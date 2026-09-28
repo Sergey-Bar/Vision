@@ -1,0 +1,133 @@
+# CodeRabbit's configuration.
+#
+# Checked in so the review's behaviour is reviewable. Every setting here is a
+# decision about how much attention the reviewer spends, and an unreviewable
+# config means nobody can tell whether a quiet review is a good review or a
+# disabled one.
+#
+# This file needs no GitHub Actions. CodeRabbit runs as a GitHub App installed
+# from the marketplace and reads this file from the repository, so it works on an
+# account where Actions cannot start a job — which is this account; see
+# .github/dependabot.yml for the measured reason.
+#
+# Installing the App is the owner's action and cannot be done from here. Once it
+# is installed, `.coderabbit.yaml` takes effect with no further change.
+language: en-US
+
+# What CodeRabbit is allowed to say. The high-signal path is a walkthrough of the
+# diff with file references; the rest is enabled selectively rather than wholesale,
+# because a review that reports everything reports nothing.
+reviews:
+  profile: assertive
+  request_changes_workflow: true
+  high_level_summary: true
+  review_style: guided
+  inline_comments: true
+  path_filters:
+    # Vendored, generated and machine-local code. A comment on a generated file is
+    # a comment nobody can act on.
+    - '!**/internal/contracts/**'
+    - '!**/*.pb.go'
+    - '!**/testdata/**'
+    - '!**/dist/**'
+    - '!docs/roadmap/**'
+    - '!**/__pycache__/**'
+
+  rules:
+    # This project's laws, restated for the reviewer. Each maps to something in
+    # AGENTS.md and to a test that fails when the control is removed.
+    - pattern: '(?i)\b(SELECT|INSERT|UPDATE|DELETE)\b[^;]*\bfmt\.Sprintf'
+      description: >-
+        A SQL statement is built with Sprintf. String building is how a tenant
+        scoping or an injection bug gets in. Use a parameterised statement.
+    - pattern: '(?i)\berrors\.New\(fmt\.Sprintf\('
+      description: >-
+        An error built with errors.New and Sprintf discards the wrapped cause, so
+        errors.Is and errors.As cannot see through it. Use fmt.Errorf with %w.
+    - pattern: '(?i)os\.Exit\('
+      description: >-
+        os.Exit skips every deferred call. In a function that holds a resource or
+        a signal handler this leaks it; return the exit code instead.
+    - pattern: '(?i)\bdefer\s+\w+\.Rollback\('
+      description: >-
+        A deferred Rollback whose error is discarded is the common case and is
+        fine; what is not fine is a Rollback whose failure hides an earlier
+        error. Return the earlier one.
+    - pattern: '(?i)log\.(Print|Fatal)|fmt\.Print'
+      path: 'internal/**'
+      description: >-
+        The standard logger inside the product. A log line without tenant, site
+        and request context cannot be correlated with anything.
+    - pattern: '(?i)time\.Now\(\)'
+      path: 'internal/**'
+      description: >-
+        A direct wall-clock read in the product. Inject the clock: a test that
+        cannot pin time cannot assert an expiry.
+    - pattern: '(?i)Pool\.(Query|QueryRow|Exec)\(ctx,'
+      path: 'internal/**'
+      description: >-
+        A bare pool call whose SQL names a tenant-scoped table runs without a
+        tenant context. Under row-level security that returns no rows or is
+        refused, while the test suite — which connects as a superuser — sees the
+        right answer. Use Pool.For(tenant, actor), Pool.InTenant or
+        Pool.InSystemTenant. internal/rlsrole fails the build on this.
+    - pattern: '(?i)math/rand'
+      description: >-
+        A non-cryptographic random source. Session tokens, nonces, challenges
+        and salts need crypto/rand.
+    - pattern: '(?i)(md5|sha1)\b'
+      description: >-
+        A weak hash. SHA-256 or better, except where an MD5 is a content
+        address inherited from a format and the comment says so.
+
+# Path-scoped guidance, because one rule set for a JSON schema and a claim-scanning
+# rule compiler would be noise.
+path_instructions:
+  - path: 'internal/rules/**'
+    instructions: >-
+      This is the rule compiler for untrusted operator input. No shell, no SQL, no
+      network, no dynamic code and no regular expression may be introduced here or
+      anywhere it reaches. A regex in a bundle an operator uploads is a denial of
+      service delivered as a YAML file.
+  - path: 'internal/audit/**'
+    instructions: >-
+      The audit ledger is append-only and hash-chained. The chain is computed by
+      the database over a length-prefixed encoding. Do not compute or store a
+      chain hash in Go.
+  - path: 'internal/identity/**'
+    instructions: >-
+      Argon2id parameters live in this package, not in the database, so a row
+      cannot weaken a site's password cost. Do not read them from a column, and
+      do not lower the floor.
+  - path: 'internal/rlsrole/**'
+    instructions: >-
+      The RLS canary. It connects as the production role on purpose, because a
+      superuser test suite cannot see a missing tenant context. Do not make it
+      skip when it cannot reach the database — a canary that skips has stopped
+      protecting.
+  - path: 'internal/evidence/**'
+    instructions: >-
+      Every path is validated before use and re-validated after symlink
+      resolution. A test for a traversal shape is required for any change here.
+  - path: 'internal/release/**'
+    instructions: >-
+      Release verification is a security boundary. An unverified archive must
+      never be extracted, and the trusted-key argument is not optional.
+  - path: 'migrations/**'
+    instructions: >-
+      Forward-only and expand/contract. Never edit an applied migration; add a new
+      one. A contract step never ships in the same release as its expand.
+  - path: 'deploy/ai-runtime/**'
+    instructions: >-
+      Standard library only, and the workflow asserts it. A service that touches a
+      tenant's camera footage is not the place to take a supply-chain dependency
+      it does not need.
+
+# Generated and machine-local paths get no review at all, rather than a filtered one.
+ignore_paths:
+  - 'internal/contracts/**'
+  - '**/*.pb.go'
+  - 'testdata/**'
+  - 'dist/**'
+  - '**/__pycache__/**'
+  - '.kilo/**'

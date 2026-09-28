@@ -3,8 +3,8 @@
     The verification gate. Runs the same checks as `make verify`, natively.
 
 .DESCRIPTION
-    `make` is not installed on this machine — not on PATH, not in Git Bash, not
-    in WSL — so `make verify` is a gate nobody can actually pull. This script is
+    `make` is not installed on this machine - not on PATH, not in Git Bash, not
+    in WSL - so `make verify` is a gate nobody can actually pull. This script is
     the same list of checks with no build tool required, so the thing the project
     tells you to trust is a thing that runs.
 
@@ -18,9 +18,19 @@
       migration-phases every migration declares a phase and no expand ships
                        with its contract step
       rules-lint       the built-in bundle compiles as untrusted input
+      rls-canary       the row-level-security canary, which connects as the
+                       production role rather than as the test database's
+                       owner, because a superuser suite cannot see a missing
+                       tenant context
+      ai-runtime       the AI runtime's contract in Python
 
     Deliberately absent: golangci-lint (not installed, and `make ci` covers it
     before a release) and the protoc regeneration check.
+
+    SonarQube is not here because it cannot be: the analysis has to be uploaded
+    somewhere that holds the history, and GitHub Actions cannot start a job on
+    this account. Run `scripts/sonar.ps1` when a server is reachable. See
+    .github/dependabot.yml for the measured reason.
 
 .NOTES
     Run with a database, or the database-backed suites will skip and a green
@@ -92,12 +102,43 @@ Invoke-Gate 'gofmt' {
     }
 }
 
-$race = if ($NoRace) { @() } else { @('-race') }
+# A single-element array from an `if` expression is unrolled to a scalar, so
+# `@race` splatted the *string* '-race' into its characters and the test gate ran
+# `go test -p 1 -count=1 - r a c e ./...`. It failed, loudly, which is how this was
+# found — but the race detector this gate claims to run has never actually run.
+# The comma keeps it an array.
+$race = if ($NoRace) { ,@() } else { ,@('-race') }
 Invoke-Gate 'test' { & $go test -p 1 -count=1 @race ./... }
 
 Invoke-Gate 'migration-phases' { & $go test -p 1 -count=1 -run TestAllLoadsAndValidates ./migrations/... }
 
 Invoke-Gate 'rules-lint' { & $go run ./cmd/securityctl rules lint --bundle rules/builtin }
+
+# The row-level-security canary is separated from the rest of the suite because
+# it is the one that connects as the production role rather than as the test
+# database's owner. A superuser suite cannot see a query issued without a tenant
+# context: under RLS that returns no rows or is refused, while the superuser sees
+# the right answer. It has found six defects that broke the product in
+# production and that every other check passed straight through.
+Invoke-Gate 'rls-canary' {
+    & $go test -p 1 -count=1 -v ./internal/rlsrole/... 2>&1 |
+        Select-String -Pattern '^(---|===) (PASS|FAIL|RUN)' |
+        ForEach-Object { Write-Host "    $_" }
+    if ($LASTEXITCODE -ne 0) { exit 1 }
+}
+
+# The AI runtime's contract. Standard library only, and 21 tests over the part of
+# it that decides what a degraded observation looks like.
+$py = Get-Command py -ErrorAction SilentlyContinue
+if ($py) {
+    Invoke-Gate 'ai-runtime' { & $py.Source -m unittest discover -s deploy/ai-runtime }
+} elseif (Get-Command python -ErrorAction SilentlyContinue) {
+    Invoke-Gate 'ai-runtime' { & python -m unittest discover -s deploy/ai-runtime }
+} else {
+    Write-Host "==> ai-runtime SKIPPED (no Python on PATH)"
+    Write-Host "    The AI runtime's contract is unverified. Install Python, or accept that the"
+    Write-Host "    degraded-observation path - the product's central invariant - has no test."
+}
 
 Write-Host ""
 if ($failures.Count -gt 0) {
