@@ -211,6 +211,26 @@ func (s *Service) CreateIncident(ctx context.Context, in Create) (string, error)
 	return id, err
 }
 
+// ConsumeStepUp spends a step-up proof against this incident's tenant.
+//
+// The proof lives in the identity package and is bound to a user, so the
+// identity service spends it. This wrapper exists so the API has one call, and
+// so a handler cannot accidentally skip the check by recording a disposition
+// without one.
+func (s *Service) ConsumeStepUp(ctx context.Context, identities StepUpConsumer, tenant, userID, proof string) error {
+	if identities == nil {
+		return errors.New("incidents: no step-up consumer is configured")
+	}
+	return identities.ConsumeStepUp(ctx, tenant, userID, proof)
+}
+
+// StepUpConsumer is the identity service's step-up check, as this package needs
+// it. Declaring it here rather than importing identity keeps the dependency one
+// way: incidents does not know how a factor is verified, only that one was.
+type StepUpConsumer interface {
+	ConsumeStepUp(ctx context.Context, tenant, userID, proof string) error
+}
+
 func (s *Service) newID(tenant, site string, at time.Time) string {
 	if s.IDGenerator != nil {
 		return s.IDGenerator(tenant, site, at)

@@ -258,6 +258,11 @@ type Principal struct {
 	SessionID   string
 	BreakGlass  bool
 	MFAVerified bool
+	// CSRFToken is this session's current CSRF token, rotated alongside the
+	// session token. It travels with the principal because every state-changing
+	// request needs it, and reading it back out of the database on each one
+	// would be a round trip for a value the session row has already decided.
+	CSRFToken string
 	// ServiceAccount marks a non-human principal, which has no password and no
 	// MFA because it authenticates with a scoped token.
 	ServiceAccount bool

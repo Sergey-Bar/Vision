@@ -399,10 +399,10 @@ func (s *Service) ConsumeStepUp(ctx context.Context, tenant, userID, proof strin
 // Rotation on every use is the cheap half of session theft defence: a token
 // captured from a browser is only good until the legitimate operator's next
 // request.
-func (s *Service) Resolve(ctx context.Context, tenant, token, sourceIP string) (Principal, error) {
+func (s *Service) Resolve(ctx context.Context, tenant, token, sourceIP string) (Principal, string, error) {
 	var p Principal
 	if strings.TrimSpace(token) == "" {
-		return p, errors.New("identity: no session token")
+		return p, "", errors.New("identity: no session token")
 	}
 	now := s.now()
 
@@ -422,27 +422,27 @@ func (s *Service) Resolve(ctx context.Context, tenant, token, sourceIP string) (
 		})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return p, errors.New("identity: no such session")
+			return p, "", errors.New("identity: no such session")
 		}
-		return p, fmt.Errorf("identity: resolve: %w", err)
+		return p, "", fmt.Errorf("identity: resolve: %w", err)
 	}
 
 	if now.After(absoluteExpiry) {
 		_ = s.revoke(ctx, tenant, sessionID, "absolute expiry")
-		return p, errors.New("identity: the session has expired")
+		return p, "", errors.New("identity: the session has expired")
 	}
 	if now.Sub(lastSeen) > s.sessionIdle() {
 		_ = s.revoke(ctx, tenant, sessionID, "idle timeout")
-		return p, errors.New("identity: the session timed out")
+		return p, "", errors.New("identity: the session timed out")
 	}
 
 	user, err := s.loadUser(ctx, tenant, userID)
 	if err != nil {
-		return p, err
+		return p, "", err
 	}
 	if !user.Enabled {
 		_ = s.revoke(ctx, tenant, sessionID, "account disabled")
-		return p, ErrInvalidCredentials
+		return p, "", ErrInvalidCredentials
 	}
 
 	p = Principal{
@@ -453,13 +453,13 @@ func (s *Service) Resolve(ctx context.Context, tenant, token, sourceIP string) (
 
 	// Rotate. The old token stops working immediately, so a token captured from
 	// a browser is only good until the legitimate operator's next request.
-	_, newHash, err := NewToken()
+	newToken, newHash, err := NewToken()
 	if err != nil {
-		return p, err
+		return p, "", err
 	}
-	_, newCSRFHash, err := NewToken()
+	newCSRF, newCSRFHash, err := NewToken()
 	if err != nil {
-		return p, err
+		return p, "", err
 	}
 	if err := s.Pool.InTx(ctx, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `
@@ -469,9 +469,12 @@ func (s *Service) Resolve(ctx context.Context, tenant, token, sourceIP string) (
 			tenant, sessionID, newHash, newCSRFHash, now, sourceIP)
 		return err
 	}); err != nil {
-		return p, err
+		return p, "", err
 	}
-	return p, nil
+	// The rotated CSRF token rides alongside the rotated session token; the
+	// client needs both or the next state-changing request fails.
+	p.CSRFToken = newCSRF
+	return p, newToken, nil
 }
 
 // RotateCSRF issues a fresh CSRF token for a live session.
@@ -494,7 +497,11 @@ func (s *Service) RotateCSRF(ctx context.Context, tenant, sessionID string) (str
 	return raw, nil
 }
 
-// CheckCSRF compares a presented token with the session's.
+// CheckCSRF compares a presented token with the one the session row holds.
+//
+// The comparison is against the row rather than against a second cookie, so a
+// CSRF token cannot be forged by reading one out of a browser that already had
+// it: it is bound to a session that has to be live.
 func (s *Service) CheckCSRF(ctx context.Context, tenant, sessionID, presented string) error {
 	if strings.TrimSpace(presented) == "" {
 		return errors.New("identity: a CSRF token is required on every state-changing method")

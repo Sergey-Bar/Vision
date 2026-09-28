@@ -1,0 +1,163 @@
+{{define "incident.html"}}
+{{template "head" .}}
+{{with .Incident}}
+<main>
+  <h1>{{.Title}}</h1>
+  {{template "messages" $}}
+
+  <dl class="facts">
+    <dt>Incident</dt><dd><code>{{.IncidentID}}</code></dd>
+    <dt>State</dt><dd><span class="badge {{stateClass .State}}">{{.State}}</span></dd>
+    <dt>Severity</dt><dd><span class="badge {{severityClass .Severity}}">{{.Severity}}</span></dd>
+    <dt>Site</dt><dd>{{.SiteID}}</dd>
+    <dt>Rule</dt><dd><code>{{.RuleID}}</code></dd>
+    <dt>Bundle</dt><dd>{{.BundleVersion}} <code>{{.BundleContentHash}}</code></dd>
+    <dt>Policy</dt><dd>{{.PolicyVersion}}</dd>
+    <dt>First event</dt><dd>{{$.Time .FirstEvent}}</dd>
+    <dt>Created</dt><dd>{{$.Time .Created}}</dd>
+  </dl>
+
+  {{if .Degraded}}
+  <p class="alert degraded" role="note">
+    This incident was raised while the AI plane was
+    {{join .DegradedReasons ", "}}. It is not fully corroborated, and it is
+    flagged here so a pilot can measure how often the AI path was actually live
+    rather than assuming it was.
+  </p>
+  {{end}}
+
+  <section>
+    <h2>Why this incident exists</h2>
+    {{with .Verification}}
+    <p class="verdict">
+      <span class="badge {{stateClass (lower .State)}}">{{.State}}</span>
+      <code>{{.ReasonCode}}</code>
+    </p>
+    <p>{{.Explanation}}</p>
+    <dl class="facts">
+      <dt>Evaluated</dt><dd>{{$.Time .EvaluatedAt}}</dd>
+      <dt>AI degradation</dt><dd>{{.AIDegradation}}</dd>
+      <dt>Supporting events</dt>
+      <dd>{{range .SupportingEvents}}<code>{{.}}</code> {{end}}</dd>
+      <dt>AI observations</dt>
+      <dd>{{if .SupportingObservations}}{{range .SupportingObservations}}<code>{{.}}</code> {{end}}{{else}}<span class="muted">none participated</span>{{end}}</dd>
+      {{if .ContradictingEvents}}
+      <dt>Contradicting events</dt>
+      <dd>{{range .ContradictingEvents}}<code>{{.}}</code> {{end}}</dd>
+      {{end}}
+    </dl>
+
+    {{if .DriftExclusions}}
+    <h3>Excluded from corroboration</h3>
+    <ul>
+      {{range .DriftExclusions}}<li><code>{{.DeviceID}}</code> — {{.Reason}}</li>{{end}}
+    </ul>
+    {{end}}
+    {{end}}
+  </section>
+
+  <section>
+    <h2>Evidence cited</h2>
+    {{if .Observations}}
+    <table>
+      <thead><tr><th>Observation</th><th>Profile</th><th>Model</th><th>Prompt</th>
+                 <th>Output hash</th><th>Latency</th><th>Degraded</th></tr></thead>
+      <tbody>
+      {{range .Observations}}
+        <tr>
+          <td><code>{{.ObservationID}}</code></td>
+          <td>{{.ProfileID}}{{if not .ProductionProfile}} <span class="muted">(shadow)</span>{{end}}</td>
+          <td>{{.Model}}<br><span class="muted">{{short .ModelHash}}</span></td>
+          <td>{{.PromptTemplateID}} v{{.PromptVersion}}</td>
+          <td><code>{{short .OutputHash}}</code></td>
+          <td>{{.LatencyMS}} ms</td>
+          <td>{{.DegradedReason}}</td>
+        </tr>
+      {{end}}
+      </tbody>
+    </table>
+    {{else}}
+    <p class="empty">No AI observation participated in this decision.</p>
+    {{end}}
+  </section>
+
+  <section>
+    <h2>Events</h2>
+    <table>
+      <thead><tr><th>Event</th><th>Type</th><th>Device</th>
+                 <th>Observed (source)</th><th>Received (us)</th><th>Normalized</th>
+                 <th>Clock</th></tr></thead>
+      <tbody>
+      {{range .Events}}
+        <tr>
+          <td><code>{{.EventID}}</code></td>
+          <td>{{.EventType}}</td>
+          <td>{{if .DeviceID}}<code>{{.DeviceID}}</code>{{else}}<span class="muted">unattributed</span>{{end}}</td>
+          <td>{{$.Time .ObservedAt}}</td>
+          <td>{{$.Time .ReceivedAt}}</td>
+          <td>{{$.Time .NormalizedAt}}</td>
+          <td>{{.ClockSource}}{{if .ClockDriftMS}} ({{.ClockDriftMS}} ms){{end}}</td>
+        </tr>
+      {{end}}
+      </tbody>
+    </table>
+    <p class="hint">
+      Observed is what the source claimed, received is when we accepted it, and
+      normalized is the drift-corrected value correlation reads. The third is the
+      only one a rule is allowed to compare.
+    </p>
+  </section>
+
+  {{if .Evidence}}
+  <section>
+    <h2>Stored evidence</h2>
+    <table>
+      <thead><tr><th>Evidence</th><th>Kind</th><th>Tier</th><th>Size</th>
+                 <th>SHA-256</th><th>Captured</th><th>Legal hold</th></tr></thead>
+      <tbody>
+      {{range .Evidence}}
+        <tr>
+          <td><a href="/v1/evidence/{{.EvidenceID}}/content">{{.EvidenceID}}</a></td>
+          <td>{{.Kind}}</td>
+          <td>{{.Tier}}</td>
+          <td>{{.SizeBytes}} B</td>
+          <td><code>{{short .SHA256}}</code></td>
+          <td>{{$.Time .CapturedAt}}</td>
+          <td>{{if .LegalHold}}yes{{else}}no{{end}}</td>
+        </tr>
+      {{end}}
+      </tbody>
+    </table>
+  </section>
+  {{end}}
+
+  <section>
+    <h2>Operator dispositions</h2>
+    {{if .Dispositions}}
+    <table>
+      <thead><tr><th>When</th><th>Actor</th><th>Outcome</th><th>Agreed with the AI?</th><th>Reason</th><th>Notes</th></tr></thead>
+      <tbody>
+      {{range .Dispositions}}
+        <tr>
+          <td>{{$.Time .CreatedAt}}</td>
+          <td><code>{{.ActorID}}</code></td>
+          <td>{{.Outcome}}</td>
+          <td>{{.Agreement}}</td>
+          <td>{{.ReasonCode}}</td>
+          <td>{{.Notes}}</td>
+        </tr>
+      {{end}}
+      </tbody>
+    </table>
+    <p class="hint">
+      A disposition never overwrites an observation. "The AI said X" and "the
+      operator said Y" are both stored and both replay.
+    </p>
+    {{else}}
+    <p class="empty">No operator has dispositioned this incident.</p>
+    {{end}}
+  </section>
+</main>
+{{end}}
+{{template "foot" .}}
+{{end}}

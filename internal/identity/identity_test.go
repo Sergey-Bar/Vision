@@ -438,10 +438,10 @@ func TestSessionTokensRotateOnUse(t *testing.T) {
 	res, _ := svc.PasswordStep(ctx, tenant, "admin", "a-long-bootstrap-passphrase", "10.0.0.1")
 	first := res.Session.Token
 
-	if _, err := svc.Resolve(ctx, tenant, first, "10.0.0.1"); err != nil {
+	if _, _, err := svc.Resolve(ctx, tenant, first, "10.0.0.1"); err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if _, err := svc.Resolve(ctx, tenant, first, "10.0.0.1"); err == nil {
+	if _, _, err := svc.Resolve(ctx, tenant, first, "10.0.0.1"); err == nil {
 		t.Error("a rotated-away token still resolved; a captured cookie would be reusable")
 	}
 }
@@ -476,14 +476,14 @@ func TestPasswordChangeRevokesEverySession(t *testing.T) {
 	res, _ := svc.PasswordStep(ctx, tenant, "admin", "a-long-bootstrap-passphrase", "10.0.0.1")
 	token := res.Session.Token
 
-	if _, err := svc.Resolve(ctx, tenant, token, "10.0.0.1"); err != nil {
+	if _, _, err := svc.Resolve(ctx, tenant, token, "10.0.0.1"); err != nil {
 		t.Fatalf("Resolve before change: %v", err)
 	}
 	if err := svc.SetPassword(ctx, tenant, admin, "a-long-bootstrap-passphrase",
 		"a-different-long-passphrase", admin); err != nil {
 		t.Fatalf("SetPassword: %v", err)
 	}
-	if _, err := svc.Resolve(ctx, tenant, token, "10.0.0.1"); err == nil {
+	if _, _, err := svc.Resolve(ctx, tenant, token, "10.0.0.1"); err == nil {
 		t.Error("a session survived a password change; a password change is the operator's " +
 			"statement that whoever had the old one should not still be in")
 	}

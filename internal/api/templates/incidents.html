@@ -1,0 +1,96 @@
+{{define "incidents.html"}}
+{{template "head" .}}
+<main>
+  <h1>Incidents</h1>
+  {{template "messages" .}}
+
+  {{if .DeadLetters}}
+  <section class="deadletters">
+    <h2>Dead letters</h2>
+    <p class="hint">
+      Work that reached a terminal failure. Nothing is dropped silently: these are
+      the events the platform could not process and the jobs it could not run.
+    </p>
+    <table>
+      <thead><tr><th>Kind</th><th>Reference</th><th>Attempts</th><th>Reason</th><th>When</th></tr></thead>
+      <tbody>
+      {{range .DeadLetters}}
+        <tr>
+          <td>{{.Kind}}</td>
+          <td><code>{{.ID}}</code></td>
+          <td>{{.Attempts}}</td>
+          <td>{{.Reason}}</td>
+          <td>{{$.Time .UpdatedAt}}</td>
+        </tr>
+      {{end}}
+      </tbody>
+    </table>
+  </section>
+  {{end}}
+
+  <section class="feed">
+    {{if .Incidents}}
+    <table>
+      <thead>
+        <tr><th>Severity</th><th>State</th><th>Title</th><th>Rule</th>
+            <th>Bundle</th><th>First event</th><th>AI</th></tr>
+      </thead>
+      <tbody>
+      {{range .Incidents}}
+        <tr class="{{severityClass .Severity}}">
+          <td><span class="badge {{severityClass .Severity}}">{{.Severity}}</span></td>
+          <td><span class="badge {{stateClass .State}}">{{.State}}</span></td>
+          <td><a href="/incidents/{{.IncidentID}}">{{.Title}}</a></td>
+          <td><code>{{.RuleID}}</code></td>
+          <td>{{.BundleVersion}}</td>
+          <td><time datetime="{{.FirstEvent.Format "2006-01-02T15:04:05Z07:00"}}">{{$.Time .FirstEvent}}</time></td>
+          <td>
+            {{if .Degraded}}
+              <span class="badge degraded" title="Raised without a live AI observation">degraded: {{join .DegradedReasons ", "}}</span>
+            {{else}}
+              <span class="muted">—</span>
+            {{end}}
+          </td>
+        </tr>
+      {{end}}
+      </tbody>
+    </table>
+    {{else}}
+      <p class="empty">No incidents match.</p>
+    {{end}}
+  </section>
+
+  {{if .Drift}}
+  <section class="drift">
+    <h2>Device clock drift</h2>
+    <p class="hint">
+      A device past the severe band is excluded from time-windowed corroboration.
+      The exclusion is recorded on the verification result, not applied silently.
+    </p>
+    <table>
+      <thead><tr><th>Device</th><th>Source</th><th>Drift</th><th>Band</th><th>Used for corroboration</th><th>Measured</th></tr></thead>
+      <tbody>
+      {{range .Drift}}
+        <tr>
+          <td><code>{{.DeviceID}}</code></td>
+          <td>{{.SiteID}}</td>
+          <td>{{.DriftMS}} ms</td>
+          <td><span class="badge band-{{.Band}}">{{.Band}}</span></td>
+          <td>
+            {{if .Excluded}}
+              <span class="badge degraded">excluded</span>
+              <span class="reason">{{.Reason}}</span>
+            {{else}}
+              <span class="muted">yes</span>
+            {{end}}
+          </td>
+          <td>{{$.Time .MeasuredAt}}</td>
+        </tr>
+      {{end}}
+      </tbody>
+    </table>
+  </section>
+  {{end}}
+</main>
+{{template "foot" .}}
+{{end}}

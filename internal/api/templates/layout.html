@@ -1,0 +1,41 @@
+{{define "head"}}<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>{{.Title}} — Physical Security Intelligence Layer</title>
+<link rel="stylesheet" href="/static/console.css">
+</head>
+<body>
+<header class="topbar">
+  <span class="brand">Physical Security Intelligence Layer</span>
+  {{if .Principal.Username}}
+  <span class="who">
+    {{.Principal.Username}}
+    {{range .Principal.Roles}}&middot; {{.}}{{end}}
+    {{if .Principal.BreakGlass}}<strong class="breakglass">BREAK GLASS</strong>{{end}}
+    {{if not .Principal.MFAVerified}}<strong class="warn">NO SECOND FACTOR</strong>{{end}}
+  </span>
+  <form method="post" action="/v1/auth/session" class="inline">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+    <button type="submit" class="link">Sign out</button>
+  </form>
+  {{end}}
+</header>
+{{end}}
+
+{{define "foot"}}
+<footer class="footer">
+  <span>Rendered {{.Time .Now}}</span>
+  {{if .RequestID}}<span>request {{.RequestID}}</span>{{end}}
+  {{if .Principal.Username}}<span>tenant {{.Principal.TenantID}}</span>{{end}}
+</footer>
+</body>
+</html>
+{{end}}
+
+{{define "messages"}}
+  {{if .Error}}<p class="alert error" role="alert">{{.Error}}</p>{{end}}
+  {{if .Message}}<p class="alert ok" role="status">{{.Message}}</p>{{end}}
+{{end}}
