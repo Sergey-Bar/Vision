@@ -5,7 +5,6 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/base32"
 	"encoding/base64"
 	"encoding/binary"
@@ -13,14 +12,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Sergey-Bar/Ai-Captain/internal/audit"
-	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
 )
 
 // totpSecret is the wrapped shared secret. Wrapping happens in the secret store,
@@ -482,7 +479,3 @@ func jsonMarshal(v any) (string, error) {
 	b, err := json.Marshal(v)
 	return string(b), err
 }
-
-var _ = subtle.ConstantTimeCompare
-var _ = strconv.Itoa
-var _ = dbx.SystemTenant

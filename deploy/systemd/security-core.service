@@ -1,0 +1,71 @@
+[Unit]
+# The core process is not a network service. It listens on a local address for
+# the console, and its real dependencies are the database and the evidence
+# directory. After depends on those being reachable is deliberately absent: a
+# service that refuses to start because a network mount is slow is a service that
+# takes a site down at boot.
+Description=Physical Security Intelligence Layer — core
+Documentation=file:///usr/share/doc/security-platform/README.md
+After=network.target
+
+[Service]
+Type=notify
+NotifyAccess=main
+User=security
+Group=security
+
+# The program directory is separate from data, config, evidence, logs and secrets.
+# Running as a dedicated unprivileged user is the second half of that separation:
+# a compromised core must not be able to read the signing keys or write the
+# evidence root's parent.
+WorkingDirectory=/opt/security-platform
+ExecStart=/opt/security-platform/bin/security-core
+ExecReload=/bin/kill -HUP $MAINPID
+
+EnvironmentFile=-/etc/security-platform/security-platform.env
+# A site has no network, so the process must not try to resolve anything or reach
+# a time server. Time comes from the host's NTP discipline and is measured against
+# the VMS by the clock subsystem, not fetched per request.
+Environment=SP_TENANT_ID=tenant-local
+Environment=SP_PROGRAM_DIR=/opt/security-platform
+
+Restart=on-failure
+RestartSec=5s
+# Crash-looping is worse than stopped: an operator needs a stopped service and a
+# log, not a process restarting every five seconds for ever.
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+# Hardening. This is a network-facing process that parses untrusted envelopes from
+# the site LAN, so the blast radius of a compromise is kept small deliberately.
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# Read-write paths are exactly the two that change: the data directory and the
+# evidence root. Everything else is read-only or absent.
+ReadWritePaths=/var/lib/security-platform /var/lib/security-platform/evidence
+ReadOnlyPaths=/opt/security-platform /etc/security-platform
+
+# Resource limits. A pipeline that is falling behind should be bounded and
+# visible rather than unbounded and quiet.
+MemoryMax=4G
+TasksMax=512
+LimitNOFILE=16384
+
+[Install]
+WantedBy=multi-user.target

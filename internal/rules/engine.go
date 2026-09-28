@@ -1,10 +1,7 @@
 package rules
 
 import (
-	"encoding/json"
 	"fmt"
-	"sort"
-	"strings"
 	"time"
 )
 
@@ -404,7 +401,3 @@ func findCorroboration(c CompiledCondition) *CompiledCorroboration {
 	}
 	return nil
 }
-
-var _ = json.Marshal
-var _ = sort.Strings
-var _ = strings.TrimSpace

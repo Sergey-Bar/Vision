@@ -17,7 +17,6 @@ import (
 	"crypto/subtle"
 	"crypto/tls"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -516,5 +515,3 @@ func parseLimit(raw string, def, max int) int {
 	}
 	return n
 }
-
-var _ = errors.Is

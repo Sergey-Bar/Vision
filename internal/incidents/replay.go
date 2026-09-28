@@ -6,10 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/Sergey-Bar/Ai-Captain/internal/clock"
-	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
 	"github.com/Sergey-Bar/Ai-Captain/internal/rules"
 )
 
@@ -407,6 +404,3 @@ func shortHash(s string) string {
 	}
 	return s[:12]
 }
-
-var _ = pgx.ErrNoRows
-var _ = dbx.SystemTenant

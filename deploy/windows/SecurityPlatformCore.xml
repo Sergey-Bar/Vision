@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Windows Service definition for the core process.
+
+  Installed with:
+    sc.exe create SecurityPlatformCore binPath= "C:\Program Files\SecurityPlatform\bin\security-core.exe" start= auto
+  and configured by the installer, which also sets the account, the data directory
+  and the failure actions.
+
+  Two things are deliberate.
+
+  First, the account is a virtual service account rather than LocalSystem. Local
+  System can read the release signing key and the evidence root's parent, and a
+  process that parses untrusted envelopes from the site LAN should not hold that
+  much authority.
+
+  Second, the failure actions restart twice and then stop. A service that
+  restarts for ever takes the site down and hides the reason; a stopped service
+  with a log is something an operator can act on.
+-->
+<configuration>
+  <system.service installation="disabled">
+    <name>SecurityPlatformCore</name>
+    <displayname>Physical Security Intelligence Layer</displayname>
+    <description>Core ingest, verification, incident and audit process.</description>
+
+    <executable>
+      <name>security-core.exe</name>
+      <commandline>security-core.exe</commandline>
+    </executable>
+
+    <serviceaccount>
+      <!--
+        A virtual service account: NT SERVICE\SecurityPlatformCore. It exists
+        only for this service, has no password, and is denied interactive logon.
+        The installer creates it and grants it read on the program directory and
+        modify on the data and evidence directories — and nothing else.
+      -->
+      <username>NT SERVICE\SecurityPlatformCore</username>
+      <displaysmall>0</displaysmall>
+      <userelatives>true</userelatives>
+    </serviceaccount>
+
+    <failureactions>
+      <actions restart="true" delay="5000" count="2"/>
+      <actions restart="false" delay="0" count="0"/>
+    </failureactions>
+
+    <recovery>
+      <resetfailureafter>86400</resetfailureafter>
+    </recovery>
+
+    <dependencysection>
+      <!--
+        No network dependency. The console is served from this host and the
+        database is local or on the site LAN, but depending on either would make
+        the service refuse to start when a dependency is slow, which is how an
+        install becomes an outage.
+      -->
+    </dependencysection>
+
+    <stoptype>windows9x</stoptype>
+  </system.service>
+
+  <startoptions>
+    <onfailure action="log" resetperiod="86400"/>
+  </startoptions>
+</configuration>

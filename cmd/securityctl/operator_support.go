@@ -6,10 +6,8 @@ import (
 	"crypto/ed25519"
 	"encoding/hex"
 	"fmt"
-	"io"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/Sergey-Bar/Ai-Captain/internal/audit"
 	"github.com/Sergey-Bar/Ai-Captain/internal/command"
@@ -90,6 +88,3 @@ func dirOf(p string) string {
 	}
 	return "."
 }
-
-var _ = io.EOF
-var _ = time.Now

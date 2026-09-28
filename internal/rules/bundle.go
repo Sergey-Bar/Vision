@@ -27,7 +27,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 )
 
 // SchemaVersion is the bundle schema this build compiles. A bundle declaring
@@ -372,5 +371,3 @@ func severityRank(s string) int {
 		return 0
 	}
 }
-
-var _ = time.Now

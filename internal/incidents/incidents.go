@@ -29,7 +29,6 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Sergey-Bar/Ai-Captain/internal/audit"
-	"github.com/Sergey-Bar/Ai-Captain/internal/clock"
 	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
 	"github.com/Sergey-Bar/Ai-Captain/internal/rules"
 )
@@ -775,5 +774,3 @@ func first(v []string) string {
 	}
 	return v[0]
 }
-
-var _ = clock.BandOK

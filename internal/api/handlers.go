@@ -1,12 +1,12 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/audit"
 	"github.com/Sergey-Bar/Ai-Captain/internal/bundles"
 	"github.com/Sergey-Bar/Ai-Captain/internal/evidence"
 	"github.com/Sergey-Bar/Ai-Captain/internal/identity"
@@ -476,14 +476,21 @@ func (s *Server) handleEvidenceContent(w http.ResponseWriter, r *http.Request, p
 
 func (s *Server) handleDeadLetters(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
 	if d.DeadLetters == nil {
-		WriteError(w, http.StatusNotImplemented, "not_wired", "The dead-letter reader is not configured.", requestID(r))
+		WriteError(w, http.StatusServiceUnavailable, "not_wired",
+			"The dead-letter reader is not configured. An empty list and a broken list look "+
+				"identical to an operator, and only one of them is a lie, so this says "+
+				"unavailable rather than returning nothing.", requestID(r))
 		return
 	}
 	kind := r.URL.Query().Get("kind")
 	limit := parseLimit(r.URL.Query().Get("limit"), 100, 500)
 	items, err := d.DeadLetters.Read(r.Context(), p.TenantID, kind, limit)
 	if err != nil {
-		WriteError(w, http.StatusInternalServerError, "dead_letters_failed", err.Error(), requestID(r))
+		status := http.StatusInternalServerError
+		if errors.Is(err, ErrNotWired) {
+			status = http.StatusServiceUnavailable
+		}
+		WriteError(w, status, "dead_letters_unavailable", err.Error(), requestID(r))
 		return
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"items": items})
@@ -491,12 +498,19 @@ func (s *Server) handleDeadLetters(w http.ResponseWriter, r *http.Request, p ide
 
 func (s *Server) handleClockDrift(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
 	if d.ClockDrift == nil {
-		WriteError(w, http.StatusNotImplemented, "not_wired", "The clock-drift reader is not configured.", requestID(r))
+		WriteError(w, http.StatusServiceUnavailable, "not_wired",
+			"The clock-drift reader is not configured. A console that shows an empty "+
+				"drift table next to a real backlog is worse than one that says it cannot see it.",
+			requestID(r))
 		return
 	}
 	items, err := d.ClockDrift.List(r.Context(), p.TenantID, 500)
 	if err != nil {
-		WriteError(w, http.StatusInternalServerError, "clock_drift_failed", err.Error(), requestID(r))
+		status := http.StatusInternalServerError
+		if errors.Is(err, ErrNotWired) {
+			status = http.StatusServiceUnavailable
+		}
+		WriteError(w, status, "clock_drift_unavailable", err.Error(), requestID(r))
 		return
 	}
 	var severe int
@@ -671,5 +685,3 @@ func roleStrings(p identity.Principal) []string {
 	}
 	return out
 }
-
-var _ = audit.ActionLoginSuccess

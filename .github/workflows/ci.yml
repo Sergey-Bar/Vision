@@ -112,6 +112,28 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
       - run: go run ./cmd/securityctl rules lint --bundle rules/builtin
 
+  ai-runtime:
+    name: AI runtime contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # The plane has no third-party dependencies on purpose: a service that runs
+      # on a customer's site and touches camera footage is not the place to take a
+      # supply-chain dependency it does not need.
+      - name: Check the runtime has no third-party imports
+        run: |
+          set -euo pipefail
+          if grep -nE '^(import|from) ' deploy/ai-runtime/runtime.py \
+             | grep -vE '(import|from) (__future__|base64|hashlib|json|os|time|dataclasses|http|pathlib|typing)'; then
+            echo "::error::the AI runtime imports a third-party module"
+            exit 1
+          fi
+          echo "standard library only"
+      - run: py -m unittest discover -s deploy/ai-runtime -v
+
   secrets:
     name: no secrets in the tree
     runs-on: ubuntu-latest

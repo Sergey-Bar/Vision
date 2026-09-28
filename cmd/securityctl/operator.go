@@ -16,9 +16,9 @@ import (
 	"github.com/Sergey-Bar/Ai-Captain/internal/bundles"
 	"github.com/Sergey-Bar/Ai-Captain/internal/checkpoint"
 	"github.com/Sergey-Bar/Ai-Captain/internal/command"
+	"github.com/Sergey-Bar/Ai-Captain/internal/identity"
 	"github.com/Sergey-Bar/Ai-Captain/internal/incidents"
 	"github.com/Sergey-Bar/Ai-Captain/internal/rules"
-	"github.com/Sergey-Bar/Ai-Captain/internal/simulate"
 )
 
 // The operator surface. Every capability below already existed as a tested
@@ -689,20 +689,21 @@ func runEnrollMFA(ctx context.Context, env *command.Env, args []string) error {
 	user := fs.String("user", "", "User id.")
 	method := fs.String("method", "totp", "totp or webauthn.")
 	label := fs.String("label", "", "Credential label.")
+	origin := fs.String("origin", os.Getenv("SP_CONSOLE_ORIGIN"),
+		"Console origin, e.g. https://console.example:8443. Required for webauthn.")
+	rpID := fs.String("rp-id", os.Getenv("SP_CONSOLE_RP_ID"),
+		"WebAuthn relying-party id: a registrable suffix of the origin host.")
+	challenge := fs.String("challenge", "", "A challenge issued earlier by enroll-mfa --method webauthn --begin.")
+	credentialID := fs.String("credential-id", "", "Credential id returned by the browser.")
+	publicKey := fs.String("public-key", "", "Attested credential data, base64url, as the browser returned it.")
+	signCount := fs.Int64("sign-count", 0, "The authenticator's sign count.")
+	confirm := fs.String("confirm", "", "A code from the authenticator, to confirm a TOTP enrolment.")
+	begin := fs.Bool("begin", false, "Print a registration challenge and the browser options for it.")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *user == "" {
 		return &command.UsageError{Err: errors.New("--user is required")}
-	}
-	if *method != "totp" {
-		return command.Refuse(
-			"%q enrolment is not implemented in this build. The schema carries WebAuthn and "+
-				"the service verifies an assertion's counter, but there is no registration "+
-				"ceremony: enrolment that cannot be completed is not an enrolment.", *method)
-	}
-	if *label == "" {
-		*label = *user
 	}
 
 	ident, err := newIdentityService()
@@ -710,16 +711,92 @@ func runEnrollMFA(ctx context.Context, env *command.Env, args []string) error {
 		return err
 	}
 	defer ident.Pool.Close()
+	tenant := configuredTenant()
 
-	secret, uri, err := ident.EnrollTOTP(ctx, configuredTenant(), *user, *label)
-	if err != nil {
-		return err
+	switch *method {
+	case "totp":
+		if *label == "" {
+			*label = *user
+		}
+		if *confirm != "" {
+			// Confirming an existing enrolment is the step that makes the
+			// credential usable. Without it the row is stored with a null
+			// verified_at and the first sign-in at 3am fails.
+			if err := ident.VerifyTOTPEnrollment(ctx, tenant, *user, *confirm); err != nil {
+				return command.Refuse("%v", err)
+			}
+			fmt.Fprintf(env.Stdout, "confirmed the TOTP credential for %s\n", *user)
+			return nil
+		}
+		secret, uri, err := ident.EnrollTOTP(ctx, tenant, *user, *label)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(env.Stdout, "secret (shown once): %s\n", secret)
+		fmt.Fprintf(env.Stdout, "add to an authenticator: %s\n", uri)
+		fmt.Fprintf(env.Stdout, "\nthen confirm it, or the credential is stored but unusable:\n"+
+			"  securityctl identity enroll-mfa --user %s --method totp --confirm <code>\n", *user)
+		return nil
+
+	case "webauthn":
+		return runEnrollWebAuthn(ctx, env, ident, tenant, *user, *origin, *rpID,
+			*challenge, *credentialID, *publicKey, *signCount, *begin)
+
+	default:
+		return command.Refuse("method %q is not one of totp or webauthn", *method)
 	}
-	fmt.Fprintf(env.Stdout, "secret (shown once): %s\n", secret)
-	fmt.Fprintf(env.Stdout, "add to an authenticator: %s\n", uri)
+}
+
+func runEnrollWebAuthn(ctx context.Context, env *command.Env, ident *identity.Service,
+	tenant, user, origin, rpID, challenge, credentialID, publicKey string, signCount int64, begin bool) error {
+
+	rp := identity.WebAuthnRelyingParty{
+		ID: rpID, Origin: origin, UserName: user, DisplayName: user,
+	}
+
+	if begin || challenge == "" {
+		if origin == "" || rpID == "" {
+			return command.Refuse(
+				"--origin and --rp-id are required. The relying-party id must be a registrable " +
+					"suffix of the origin's host, or the browser refuses the credential and it " +
+					"would never be presented here. Set SP_CONSOLE_ORIGIN and SP_CONSOLE_RP_ID " +
+					"to avoid passing them each time")
+		}
+		issued, err := identity.IssueRegistrationChallenge(rp, user)
+		if err != nil {
+			return err
+		}
+		payload, err := identity.RegistrationPayload(rp, issued, user)
+		if err != nil {
+			return err
+		}
+		body, _ := json.MarshalIndent(payload, "", "  ")
+		fmt.Fprintf(env.Stdout, "hand this to navigator.credentials.create:\n%s\n", body)
+		fmt.Fprintln(env.Stdout,
+			"\nThen complete the ceremony with the values the browser returns:\n"+
+				"  securityctl identity enroll-mfa --user "+user+" --method webauthn \\\n"+
+				"      --challenge <challenge> --credential-id <id> --public-key <cose> --sign-count <n>")
+		return nil
+	}
+
+	if credentialID == "" || publicKey == "" {
+		return &command.UsageError{Err: errors.New(
+			"--credential-id and --public-key are required to complete a registration")}
+	}
+	issued := identity.RegistrationChallenge{Challenge: challenge, UserID: user}
+
+	err := ident.CompleteRegistration(ctx, tenant, user, rp, issued, identity.RegistrationResponse{
+		CredentialID: credentialID, PublicKey: publicKey, SignCount: signCount,
+	})
+	if err != nil {
+		return command.Refuse("%v", err)
+	}
+	fmt.Fprintf(env.Stdout, "enrolled a WebAuthn credential for %s\n", user)
 	fmt.Fprintln(env.Stdout,
-		"\nNow confirm the enrolment, or the credential is stored but unusable:\n"+
-			"  securityctl identity enroll-mfa --user "+*user+" --method totp --confirm <code>")
+		"\nThis build checks the credential's structure and its sign counter, and stores the "+
+			"attestation for the record. It does not verify an attestation trust chain: the "+
+			"replay defence here is the counter, not the certificate. A deployment that needs "+
+			"attestation provenance should say so rather than assume it is in place")
 	return nil
 }
 
@@ -1127,7 +1204,3 @@ func readLine(env *command.Env) (string, error) {
 	reader := bufioReader(env)
 	return reader.ReadString('\n')
 }
-
-var _ = simulate.Diff
-var _ = checkpoint.VerifySeal
-var _ = errors.New

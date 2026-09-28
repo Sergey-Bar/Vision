@@ -102,12 +102,6 @@ their own work.`,
 	return c
 }
 
-func notImplemented(what string) func(context.Context, *command.Env, []string) error {
-	return func(context.Context, *command.Env, []string) error {
-		return command.Refuse("%s is not implemented in this build", what)
-	}
-}
-
 // printUsageError marks a malformed invocation, which the command tree renders
 // with the command's own usage text and a distinct exit code.
 func printUsageError(format string, args ...any) error {

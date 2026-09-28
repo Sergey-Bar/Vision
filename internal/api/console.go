@@ -3,7 +3,6 @@ package api
 import (
 	"bytes"
 	"embed"
-	"fmt"
 	"html/template"
 	"net/http"
 	"strings"
@@ -254,6 +253,3 @@ func stateClass(s string) string {
 		return "state-unknown"
 	}
 }
-
-var _ = strings.TrimSpace
-var _ = fmt.Sprintf
