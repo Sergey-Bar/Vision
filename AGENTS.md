@@ -55,10 +55,19 @@ order.
 
 ## Hebrew and RTL
 
-The operator surface is Hebrew-first and RTL. New templates set `dir="rtl"`
-and `lang="he"` by default. Dates render through the site timezone, never the
-host's, and times carry an explicit offset. A new console template that renders
-LTR-only text without a per-element override is a defect.
+**Not a requirement.** The Hebrew-first RTL operator surface in the original plan
+has been dropped by product decision. Console templates are LTR, `lang="en"`,
+and no template may carry per-element direction overrides, because there is no
+second direction to override to. The operator surface is English.
+
+Two consequences that are easy to get wrong:
+
+- Time rendering is unaffected. A site's timezone is still the site's timezone and
+  never the host's, and every rendered time carries an explicit offset. Dropping
+  RTL does not mean dropping the site's clock.
+- `sites.default_locale` stays in the schema. It is a rendering input, not a
+  security control, and a site that later needs another locale should not require
+  a migration to express it.
 
 ## Verification
 

@@ -21,7 +21,6 @@
           "minItems": 1,
           "items": { "type": "string", "minLength": 1, "maxLength": 64 }
         },
-        "defaultLocale": { "enum": ["he", "en"], "default": "he" },
         "siteTags": { "type": "array", "items": { "type": "string", "maxLength": 64 }, "maxItems": 64 }
       }
     },
