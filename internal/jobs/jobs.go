@@ -1,0 +1,439 @@
+// Package jobs is the Postgres-backed work queue that replaces both Kafka and
+// Redis in this product.
+//
+// The plan's reasoning for one table rather than two systems is worth keeping in
+// view: the inbox gives exactly-once effect, the outbox gives atomic side
+// effects, and this table gives retries and visibility timeouts. Four properties
+// carry that:
+//
+//   - Claims use FOR UPDATE SKIP LOCKED, so many workers run without coordinating
+//     and none blocks on another.
+//   - Every job has an idempotency key unique per queue, so enqueueing the same
+//     work twice is a no-op rather than a duplicate VLM inference.
+//   - Every lease has an expiry, so a worker's crash is recovered rather than
+//     waited out.
+//   - dead_letter is a first-class state with a reason, surfaced in the console
+//     and audited, never silently dropped.
+package jobs
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+
+	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
+)
+
+// Queue names the work class. It is a discriminator, not a routing key: each
+// queue has its own workers, its own lease duration and its own retry bound,
+// because a VLM inference and a rule-bulk compile have nothing in common
+// operationally.
+type Queue string
+
+const (
+	QueueVLM            Queue = "vlm"
+	QueueEvidenceFetch  Queue = "evidence_fetch"
+	QueueRuleBulk       Queue = "rule_bulk"
+	QueueCheckpointSeal Queue = "checkpoint_seal"
+)
+
+// Status is a job's lifecycle.
+type Status string
+
+const (
+	StatusPending    Status = "pending"
+	StatusLeased     Status = "leased"
+	StatusDone       Status = "done"
+	StatusFailed     Status = "failed"
+	StatusDeadLetter Status = "dead_letter"
+)
+
+// ErrNotClaimed is returned when a lease is completed or renewed for a job the
+// caller no longer holds. It is a distinct error because the correct response is
+// to stop working on the job, not to retry.
+var ErrNotClaimed = errors.New("jobs: job is not leased by this worker")
+
+// Job is one unit of queued work.
+type Job struct {
+	ID             string
+	TenantID       string
+	SiteID         string
+	Queue          Queue
+	IdempotencyKey string
+	Payload        json.RawMessage
+	AttemptCount   int
+	MaxAttempts    int
+	RunAfter       time.Time
+	LeaseOwner     string
+	LeaseExpiresAt time.Time
+	CreatedAt      time.Time
+}
+
+// Enqueue describes one job to add.
+type Enqueue struct {
+	TenantID string
+	SiteID   string
+	Queue    Queue
+	// IdempotencyKey is unique per queue. Required, because a duplicate enqueue
+	// that silently creates a second job is a second VLM inference and a second
+	// operator notification.
+	IdempotencyKey string
+	Payload        json.RawMessage
+	MaxAttempts    int
+	RunAfter       time.Time
+}
+
+// Enqueuer adds jobs inside a caller's transaction, so a job and the state
+// change that caused it commit together.
+type Enqueuer struct{ Pool *dbx.Pool }
+
+// New builds an Enqueuer.
+func New(pool *dbx.Pool) *Enqueuer { return &Enqueuer{Pool: pool} }
+
+// Enqueue adds a job, or does nothing if the key already exists. It reports
+// whether work was actually created.
+func (e *Enqueuer) Enqueue(ctx context.Context, tx pgx.Tx, in Enqueue) (created bool, jobID string, err error) {
+	switch {
+	case in.TenantID == "":
+		return false, "", errors.New("jobs: tenant id is required and is never read from a request body")
+	case in.Queue == "":
+		return false, "", errors.New("jobs: queue is required")
+	case in.IdempotencyKey == "":
+		return false, "", errors.New("jobs: idempotency key is required; a duplicate enqueue is a second inference")
+	}
+	if len(in.Payload) == 0 {
+		in.Payload = json.RawMessage(`{}`)
+	}
+	if in.MaxAttempts <= 0 {
+		in.MaxAttempts = 5
+	}
+	if in.RunAfter.IsZero() {
+		in.RunAfter = time.Now().UTC()
+	}
+
+	var id string
+	err = tx.QueryRow(ctx, `
+		INSERT INTO jobs (tenant_id, site_id, queue, idempotency_key, payload, max_attempts, run_after)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		ON CONFLICT (tenant_id, queue, idempotency_key) DO NOTHING
+		RETURNING job_id::text`,
+		in.TenantID, nullString(in.SiteID), string(in.Queue), in.IdempotencyKey,
+		in.Payload, in.MaxAttempts, in.RunAfter.UTC(),
+	).Scan(&id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, "", nil
+		}
+		return false, "", fmt.Errorf("jobs: enqueue: %w", err)
+	}
+	return true, id, nil
+}
+
+// DefaultLeaseDuration is the visibility timeout for a general job.
+const DefaultLeaseDuration = 60 * time.Second
+
+// VLMLeaseDuration is longer, because an inference that has been running for
+// thirty seconds is normal and a lease that expires under it would start a
+// second inference of the same evidence.
+const VLMLeaseDuration = 5 * time.Minute
+
+const claimSQL = `
+WITH candidate AS (
+    SELECT job_id
+      FROM jobs
+     WHERE run_after <= now()
+       AND ($4 = '' OR tenant_id = $4)
+       AND (
+             status IN ('pending', 'failed')
+             -- A job whose worker died is still status=leased. Without this
+             -- clause a killed worker would hold its jobs until a human
+             -- intervened, and the lease would be decorative.
+          OR (status = 'leased' AND lease_expires_at IS NOT NULL AND lease_expires_at < now())
+           )
+     ORDER BY run_after, job_id
+     FOR UPDATE SKIP LOCKED
+     LIMIT $3
+)
+UPDATE jobs j
+   SET status = 'leased',
+       lease_owner = $1,
+       lease_expires_at = now() + make_interval(secs => $2),
+       -- Advanced here, not in the handler. A job that fails repeatedly must
+       -- reach max_attempts and become a dead letter; a counter that only moves
+       -- on success never counts the failures that matter.
+       attempt_count = j.attempt_count + 1
+  FROM candidate c
+ WHERE j.job_id = c.job_id
+RETURNING j.job_id::text, j.tenant_id, j.site_id, j.queue, j.idempotency_key,
+          j.payload, j.attempt_count, j.max_attempts, j.run_after,
+          j.lease_owner, j.lease_expires_at, j.created_at`
+
+// Worker claims and runs jobs of one queue.
+type Worker struct {
+	Enqueuer
+	// Name selects which queue this worker serves.
+	Name Queue
+	// LeaseDuration is the visibility timeout for this queue's jobs.
+	LeaseDuration time.Duration
+	// Handler runs one job. It must be idempotent: the queue gives at-least-once
+	// delivery, and a handler that is not idempotent will double its effect on
+	// the first retry after a crash.
+	Handler func(ctx context.Context, j Job) error
+	// Logf receives progress. It never receives a payload.
+	Logf func(format string, args ...any)
+}
+
+// Claim takes up to limit jobs for a single tenant.
+//
+// Claiming deliberately does not require a handler. A worker can legitimately
+// claim, inspect and hand off, and a guard here would push that shape away from
+// the natural one; the handler requirement lives in Run, where it is a real
+// precondition for doing the work.
+func (q *Worker) Claim(ctx context.Context, tenantID, owner string, limit int) ([]Job, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	seconds := int(q.lease().Seconds())
+	if seconds < 1 {
+		seconds = 1
+	}
+
+	var out []Job
+	err := q.Pool.InSystemTenant(ctx, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, claimSQL, owner, seconds, limit, tenantID)
+		if err != nil {
+			return fmt.Errorf("jobs: claim: %w", err)
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var j Job
+			var siteID *string
+			if err := rows.Scan(&j.ID, &j.TenantID, &siteID, &j.Queue, &j.IdempotencyKey,
+				&j.Payload, &j.AttemptCount, &j.MaxAttempts, &j.RunAfter,
+				&j.LeaseOwner, &j.LeaseExpiresAt, &j.CreatedAt); err != nil {
+				return fmt.Errorf("jobs: scan: %w", err)
+			}
+			if siteID != nil {
+				j.SiteID = *siteID
+			}
+			out = append(out, j)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+// Run claims and executes up to limit jobs, returning how many completed.
+//
+// It is the shape a worker loop uses, and the place the handler precondition is
+// enforced: a worker with no handler would claim jobs, do nothing, and leave
+// them to expire — a loop that looks busy and achieves nothing.
+func (q *Worker) Run(ctx context.Context, tenantID, owner string, limit int) (int, error) {
+	if q.Handler == nil {
+		return 0, errors.New("jobs: queue worker has no handler")
+	}
+	claimed, err := q.Claim(ctx, tenantID, owner, limit)
+	if err != nil {
+		return 0, err
+	}
+	done := 0
+	for _, j := range claimed {
+		if err := q.Handler(ctx, j); err != nil {
+			status, ferr := q.Fail(ctx, j.ID, owner, err)
+			if ferr != nil {
+				if errors.Is(ferr, ErrNotClaimed) {
+					// The lease moved on while the handler ran. The work may have
+					// been done by whoever holds it now, so this is reported
+					// rather than retried.
+					continue
+				}
+				return done, ferr
+			}
+			if status == StatusDeadLetter && q.Logf != nil {
+				q.Logf("job %s (%s) dead-lettered: %v", j.ID, j.Queue, err)
+			}
+			continue
+		}
+		if err := q.Complete(ctx, j.ID, owner); err != nil {
+			if errors.Is(err, ErrNotClaimed) {
+				continue
+			}
+			return done, err
+		}
+		done++
+	}
+	return done, nil
+}
+
+func (q *Worker) lease() time.Duration {
+	if q.LeaseDuration > 0 {
+		return q.LeaseDuration
+	}
+	if q.Name == QueueVLM {
+		return VLMLeaseDuration
+	}
+	return DefaultLeaseDuration
+}
+
+// Renew extends a lease a worker is still using. A long inference must not have
+// its job stolen from under it and started a second time.
+func (q *Worker) Renew(ctx context.Context, id, owner string) error {
+	seconds := int(q.lease().Seconds())
+	tag, err := q.Pool.Exec(ctx, `
+		UPDATE jobs
+		   SET lease_expires_at = now() + make_interval(secs => $3)
+		 WHERE job_id = $1 AND lease_owner = $2 AND status = 'leased'`,
+		id, owner, seconds)
+	if err != nil {
+		return fmt.Errorf("jobs: renew: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("%w: %s", ErrNotClaimed, id)
+	}
+	return nil
+}
+
+// Complete marks a job done. Done is terminal and a job is never re-run.
+func (q *Worker) Complete(ctx context.Context, id, owner string) error {
+	tag, err := q.Pool.Exec(ctx, `
+		UPDATE jobs
+		   SET status = 'done', completed_at = now(),
+		       lease_owner = NULL, lease_expires_at = NULL, last_error = NULL
+		 WHERE job_id = $1 AND lease_owner = $2`, id, owner)
+	if err != nil {
+		return fmt.Errorf("jobs: complete: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("%w: %s", ErrNotClaimed, id)
+	}
+	return nil
+}
+
+// Fail records a failed attempt and applies exponential backoff with a cap. Past
+// the job's own retry bound it becomes a dead letter with a reason.
+func (q *Worker) Fail(ctx context.Context, id, owner string, cause error) (Status, error) {
+	var status Status
+	if err := q.Pool.QueryRow(ctx, `
+		UPDATE jobs
+		   SET status = CASE WHEN attempt_count >= max_attempts THEN 'dead_letter' ELSE 'failed' END,
+		       last_error = $3,
+		       dead_letter_reason = CASE WHEN attempt_count >= max_attempts THEN $3 ELSE NULL END,
+		       run_after = now() + make_interval(secs => least(900, 5 * power(2, attempt_count)::int)),
+		       lease_owner = NULL,
+		       lease_expires_at = NULL
+		 WHERE job_id = $1 AND lease_owner = $2
+		RETURNING status`, id, owner, cause.Error()).Scan(&status); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", fmt.Errorf("%w: %s", ErrNotClaimed, id)
+		}
+		return "", fmt.Errorf("jobs: fail: %w", err)
+	}
+	return status, nil
+}
+
+// DeadLetter is one job that reached a terminal failure.
+type DeadLetter struct {
+	ID             string
+	TenantID       string
+	SiteID         string
+	Queue          Queue
+	IdempotencyKey string
+	Attempts       int
+	MaxAttempts    int
+	Reason         string
+	CreatedAt      time.Time
+}
+
+// DeadLetters lists dead-lettered jobs, newest first. Surfaced in the console
+// and audited: the plan is explicit that a dead letter is never silently dropped.
+func (q *Worker) DeadLetters(ctx context.Context, tenantID string, limit int) ([]DeadLetter, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	rows, err := q.Pool.Query(ctx, `
+		SELECT job_id::text, tenant_id, site_id, queue, idempotency_key,
+		       attempt_count, max_attempts, COALESCE(dead_letter_reason, last_error, ''), created_at
+		  FROM jobs
+		 WHERE ($1 = '' OR tenant_id = $1) AND status = 'dead_letter'
+		 ORDER BY created_at DESC
+		 LIMIT $2`, tenantID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("jobs: list dead letters: %w", err)
+	}
+	defer rows.Close()
+
+	var out []DeadLetter
+	for rows.Next() {
+		var d DeadLetter
+		var siteID *string
+		if err := rows.Scan(&d.ID, &d.TenantID, &siteID, &d.Queue, &d.IdempotencyKey,
+			&d.Attempts, &d.MaxAttempts, &d.Reason, &d.CreatedAt); err != nil {
+			return nil, fmt.Errorf("jobs: scan dead letter: %w", err)
+		}
+		if siteID != nil {
+			d.SiteID = *siteID
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// Replay moves a dead letter back to pending, resetting its retry budget.
+//
+// Operator-triggered, not automatic: a dead letter usually means the dependency
+// is broken, and retrying in a loop turns a visible incident into invisible load.
+func (q *Worker) Replay(ctx context.Context, id string) error {
+	tag, err := q.Pool.Exec(ctx, `
+		UPDATE jobs
+		   SET status = 'pending', attempt_count = 0, last_error = NULL,
+		       dead_letter_reason = NULL, completed_at = NULL, run_after = now(),
+		       lease_owner = NULL, lease_expires_at = NULL
+		 WHERE job_id = $1 AND status = 'dead_letter'`, id)
+	if err != nil {
+		return fmt.Errorf("jobs: replay: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("jobs: %s is not a dead letter", id)
+	}
+	return nil
+}
+
+// Counts is the queue depth summary the SLO alerts read.
+type Counts struct {
+	Pending    int64
+	Leased     int64
+	Failed     int64
+	DeadLetter int64
+	Done       int64
+}
+
+// Counts reads the queue's depth.
+func (q *Worker) Counts(ctx context.Context, tenantID string) (Counts, error) {
+	var c Counts
+	err := q.Pool.QueryRow(ctx, `
+		SELECT
+		    count(*) FILTER (WHERE status = 'pending'),
+		    count(*) FILTER (WHERE status = 'leased'),
+		    count(*) FILTER (WHERE status = 'failed'),
+		    count(*) FILTER (WHERE status = 'dead_letter'),
+		    count(*) FILTER (WHERE status = 'done')
+		  FROM jobs
+		 WHERE ($1 = '' OR tenant_id = $1) AND queue = $2`,
+		tenantID, string(q.Name)).Scan(&c.Pending, &c.Leased, &c.Failed, &c.DeadLetter, &c.Done)
+	if err != nil {
+		return c, fmt.Errorf("jobs: counts: %w", err)
+	}
+	return c, nil
+}
+
+func nullString(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
