@@ -61,8 +61,7 @@
               "description": "Per-site bound on normalized_at divergence permitted inside a time window. Site parameter, not a global constant."
             },
             "driftWarnMs": { "type": "integer", "minimum": 0, "maximum": 600000 },
-            "driftSevereMs": { "type": "integer", "minimum": 0, "maximum": 600000 },
-            "referenceSource": { "enum": ["ntp", "vms", "host"] }
+            "driftSevereMs": { "type": "integer", "minimum": 0, "maximum": 600000 },            "referenceSource": { "enum": ["ntp", "vms", "host"] }
           }
         },
         "dedupe": {
@@ -113,7 +112,17 @@
           "type": "array",
           "minItems": 1,
           "maxItems": 64,
-          "items": { "enum": ["motion", "analytics", "alarm", "device_state", "recording_state", "access", "gate", "bookmark", "metadata"] }
+          "description": "The adapter's normalized vocabulary. The vendor's PascalCase spellings are an adapter detail that never appear here, so a bundle is portable between sites and between replay and integration mode. A name outside this set is a semantic error: a rule that can never match is a rule an operator believes is running.",
+          "items": {
+            "enum": [
+              "motion", "analytics",
+              "alarm.created", "alarm.acknowledged", "alarm.closed",
+              "device.camera_offline", "device.camera_online", "device_state",
+              "recording.started", "recording.stopped",
+              "bookmark", "metadata",
+              "access.granted", "access.denied", "gate"
+            ]
+          }
         },
         "device": {
           "type": "object",

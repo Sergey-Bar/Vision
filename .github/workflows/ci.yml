@@ -102,14 +102,9 @@ jobs:
   rules:
     name: rule bundle lint
     runs-on: ubuntu-latest
-    # Not wired up yet. The rule engine is Track D, and until `securityctl rules
-    # lint` exists this job would either do nothing or pass vacuously — and a
-    # green job that checks nothing is worse than no job, because it is read as
-    # "the bundles are linted".
-    #
-    # It returns with the engine, and it runs in CI with no Milestone server
-    # reachable, which is the constraint that makes it possible at all.
-    if: false
+    # Runs with no Milestone server reachable, which is the constraint that
+    # makes it possible at all: the bundles are static input and the compiler
+    # needs nothing else.
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

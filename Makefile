@@ -69,8 +69,8 @@ migrate-status:
 	$(GO) run ./cmd/security-migrate status
 
 # Rule bundles are untrusted input. They are linted on every change, in CI,
-# with no Milestone server available. Enabled when the rule engine lands
-# (Track D); until then `securityctl rules lint` refuses by design.
+# with no Milestone server available. The engine is in place; simulate and
+# activate land with the rest of Track D.
 rules-lint:
 	$(GO) run ./cmd/securityctl rules lint --bundle rules/builtin
 
@@ -80,7 +80,15 @@ rules-lint:
 migration-phases:
 	@$(GO) test -p 1 ./migrations/... -run TestAllLoadsAndValidates -count=1
 
-ci: contract-check vet lint test-race migration-phases
+# The published bundle schema and the embedded copy must be the same file. The
+# compiler enforces the embed, so a stale copy is a bundle validated against a
+# contract nobody published.
+contract-sync:
+	@cmp contracts/json-schema/rule-bundle.schema.json internal/rules/schema/rule-bundle.schema.json \
+		|| (echo "internal/rules/schema is stale; copy the published contract:"; \
+		    echo "  cp contracts/json-schema/rule-bundle.schema.json internal/rules/schema/"; exit 1)
+
+ci: contract-check contract-sync vet lint test-race migration-phases rules-lint
 
 clean:
 	rmdir /s /q bin 2>nul || true

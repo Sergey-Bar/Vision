@@ -1,6 +1,10 @@
 package main
 
-import "github.com/Sergey-Bar/Ai-Captain/internal/command"
+import (
+	"flag"
+
+	"github.com/Sergey-Bar/Ai-Captain/internal/command"
+)
 
 // The lifecycle, rule and operator commands below are the command-tree skeleton
 // for Milestone 1: every name an operator or an installer will reach for exists,
@@ -102,16 +106,20 @@ func rulesCommand() *command.Command {
 
 A bundle is YAML. It is validated against its JSON Schema, then semantically
 validated (referenced zone and schedule exist, no impossible window, no
-duplicate rule id, no unsupported event type, no contradictory configuration),
-then compiled. There is no shell, no SQL, no network, no dynamic code and no
-unbounded regex anywhere in that path.`,
+duplicate rule id, no unsupported event type, no contradictory configuration,
+no rule with an action that does nothing), then compiled. There is no shell, no
+SQL, no network, no dynamic code and no unbounded regular expression anywhere in
+that path — the strongest operator in the language is a fixed prefix match.`,
 	}
 	rules.Register(
 		&command.Command{
 			Name:    "lint",
 			Summary: "Validate a bundle without activating it",
-			Usage:   `lint — validate a bundle file or directory.`,
-			Run:     notImplemented("rules lint"),
+			Flags: func(fs *flag.FlagSet) {
+				fs.String("bundle", "", "Bundle file, or a directory of them. Defaults to rules/builtin.")
+				fs.Bool("json", false, "Emit machine-readable output.")
+			},
+			Run: runRulesLint,
 		},
 		&command.Command{
 			Name:    "explain",
@@ -125,8 +133,8 @@ unbounded regex anywhere in that path.`,
 			Usage: `simulate — produce the diff digest that activation requires.
 
 The digest is over the diff itself, not over the bundle. Re-running the
-simulation and getting a different digest means the fixtures or the active
-bundle moved, and the reviewed diff is no longer the one being activated.`,
+simulation and getting a different digest means the fixtures or the active bundle
+moved, and the reviewed diff is no longer the one being activated.`,
 			Run: notImplemented("rules simulate"),
 		},
 		&command.Command{

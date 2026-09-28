@@ -1,0 +1,195 @@
+apiVersion: security.io/v1
+kind: RuleBundle
+version: 0.1.0
+description: >-
+  The built-in bundle shipped in the release archive. It is the one production
+  incident type Milestone 1 promises: a person in a restricted zone after hours,
+  corroborated by an independent signal. The two shadow profiles evaluate
+  against the same evidence but create nothing.
+
+site:
+  siteId: site-default
+  timezones:
+    - Asia/Jerusalem
+
+settings:
+  clock:
+    # Every site is different: a reference clock and a tolerance belong here,
+    # not in the binary. Two sites with different reference clocks have different
+    # right answers for "simultaneous".
+    referenceSource: ntp
+    driftWarnMs: 2000
+    driftSevereMs: 10000
+    skewTolerance: 5000
+  dedupe:
+    windowSeconds: 30
+    keys:
+      - zone.id
+      - device.id
+  burstMerge:
+    windowSeconds: 60
+    maxEvents: 200
+
+rules:
+  # --- hard suppression -------------------------------------------------------
+  # Suppression has the highest precedence in the deterministic ordering, so a
+  # deliberate "this is expected noise" decision short-circuits everything below
+  # it. It is a rule rather than a special case so that suppressing noise is an
+  # auditable act with a rule id attached.
+  - id: core.suppress.camera-offline-during-maintenance
+    description: A camera the operator has marked for maintenance is expected to be offline.
+    enabled: false
+    priority: 1000
+    tags: [suppression, maintenance]
+    when:
+      eventType: [device.camera_offline]
+      field:
+        path: vendor.Message
+        op: contains_prefix
+        value: "maintenance"
+    then:
+      createIncident: false
+      suppress: true
+
+  - id: core.suppress.analytics-below-threshold
+    description: Analytics the source itself rated below its own confidence floor.
+    enabled: true
+    priority: 900
+    tags: [suppression, analytics]
+    when:
+      eventType: [analytics]
+      all:
+        - field:
+            path: vendor.Analytics.Confidence
+            op: lt
+            value: 0.35
+    then:
+      createIncident: false
+      suppress: true
+
+  # --- the one production incident type ---------------------------------------
+  - id: core.person-in-restricted-zone-after-hours
+    description: >-
+      A person in a restricted zone outside business hours, corroborated by a
+      second independent signal, and — when the AI profile is available — by a
+      stored VLM observation.
+    enabled: true
+    priority: 500
+    tags: [production, restricted-zone, after-hours]
+    when:
+      all:
+        - eventType: [motion, analytics]
+        - zone:
+            pathPrefix: /restricted
+        - schedule:
+            id: business-hours
+            invert: true
+        - corroborate:
+            eventTypes: [analytics, access.granted, device_state, motion]
+            minSignals: 2
+            minEvidenceTier: B
+            requiresAIObservation: true
+            # Mandatory, and deliberately so. A missing AI observation is never a
+            # negative observation, so the rule has to say what it does without
+            # one. UNVERIFIED means the operator sees an incident raised on less
+            # evidence and can tell it apart from a fully corroborated one;
+            # proceed_without would create incidents on less evidence whenever
+            # the model is down, which the linter warns about.
+            ifAIAvailable:
+              degradeTo: UNVERIFIED
+    then:
+      createIncident: true
+      severity: high
+      title: "Person in a restricted zone after hours"
+      requireAIObservation: true
+      dispatch:
+        - type: request_vlm
+          target: restricted-person
+        - type: fetch_evidence
+          target: pre-event
+        - type: notify_operator
+          target: on-call
+
+  # --- corroboration without the AI plane -------------------------------------
+  # A second production-adjacent rule that needs no model at all, so a site can
+  # run the whole operator workflow with the AI plane completely absent — which
+  # is a supported production configuration, not a degraded mode.
+  - id: core.door-forced-after-hours
+    description: A door forced or left open outside business hours. Needs no AI.
+    enabled: true
+    priority: 450
+    tags: [production, door]
+    when:
+      all:
+        - eventType: [access.denied, device_state]
+        - schedule:
+            id: business-hours
+            invert: true
+        - corroborate:
+            eventTypes: [motion, analytics, access.denied]
+            minSignals: 2
+            minEvidenceTier: B
+    then:
+      createIncident: true
+      severity: critical
+      title: "Door forced outside business hours"
+      escalate: true
+      dispatch:
+        - type: fetch_evidence
+          target: pre-event
+        - type: notify_supervisor
+          target: security-manager
+
+  # --- device health ----------------------------------------------------------
+  - id: core.camera-offline
+    description: A camera stopped reporting. Informational, never escalated.
+    enabled: true
+    priority: 100
+    tags: [device-health]
+    when:
+      eventType: [device.camera_offline]
+    then:
+      createIncident: true
+      severity: low
+      title: "Camera offline"
+
+  # --- shadow evaluation, no authoritative effect ------------------------------
+  # These request a VLM observation and record it, but create no incident and
+  # suppress nothing. They exist so a shadow profile can be measured against
+  # real traffic without touching the operator's queue — which is the whole
+  # reason a failing profile is safe to try.
+  - id: shadow.vehicle-at-gate
+    description: Shadow evaluation of the vehicle-at-gate profile. Creates nothing.
+    enabled: true
+    priority: 50
+    tags: [shadow, evaluation]
+    when:
+      all:
+        - eventType: [gate, metadata]
+        - corroborate:
+            eventTypes: [motion, analytics, gate]
+            minSignals: 2
+            minEvidenceTier: B
+            requiresAIObservation: true
+            ifAIAvailable:
+              degradeTo: UNVERIFIED
+    then:
+      createIncident: false
+      dispatch:
+        - type: request_vlm
+          target: vehicle-at-gate
+
+  - id: shadow.door-forced-observation
+    description: >-
+      Shadow evaluation of the door-forced profile. Produces an observation for
+      the evaluation harness and no incident.
+    enabled: true
+    priority: 40
+    tags: [shadow, evaluation]
+    when:
+      eventType: [device_state, access.denied]
+    then:
+      createIncident: false
+      dispatch:
+        - type: request_vlm
+          target: door-forced
