@@ -13,7 +13,7 @@ MODULE := github.com/Sergey-Bar/Ai-Captain
 MIGRATIONS_DIR := migrations
 
 .PHONY: all bootstrap generate contract-check build test test-race lint fmt vet \
-        tidy migrate-up migrate-status rules-lint ci clean
+        tidy migrate-up migrate-status rules-lint ci verify clean
 
 all: build test
 
@@ -89,6 +89,28 @@ contract-sync:
 		    echo "  cp contracts/json-schema/rule-bundle.schema.json internal/rules/schema/"; exit 1)
 
 ci: contract-check contract-sync vet lint test-race migration-phases rules-lint
+
+# The gate that actually runs, and the one to trust.
+#
+# `ci` above is the full list but it needs protoc and golangci-lint, which are
+# not on PATH on a default Windows shell and are not installed by default. This
+# target is the subset that needs nothing beyond the Go toolchain, so it runs
+# anywhere and it is what a change is expected to pass before it is committed.
+#
+# Deliberately absent: lint (needs golangci-lint) and the generated-code check
+# (needs protoc). Both still matter and both still run before a release — see
+# `ci` and `generate`. What this target buys is that the common case, "did I
+# break anything", has one command that always works.
+#
+# The database-backed suites skip rather than fail without SP_TEST_DATABASE_URL,
+# so a green run here can be a run that tested nothing. See AGENTS.md.
+verify: contract-check contract-sync vet fmt-check test-race migration-phases rules-lint
+
+# Fails if anything is unformatted. Same intent as the CI fmt job, phrased so it
+# does not depend on a shell pipeline.
+fmt-check:
+	@out=$$($(GO) fmt ./... 2>&1); \
+	if [ -n "$$out" ]; then echo "gofmt reformatted these; commit the result:"; echo "$$out"; exit 1; fi
 
 clean:
 	rmdir /s /q bin 2>nul || true

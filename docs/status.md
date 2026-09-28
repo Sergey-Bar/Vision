@@ -14,6 +14,17 @@ real Postgres 16, with the race detector on. `go vet` and `gofmt` clean.
 enums compatible with the baseline. The Python AI runtime's 21 contract tests
 pass under `py -m unittest`.
 
+> **Verification is local. There is no pipeline.** This repository is private and
+> on GitHub's free plan, and the account's billing state prevents any Actions job
+> from starting. The workflow was removed rather than left as decoration that
+> would never run; `scripts/verify.ps1` is the gate.
+>
+> The consequence to be honest about: every verification claim in this document
+> is a **local** run on the machine that produced it, not pipeline evidence.
+> There is no check on a pull request, and nothing stops a force-push to `main`.
+> `scripts/enable-branch-protection.sh` fixes the second the day the plan is
+> upgraded.
+
 The linter configuration in `.golangci.yml` excludes four categories, each
 with a written reason rather than a blanket suppression: writes to stdout from a
 CLI, helper failures a test asserts for itself, `httptest.NewRequest` in tests

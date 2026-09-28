@@ -1149,11 +1149,14 @@ commit".
    dataset's provenance file, because an unrecorded anonymisation is an assertion
    rather than a control. Recorded licence and provenance per §9.5 of
    ``.
-3. **CI has no access to a customer's data.** CI runs on synthetic fixtures and
-   committed datasets only. A test that needs a live site is a manual test with a
-   person, and `AGENTS.md`'s rule generalises: **"CI must pass with no Milestone
-   server reachable. If a test needs one, the test is wrong."** The same applies
-   to a customer database, a customer VMS and a customer evidence store.
+3. **The suite has no access to a customer's data.** Tests run on synthetic
+   fixtures and committed datasets only. A test that needs a live site is a
+   manual test with a person, and `AGENTS.md`'s rule generalises: **the suite
+   must pass with no Milestone server reachable; if a test needs one, the test is
+   wrong.** The same applies to a customer database, a customer VMS and a
+   customer evidence store. This is now the only place the rule is enforced,
+   since the pipeline does not run for this repository — which makes it more
+   important, not less.
 4. **`SP_TEST_DATABASE_PASSWORD` is a local test password** and is only ever
    present in a local shell or a CI secret store. It never appears in a committed
    file, a log line or a test failure message. A failing test that prints a DSN
@@ -1183,7 +1186,7 @@ at the evidence.
 | 1 | Contracts unchanged or intentionally versioned | `make contract-check`; a diff to `contracts/compat/baseline.json` must cite an ADR | E2 | the wire moved without a decision |
 | 2 | Embedded schemas match published ones | `make contract-sync` | E2 | a bundle is validated against a contract nobody published |
 | 3 | Migrations legal and forward-only | `make migration-phases`; `internal/migrate`'s five tests | E2 | a contract step is bundled with an expand step, or a phase is unknown |
-| 4 | Built-in bundle compiles with no server | `make rules-lint` | E2 | `AGENTS.md`: CI must pass with no Milestone server reachable |
+| 4 | Built-in bundle compiles with no server | `make rules-lint` | E2 | `AGENTS.md`: the suite must pass with no Milestone server reachable |
 | 5 | Vet and lint clean | `make vet && make lint` | E2 | — |
 | 6 | Full suite green with `-race` | `make test-race` | E2 | any test fails **or any test skips** (see 9.2) |
 | 7 | Fault injection green for every stage a change touches | `go test ./internal/faultinjection/... -stage <stages>` | E2 | a stage has no test, or a test passes on a control that was removed |
@@ -1450,7 +1453,7 @@ that "green" in `docs/status.md` is not read as "nothing is wrong".
 | Q-4 | `securityctl adapter probe` is referenced in five places in `internal/milestone/routes.go` — including "the first thing to run on a real install" — and the command does not exist in `cmd/securityctl`'s tree | `internal/milestone/routes.go:16,42,53,119` | The M1 exit gate's first item is live-Milestone parity, and the command written to start that conversation is not there. Whoever goes to a real installation runs a command that does not exist | Write it before the first site visit. It should print what the server actually exposes, what the adapter can reach, and what is unverified — which is precisely `TestMilestoneRoutesAreDeclaredUnverified` made operable |
 | Q-5 | The console's dead-letter and clock-drift tables render from `consoleData` with `requirePrincipal`, not `requireCapability`, so a principal without `dead_letter.read` is shown the dead-letter list | `internal/api/handlers.go:158-163`, `internal/api/console.go:186-195` | A capability leak. The API routes get this right (`requireCapability(identity.CapDeadLetterRead, ...)`); the console routes do not, because `requirePrincipal` was used for the HTML surface. Invariant 5 is about tenant scoping, and this is the same family of defect: a surface reads data its caller is not authorised to read | Console routes use `requireCapability` like the API ones, or the data is omitted by capability. A test to match, in `internal/api/api_test.go` — and it is a §7-content-assertion gap as well (§2.7) |
 | Q-6 | `internal/evidence`'s `TestSymlinkEscapeIsRefused` skips on Windows | `internal/evidence/evidence_test.go:74-77` | §6.2. A test that skips on the platform running half our target installs is not protecting half our customers | Grant `SeCreateSymbolicLinkPrivilege` on the Windows CI runner, or test the post-open `Lstat` check directly, or use a junction. At least one ships in M1 |
-| Q-7 | `go.mod` declares `go 1.26.0`; `.github/workflows/ci.yml` pins `GO_VERSION: "1.24"` with `GOTOOLCHAIN: local`; `docs/status.md` says Go 1.27 | `go.mod:3`, `.github/workflows/ci.yml:11-12` | With `GOTOOLCHAIN=local` a Go 1.24 toolchain cannot build a module declaring 1.26. **CI cannot build this module as pinned.** A green local run and a red CI run is the most expensive way to discover a version mismatch, and it will be discovered by a release, not by a test | Pin one version in three places and add a CI step asserting `go.mod`'s version against the runner's. Until then, treat "CI is green" as unverified, and say so in the release notes rather than asserting it |
+| Q-7 | **RESOLVED.** `go.mod` declared `go 1.26.0` while the workflow pinned `GO_VERSION: "1.24"` with `GOTOOLCHAIN: local`, so nothing could build; `docs/status.md` said 1.27 as well | `go.mod:3` | Three asserted versions, none reconcilable. The pin is now `1.26` and `docs/status.md` says `1.26.0`. The workflow has since been removed for an unrelated billing reason | Pin one version in `go.mod` and `docs/status.md`; a future pipeline must match it | Closed |
 | Q-8 | The Windows Service and systemd units are absent; `deploy/` was created and removed | `docs/status.md` | A site on an isolated network has no supported way to start the product at boot. Every other deployment concern in `` is downstream of this | M1. Genuinely small; deferred rather than absent, and nothing else depends on it — but "nothing depends on it" stops being true the moment there is a customer |
 
 ### 11.5 The one summary line for a QA review

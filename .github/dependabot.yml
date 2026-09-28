@@ -1,0 +1,35 @@
+# Keeps the Go module current without anyone having to remember.
+#
+# There is no `github-actions` entry because the repository has no workflows.
+# GitHub Actions cannot start a job for this account — it is private, on the free
+# plan, and the account's billing state blocks it — so the pipeline was removed
+# rather than left as decoration that would never run. `scripts/verify.ps1` is
+# the gate, and `AGENTS.md` is where that is recorded.
+#
+# Security updates do not need a group here. Dependabot's security updates are
+# driven by the vulnerability alerts enabled on the repository and are opened
+# independently of this schedule; a `groups` entry with `applies-to:
+# security-updates` is rejected by the schema for the gomod ecosystem, which is
+# what Dependabot told us when this file first went in.
+#
+# The Python runtime is deliberately absent: it has no third-party imports, and
+# a Dependabot entry for a package set that is meant to stay empty would be a
+# way to quietly add a dependency to a service that runs on a customer's site
+# and touches camera footage.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: Etc/UTC
+    # Grouped so a routine bump is one pull request rather than nine, and so a
+    # patch does not arrive ahead of an unrelated minor and hold it up.
+    open-pull-requests-limit: 5
+    groups:
+      go-minor:
+        update-types:
+          - minor
+          - patch

@@ -145,12 +145,48 @@ Two consequences that are easy to get wrong:
 
 ## Verification
 
-```sh
-make contract-check
-make build
-make test-race   # -p 1: the database-backed suites share one database
-make lint
+**`scripts/verify.ps1` is the gate. It runs locally, it needs nothing installed
+beyond Go, and it is the thing to trust.**
+
+```powershell
+.\scripts\verify.ps1            # contract-check, contract-sync, vet, gofmt,
+                                # test -race -p 1, migration-phases, rules-lint
+.\scripts\verify.ps1 -NoRace    # same, without the race detector
 ```
 
-CI must pass with no Milestone server reachable. If a test needs one, the test
-is wrong.
+It runs `contract-check`, `contract-sync`, `vet`, `gofmt`, `test -race -p 1`,
+`migration-phases` and `rules-lint`, in that order, and exits non-zero naming
+whatever failed. It resolves `go` and `gofmt` itself, because neither is on
+`PATH` on this machine.
+
+**`make verify` is the same list** and is what the `Makefile` and the roadmap
+documents name, but **`make` is not installed here** — not on `PATH`, not in Git
+Bash, not in WSL. The PowerShell script is the one that runs; the Makefile is
+the portable description. If you install `make` they are equivalent.
+
+Not covered here, and still required before a release: `golangci-lint`, and
+regenerating the contracts with `protoc` and committing the result.
+
+**GitHub Actions does not exist in this repository.** The pipeline was removed.
+The reason is not that it was unhelpful: Actions cannot start a job for this
+account, because the repository is private, it is on the free plan, and the
+account's billing state blocks it. A pipeline that never runs is worse than no
+pipeline, because a red X trains you to ignore red.
+
+Consequences to be honest about:
+
+- **No check runs on a pull request.** A green branch here is a human claim, not
+  an automated one. Do not write "CI passed" anywhere; write which command ran.
+- **No push protection.** Nothing stops a force-push to `main`, and nothing
+  blocks a merge. `scripts/enable-branch-protection.sh` applies both the day the
+  plan is upgraded — with the check list emptied, because there are no checks to
+  require.
+- **`docs/status.md`'s verification block describes a local run.** That is what
+  it is; it is not pipeline evidence.
+
+If CI is ever wanted back, it should be rebuilt deliberately with the
+`permissions`, `concurrency` and SHA-pinning that the deleted pipeline had, plus
+a Windows test job. Do not restore it by copying an old file back.
+
+The suite must pass with **no Milestone server reachable**. If a test needs one,
+the test is wrong. That rule is unaffected by any of the above.

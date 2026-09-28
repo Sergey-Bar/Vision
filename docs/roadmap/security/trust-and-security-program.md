@@ -108,7 +108,7 @@ customer's operator clicks things, their administrator configures things, and
 some of the harm lands on a person who is not us. That asymmetry is why (b)
 gets the disclosure programme in §8 and (a) gets the build programme in §3.
 
-### 2.2 What CI actually does today — read from `.github/workflows/ci.yml`
+### 2.2 What the pipeline did while it existed — read from the removed `.github/workflows/ci.yml`
 
 One workflow, six jobs, on `push` to `main` and on every `pull_request`.
 
@@ -118,7 +118,7 @@ One workflow, six jobs, on `push` to `main` and on every `pull_request`.
 | `build` | `go build -trimpath ./...` and `go vet ./...` on `ubuntu-latest` **and** `windows-latest` | cross-platform build, `-trimpath` so the binary does not embed the build path | **Real, and under-used.** A `test` job exists for Linux only (below) |
 | `lint` | `golangci-lint-action@v6` with `version: latest`, then a `gofmt -l` emptiness check | style and a linter set | **Weak, see gaps** |
 | `test` | `go test -p 1 -race -count=1 ./...` against a `postgres:16` service | the full suite, with the race detector, on a real database | **The most valuable job in the file** |
-| `rules` | `go run ./cmd/securityctl rules lint --bundle rules/builtin` | the untrusted-input path is exercised on every change, with no Milestone server | **Real control**, and the reason `AGENTS.md`'s "CI must pass with no Milestone server reachable" is enforceable |
+| `rules` | `go run ./cmd/securityctl rules lint --bundle rules/builtin` | the untrusted-input path is exercised on every change, with no Milestone server | **Real control**, and the reason `AGENTS.md`'s "the suite must pass with no Milestone server reachable" is enforceable |
 | `secrets` | `git ls-files \| grep -EIn '(BEGIN (RSA \|EC \|OPENSSH )?PRIVATE KEY\|AKIA[0-9A-Z]{16})'` | a build-time backstop against a committed key | **Real but very narrow** — two patterns against `internal/release`'s six |
 
 The `secrets` job's own comment is honest about it: "A build-time guard. The
@@ -126,14 +126,14 @@ stronger statement — the release builder refuses to package a secret — is
 asserted by the builder's own tests." That is correct and worth keeping in the
 same tone.
 
-### 2.3 Gaps found in `.github/workflows/ci.yml`, and what to do about each
+### 2.3 Gaps found in the removed pipeline, and what to do about each
 
 Every item below was found by reading the file, not by guessing. Priority is by
 what it lets through, not by how easy it is.
 
 | # | Gap | Evidence | Consequence | Action | Owner | By |
 |---|---|---|---|---|---|---|
-| CI-1 | **The workflow cannot build the module.** `go.mod` declares `go 1.26.0`; `env.GO_VERSION: "1.24"` with `GOTOOLCHAIN: local` | `ci.yml:11-12` vs `go.mod:3` | A 1.24 toolchain cannot build a 1.26 module. Every CI run fails at `setup-go`, so **no control in the workflow is currently being demonstrated** | Pin one version in three places (`go.mod`, `ci.yml`, `docs/status.md` — which says 1.27) and add a step asserting `go.mod` against the runner's | E2 | M1, before any other CI work |
+| CI-1 | **RESOLVED, then moot.** The workflow pinned `GO_VERSION: "1.24"` with `GOTOOLCHAIN: local` against a `go 1.26.0` module, so every run failed before a test | the removed `ci.yml` vs `go.mod:3` | Fixed to `1.26` while the workflow still existed. The workflow has since been removed for an unrelated billing reason, so no pipeline demonstrates any control either way | Pin one version in three places (`go.mod`, `ci.yml`, `docs/status.md` — which says 1.27) and add a step asserting `go.mod` against the runner's | E2 | M1, before any other CI work |
 | CI-2 | **No `permissions:` block** | absent from the file | The job inherits the repository/organisation default `GITHUB_TOKEN` scope. On `pull_request` from a fork it is read-only, but from a same-repo branch it is whatever the org default is, which is frequently write | `permissions: {contents: read}` at the workflow level, then add scopes per job | E2 | M1 |
 | CI-3 | **Actions are pinned to tags, not SHAs** | `actions/checkout@v4`, `actions/setup-go@v5`, `golangci/golangci-lint-action@v6` | A tag is mutable. A compromised or force-moved tag is code execution in CI with the token's scopes. This is exactly attacker profile **P4** in `docs/threat-model.md` §3 | Pin all three to full commit SHAs with a `# v4.2.2` comment; bump deliberately | E2 | M1 |
 | CI-4 | **A build tool is installed floating** | `go install google.golang.org/protobuf/cmd/protoc-gen-go@latest` (line 30) and `version: latest` for golangci-lint (line 70) | `latest` resolves to whatever exists at run time. The generated code in `internal/contracts` — which `AGENTS.md` says nothing may hand-edit — is produced by a tool whose version is not recorded | Pin both. Record the versions in the release `Provenance` so an auditor can reconstruct which tool wrote the contract | E2 | M1 |
@@ -145,8 +145,8 @@ what it lets through, not by how easy it is.
 | CI-10 | **The test password is in a committed file** | `SP_TEST_DATABASE_URL: postgres://security:security@localhost:5432/…` (line 92) | It is a throwaway CI password and the risk is low, but `07` §8.4 rule 4 says `SP_TEST_DATABASE_PASSWORD` "never appears in a committed file". As written, a documented rule and the repository disagree, and a rule somebody has already broken once is a rule nobody checks | Either use a GitHub secret, or amend `07` §8.4 to say "a per-run throwaway service password in a workflow is fine; a real credential is not" — and mean it | E2 | M1 |
 | CI-11 | **A commit-time password is in the workflow** | `POSTGRES_PASSWORD: security` (line 83) | Same as CI-10 | as CI-10 | E2 | M1 |
 | CI-12 | **`gosec` is disabled** | `.golangci.yml:20-23` — `default: standard` with `gosec` in `disable:` and a comment about test helpers | The rationale is about `fmt.Sprintf` in test files, and the config already has a per-path `exclude-rules` block for exactly that. Disabling the linter **globally** to exempt tests means production code is not scanned for the crypto/path/injection patterns gosec is for | Re-enable gosec globally; the existing `_test\.go$` exclude already covers the stated problem | E2 | M1 |
-| CI-13 | **No CODEOWNERS, no dependabot** | `.github/` contains only `workflows/ci.yml` | Two people cannot rely on each other noticing a dependency bump. CODEOWNERS is also how a *required* reviewer is expressed in GitHub | Add both. A one-line CODEOWNERS naming E1 and E2 is the whole file | E2 | M1 |
-| CI-14 | **No branch protection and no tag signing enforced** | not in the repository | `12` §1.3 says "`main` is releasable. Always." That is a convention until the branch is protected, and a convention is not a control (`07` §2.2 makes exactly this point about `contract-baseline`) | Configure branch protection: required status checks, no force-push, no direct push. Enforce signed annotated tags for releases | E1 | M1 |
+| CI-13 | **No CODEOWNERS** | `.github/` holds PR and issue templates and dependabot; there is no CODEOWNERS and, with two people, there is no second reviewer to own anything | Two people cannot rely on each other noticing a dependency bump. CODEOWNERS is also how a *required* reviewer is expressed in GitHub | Add both. A one-line CODEOWNERS naming E1 and E2 is the whole file | E2 | M1 |
+| CI-14 | **No branch protection, no tag signing, and no pipeline at all** | Actions cannot start for this account (free plan, private, billing state), so the workflow is manual-only; `make verify` is the gate and it is a human claim. Branch protection is unavailable on the same plan | `12` §1.3 says "`main` is releasable. Always." That is a convention until the branch is protected, and a convention is not a control (`07` §2.2 makes exactly this point about `contract-baseline`) | Configure branch protection: required status checks, no force-push, no direct push. Enforce signed annotated tags for releases | E1 | M1 |
 | CI-15 | **Tests run on Linux only** | the `test` job is `ubuntu-latest`; only `build` has the OS matrix | Half our target installs are Windows, and the symlink test skips there (Q-6). "A platform we call supported and do not test on is a platform where the evidence store's escape protection is unverified" — `12` §3.6 | Add a `windows-latest` test job, with `SeCreateSymbolicLinkPrivilege` granted to the runner account (07 §6.2 option 1, the cheapest correct fix) | E2 | M1 |
 | CI-16 | **No `concurrency` group** | absent | Two pushes to `main` run overlapping suites against the same design-partner-adjacent state. Low impact today, cheap to add | `concurrency: {group: ci-${{ github.ref }}, cancel-in-progress: true}` | E2 | M1 |
 
@@ -1169,7 +1169,7 @@ one:
 
 | Rhythm | What | Who |
 |---|---|---|
-| **Per commit** | `make ci`; the security tests; the release gate items that are checks | CI, then E2 |
+| **Per commit** | `make verify`; the security tests; the release gate items that are checks | E2 runs it locally, E2 reviews the diff. There is no automated check: Actions does not run for this repository, so "CI is green" is not a phrase anyone is entitled to use. |
 | **Per release** | The 20-line gate in `07` §9.1; the SBOM; the manifest; `verify-release` with a **required** trusted key; two keys honoured | E2 builds, E1 signs the notes |
 | **Weekly** | The decision digest (`` §7); the risk review agenda item (`16` §1); "is any Sev-1/Sev-2 security finding open?" | both |
 | **Monthly** | Dependency update + `govulncheck` triage + `go.sum` diff review; the risk register; the accepted-risk list restated with movement; a manual sample audit against §5.1 | E2 rotates |
