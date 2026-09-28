@@ -70,28 +70,12 @@ partial backup unless it is told explicitly.`,
 		Run: notImplemented("backup"),
 	}
 }
-
 func restoreCommand() *command.Command {
 	return &command.Command{
 		Name:    "restore",
 		Summary: "Restore from a backup",
 		Usage:   `restore — restore a backup produced by securityctl backup.`,
 		Run:     notImplemented("restore"),
-	}
-}
-
-func verifyReleaseCommand() *command.Command {
-	return &command.Command{
-		Name:    "verify-release",
-		Summary: "Verify a release archive without installing it",
-		Usage: `verify-release — check a signed offline release bundle.
-
-Rejects a tampered archive, an unsigned archive, a manifest whose file hashes
-do not match the archive contents, a manifest carrying a path that escapes the
-archive root, and any manifest that would install a secret.
-
-This is the command to run on a USB stick before trusting it.`,
-		Run: notImplemented("verify-release"),
 	}
 }
 

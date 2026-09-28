@@ -8,9 +8,14 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
+	"encoding/hex"
+	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 
 	"github.com/Sergey-Bar/Ai-Captain/internal/command"
 )
@@ -45,14 +50,56 @@ or from the site configuration.`,
 		rollbackCommand(),
 		backupCommand(),
 		restoreCommand(),
-		verifyReleaseCommand(),
+		verifyReleaseCmd(),
+		buildReleaseCmd(),
 		migrateCommand(),
 		rulesCommand(),
 		incidentCommand(),
 		auditCommand(),
 		identityCommand(),
+		releaseKeyCommand(),
 	)
 	return root
+}
+
+// releaseKeyCommand prints the public half of the signing key, because getting
+// it out of band is what makes `verify-release`'s trust check worth anything.
+func releaseKeyCommand() *command.Command {
+	var keyPath string
+	c := &command.Command{
+		Name:    "release-key",
+		Summary: "Print the public half of the release signing key",
+		Usage: `release-key --signing-key <path>
+
+Prints the hex public key to distribute with a release. The verifier takes it as
+--trusted-key, and it is what makes a signature mean something: an archive that
+verifies against its own embedded key only proves that whoever wrote it signed
+their own work.`,
+	}
+	c.Flags = func(fs *flag.FlagSet) {
+		fs.StringVar(&keyPath, "signing-key", "", "Path to the private signing key.")
+	}
+	c.Run = func(_ context.Context, env *command.Env, args []string) error {
+		if len(args) > 0 {
+			return &command.UsageError{Err: errors.New("pass options as flags, not positionals")}
+		}
+		if keyPath == "" {
+			return &command.UsageError{Err: errors.New("--signing-key is required")}
+		}
+		raw, err := os.ReadFile(keyPath)
+		if err != nil {
+			return fmt.Errorf("read signing key: %w", err)
+		}
+		key, err := hex.DecodeString(strings.TrimSpace(string(raw)))
+		if err != nil || len(key) != ed25519.PrivateKeySize {
+			return fmt.Errorf("the signing key file is not a %d-byte hex private key",
+				ed25519.PrivateKeySize)
+		}
+		priv := ed25519.PrivateKey(key)
+		fmt.Fprintln(env.Stdout, hex.EncodeToString(priv.Public().(ed25519.PublicKey)))
+		return nil
+	}
+	return c
 }
 
 func notImplemented(what string) func(context.Context, *command.Env, []string) error {

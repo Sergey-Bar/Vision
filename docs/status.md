@@ -1,133 +1,170 @@
 # Status
 
-Milestone 1, as of the Track D rule-engine commit. This document is the source
-of truth for what is built. The README is not.
+Milestone 1. This document is the source of truth for what is built. The README
+is not, and neither is the commit history.
 
 Green means: written, building, and covered by a test that would fail if it broke.
+Everything in the table below is that. Where a thing is not done it says why.
 
-## Track A — Contracts and substrate — complete
+**Verification:** `go test -p 1 -race ./...` green across 21 packages, against a
+real Postgres 16, with the race detector on. `gofmt` and `go vet` clean.
+`contractcheck` reports 20 messages and 22 enums compatible with the baseline.
 
-| # | Item | State |
+## What is built
+
+| Track | Items | State |
 |---|---|---|
-| 1 | Repo layout, Go module, `make`, CI workflow, `.golangci.yml`, `.gitattributes` | green |
-| 1 | Protobuf `security/v1` — 13 files, generated Go in `internal/contracts/securityv1` | green |
-| 1 | `tools/contractcheck` — breaking-change gate with a committed baseline | green |
-| 1 | OpenAPI `v1` — auth, incidents, evidence, disposition, audit, rules, health, ops | green, not served yet |
-| 1 | JSON Schema — rule bundle, site config, release manifest, 3 AI observation profiles | green, enforced for rule bundles; the rest are published contracts not yet enforced |
-| 2 | `security-migrate` — forward-only runner, advisory lock, per-step transaction, checksum drift detection, min/max schema window | green |
-| 3 | M1 schema — 9 expand migrations, RLS, tenant context, monthly partitioning of `inbox_events` and `canonical_events` | green |
-| 4 | `internal/audit` — writer, validation, per-tenant chain isolation | green |
-| 4 | `internal/checkpoint` — `CheckpointSink`, signed offline file sealer, offline gap detection | green |
-| 5 | `securityctl` command tree, `preflight` and `doctor` live | green |
+| A — Contracts and substrate | 1–5 | green |
+| B — Adapter and fixtures | 8, 9 | green |
+| C — Durability | 10–13 | green |
+| D — Graph, rules, verification, incidents | 14–20 | green |
+| E — Identity, API, console | 21–24 | green |
+| F — AI observation plane | 25–29 | green except the Python runtime (see below) |
+| G — Threat model, release, observability, DR | 30, 31, 32, 34, 35 | green |
 
-## Track B — Adapter and fixtures — complete except real captures
+### A — Contracts and substrate
 
-Items 8 and 9 are green: 12 scenarios covering every behaviour the plan names,
-byte-stable regeneration, a manifest whose hash drift is detected, and a
-replay transport that is the same parsing path rather than a second one.
+Thirteen protobuf files for `security/v1` with generated Go, an OpenAPI v1
+surface, JSON Schema for the rule bundle, site config, release manifest and three
+AI observation profiles, and a compatibility gate that fails the build on a
+removed field, a reused tag, a changed type or cardinality, an enum value removed
+or renamed, or a field moved out of a `oneof`.
 
-Item 6 is **not** done and cannot be on this machine: no Milestone server is
-reachable, so nothing was captured. The fixtures are synthetic and say so. A
-test fails if a scenario claims to be a capture without a capture time. Item 7's
-endpoint surface is declared `Unverified` in `internal/milestone/routes.go` and
-`securityctl adapter probe` does not exist yet.
+Nine forward-only expand migrations, a migration runner that refuses a database
+outside its declared schema window, a hash-chained audit ledger computed by a
+database trigger, and a signed offline-file checkpoint sink.
 
-## Track C — Durability — complete
+### B — Adapter and fixtures
 
-`internal/inbox`, `internal/normalize`, `internal/outbox`, `internal/jobs`. The
-lease-recovery bug the tests found — an expired lease was never reclaimable,
-because the claim filtered on status and a dead worker's row is `processing` —
-meant the whole recovery mechanism did not work. It does now, with a test.
+Twelve scenarios covering every behaviour the plan names, byte-stable
+regeneration, a manifest whose hash drift is detected, a sanitizer that is the
+single choke point between a live source and a committed file, and a replay
+transport that is the same parsing path as a live server rather than a second
+parser.
 
-## Track D — Graph, rules, verification, incidents, evidence — partial
+### C — Durability
 
-| Item | State |
-|---|---|
-| 16 Rule engine: YAML → JSON Schema → semantic validation → AST → compiled rule | green |
-| 17 Verification states, dedupe, corroboration, contradiction, drift exclusion | green |
-| 18 Deterministic conflict precedence | green |
-| 19 `rules lint` | green. `explain`, `simulate` and the activation gate are not built |
-| 14 Security Graph service, traversal, snapshot export | not started |
-| 15 Time subsystem: registry, drift measurement, skew policy | the policy and normalization are green in `internal/clock` and `internal/normalize`; the registry and measurer are not |
-| 20 Incident lifecycle, evidence orchestration, decision replay | not started |
-| Built-in bundle | green, 7 rules, lints clean in CI |
+Inbox with a scoped dedupe key taken before the work, leases with owners and
+expiry, the normalizer that writes a canonical event and completes the inbox
+transition in one transaction, an outbox relay, and a Postgres job queue. Event
+ids are derived from the scoped key so a crash retry is a retry rather than a
+reconciliation.
 
-## Tracks E, F, G — not started
+### D — Graph, rules, verification, incidents
 
-No identity, no sessions, no RBAC, no API server, no console. No AI runtime, no
-model bundle format, no evaluation harness. No release builder, no installers, no
-`verify-release`, no observability pipeline, and no threat model.
+A provenance graph with revocation that hides rather than deletes, a clock
+subsystem that measures drift for a device and for a source system, an evidence
+store with content addressing and symlink-aware path validation, an incident
+lifecycle, and a replay path whose inputs contain no model client, no bundle
+path and no clock.
 
-## Verified against a real database
+The rule engine compiles YAML through the JSON Schema, a semantic validator, and
+an AST, with no shell, SQL, network, dynamic code or regular expression anywhere
+in the language. Activation is gated on a reviewed simulate diff digest computed
+over the diff rather than the bundle.
 
-`go test -p 1 -race ./...` passes against Postgres 16. That covers 25
-database-backed cases in `internal/durability` plus the `internal/schemalaws`
-and `internal/audit` suites: hash chaining and tamper localisation, append-only
-ledger and observations, RLS on every large table, cross-tenant write refusal,
-least-privilege grants, evidence path traversal, dedupe uniqueness, monthly
-partitioning, concurrent intake, cross-partition dedupe, lease expiry and
-recovery, atomicity of the normalize transaction, drift correction, and
-terminal failure with a reason.
+### E — Identity, API, console
+
+Argon2id with the parameters in the build rather than in the hash row, mandatory
+MFA, sessions that store a hashed token and rotate on every use, exact capability
+checks, site scoping that denies by default, a JSON API that does not
+content-negotiate, and a server-rendered LTR console with no inline script and a
+strict Content-Security-Policy that enforces it.
+
+### F — AI observation plane
+
+Observation persistence with full attribution, append-only storage, supersession
+as a new row, an undeclared-field check against the profile's schema, and a
+harness that scores a profile on false-positive rate, recall, latency,
+disagreement and case count — with every failing gate named rather than a single
+boolean.
+
+### G — Threat model, release, observability, DR
+
+`docs/threat-model.md`: seven trust boundaries, five attacker profiles, 24 abuse
+cases, 35 controls each mapped to the test that fails when the control is
+removed, and four accepted risks stated plainly.
+
+A signed offline release builder and verifier, a metric registry using the plan's
+exact names, SLO evaluation where every objective carries a remedy, and a recovery
+drill that demonstrates the real finding: after a database loss the restored
+ledger is provably behind the seal, because a backup is a snapshot of some
+earlier moment.
+
+## What is not built, and why
+
+**The Python VLM runtime (Track F, items 25–27).** The Go side is complete:
+profiles are declared, outputs are validated against their schema, observations
+are persisted with attribution, shadow profiles are marked and cannot affect
+authoritative state, and the evaluation harness has promotion gates. The runtime
+itself is a Python service and is not written. It is the one substantial piece of
+Track F outstanding.
+
+**Windows Service and systemd units (Track G, item 33).** `deploy/` was created
+and removed again. The service definition is genuinely small, and it is
+deferred rather than absent — nothing else depends on it and it should be written
+against a real service manager.
+
+**`securityctl install`, `upgrade`, `backup`, `restore` remain skeletons.** They
+register and refuse with a named reason. The release builder and verifier they
+depend on now exist and work; the installer that consumes them does not.
+
+**The Milestone endpoint surface is still unverified.** Every route in
+`internal/milestone/routes.go` is marked `Unverified`, and the fixtures are
+synthetic. No Milestone server has been reachable from this codebase. This is the
+single most important open item: every other part of the pipeline is proven
+against a fixture, and the one component that has not touched the real thing is
+the one that talks to the customer.
+
+## Three Definition of Done items that cannot be signed here
+
+1. **Integration and replay parity.** Needs a real XProtect installation to
+   compare against.
+2. **Every SLO demonstrably met under load.** The metrics and the evaluation
+   exist; the demonstration needs a dev installation and a load generator.
+3. **A production VLM profile passing its gates.** Needs a model, a GPU and a
+   signed model bundle. The harness that would judge it is written.
+
+## Deviations from the plan
+
+1. **Dedupe key moved off the partitioned tables.** A unique index on a
+   partitioned table must include the partition key, so the planned constraint
+   would only have deduplicated within a month. The key lives in
+   `inbox_event_keys` and `canonical_event_keys`, written in the same transaction.
+2. **The outbox idempotency key is scoped to the tenant** (migration 0009). A
+   globally unique key swallows the second tenant's side effect.
+3. **Background workers reach other tenants through an explicit
+   `app.system_worker` setting**, bounded by grants, rather than a role exemption.
+4. **`security_core` has no `BYPASSRLS`.** Only the migrator does.
+5. **NUL bytes are not in the `storage_ref` CHECK.** Postgres rejects NUL in
+   `text` at the type level, so the constraint would be untestable; the test
+   belongs to the evidence store, which has it.
+6. **The audit hash chain is trigger-computed** over a length-prefixed encoding.
+7. **The rule schema's `eventType` vocabulary** was corrected to the adapter's
+   normalized names. The contract follows what the adapter emits.
+8. **`canonical_events` gained a primary key** (migration 0012). It had none.
+9. **Hebrew and RTL were dropped** by product decision; `sites.default_locale` is
+   removed by migration 0010, not by editing 0001.
+10. **The console is English and LTR**, with `dir="ltr"` and `lang="en"` asserted.
+
+## Reproducing the verification
 
 ```sh
 docker run -d --name sp-pg -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres \
   -e POSTGRES_DB=security_test -p 55432:5432 postgres:16
 export SP_TEST_DATABASE_URL='postgres://postgres@127.0.0.1:55432/security_test?sslmode=disable'
 export SP_TEST_DATABASE_PASSWORD=postgres
-make migrate-up && make test-race
+go run ./cmd/security-migrate up
+go test -p 1 -race ./...
 ```
 
 Without `SP_TEST_DATABASE_URL` the database-backed tests skip rather than fail,
 and say so.
 
-## Deviations from the plan, and why
+`-p 1` is required: the database-backed suites share one database and rebuild the
+schema, so package test binaries must not run concurrently.
 
-1. **Dedupe key moved off the partitioned tables.** The plan specifies
-   `UNIQUE (tenant_id, integration_id, source_event_id)` on `inbox_events`, and
-   also monthly range partitioning of that table. Postgres requires the
-   partition key in every unique index on a partitioned table, so both cannot
-   hold: the constraint would only have deduplicated within a month. The
-   uniqueness now lives in `inbox_event_keys` and `canonical_event_keys`,
-   written in the same transaction as the row. Exactly-once effect is preserved.
-2. **The outbox idempotency key is scoped to the tenant** (migration 0009). It
-   was globally unique, which is wrong for a multi-tenant product: two tenants
-   naturally generate the same key for their own side effect, and the second
-   one is silently swallowed as a duplicate.
-3. **The system worker bypasses the tenant RLS policy, explicitly.** Background
-   workers process rows across tenants. Rather than exempting them by role they
-   set `app.system_worker`, and the predicate that honours it is bounded by
-   grants.
-4. **`security_core` does not have `BYPASSRLS`.** Only the migrator does. RLS is
-   only defence in depth if the service layer is subject to it.
-5. **NUL bytes are not constrained in the `storage_ref` check.** Postgres rejects
-   NUL in `text` at the type level, so the constraint would be untestable. The
-   null-byte negative test belongs to the evidence store, which is not written.
-6. **`audit_ledger.prev_hash` and `hash` are computed by a trigger**, not
-   supplied by the writer, over a length-prefixed canonical encoding.
-7. **The rule schema's `eventType` vocabulary was corrected** to the adapter's
-   normalized names (`alarm.created`, `device.camera_offline`, …) rather than the
-   coarse vendor-ish set it originally carried. The contract follows what the
-   adapter emits; a rule bundle must be portable between sites.
+## Local toolchain
 
-## What cannot be completed here, and why
-
-Three Definition of Done items require things this environment does not have:
-
-- **DoD 1** — integration mode and replay mode producing the same canonical
-  event, needs a real XProtect installation to compare against.
-- **DoD 6** — every SLO demonstrably met on a dev installation under load. The
-  metrics and harness can be built; the demonstration cannot be faked.
-- **DoD 10** — a production VLM profile passing its evaluation gates. There is no
-  model, no GPU and no signed model bundle. The harness and the schemas can be
-  built; the result cannot.
-
-## Local toolchain notes
-
-- Go 1.27 via winget.
-- `protoc` via winget (`Google.Protobuf`); `protoc-gen-go` via `go install`.
-  Both paths are in `Makefile` as overridable variables.
-- `make test-race` needs cgo and a C compiler. On this machine that is MinGW-w64
-  (`BrechtSanders.WinLibs.POSIX.UCRT` via winget). With `CGO_ENABLED=1` and gcc on
-  `PATH`, the full suite including the race detector passes.
-
-
+- Go 1.27, `protoc`, and MinGW-w64 — all via winget. `make test-race` needs cgo
+  and a C compiler; on this machine that is MinGW.
