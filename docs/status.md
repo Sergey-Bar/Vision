@@ -22,6 +22,26 @@ real Postgres 16, with the race detector on. `gofmt` and `go vet` clean.
 | F — AI observation plane | 25–29 | green except the Python runtime (see below) |
 | G — Threat model, release, observability, DR | 30, 31, 32, 34, 35 | green |
 
+### The operator CLI
+
+`securityctl` reaches every capability above. Verified by hand against a running
+database, not only by unit test:
+
+```
+securityctl identity bootstrap-admin --username admin   # refuses a second one
+securityctl identity list                              # roles, sites, MFA, state
+securityctl identity revoke-sessions --user <id>
+securityctl incident list | show <id> | explain <id> | replay <id> | disposition <id>
+securityctl audit verify | seal | checkpoints | verify-seals
+securityctl rules lint | explain | simulate | store | show | activate | rollback
+securityctl build-release | verify-release | release-key
+securityctl preflight | doctor | migrate up | status
+```
+
+`audit seal` produced a signed seal, and `audit verify-seals` — the air-gapped
+path, no database — accepted it offline and refused the same seal against a
+different key.
+
 ### A — Contracts and substrate
 
 Thirteen protobuf files for `security/v1` with generated Go, an OpenAPI v1
@@ -105,9 +125,17 @@ and removed again. The service definition is genuinely small, and it is
 deferred rather than absent — nothing else depends on it and it should be written
 against a real service manager.
 
-**`securityctl install`, `upgrade`, `backup`, `restore` remain skeletons.** They
-register and refuse with a named reason. The release builder and verifier they
-depend on now exist and work; the installer that consumes them does not.
+**`securityctl install`, `upgrade`, `rollback`, `backup` and `restore` remain
+skeletons.** They register and refuse with a named reason. The release builder
+and verifier they depend on now exist and work, and the schema window check that
+stops a half-upgrade is implemented; what is missing is the installer that
+extracts the verified archive, the transactional upgrade, and the backup command.
+Those are real work, not a stub, and they are the next thing to write.
+
+**WebAuthn enrolment is not implemented.** TOTP enrolment, verification and
+the WebAuthn assertion's counter check are, and the schema carries both
+methods. The registration ceremony is missing, so `enroll-mfa --method webauthn`
+refuses rather than storing an unusable credential.
 
 **The Milestone endpoint surface is still unverified.** Every route in
 `internal/milestone/routes.go` is marked `Unverified`, and the fixtures are

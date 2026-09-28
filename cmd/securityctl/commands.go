@@ -107,9 +107,14 @@ that path — the strongest operator in the language is a fixed prefix match.`,
 		},
 		&command.Command{
 			Name:    "explain",
-			Summary: "Explain how a rule evaluates, and why",
-			Usage:   `explain — show the compiled rule and the evaluation path for a scenario.`,
-			Run:     notImplemented("rules explain"),
+			Summary: "Explain a rule, or list them all with their actions",
+			Usage: `explain [--rule <id>] [--bundle <path>]
+
+With no --rule it lists every rule, its priority, whether it is enabled, and what
+it does. With --rule it prints the condition tree, the dispatches it requires, and
+what happens when the AI plane is unavailable — because "what does this rule do
+without a model" is the question an operator asks before trusting a bundle.`,
+			Run: runRulesExplain,
 		},
 		&command.Command{
 			Name:    "simulate",
@@ -175,118 +180,4 @@ changes.`,
 		},
 	)
 	return rules
-}
-
-func incidentCommand() *command.Command {
-	inc := &command.Command{
-		Name:    "incident",
-		Summary: "Inspect incidents and why they exist",
-		Usage: `incident — read-only incident inspection.
-
-Every answer here comes from stored facts and the stored AIObservation. No
-command in this tree re-runs a model to explain a past decision, and one that
-tried to would be a bug rather than a feature.`,
-	}
-	inc.Register(
-		&command.Command{
-			Name:    "list",
-			Summary: "List incidents visible to the session",
-			Run:     notImplemented("incident list"),
-		},
-		&command.Command{
-			Name:    "show",
-			Summary: "Show an incident with its full provenance",
-			Usage:   `show <id> — the event IDs, observation ID, model, prompt, hashes, rule id, bundle version and policy version behind the decision.`,
-			Run:     notImplemented("incident show"),
-		},
-		&command.Command{
-			Name:    "explain",
-			Summary: "Answer why this incident existed",
-			Usage:   `explain <id> — the evaluation steps, in order, with the event and observation IDs each step relied on.`,
-			Run:     notImplemented("incident explain"),
-		},
-		&command.Command{
-			Name:    "replay",
-			Summary: "Reproduce a past decision from stored facts",
-			Usage:   `replay <id> — re-evaluate a historical incident from stored facts and the stored observation, and report whether the outcome matches.`,
-			Run:     notImplemented("incident replay"),
-		},
-		&command.Command{
-			Name:    "disposition",
-			Summary: "Record an operator disposition",
-			Run:     notImplemented("incident disposition"),
-		},
-	)
-	return inc
-}
-
-func auditCommand() *command.Command {
-	aud := &command.Command{
-		Name:    "audit",
-		Summary: "Verify and seal the audit ledger",
-		Usage: `audit — the ledger is separate from the operational logs.
-
-Logs are diagnostic and can be lost. The ledger is authoritative, hash-chained,
-and sealed to storage the database owner cannot reach.`,
-	}
-	aud.Register(
-		&command.Command{
-			Name:    "verify",
-			Summary: "Recompute the hash chain and report the first break",
-			Run:     notImplemented("audit verify"),
-		},
-		&command.Command{
-			Name:    "seal",
-			Summary: "Seal the verified range through the CheckpointSink",
-			Usage:   `seal — verifies first and seals second. It never seals a chain that does not verify.`,
-			Run:     notImplemented("audit seal"),
-		},
-		&command.Command{
-			Name:    "checkpoints",
-			Summary: "List sealed checkpoints",
-			Run:     notImplemented("audit checkpoints"),
-		},
-		&command.Command{
-			Name:    "verify-seals",
-			Summary: "Verify the offline seal set with no database present",
-			Usage:   `verify-seals — the air-gapped audit path. Takes a directory of seal files and a trusted public key, and reports any gap or forged seal.`,
-			Run:     notImplemented("audit verify-seals"),
-		},
-	)
-	return aud
-}
-
-func identityCommand() *command.Command {
-	id := &command.Command{
-		Name:    "identity",
-		Summary: "Administrator identity and recovery",
-		Usage: `identity — MFA is mandatory and there is no default password.
-
-bootstrap-admin requires a passphrase supplied on the terminal or from the
-secret store, never as an argument, and never from a file in the release
-archive.`,
-	}
-	id.Register(
-		&command.Command{
-			Name:    "bootstrap-admin",
-			Summary: "Create the first administrator",
-			Run:     notImplemented("identity bootstrap-admin"),
-		},
-		&command.Command{
-			Name:    "enroll-mfa",
-			Summary: "Enrol a WebAuthn or TOTP factor for a user",
-			Run:     notImplemented("identity enroll-mfa"),
-		},
-		&command.Command{
-			Name:    "list",
-			Summary: "List users, roles and site assignments",
-			Run:     notImplemented("identity list"),
-		},
-		&command.Command{
-			Name:    "revoke-sessions",
-			Summary: "Revoke every session for a user or a tenant",
-			Run:     notImplemented("identity revoke-sessions"),
-		},
-	)
-	return id
 }

@@ -69,6 +69,13 @@ func (s *Sealer) SealRange(ctx context.Context, tx pgx.Tx, tenant string, from, 
 			"refusing to seal a chain that does not hold",
 			ErrVerify, tenant, at, checked)
 	}
+	if checked == 0 {
+		// Sealing nothing is not a seal. Producing one anyway would put a signed
+		// artefact in the sink that says nothing about any entry, and an operator
+		// handed that file would reasonably believe something had been preserved.
+		return seal, fmt.Errorf("%w: there is nothing to seal in sequences %d..%d for tenant %s",
+			ErrVerify, from, toSeq, tenant)
+	}
 	if latest > 0 {
 		toSeq = latest
 	}

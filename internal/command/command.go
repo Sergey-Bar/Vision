@@ -165,20 +165,33 @@ func (c *Command) Execute(ctx context.Context, env *Env, args []string) ExitCode
 		return ExitOK
 	}
 
-	fs := flag.NewFlagSet(target.Path(), flag.ContinueOnError)
-	fs.SetOutput(env.Stderr)
+	// A command that declares a Flags closure has its flags parsed here and its
+	// Run receives only the positionals. A command that does not gets the raw
+	// argument list, so a handler may own its own FlagSet.
+	//
+	// Both shapes are supported deliberately: the Flags closure is the shape the
+	// tree was designed around, and a handler with its own FlagSet is the shape
+	// most Go command code takes. Parsing in both places is the failure this
+	// branch prevents — a handler whose flags are consumed here sees an empty
+	// argument list, and reports "--flag is required" for a flag it was given.
+	var positional []string
 	if target.Flags != nil {
+		fs := flag.NewFlagSet(target.Path(), flag.ContinueOnError)
+		fs.SetOutput(env.Stderr)
 		target.Flags(fs)
-	}
-	fs.Usage = func() { target.writeHelp(env.Stderr) }
-	if err := fs.Parse(rest); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return ExitOK
+		fs.Usage = func() { target.writeHelp(env.Stderr) }
+		if err := fs.Parse(rest); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return ExitOK
+			}
+			return ExitUsage
 		}
-		return ExitUsage
+		positional = fs.Args()
+	} else {
+		positional = rest
 	}
 
-	if err := target.Run(ctx, env, fs.Args()); err != nil {
+	if err := target.Run(ctx, env, positional); err != nil {
 		return report(env, target, err)
 	}
 	return ExitOK

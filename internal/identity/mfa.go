@@ -281,6 +281,30 @@ func (s *Service) BootstrapAdmin(ctx context.Context, tenant, username, passphra
 			"and an audited recovery path; a second bootstrap is how an account nobody knows " +
 			"about gets created")
 	}
+
+	// The tenant and the site have to exist. Booting an administrator into a
+	// tenant that is not there would surface as a raw foreign-key error, which
+	// tells an operator nothing about what to do next.
+	var tenants, sites int
+	if err := s.Pool.QueryRow(ctx,
+		`SELECT count(*) FROM tenants WHERE tenant_id = $1`, tenant).Scan(&tenants); err != nil {
+		return "", fmt.Errorf("identity: check tenant: %w", err)
+	}
+	if tenants == 0 {
+		return "", fmt.Errorf("identity: tenant %q does not exist. The installer creates the "+
+			"tenant and its sites; bootstrap-admin runs afterwards", tenant)
+	}
+	if siteID != "" {
+		if err := s.Pool.QueryRow(ctx,
+			`SELECT count(*) FROM sites WHERE tenant_id = $1 AND site_id = $2`,
+			tenant, siteID).Scan(&sites); err != nil {
+			return "", fmt.Errorf("identity: check site: %w", err)
+		}
+		if sites == 0 {
+			return "", fmt.Errorf("identity: site %q does not exist in tenant %q. Create it "+
+				"first, or omit --site and assign it afterwards", siteID, tenant)
+		}
+	}
 	if len([]rune(passphrase)) < 16 {
 		return "", errors.New("identity: the bootstrap passphrase must be at least 16 characters")
 	}
