@@ -1,0 +1,65 @@
+{
+  "formatVersion": 1,
+  "name": "malformed-envelopes",
+  "description": "Envelopes that are readable JSON but break the assumed field contract: no id, no type, an unparseable timestamp, and a type nobody has seen.",
+  "source": "synthetic",
+  "capturedAt": "2026-03-01T09:00:00Z",
+  "epoch": "2026-03-01T09:00:00Z",
+  "siteId": "site-fixture",
+  "events": [
+    {
+      "offsetMs": 0,
+      "kind": "/api/v1/Events",
+      "method": "GET",
+      "envelope": {
+        "Source": "No Id Camera",
+        "Timestamp": "2026-03-01T09:00:00Z",
+        "Type": "Motion"
+      },
+      "headers": {
+        "content-type": "application/json"
+      }
+    },
+    {
+      "offsetMs": 100,
+      "kind": "/api/v1/Events",
+      "method": "GET",
+      "envelope": {
+        "Id": "ml-0002",
+        "Source": "No Type Camera",
+        "Timestamp": "2026-03-01T09:00:00.1Z"
+      },
+      "headers": {
+        "content-type": "application/json"
+      }
+    },
+    {
+      "offsetMs": 200,
+      "kind": "/api/v1/Events",
+      "method": "GET",
+      "envelope": {
+        "Id": "ml-0003",
+        "Source": "Bad Clock Camera",
+        "Timestamp": "not-a-timestamp",
+        "Type": "Motion"
+      },
+      "headers": {
+        "content-type": "application/json"
+      }
+    },
+    {
+      "offsetMs": 300,
+      "kind": "/api/v1/Events",
+      "method": "GET",
+      "envelope": {
+        "Id": "ml-0004",
+        "Source": "Future Camera",
+        "Timestamp": "2026-03-01T09:00:00.3Z",
+        "Type": "QuantumFlux"
+      },
+      "headers": {
+        "content-type": "application/json"
+      }
+    }
+  ]
+}

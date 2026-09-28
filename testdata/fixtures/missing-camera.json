@@ -1,0 +1,25 @@
+{
+  "formatVersion": 1,
+  "name": "missing-camera",
+  "description": "An event from a camera id that was never registered on this platform.",
+  "source": "synthetic",
+  "capturedAt": "2026-03-01T09:00:00Z",
+  "epoch": "2026-03-01T09:00:00Z",
+  "siteId": "site-fixture",
+  "events": [
+    {
+      "offsetMs": 0,
+      "kind": "/api/v1/Events",
+      "method": "GET",
+      "envelope": {
+        "Id": "mc-0001",
+        "Source": "Ghost Camera 99 [CAM-999]",
+        "Timestamp": "2026-03-01T09:00:00Z",
+        "Type": "Motion"
+      },
+      "headers": {
+        "content-type": "application/json"
+      }
+    }
+  ]
+}

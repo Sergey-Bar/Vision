@@ -1,0 +1,41 @@
+{
+  "formatVersion": 1,
+  "name": "camera-offline-online",
+  "description": "A camera going offline and returning, which is both a device-health signal the graph records and a clock reference the drift subsystem re-measures.",
+  "source": "synthetic",
+  "capturedAt": "2026-03-01T09:00:00Z",
+  "epoch": "2026-03-01T09:00:00Z",
+  "siteId": "site-fixture",
+  "events": [
+    {
+      "offsetMs": 0,
+      "kind": "/api/v1/Servlets",
+      "method": "GET",
+      "envelope": {
+        "Id": "sv-0001",
+        "Source": "Dock Camera 22 [CAM-022]",
+        "State": "Offline",
+        "Timestamp": "2026-03-01T09:00:00Z",
+        "Type": "Servlets.State"
+      },
+      "headers": {
+        "content-type": "application/json"
+      }
+    },
+    {
+      "offsetMs": 90000,
+      "kind": "/api/v1/Servlets",
+      "method": "GET",
+      "envelope": {
+        "Id": "sv-0002",
+        "Source": "Dock Camera 22 [CAM-022]",
+        "State": "Online",
+        "Timestamp": "2026-03-01T09:01:30Z",
+        "Type": "Servlets.State"
+      },
+      "headers": {
+        "content-type": "application/json"
+      }
+    }
+  ]
+}

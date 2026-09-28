@@ -1,0 +1,51 @@
+{
+  "formatVersion": 1,
+  "name": "analytics-object-crossed",
+  "description": "Analytics line-crossing and loitering on an unrestricted camera.",
+  "source": "synthetic",
+  "capturedAt": "2026-03-01T09:00:00Z",
+  "epoch": "2026-03-01T09:00:00Z",
+  "siteId": "site-fixture",
+  "events": [
+    {
+      "offsetMs": 0,
+      "kind": "/api/v1/Events",
+      "method": "GET",
+      "envelope": {
+        "Analytics": {
+          "AnalyticsType": "LineCrossing",
+          "ObjectType": "Person"
+        },
+        "Id": "mp-000010",
+        "Message": "Line crossed",
+        "Priority": "Normal",
+        "Source": "Corridor Camera 07 [CAM-007]",
+        "Timestamp": "2026-03-01T09:00:00Z",
+        "Type": "Analytics"
+      },
+      "headers": {
+        "content-type": "application/json"
+      }
+    },
+    {
+      "offsetMs": 40000,
+      "kind": "/api/v1/Events",
+      "method": "GET",
+      "envelope": {
+        "Analytics": {
+          "AnalyticsType": "Loitering",
+          "ObjectType": "Person"
+        },
+        "Id": "mp-000011",
+        "Message": "Loitering detected",
+        "Priority": "Normal",
+        "Source": "Corridor Camera 07 [CAM-007]",
+        "Timestamp": "2026-03-01T09:00:40Z",
+        "Type": "Analytics"
+      },
+      "headers": {
+        "content-type": "application/json"
+      }
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "formatVersion": 1,
+  "name": "recording-state",
+  "description": "Recording starting and stopping, which evidence retention depends on.",
+  "source": "synthetic",
+  "capturedAt": "2026-03-01T09:00:00Z",
+  "epoch": "2026-03-01T09:00:00Z",
+  "siteId": "site-fixture",
+  "events": [
+    {
+      "offsetMs": 0,
+      "kind": "/api/v1/Events",
+      "method": "GET",
+      "envelope": {
+        "Id": "rc-0001",
+        "Source": "Yard Camera 31 [CAM-031]",
+        "Timestamp": "2026-03-01T09:00:00Z",
+        "Type": "RecordingStarted"
+      },
+      "headers": {
+        "content-type": "application/json"
+      }
+    },
+    {
+      "offsetMs": 60000,
+      "kind": "/api/v1/Events",
+      "method": "GET",
+      "envelope": {
+        "Id": "rc-0002",
+        "Source": "Yard Camera 31 [CAM-031]",
+        "Timestamp": "2026-03-01T09:01:00Z",
+        "Type": "RecordingStopped"
+      },
+      "headers": {
+        "content-type": "application/json"
+      }
+    }
+  ]
+}

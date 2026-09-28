@@ -1,0 +1,45 @@
+{
+  "formatVersion": 1,
+  "name": "bookmark-and-metadata",
+  "description": "A bookmark and a metadata event, which are the two evidence-fetch triggers.",
+  "source": "synthetic",
+  "capturedAt": "2026-03-01T09:00:00Z",
+  "epoch": "2026-03-01T09:00:00Z",
+  "siteId": "site-fixture",
+  "events": [
+    {
+      "offsetMs": 0,
+      "kind": "/api/v1/Bookmarks",
+      "method": "GET",
+      "envelope": {
+        "Id": "bm-0001",
+        "Message": "Contractor arrival",
+        "Source": "Entrance Camera 01 [CAM-001]",
+        "Timestamp": "2026-03-01T09:00:00Z",
+        "Type": "Bookmark"
+      },
+      "headers": {
+        "content-type": "application/json"
+      }
+    },
+    {
+      "offsetMs": 500,
+      "kind": "/api/v1/Events",
+      "method": "GET",
+      "envelope": {
+        "Id": "md-0001",
+        "Message": "Vehicle plate read",
+        "Metadata": {
+          "Direction": "Inbound",
+          "Plate": "XXXXX123"
+        },
+        "Source": "Gate 1 [GAT-001]",
+        "Timestamp": "2026-03-01T09:00:00.5Z",
+        "Type": "Metadata"
+      },
+      "headers": {
+        "content-type": "application/json"
+      }
+    }
+  ]
+}

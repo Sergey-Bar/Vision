@@ -1,0 +1,73 @@
+{
+  "formatVersion": 1,
+  "name": "reconnect-replay",
+  "description": "A reconnect that re-serves the previous window, duplicating every id.",
+  "source": "synthetic",
+  "capturedAt": "2026-03-01T09:00:00Z",
+  "epoch": "2026-03-01T09:00:00Z",
+  "siteId": "site-fixture",
+  "events": [
+    {
+      "offsetMs": 0,
+      "kind": "/api/v1/Events",
+      "method": "GET",
+      "envelope": {
+        "Id": "rr-0001",
+        "Source": "Entrance Camera 01 [CAM-001]",
+        "Timestamp": "2026-03-01T09:00:00Z",
+        "Type": "Motion"
+      },
+      "headers": {
+        "content-type": "application/json"
+      }
+    },
+    {
+      "offsetMs": 800,
+      "kind": "/api/v1/Events",
+      "method": "GET",
+      "envelope": {
+        "Analytics": {
+          "ObjectType": "Person"
+        },
+        "Id": "rr-0002",
+        "Source": "Entrance Camera 01 [CAM-001]",
+        "Timestamp": "2026-03-01T09:00:00.8Z",
+        "Type": "Analytics"
+      },
+      "headers": {
+        "content-type": "application/json"
+      }
+    },
+    {
+      "offsetMs": 20000,
+      "kind": "/api/v1/Events",
+      "method": "GET",
+      "envelope": {
+        "Id": "rr-0001",
+        "Source": "Entrance Camera 01 [CAM-001]",
+        "Timestamp": "2026-03-01T09:00:00Z",
+        "Type": "Motion"
+      },
+      "headers": {
+        "content-type": "application/json"
+      }
+    },
+    {
+      "offsetMs": 20800,
+      "kind": "/api/v1/Events",
+      "method": "GET",
+      "envelope": {
+        "Analytics": {
+          "ObjectType": "Person"
+        },
+        "Id": "rr-0002",
+        "Source": "Entrance Camera 01 [CAM-001]",
+        "Timestamp": "2026-03-01T09:00:00.8Z",
+        "Type": "Analytics"
+      },
+      "headers": {
+        "content-type": "application/json"
+      }
+    }
+  ]
+}

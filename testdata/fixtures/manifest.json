@@ -1,0 +1,132 @@
+{
+  "formatVersion": 1,
+  "generatedAt": "2026-03-01T09:00:00Z",
+  "source": "synthetic",
+  "scenarios": [
+    {
+      "name": "motion-restricted-zone",
+      "file": "motion-restricted-zone.json",
+      "hash": "edbf40cca9004fb5e9f52c4a4762d1f959e51afcc6744565f0612d25302c076b",
+      "events": 3,
+      "covers": [
+        "motion",
+        "analytics",
+        "corroboration",
+        "after-hours"
+      ]
+    },
+    {
+      "name": "analytics-object-crossed",
+      "file": "analytics-object-crossed.json",
+      "hash": "833e74c7bc8b47fc9a9e73dbd6503d35146a5e0280adda213f59e6121ec47966",
+      "events": 2,
+      "covers": [
+        "analytics"
+      ]
+    },
+    {
+      "name": "alarm-lifecycle",
+      "file": "alarm-lifecycle.json",
+      "hash": "ce6beb8e9b9ec51d49cca826aac5277f1d26685bd3629625862218399b871872",
+      "events": 3,
+      "covers": [
+        "alarm.created",
+        "alarm.acknowledged",
+        "alarm.closed"
+      ]
+    },
+    {
+      "name": "camera-offline-online",
+      "file": "camera-offline-online.json",
+      "hash": "8c82b85c834f3fab97c4de034bf4d7c28ae58f228ac9d0672926573526ad87b9",
+      "events": 2,
+      "covers": [
+        "device.camera_offline",
+        "device.camera_online"
+      ]
+    },
+    {
+      "name": "bookmark-and-metadata",
+      "file": "bookmark-and-metadata.json",
+      "hash": "c8835f585a1bbaf8495d4346f163cc2288a62a53ca19a0b1cbf20ddeae2dcc62",
+      "events": 2,
+      "covers": [
+        "bookmark",
+        "metadata"
+      ]
+    },
+    {
+      "name": "recording-state",
+      "file": "recording-state.json",
+      "hash": "cae8429f487e19f001813415a20eb7a2f267c9f59e7678aac331f5148c6e2540",
+      "events": 2,
+      "covers": [
+        "recording.started",
+        "recording.stopped"
+      ]
+    },
+    {
+      "name": "malformed-envelopes",
+      "file": "malformed-envelopes.json",
+      "hash": "ebbe797f97c41c65b14ba3833a4dacc4841ebf6af70f95b85a20d8ec913da404",
+      "events": 4,
+      "covers": [
+        "malformed",
+        "unreadable-id",
+        "unreadable-type",
+        "unreadable-time",
+        "unknown-type"
+      ]
+    },
+    {
+      "name": "duplicate-delivery",
+      "file": "duplicate-delivery.json",
+      "hash": "9fb2dea98b431f758b777110f7c3342f0c342dc76aa6df710e92d0d1e9653353",
+      "events": 2,
+      "covers": [
+        "duplicate"
+      ]
+    },
+    {
+      "name": "delayed-arrival",
+      "file": "delayed-arrival.json",
+      "hash": "f6aecaf70c09e6f0b8b6cae5a79df1795c84bf2c3561ad8106cae01b554724fc",
+      "events": 1,
+      "covers": [
+        "delayed",
+        "ingest-lag"
+      ]
+    },
+    {
+      "name": "out-of-order-arrival",
+      "file": "out-of-order-arrival.json",
+      "hash": "e2b22dc81be77ff23a30f4d83e5439190febca281c5a2a91d0be57d8c208f8f0",
+      "events": 2,
+      "covers": [
+        "out-of-order"
+      ]
+    },
+    {
+      "name": "missing-camera",
+      "file": "missing-camera.json",
+      "hash": "c48a6c2bad53ecc944fe12d42669c0cd6733e27aca93d3c5f13c61fa4cf48825",
+      "events": 1,
+      "covers": [
+        "missing-camera",
+        "malformed"
+      ]
+    },
+    {
+      "name": "reconnect-replay",
+      "file": "reconnect-replay.json",
+      "hash": "d0552cd5814f4b1bd4adf2febe4062f353df3f5784025b085b1e758bdbc970bd",
+      "events": 4,
+      "covers": [
+        "reconnect",
+        "replay",
+        "duplicate"
+      ]
+    }
+  ],
+  "notes": "Authored from the assumed Milestone API surface. No live Milestone server has been reachable, so these are shape fixtures, not captures. Replace or supplement them with real captures before claiming integration-mode parity."
+}

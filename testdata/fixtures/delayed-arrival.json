@@ -1,0 +1,25 @@
+{
+  "formatVersion": 1,
+  "name": "delayed-arrival",
+  "description": "An event whose observed time precedes its arrival by 45 seconds.",
+  "source": "synthetic",
+  "capturedAt": "2026-03-01T09:00:00Z",
+  "epoch": "2026-03-01T09:00:00Z",
+  "siteId": "site-fixture",
+  "events": [
+    {
+      "offsetMs": 45000,
+      "kind": "/api/v1/Events",
+      "method": "GET",
+      "envelope": {
+        "Id": "dl-0001",
+        "Source": "Entrance Camera 01 [CAM-001]",
+        "Timestamp": "2026-03-01T09:00:00Z",
+        "Type": "Motion"
+      },
+      "headers": {
+        "content-type": "application/json"
+      }
+    }
+  ]
+}

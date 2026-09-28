@@ -1,0 +1,66 @@
+{
+  "formatVersion": 1,
+  "name": "alarm-lifecycle",
+  "description": "An alarm created, then acknowledged, then closed, as three feed entries.",
+  "source": "synthetic",
+  "capturedAt": "2026-03-01T09:00:00Z",
+  "epoch": "2026-03-01T09:00:00Z",
+  "siteId": "site-fixture",
+  "events": [
+    {
+      "offsetMs": 0,
+      "kind": "/api/v1/Alarms",
+      "method": "GET",
+      "envelope": {
+        "Acknowledged": false,
+        "AlarmState": "Created",
+        "Id": "al-0001",
+        "Message": "Perimeter intrusion alarm",
+        "Priority": "High",
+        "Source": "Perimeter North [CAM-014]",
+        "Timestamp": "2026-03-01T09:00:00Z",
+        "Type": "Alarm"
+      },
+      "headers": {
+        "content-type": "application/json"
+      }
+    },
+    {
+      "offsetMs": 30000,
+      "kind": "/api/v1/Alarms",
+      "method": "GET",
+      "envelope": {
+        "Acknowledged": true,
+        "AcknowledgedBy": "operator@example.invalid",
+        "AlarmState": "Acknowledged",
+        "Id": "al-0001",
+        "Message": "Perimeter intrusion alarm",
+        "Priority": "High",
+        "Source": "Perimeter North [CAM-014]",
+        "Timestamp": "2026-03-01T09:00:30Z",
+        "Type": "Alarm"
+      },
+      "headers": {
+        "content-type": "application/json"
+      }
+    },
+    {
+      "offsetMs": 120000,
+      "kind": "/api/v1/Alarms",
+      "method": "GET",
+      "envelope": {
+        "Acknowledged": true,
+        "AlarmState": "Closed",
+        "Id": "al-0001",
+        "Message": "Perimeter intrusion alarm",
+        "Priority": "High",
+        "Source": "Perimeter North [CAM-014]",
+        "Timestamp": "2026-03-01T09:02:00Z",
+        "Type": "Alarm"
+      },
+      "headers": {
+        "content-type": "application/json"
+      }
+    }
+  ]
+}
