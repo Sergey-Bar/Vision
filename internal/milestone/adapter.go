@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -75,6 +76,37 @@ type RawRecord struct {
 	// a source sent something unreadable, which is a source fault, not a reason
 	// to lose the event.
 	MalformedReason string
+	// SourceDeviceRef is the device identifier the source named, resolved from
+	// the envelope's Source field. Empty when the source named no device or
+	// named one this platform has not registered.
+	SourceDeviceRef string
+}
+
+// deviceRefPattern matches the bracketed identifier Milestone conventionally
+// appends to a source name, as in "Entrance Camera 01 [CAM-001]".
+var deviceRefPattern = regexp.MustCompile(`\[([A-Za-z0-9._:-]{1,64})\]`)
+
+// sourceDeviceRef extracts the device identifier from an envelope.
+//
+// Three shapes are accepted, in the order they are tried: a bracketed id, a
+// dedicated device field, and finally the bare source name. The bracketed form
+// is a convention rather than a documented guarantee, which is why the dedicated
+// field is tried first where one exists.
+func sourceDeviceRef(item map[string]any) string {
+	if d := stringField(item, "DeviceId", "deviceId", "DeviceID", "CameraId", "cameraId"); d != "" {
+		return d
+	}
+	src := stringField(item, "Source", "source", "SourceName", "sourceName")
+	if src == "" {
+		return ""
+	}
+	if m := deviceRefPattern.FindStringSubmatch(src); len(m) == 2 {
+		return m[1]
+	}
+	// A bare source name with no bracketed id is not a device reference. Treating
+	// a human-readable label as an id would create a device row per camera
+	// label and attach events to the wrong thing when a label is reworded.
+	return ""
 }
 
 // KnownMilestoneEventTypes are the source event types the adapter recognises.
@@ -233,6 +265,13 @@ func (a *Adapter) toRecord(route Route, item map[string]any, index int, now time
 		SourceTimezone: tz,
 		ClockSource:    "vms",
 		ReceivedAt:     now,
+		// The source names its device in the Source field, conventionally as
+		// "Entrance Camera 01 [CAM-001]". Resolving it here rather than leaving
+		// the raw string in the payload is what lets the graph attach the event
+		// to a device, and therefore lets any rule that filters on device match.
+		// An unresolvable reference is left empty: the event still arrives, and
+		// is unattributable rather than attributed to something guessed.
+		SourceDeviceRef: sourceDeviceRef(item),
 	}
 
 	if !KnownMilestoneEventTypes[eventType] {

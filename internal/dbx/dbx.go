@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -194,6 +195,16 @@ func (p *Pool) InSystemTenant(ctx context.Context, fn func(pgx.Tx) error) error 
 		}
 		return fn(tx)
 	})
+}
+
+// EnvOrDefault reads a non-secret setting from the environment. It exists for
+// non-secret values only: a password never goes through it, because an
+// environment variable survives into child processes and diagnostic dumps.
+func EnvOrDefault(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
 }
 
 func encodeSiteIDs(ids []string) string {

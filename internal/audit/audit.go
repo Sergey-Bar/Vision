@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -151,11 +152,15 @@ RETURNING prev_hash, hash`
 // audited action that is not recorded because the transaction rolled back did
 // not happen; a recorded action whose state change rolled back would be a lie.
 func (w *Writer) Append(ctx context.Context, tx pgx.Tx, e Entry) (string, error) {
-	if err := e.Validate(); err != nil {
-		return "", err
-	}
+	// Default the timestamp before validating, not after. Validation is what
+	// catches an entry nobody can attribute later, and a caller that did not set
+	// a timestamp has not made the entry unattributable — it has simply left the
+	// field for the writer that is about to record it.
 	if e.TS.IsZero() {
 		e.TS = w.now()
+	}
+	if err := e.Validate(); err != nil {
+		return "", err
 	}
 	evidence, err := jsonArray(e.EvidenceRefs)
 	if err != nil {
@@ -174,15 +179,35 @@ func (w *Writer) Append(ctx context.Context, tx pgx.Tx, e Entry) (string, error)
 	var prevHash, hash string
 	err = tx.QueryRow(ctx, insertSQL,
 		e.TenantID, seq, e.TS.UTC(), e.Actor, string(e.ActorType), e.Action,
-		nullIfEmpty(e.TargetType), nullIfEmpty(e.TargetID),
-		nullIfEmpty(e.PrevStateHash), nullIfEmpty(e.ResultStateHash),
-		nullIfEmpty(e.PolicyVersion), nullIfEmpty(e.Reason),
-		evidence, nullIfEmpty(e.RequestID), nullIfEmpty(e.SessionID), sites,
+		orEmpty(e.TargetType), orEmpty(e.TargetID),
+		// These two are genuinely nullable: an action that changed nothing has
+		// neither a prior state nor a result state, and inventing one would put a
+		// hash in the ledger that refers to nothing.
+		nullable(e.PrevStateHash), nullable(e.ResultStateHash),
+		// The rest are NOT NULL with a default. An empty string is the honest
+		// value for "this field does not apply", and sending an explicit NULL
+		// would defeat the default rather than use it.
+		orEmpty(e.PolicyVersion), orEmpty(e.Reason),
+		evidence, orEmpty(e.RequestID), orEmpty(e.SessionID), sites,
 	).Scan(&prevHash, &hash)
 	if err != nil {
 		return "", fmt.Errorf("audit: append entry: %w", err)
 	}
 	return hash, nil
+}
+
+func nullable(s string) any {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	return s
+}
+
+func orEmpty(s string) string {
+	if strings.TrimSpace(s) == "" {
+		return ""
+	}
+	return s
 }
 
 func auditNextSequence(ctx context.Context, tx pgx.Tx, tenant string) (int64, error) {

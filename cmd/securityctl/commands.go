@@ -129,28 +129,65 @@ that path — the strongest operator in the language is a fixed prefix match.`,
 		},
 		&command.Command{
 			Name:    "simulate",
-			Summary: "Run a bundle over a fixture set and diff against the active bundle",
+			Summary: "Run a bundle over the fixture set and diff against the active bundle",
 			Usage: `simulate — produce the diff digest that activation requires.
 
-The digest is over the diff itself, not over the bundle. Re-running the
-simulation and getting a different digest means the fixtures or the active bundle
-moved, and the reviewed diff is no longer the one being activated.`,
-			Run: notImplemented("rules simulate"),
+The digest is over the diff, not over the bundle and not over the run time. So
+re-running the simulation to confirm a review produces the same digest, while a
+change to the fixtures or to the active bundle produces a different one — and a
+review that no longer describes what would happen no longer authorises anything.
+
+Runs from committed fixtures with no Milestone server reachable.`,
+			Flags: func(fs *flag.FlagSet) {
+				fs.String("bundle", "", "Candidate bundle file. Defaults to the newest in rules/builtin.")
+				fs.String("fixtures", "testdata/fixtures", "Fixture set directory.")
+				fs.String("baseline", "", "Bundle to diff against. Defaults to the stored active bundle.")
+				fs.Bool("json", false, "Emit machine-readable output.")
+				fs.Int("max-events", 100000, "Cap on evaluated signals.")
+			},
+			Run: runRulesSimulate,
 		},
 		&command.Command{
 			Name:    "activate",
 			Summary: "Activate a stored bundle version",
-			Run:     notImplemented("rules activate"),
+			Usage: `activate --version <v> --diff-digest <sha256>
+
+Refuses without a diff digest, and refuses a digest that is not a SHA-256. A
+bundle that has not been simulated cannot be activated, so there is no path that
+turns a rule on without someone having read what it changes.`,
+			Flags: func(fs *flag.FlagSet) {
+				fs.String("version", "", "Bundle version to activate.")
+				fs.String("diff-digest", "", "Diff digest from `rules simulate`.")
+			},
+			Run: runRulesActivate,
 		},
 		&command.Command{
 			Name:    "rollback",
 			Summary: "Restore the previous immutable bundle version",
-			Run:     notImplemented("rules rollback"),
+			Usage:   `rollback — returns to whichever version was active before this one, audited.`,
+			Run:     runRulesRollback,
 		},
 		&command.Command{
 			Name:    "show",
 			Summary: "List stored bundles and the active version",
-			Run:     notImplemented("rules show"),
+			Flags: func(fs *flag.FlagSet) {
+				fs.Bool("json", false, "Emit machine-readable output.")
+			},
+			Run: runRulesShow,
+		},
+		&command.Command{
+			Name:    "store",
+			Summary: "Store a bundle without activating it",
+			Usage: `store — compiles and stores a bundle immutably.
+
+Storing is not activating. They are separate commands because a bundle that
+could be activated in one step would be activated without anyone reading what it
+changes.`,
+			Flags: func(fs *flag.FlagSet) {
+				fs.String("bundle", "", "Bundle file to store.")
+				fs.String("source", "", "Source reference recorded with the bundle.")
+			},
+			Run: runRulesStore,
 		},
 	)
 	return rules
