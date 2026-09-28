@@ -3,11 +3,11 @@
 Owner: E1 (accountable), E2 (implementation). Status: living. Last revised 2026-09-28.
 
 This is the "Trust and Security" parallel track named in
-`01-master-roadmap.md`. It is a **continuous staffed obligation, not a project**:
+``. It is a **continuous staffed obligation, not a project**:
 it has no end date and no exit gate, and it is budgeted out of the 40% tax in
-`00-strategy-and-north-star.md` §6 rather than out of milestone new-build.
+`` §6 rather than out of milestone new-build.
 
-Read `00`, `01`, `07-quality-engineering.md` and `12-release-sre-and-support.md`
+Read `00`, `01`, `` and ``
 first. This document does not restate the release gate (`07` §9), the release
 train (`12` §1), the disclosure policy (`12` §10.4) or the control-to-test map
 (`docs/threat-model.md` §5). It says what the *program* is, who owns each area,
@@ -375,7 +375,7 @@ because a free-text use-case field becomes a marketing sentence.
 ### 4.2 The promotion gate, with shadow mode
 
 The sequence is fixed and none of it is skippable. From `07` §7.4 and
-`01-master-roadmap.md` M1 gate 4:
+`` M1 gate 4:
 
 ```
 1  declared     profile spec exists, output schema committed, model and prompt
@@ -581,7 +581,7 @@ the market."
 
 **This is our strongest compliance answer and it is a real one**: video,
 evidence, the audit ledger and the checkpoints never leave the customer's
-network unless the customer moves them. §4 of `14-compliance-and-certifications.md`
+network unless the customer moves them. §4 of ``
 turns this into a sales argument and lists the four places where it is currently
 undermined by an open question — telemetry, support bundles, licence validation
 and model downloads. **None of the four has a decision date, and that is the
@@ -924,7 +924,7 @@ customer actually holds us to:
 ### 8.5 The rule about the calendar
 
 > **A security fix ships as a patch release on the train in
-> `12-release-sre-and-support.md`, regardless of the calendar.**
+> ``, regardless of the calendar.**
 
 Which means, concretely: a Sev-1 or a Sev-2 security fix does not wait for the
 first of the month if the first is ten days away. It is a **hotfix**
@@ -1062,7 +1062,7 @@ document nobody reads.
 |---|---|---|---|---|---|
 | **Every milestone review** | Delta re-run: what changed since the last model? | Only the new surface | A new §"M<n> deltas" section appended to `docs/threat-model.md`; controls added to §5 with their tests; accepted risks restated | E1 | 1 day |
 | **M2** (Q3 2027) | Full re-run | The M1 model plus the investigation engine: evidence retrieval across cameras, the LLM orchestrator, semantic search, `pgvector` for derived data | New boundary for the LLM plane (B4 widens: it now *plans*, not only observes); new abuse cases for a planner that can be induced to search the wrong window | E1 | 2 days |
-| **M3** (Q1 2028) | Full re-run, plus the first pen test | Adds safe actions, PTZ, recording extension, notifications, bounded auto-resolution | **The action boundary is new and it is the first one with physical consequence.** §10.4's pre-mortem for M3 in `16-risk-register.md` is where this bites | E1 + external | 3 days + the pen test |
+| **M3** (Q1 2028) | Full re-run, plus the first pen test | Adds safe actions, PTZ, recording extension, notifications, bounded auto-resolution | **The action boundary is new and it is the first one with physical consequence.** §10.4's pre-mortem for M3 in `` is where this bites | E1 + external | 3 days + the pen test |
 | **M4** (Q4 2028) | Full re-run, **plus a per-adapter model** | Adapters, the Adapter SDK, third-party SDK code (§10.3) | Each adapter gets its own boundary and its own controls; the SDK's conformance suite becomes a security control, not just a quality one | E1 | 3 days |
 | **M5** (Q3 2029) | Full re-run | The central plane, enterprise identity (OIDC/SCIM/AD/LDAP) (§10.3) | A new boundary (site ↔ control plane) and a new identity boundary, with the constraint that the plane is read-mostly and never on the decision path | E1 | 3 days |
 | **M6** (Q2 2030) | Delta | Baselines, site memory, drift detection, camera health | "Site memory" is derived knowledge about a site and a set of people. New data category, new DPIA-lite question | E1 | 1 day |
@@ -1171,7 +1171,7 @@ one:
 |---|---|---|
 | **Per commit** | `make ci`; the security tests; the release gate items that are checks | CI, then E2 |
 | **Per release** | The 20-line gate in `07` §9.1; the SBOM; the manifest; `verify-release` with a **required** trusted key; two keys honoured | E2 builds, E1 signs the notes |
-| **Weekly** | The decision digest (`19-decision-log-and-process.md` §7); the risk review agenda item (`16` §1); "is any Sev-1/Sev-2 security finding open?" | both |
+| **Weekly** | The decision digest (`` §7); the risk review agenda item (`16` §1); "is any Sev-1/Sev-2 security finding open?" | both |
 | **Monthly** | Dependency update + `govulncheck` triage + `go.sum` diff review; the risk register; the accepted-risk list restated with movement; a manual sample audit against §5.1 | E2 rotates |
 | **Quarterly** | The hardening sweep across H1–H8; the media-provenance review (§7.3); a `securityctl audit verify` against a production-shaped dataset; the key-rotation rehearsal; the M3+ external pen test scope | E1 accountable |
 | **Per milestone** | The threat-model delta (§10.2); the DPIA-lite (§5.5); the data-flow delta question (§5.6); a manual run with the model stopped; the seal-loss and evidence-loss drills | E1 |
@@ -1208,7 +1208,7 @@ is either a configuration change or a small test. **None of them is a project.**
 Named so that a well-meant suggestion does not add it:
 
 - **A bug bounty before we can afford one.** `12` §10.4 says so in public.
-- **A SOC 2 before the evidence exists.** See `14-compliance-and-certifications.md`
+- **A SOC 2 before the evidence exists.** See ``
   §1: SOC 2 Type II needs ~3 months of evidence collection and an audit firm,
   so the real start date is 6+ months before the GA date. Starting the clock
   late is how a two-person company ends up with a half-finished audit and a
@@ -1216,9 +1216,9 @@ Named so that a well-meant suggestion does not add it:
 - **A media-signing scheme of our own.** §7.3.
 - **Telemetry, ever, in any form that identifies a site.** It contradicts
   `12` §3.1 outright, and it is an open decision with no date — see
-  `19-decision-log-and-process.md` §6.
+  `` §6.
 - **Certificate or attestation theatre.** A badge we cannot defend is worse
   than none, and `README.md`'s evidence rule applies to us first.
-- **An agent deciding any of this.** §13.2 of `19-decision-log-and-process.md`
+- **An agent deciding any of this.** §13.2 of ``
   is the rules of engagement; an agent may draft a threat-model delta and may
   not accept a risk.

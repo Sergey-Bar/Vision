@@ -43,6 +43,8 @@ type Env struct {
 // service managers branch on them, so adding a new one is a contract change.
 type ExitCode int
 
+// Process exit statuses. Scripts and service managers branch on these, so adding
+// one is a contract change rather than an internal detail.
 const (
 	ExitOK      ExitCode = 0
 	ExitError   ExitCode = 1
@@ -120,7 +122,7 @@ func (c *Command) Find(path []string) (*Command, error) {
 func (c *Command) Execute(ctx context.Context, env *Env, args []string) ExitCode {
 	path, rest, err := c.split(args)
 	if err != nil {
-		fmt.Fprintf(env.Stderr, "%s: %v\n\n", c.Name, err)
+		_, _ = fmt.Fprintf(env.Stderr, "%s: %v\n\n", c.Name, err)
 		c.writeHelp(env.Stderr)
 		return ExitUsage
 	}
@@ -129,7 +131,7 @@ func (c *Command) Execute(ctx context.Context, env *Env, args []string) ExitCode
 	if len(path) > 0 {
 		target, err = c.Find(path)
 		if err != nil {
-			fmt.Fprintf(env.Stderr, "%s: %v\n\n", c.Name, err)
+			_, _ = fmt.Fprintf(env.Stderr, "%s: %v\n\n", c.Name, err)
 			c.writeHelp(env.Stderr)
 			return ExitUsage
 		}
@@ -140,7 +142,7 @@ func (c *Command) Execute(ctx context.Context, env *Env, args []string) ExitCode
 	// prints the rules help and exits zero, and an operator concludes their
 	// bundle linted clean.
 	if len(rest) > 0 && !strings.HasPrefix(rest[0], "-") && len(target.Children) > 0 {
-		fmt.Fprintf(env.Stderr, "%s: unknown subcommand %q\n\n", target.Path(), rest[0])
+		_, _ = fmt.Fprintf(env.Stderr, "%s: unknown subcommand %q\n\n", target.Path(), rest[0])
 		target.writeHelp(env.Stderr)
 		return ExitUsage
 	}
@@ -156,7 +158,7 @@ func (c *Command) Execute(ctx context.Context, env *Env, args []string) ExitCode
 			if strings.HasPrefix(word, "-") {
 				kind = "flag"
 			}
-			fmt.Fprintf(env.Stderr, "%s: %s takes no %s; %q is not a subcommand of it\n\n",
+			_, _ = fmt.Fprintf(env.Stderr, "%s: %s takes no %s; %q is not a subcommand of it\n\n",
 				target.Path(), target.Path(), kind, word)
 			target.writeHelp(env.Stderr)
 			return ExitUsage
@@ -200,16 +202,16 @@ func (c *Command) Execute(ctx context.Context, env *Env, args []string) ExitCode
 func report(env *Env, c *Command, err error) ExitCode {
 	var refused *RefusedError
 	if errors.As(err, &refused) {
-		fmt.Fprintf(env.Stderr, "%s: refused: %s\n", c.Path(), refused.Reason)
+		_, _ = fmt.Fprintf(env.Stderr, "%s: refused: %s\n", c.Path(), refused.Reason)
 		return ExitRefused
 	}
 	var usage *UsageError
 	if errors.As(err, &usage) {
-		fmt.Fprintf(env.Stderr, "%s: %v\n\n", c.Path(), usage.Err)
+		_, _ = fmt.Fprintf(env.Stderr, "%s: %v\n\n", c.Path(), usage.Err)
 		c.writeHelp(env.Stderr)
 		return ExitUsage
 	}
-	fmt.Fprintf(env.Stderr, "%s: %v\n", c.Path(), err)
+	_, _ = fmt.Fprintf(env.Stderr, "%s: %v\n", c.Path(), err)
 	return ExitError
 }
 
@@ -249,14 +251,14 @@ func (c *Command) split(args []string) (path []string, rest []string, err error)
 
 func (c *Command) writeHelp(w io.Writer) {
 	if c.Usage != "" {
-		fmt.Fprintf(w, "%s\n\n", strings.TrimSpace(c.Usage))
+		_, _ = fmt.Fprintf(w, "%s\n\n", strings.TrimSpace(c.Usage))
 	} else if c.Summary != "" {
-		fmt.Fprintf(w, "%s\n\n", strings.TrimSpace(c.Summary))
+		_, _ = fmt.Fprintf(w, "%s\n\n", strings.TrimSpace(c.Summary))
 	}
 	if len(c.Children) == 0 {
 		return
 	}
-	fmt.Fprintf(w, "Subcommands:\n")
+	_, _ = fmt.Fprintf(w, "Subcommands:\n")
 	names := make([]*Command, len(c.Children))
 	copy(names, c.Children)
 	sort.Slice(names, func(i, j int) bool { return names[i].Name < names[j].Name })
@@ -267,6 +269,6 @@ func (c *Command) writeHelp(w io.Writer) {
 		}
 	}
 	for _, child := range names {
-		fmt.Fprintf(w, "  %-*s  %s\n", width, child.Name, child.Summary)
+		_, _ = fmt.Fprintf(w, "  %-*s  %s\n", width, child.Name, child.Summary)
 	}
 }

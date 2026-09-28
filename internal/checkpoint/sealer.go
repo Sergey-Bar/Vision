@@ -20,7 +20,7 @@ import (
 func Digest(rows []RowHash) string {
 	h := sha256.New()
 	for _, r := range rows {
-		fmt.Fprintf(h, "%d:", r.Sequence)
+		_, _ = fmt.Fprintf(h, "%d:", r.Sequence)
 		h.Write([]byte(r.Hash))
 		h.Write([]byte("\n"))
 	}

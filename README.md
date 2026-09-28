@@ -41,8 +41,9 @@ Five invariants that the rest of the code exists to protect.
 | `internal/` | Core: adapters, durability, graph, rules, verification, policy, audit, identity, API, console. |
 | `migrations/` | Ordered SQL. `expand` steps ship separately from `contract` steps. |
 | `rules/builtin/` | The built-in bundle, shipped in the release archive. |
-| `docs/` | Threat model, architecture, operational runbook. |
-| `deploy/` | Windows Service, systemd, optional OCI profile. |
+| `docs/` | Threat model, roadmap, operational runbook. |
+| `docs/roadmap/` | The plan: strategy, the M1–M8 calendar, and every R&D, GTM, trust and company track. Start at `docs/roadmap/README.md`. |
+| `deploy/` | Windows Service, systemd, optional OCI profile, and the AI runtime. |
 
 ## Build
 
@@ -61,6 +62,14 @@ Windows uses `make` through Git Bash, or the equivalent `go` invocations in
 
 Milestone 1 is in progress. See `docs/status.md` for what is built and what is
 not — the doc is the source of truth, not this file.
+
+## Plan
+
+`docs/roadmap/` holds the roadmap from today to product: the M1–M8 calendar with
+dated exit gates, and the track documents behind it — product, UX, QA, metrics,
+adapters, AI, security, compliance, GTM, pricing, launch, risk, hiring, finance.
+Its index is `docs/roadmap/README.md`, and it is deliberately readable by someone
+who is not an engineer.
 
 ## Evidence rule
 

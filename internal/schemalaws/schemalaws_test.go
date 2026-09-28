@@ -312,8 +312,7 @@ func TestEvidenceStorageRefIsAlwaysRelative(t *testing.T) {
 		"..",
 	}
 	for i, ref := range bad {
-		ref := ref
-		t.Run(strings.ReplaceAll(ref, string(filepathSeparator()), "/"), func(t *testing.T) {
+		t.Run(strings.ReplaceAll(ref, filepathSeparator(), "/"), func(t *testing.T) {
 			testutil.ExpectError(t, pool, `
 				INSERT INTO evidence (evidence_id, tenant_id, site_id, kind, tier, observed_at, captured_at,
 				                      storage_ref, size_bytes, sha256)
@@ -499,7 +498,6 @@ func TestRLSIsoTenantsForLargeTables(t *testing.T) {
 	// asserted separately in TestReadonlyHasNoGrantOnAuditLedger.
 	tables := []string{"incidents", "canonical_events", "evidence"}
 	for _, table := range tables {
-		table := table
 		t.Run(table, func(t *testing.T) {
 			testutil.AsRole(t, pool, "security_readonly", "some-other-tenant", func(tx pgx.Tx) {
 				var n int

@@ -123,7 +123,7 @@ func TestPutAndOpenRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 	read, err := io.ReadAll(rc)
 	if err != nil {
 		t.Fatalf("read: %v", err)

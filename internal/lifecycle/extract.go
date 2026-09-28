@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -33,7 +34,7 @@ type Extracted struct {
 // because the manifest and the tar are two separate claims and the tar is the
 // one that names where bytes land. A verified manifest with a traversing tar is
 // exactly the case where only the second check saves the machine.
-func Extract(archivePath, dest string, manifest release.Manifest, files []release.FileEntry) (Extracted, error) {
+func Extract(archivePath, dest string, files []release.FileEntry) (Extracted, error) {
 	var out Extracted
 	if err := os.MkdirAll(dest, 0o750); err != nil {
 		return out, fmt.Errorf("lifecycle: create destination: %w", err)
@@ -51,19 +52,22 @@ func Extract(archivePath, dest string, manifest release.Manifest, files []releas
 	if err != nil {
 		return out, fmt.Errorf("lifecycle: open archive: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	gz, err := gzip.NewReader(f)
 	if err != nil {
 		return out, fmt.Errorf("lifecycle: read archive: %w", err)
 	}
-	defer gz.Close()
+	defer func() { _ = gz.Close() }()
 
 	tr := tar.NewReader(gz)
 	seen := map[string]bool{}
 	for {
 		header, err := tr.Next()
-		if err == io.EOF {
+		// errors.Is, not ==: a reader that wraps its EOF is still finished, and
+		// treating a wrapped EOF as a read error would turn a complete archive
+		// into a failed install.
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
@@ -239,7 +243,7 @@ func HashFile(path string, maxBytes int64) (string, int64, error) {
 	if err != nil {
 		return "", 0, fmt.Errorf("lifecycle: open %s: %w", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	info, err := f.Stat()
 	if err != nil {
 		return "", 0, fmt.Errorf("lifecycle: stat %s: %w", path, err)

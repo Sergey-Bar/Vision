@@ -252,9 +252,17 @@ func (n *Normalizer) loadDrift(ctx context.Context, in Input) (int32, error) {
 		SELECT drift_ms FROM device_clocks WHERE tenant_id = $1 AND device_id = $2`,
 		in.Key.TenantID, in.DeviceID).Scan(&drift)
 	if err != nil {
-		// No measurement is not an error. The device may not have been sampled
-		// yet, and inventing a drift value would be worse than recording none.
-		return 0, nil
+		// Only "not measured yet" is benign. Swallowing every error would turn a
+		// dropped connection, a cancelled context or a permission failure into
+		// "no drift", and that removes the clock correction silently — the
+		// correlation degrades and nothing says why.
+		if errors.Is(err, pgx.ErrNoRows) {
+			// No measurement is not an error. The device may not have been
+			// sampled yet, and inventing a drift value would be worse than
+			// recording none.
+			return 0, nil
+		}
+		return 0, fmt.Errorf("normalize: read the device clock: %w", err)
 	}
 	return drift, nil
 }
@@ -338,7 +346,7 @@ func IntegrityHash(in Input, normalizedAt time.Time, payload []byte) string {
 		isoOrEmpty(in.ObservedAt), normalizedAt.UTC().Format(time.RFC3339Nano),
 		in.SourceTZ, in.DeviceID, in.ZoneID, clockSourceOrUnknown(in.ClockSource),
 	} {
-		fmt.Fprintf(h, "%d:%s", len(part), part)
+		_, _ = fmt.Fprintf(h, "%d:%s", len(part), part)
 	}
 	h.Write(payload)
 	return hex.EncodeToString(h.Sum(nil))

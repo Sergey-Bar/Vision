@@ -352,7 +352,7 @@ func (s *Service) Snapshot(ctx context.Context, tenant string) (Snapshot, error)
 		var source, rule string
 		if err := rows.Scan(&e.EdgeID, &e.FromType, &e.FromID, &e.Relation, &e.ToType, &e.ToID,
 			&e.AssertedBy, &source, &e.ObservedAt, &e.Confidence, &e.Method, &rule); err != nil {
-			return out, fmt.Errorf("graph: scan snapshot: %v", err)
+			return out, fmt.Errorf("graph: scan snapshot: %w", err)
 		}
 		e.TenantID = tenant
 		e.SourceEventID = source
@@ -366,13 +366,8 @@ func (s *Service) Snapshot(ctx context.Context, tenant string) (Snapshot, error)
 	return out, nil
 }
 
-// Rebuild checks that the graph is reconstructible from its sources, which is
-// the property that lets the whole thing be a projection rather than a source of
-// truth.
-//
-// It reports edges whose source event no longer exists, and zones with no
-// parent. Neither is automatically an error — a retained incident may outlive
-// its event's partition — but both are facts a rebuild needs to know about.
+// RebuildReport is what a consistency check found about the graph: the edge
+// count, and the two ways an edge can cite something that is no longer there.
 type RebuildReport struct {
 	Edges              int      `json:"edges"`
 	OrphanSourceEvents int      `json:"orphanSourceEvents"`
@@ -380,7 +375,10 @@ type RebuildReport struct {
 	Problems           []string `json:"problems"`
 }
 
-// CheckRebuild inspects the graph's internal consistency.
+// CheckRebuild inspects the graph's internal consistency and reports what a
+// rebuild would need to know. It reports edges whose source event no longer
+// exists and zones with no parent; neither is automatically an error — a retained
+// incident may outlive its event's partition — but both are facts a rebuild needs.
 func (s *Service) CheckRebuild(ctx context.Context, tenant string) (RebuildReport, error) {
 	var r RebuildReport
 
@@ -511,7 +509,7 @@ func (s *Service) ZonePaths(ctx context.Context, tenant string) (map[string]bool
 	return out, rows.Err()
 }
 
-// MarshalSnapshot renders a snapshot in a stable form, so two exports of the
+// MarshalJSON renders a snapshot in a stable form, so two exports of the
 // same graph are byte-identical and a diff means something.
 func (s Snapshot) MarshalJSON() ([]byte, error) {
 	type alias Snapshot

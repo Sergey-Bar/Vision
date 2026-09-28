@@ -551,7 +551,7 @@ QUESTIONS  (a question with an owner and a date, which is the only kind that
   Never "we should think about X". A question with no owner and no date is a
   wish.
 
-SETTLED THIS WEEK  (new rows for §5 of 19-decision-log-and-process.md)
+SETTLED THIS WEEK  (new rows for §5 of )
   · <what is now settled> → the ADR that settled it, or the code and the
     reason. **A row added here is a row that will not be re-opened in six
     months**, and it takes one sentence.

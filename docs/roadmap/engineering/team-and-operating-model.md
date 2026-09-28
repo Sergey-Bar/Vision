@@ -4,8 +4,8 @@ Owner: E1. Status: living. Last revised 2026-09-28.
 
 How two engineers and a pile of AI agents actually run an R&D organisation, and
 what each role means when the roster is two people long. Read
-`00-strategy-and-north-star.md` §6 (the capacity law) and
-`01-master-roadmap.md` first; this document is the operating consequence of both.
+`` §6 (the capacity law) and
+`` first; this document is the operating consequence of both.
 
 This is not an org chart. There is no third engineer to promote anyone into, and
 writing a role catalogue that pretends otherwise would be the first dishonest
@@ -37,7 +37,7 @@ customer. "Who holds it" is a real answer, not a placeholder.
 
 | # | Role | Why it exists | Who holds it now | Artefacts this role owns | The single metric it is judged by |
 |---|---|---|---|---|---|
-| R-01 | **Product** | Decides what is built and, more often, what is refused. At 2 people this is the job that keeps scope from expanding to fill the calendar | **E1**, permanently | `00-strategy-and-north-star.md` §3 segment order and anti-segments; the intake decisions in §5; the demo script; the pilot agreement | **Share of shipped work that maps to a named segment in `00` §3.** A quarter at zero means product drift has started, whatever the velocity looks like |
+| R-01 | **Product** | Decides what is built and, more often, what is refused. At 2 people this is the job that keeps scope from expanding to fill the calendar | **E1**, permanently | `` §3 segment order and anti-segments; the intake decisions in §5; the demo script; the pilot agreement | **Share of shipped work that maps to a named segment in `00` §3.** A quarter at zero means product drift has started, whatever the velocity looks like |
 | R-02 | **Architect** | Owns the things that are expensive to change: contracts, migrations, the trust boundaries, the adapter seam. Everything else can be refactored; the wire cannot | **E1**, permanently | `docs/threat-model.md`; the ADR set; the contract change path; the decision that M4's second adapter is the real architecture test | **Number of invariants weakened without an ADR and a test, in that order.** Target: zero. It is the cleanest possible metric for "is the architecture still ours" |
 | R-03 | **UI/UX** | The console is the product for the operator. Nobody else will notice that a degraded incident looks like a quiet one | **E1**, permanently | The server-rendered console templates; the CSP; the time-rendering law; the dead-letter list; M1-T47–T52 in `02` §2 | **Time for a real operator to complete the M1 workflow unaided, measured once in `02` M1-T38.** Not a usability score. One number, from one real person |
 | R-04 | **QA** | Owns the DoD claim, the fault-injection matrix, the golden suite, and the path-traversal negatives. At 2 people this is the role most likely to be quietly dropped, so it is written down | **E2**, permanently, with the `fault-injection-writer` agent drafting | M1-T53–T58 in `02` §2; the control-to-test map; the statement in `docs/status.md` that green means green | **`make ci` green with no Milestone server reachable, and a `kill -9` test at every stage M1 touches.** A gate with no failing test is a claim (`docs/threat-model.md` §5) |
@@ -74,7 +74,7 @@ is a legitimate act that must be recorded.
    product decision and it is E1's. An agent that proposes scope proposes it in a
    ticket, and the ticket is decided by a human like any other.
 2. **AI never signs an exit gate.** Every line in
-   `02-m1-trust-spine-execution-plan.md` §6 is signed by E1 and E2, by hand. Not
+   `` §6 is signed by E1 and E2, by hand. Not
    delegated, not summarised, not "the report says it passed".
 3. **AI never talks to a customer.** No agent sends an email, joins a call, posts
    in a channel, or drafts something a human sends without editing it. The design-partner
@@ -238,7 +238,7 @@ The rule beneath the table: **Accountable is always a human.** Every row.
 | Boundary | Rule |
 |---|---|
 | **Judgement vs. execution** | Execution is delegated freely. Judgement — scope, promotion, a release, a signature, a customer commitment, a disclosure — is not delegated at all. This is the whole `00` §6 "AI multiplies implementation, not judgement" claim, given teeth |
-| **Who may stop a release** | Anyone, for a guardrail. E1 and E2 each alone, for a feature. An agent may *flag* a guardrail concern; only a human may act on it. See `08-metrics-and-analytics.md` §6 |
+| **Who may stop a release** | Anyone, for a guardrail. E1 and E2 each alone, for a feature. An agent may *flag* a guardrail concern; only a human may act on it. See `` §6 |
 | **Who may weaken an invariant** | Neither, unilaterally. It needs an ADR **and** a test, in that order, and both signatures. There is no path in this document or any other where a date produces a weakened invariant |
 
 ---
@@ -252,7 +252,7 @@ just a way of rationalising the answer you already had.
 
 ### 5.1 The two-person filter
 
-> **Q1. Does this serve a named segment in `00-strategy-and-north-star.md` §3, at
+> **Q1. Does this serve a named segment in `` §3, at
 > the milestone that segment is reachable?**
 > **Q2. Does it deepen the intelligence layer above the installed security
 > stack?**

@@ -8,8 +8,14 @@ Everything in the table below is that. Where a thing is not done it says why.
 
 **Verification:** `go test -p 1 -race ./...` green across 24 packages against a
 real Postgres 16, with the race detector on. `go vet` and `gofmt` clean.
-`contractcheck` reports 20 messages and 22 enums compatible with the baseline.
-The Python AI runtime's 21 contract tests pass under `py -m unittest`.
+`golangci-lint` reports zero issues. `contractcheck` reports 20 messages and 22
+enums compatible with the baseline. The Python AI runtime's 21 contract tests
+pass under `py -m unittest`.
+
+The linter configuration in `.golangci.yml` excludes four categories, each
+with a written reason rather than a blanket suppression: writes to stdout from a
+CLI, helper failures a test asserts for itself, `httptest.NewRequest` in tests
+whose handlers read no context, and parameters kept for interface conformance.
 
 ## What is built
 

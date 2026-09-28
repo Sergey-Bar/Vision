@@ -192,9 +192,13 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	res, err := s.Identity.PasswordStep(r.Context(), s.Tenant, req.Username, req.Password, s.clientIP(r))
 	if err != nil {
+		// errors.Is, not a substring match on the message. A locked account and a
+		// wrong password both read "invalid", and telling them apart is the whole
+		// point of the 423: an operator whose account is locked needs to be told
+		// to wait, not to keep typing. Matching on text would also break the
+		// moment identity wrapped the error, silently downgrading 423 to 401.
 		status := http.StatusUnauthorized
-		switch {
-		case strings.Contains(err.Error(), identity.ErrLocked.Error()):
+		if errors.Is(err, identity.ErrLocked) {
 			status = http.StatusLocked
 		}
 		WriteError(w, status, "login_failed", err.Error(), requestID(r))
@@ -461,7 +465,7 @@ func (s *Server) handleEvidenceContent(w http.ResponseWriter, r *http.Request, p
 		WriteError(w, status, "evidence_unavailable", err.Error(), requestID(r))
 		return
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Length", itoa(obj.SizeBytes))

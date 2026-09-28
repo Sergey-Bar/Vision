@@ -28,12 +28,12 @@ type testSecretStore struct{}
 func (testSecretStore) Wrap(b []byte) ([]byte, error) { return append([]byte("T:"), b...), nil }
 func (testSecretStore) Unwrap(b []byte) ([]byte, error) {
 	if len(b) < 2 {
-		return nil, io_EOF
+		return nil, ioEOF
 	}
 	return b[2:], nil
 }
 
-var io_EOF = errEOF{}
+var ioEOF = errEOF{}
 
 type errEOF struct{}
 

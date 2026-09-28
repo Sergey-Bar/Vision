@@ -2,6 +2,7 @@ package bundles_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -140,11 +141,9 @@ func TestActivationRequiresAReviewedDiffDigest(t *testing.T) {
 }
 
 func asGate(err error, target **bundles.ErrGateNotSatisfied) bool {
-	g, ok := err.(*bundles.ErrGateNotSatisfied)
-	if ok {
-		*target = g
-	}
-	return ok
+	// errors.As, not a type assertion: the gate's error is wrapped on its way
+	// out of the store, and a type assertion would miss it.
+	return errors.As(err, target)
 }
 
 func TestRollbackReturnsToThePreviousVersion(t *testing.T) {

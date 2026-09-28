@@ -17,14 +17,6 @@ import (
 // ed25519PublicKey aliases the key type so the operator file reads as prose.
 type ed25519PublicKey = ed25519.PublicKey
 
-// min is the small helper Go stopped shipping, used in exactly one place.
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // newIdentityService builds the identity service for the CLI.
 //
 // The Audit writer is not optional here. Without it every authentication and

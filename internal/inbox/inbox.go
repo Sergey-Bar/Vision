@@ -38,6 +38,9 @@ import (
 // retention window, so within it every accepted event is accounted for.
 type Status string
 
+// Inbox states. The only terminal states are processed and dead_letter; a row
+// is never deleted inside the retention window, because it is the evidence
+// that nothing was lost.
 const (
 	StatusReceived   Status = "received"
 	StatusProcessing Status = "processing"
@@ -122,11 +125,6 @@ func (w *Writer) Write(ctx context.Context, opts WriteOptions) (Accepted, error)
 	if err := validateWrite(opts); err != nil {
 		return Accepted{}, err
 	}
-	maxAttempts := w.MaxAttempts
-	if maxAttempts <= 0 {
-		maxAttempts = 5
-	}
-
 	var accepted Accepted
 	err := w.Pool.InTenant(ctx, dbx.TenantContext{
 		TenantID: opts.TenantID,
@@ -426,7 +424,7 @@ func (w *Writer) DeadLetters(ctx context.Context, tenantID string, limit int) ([
 	var out []DeadLetter
 	for rows.Next() {
 		var d DeadLetter
-		if err := rows.Scan(&d.Key.TenantID, &d.Key.IntegrationID, &d.Key.SourceEventID,
+		if err := rows.Scan(&d.TenantID, &d.IntegrationID, &d.SourceEventID,
 			&d.SiteID, &d.Attempts, &d.Reason, &d.FirstSeen, &d.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("inbox: scan dead letter: %w", err)
 		}

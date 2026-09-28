@@ -8,7 +8,6 @@ import (
 )
 
 func yes() *bool            { b := true; return &b }
-func no() *bool             { b := false; return &b }
 func hours(h float64) *bool { b := h < 2; return &b }
 
 // buildCases produces a set with a known profile: 80% true positives correctly
@@ -20,8 +19,8 @@ func buildCases(n int) []evaluation.Case {
 			ID: "case-" + itoa(i), ProfileID: "restricted-person",
 			HoursToDisposition: 0.25,
 		}
-		switch {
-		case i%5 == 4:
+		switch i % 5 {
+		case 4:
 			c.Outcome = evaluation.OutcomeFalsePositive
 			c.PredictedRestricted = yes()
 		default:

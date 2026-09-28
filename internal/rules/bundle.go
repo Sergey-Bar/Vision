@@ -66,7 +66,7 @@ func (t Tier) rank() int {
 }
 
 // AtLeast reports whether t is at least as trustworthy as min.
-func (t Tier) AtLeast(min Tier) bool { return t.rank() >= min.rank() }
+func (t Tier) AtLeast(minimum Tier) bool { return t.rank() >= minimum.rank() }
 
 // DegradeTo is what a rule does when an AI observation it needs is absent. It
 // is mandatory, never defaulted at evaluation time, because "what happens when

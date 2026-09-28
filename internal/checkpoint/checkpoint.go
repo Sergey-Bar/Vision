@@ -141,7 +141,7 @@ func VerifySeal(seal Seal, trustedPublic ed25519.PublicKey) error {
 		return fmt.Errorf("%w: chain digest is not a 64-character hex SHA-256", ErrVerify)
 	}
 	if _, err := hex.DecodeString(seal.ChainDigest); err != nil {
-		return fmt.Errorf("%w: chain digest is not valid hex: %v", ErrVerify, err)
+		return fmt.Errorf("%w: chain digest is not valid hex: %w", ErrVerify, err)
 	}
 	if seal.FromSequence > seal.ToSequence {
 		return fmt.Errorf("%w: sealed range %d..%d is inverted", ErrVerify, seal.FromSequence, seal.ToSequence)
@@ -254,6 +254,9 @@ func (f *FileSink) Write(seal Seal) error {
 	return nil
 }
 
+// Refuse reports whether this seal may be written. It is the gate a caller checks
+// before constructing a writer, kept separate so the decision is testable without a
+// directory on disk.
 func (f *FileSink) Refuse(seal Seal) error {
 	switch {
 	case seal.CheckpointID == "":

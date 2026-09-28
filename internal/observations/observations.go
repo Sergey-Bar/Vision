@@ -36,6 +36,9 @@ import (
 // Degradation names why an observation is not evidence.
 type Degradation string
 
+// Degradation reasons. The same closed set the schema's CHECK allows: an
+// unrecognised value would be stored as a string nothing reads, and interpreted
+// downstream as no degradation at all.
 const (
 	DegradationNone             Degradation = "none"
 	DegradationModelUnavailable Degradation = "model_unavailable"
@@ -207,10 +210,10 @@ func (o *Observation) OutputHash() (string, error) {
 func (o *Observation) InputHash() (string, error) {
 	h := sha256.New()
 	for _, id := range o.InputEvidenceIDs {
-		fmt.Fprintf(h, "id:%d:%s", len(id), id)
+		_, _ = fmt.Fprintf(h, "id:%d:%s", len(id), id)
 	}
 	for _, hash := range o.InputEvidenceHashes {
-		fmt.Fprintf(h, "hash:%d:%s", len(hash), hash)
+		_, _ = fmt.Fprintf(h, "hash:%d:%s", len(hash), hash)
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }

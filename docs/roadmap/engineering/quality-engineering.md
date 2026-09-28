@@ -389,7 +389,7 @@ hash row, so they can be raised without a migration),
 **Covers.** The rendered console and the HTTP contract around it. There is no
 browser automation and there will not be any — the console is server-rendered Go
 templates with no client-side JavaScript (§4.2 of
-`06-ux-and-design-system.md`), so "E2E" here means asserting on the HTML a real
+``), so "E2E" here means asserting on the HTML a real
 request produces, against real services over a real database.
 
 **The twelve tests, and what each one is really asserting:**
@@ -428,7 +428,7 @@ comprehensible, is the disposition reachable without a mouse, does the evidence
 bundle let a competent operator reach the right answer, and would *this
 operator* rather than this engineer prefer it to the VMS.
 
-**The four M1 gates, and their test.** From `01-master-roadmap.md` M1, each
+**The four M1 gates, and their test.** From `` M1, each
 signed by E1 and E2:
 
 1. Live Milestone integration and replay parity → the parity report, both paths,
@@ -1148,7 +1148,7 @@ commit".
    replacement of the person entirely) — and the anonymisation is recorded in the
    dataset's provenance file, because an unrecorded anonymisation is an assertion
    rather than a control. Recorded licence and provenance per §9.5 of
-   `06-ux-and-design-system.md`.
+   ``.
 3. **CI has no access to a customer's data.** CI runs on synthetic fixtures and
    committed datasets only. A test that needs a live site is a manual test with a
    person, and `AGENTS.md`'s rule generalises: **"CI must pass with no Milestone
@@ -1161,7 +1161,7 @@ commit".
 5. **Research artefacts go through the same sanitiser.** Shift-shadowing notes,
    interview transcripts and incident-review samples are customer data. They
    live in `docs/research/YYYY-MM/` sanitised, and the raw recordings are
-   deleted on the stated date (`05-product-and-backlog.md` §5.2).
+   deleted on the stated date (`` §5.2).
 6. **Retention of test data is bounded.** Golden sets are permanent because they
    are inputs to a reproducibility claim. Evaluation datasets are versioned and
    superseding is a new directory, never an edit. Everything else — captured
@@ -1292,7 +1292,7 @@ monitoring, not about staffing. Two consequences, both accepted:
 2. **From M3 GA, the on-call rotation is a contracted commitment and it is
    priced.** Before M3, support is business hours on the founder's own timezone
    and the customer is told so in writing (§7 of
-   `12-release-sre-and-support.md`). Pretending otherwise in a contract is the
+   ``). Pretending otherwise in a contract is the
    single worst thing we could do to a company that is buying us for
    provability.
 
@@ -1451,7 +1451,7 @@ that "green" in `docs/status.md` is not read as "nothing is wrong".
 | Q-5 | The console's dead-letter and clock-drift tables render from `consoleData` with `requirePrincipal`, not `requireCapability`, so a principal without `dead_letter.read` is shown the dead-letter list | `internal/api/handlers.go:158-163`, `internal/api/console.go:186-195` | A capability leak. The API routes get this right (`requireCapability(identity.CapDeadLetterRead, ...)`); the console routes do not, because `requirePrincipal` was used for the HTML surface. Invariant 5 is about tenant scoping, and this is the same family of defect: a surface reads data its caller is not authorised to read | Console routes use `requireCapability` like the API ones, or the data is omitted by capability. A test to match, in `internal/api/api_test.go` — and it is a §7-content-assertion gap as well (§2.7) |
 | Q-6 | `internal/evidence`'s `TestSymlinkEscapeIsRefused` skips on Windows | `internal/evidence/evidence_test.go:74-77` | §6.2. A test that skips on the platform running half our target installs is not protecting half our customers | Grant `SeCreateSymbolicLinkPrivilege` on the Windows CI runner, or test the post-open `Lstat` check directly, or use a junction. At least one ships in M1 |
 | Q-7 | `go.mod` declares `go 1.26.0`; `.github/workflows/ci.yml` pins `GO_VERSION: "1.24"` with `GOTOOLCHAIN: local`; `docs/status.md` says Go 1.27 | `go.mod:3`, `.github/workflows/ci.yml:11-12` | With `GOTOOLCHAIN=local` a Go 1.24 toolchain cannot build a module declaring 1.26. **CI cannot build this module as pinned.** A green local run and a red CI run is the most expensive way to discover a version mismatch, and it will be discovered by a release, not by a test | Pin one version in three places and add a CI step asserting `go.mod`'s version against the runner's. Until then, treat "CI is green" as unverified, and say so in the release notes rather than asserting it |
-| Q-8 | The Windows Service and systemd units are absent; `deploy/` was created and removed | `docs/status.md` | A site on an isolated network has no supported way to start the product at boot. Every other deployment concern in `12-release-sre-and-support.md` is downstream of this | M1. Genuinely small; deferred rather than absent, and nothing else depends on it — but "nothing depends on it" stops being true the moment there is a customer |
+| Q-8 | The Windows Service and systemd units are absent; `deploy/` was created and removed | `docs/status.md` | A site on an isolated network has no supported way to start the product at boot. Every other deployment concern in `` is downstream of this | M1. Genuinely small; deferred rather than absent, and nothing else depends on it — but "nothing depends on it" stops being true the moment there is a customer |
 
 ### 11.5 The one summary line for a QA review
 

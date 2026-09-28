@@ -109,7 +109,7 @@ not materialise and M7–M8 are an automation project on top of a search product
 ## 6. The capacity law
 
 Two engineers plus heavy AI assistance. This is the constraint that shapes
-every date in `01-master-roadmap.md`, so it is written down rather than
+every date in ``, so it is written down rather than
 discovered later.
 
 - **2 engineers, 13 weeks per quarter, ~60% of that on new build.** The

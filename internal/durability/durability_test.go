@@ -63,11 +63,11 @@ func siteOf(t *testing.T) (tenant, site string) {
 	return tenant, site
 }
 
-func writeOpts(tenant, site, integration, sourceID string) inbox.WriteOptions {
+func writeOpts(tenant, site, sourceID string) inbox.WriteOptions {
 	return inbox.WriteOptions{
 		TenantID:      tenant,
 		SiteID:        site,
-		IntegrationID: integration,
+		IntegrationID: "int-1",
 		SourceEventID: sourceID,
 		Payload:       json.RawMessage(`{"Id":"` + sourceID + `","Type":"Motion"}`),
 		ReceivedAt:    base,
@@ -83,7 +83,7 @@ func TestWriteAcceptsOnce(t *testing.T) {
 	tenant, site := siteOf(t)
 	w := inbox.NewWriter(p)
 
-	first, err := w.Write(context.Background(), writeOpts(tenant, site, "int-1", "src-1"))
+	first, err := w.Write(context.Background(), writeOpts(tenant, site, "src-1"))
 	if err != nil {
 		t.Fatalf("first write: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestWriteAcceptsOnce(t *testing.T) {
 
 	// A duplicate insert is a no-op, never an error. A source that re-delivers
 	// after a reconnect is the normal case, not a fault.
-	second, err := w.Write(context.Background(), writeOpts(tenant, site, "int-1", "src-1"))
+	second, err := w.Write(context.Background(), writeOpts(tenant, site, "src-1"))
 	if err != nil {
 		t.Fatalf("duplicate write returned an error rather than a no-op: %v", err)
 	}
@@ -119,13 +119,13 @@ func TestDedupeCrossesPartitions(t *testing.T) {
 	tenant, site := siteOf(t)
 	w := inbox.NewWriter(p)
 
-	jan := writeOpts(tenant, site, "int-1", "src-jan")
+	jan := writeOpts(tenant, site, "src-jan")
 	jan.ReceivedAt = base.AddDate(0, -2, 0)
 	if _, err := w.Write(context.Background(), jan); err != nil {
 		t.Fatalf("january write: %v", err)
 	}
 
-	mar := writeOpts(tenant, site, "int-1", "src-jan")
+	mar := writeOpts(tenant, site, "src-jan")
 	mar.ReceivedAt = base
 	dup, err := w.Write(context.Background(), mar)
 	if err != nil {
@@ -152,7 +152,7 @@ func TestConcurrentWritesProduceOneRow(t *testing.T) {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
-			accepted, err := w.Write(context.Background(), writeOpts(tenant, site, "int-1", "race-1"))
+			accepted, err := w.Write(context.Background(), writeOpts(tenant, site, "race-1"))
 			dupes[n] = accepted.Duplicate
 			errs[n] = err
 		}(i)
@@ -180,7 +180,7 @@ func TestWriteRejectsUnidentifiedEvents(t *testing.T) {
 
 	// Without a source id there is no dedupe key, and an event that cannot be
 	// deduplicated is re-ingested on every poll for ever.
-	_, err := w.Write(context.Background(), writeOpts(tenant, site, "int-1", ""))
+	_, err := w.Write(context.Background(), writeOpts(tenant, site, ""))
 	if err == nil {
 		t.Error("an event with no source id was accepted")
 	}
@@ -195,7 +195,7 @@ func TestClaimLeasesAndIsExclusive(t *testing.T) {
 	tenant, site := siteOf(t)
 	w := inbox.NewWriter(p)
 	for i := 0; i < 5; i++ {
-		if _, err := w.Write(context.Background(), writeOpts(tenant, site, "int-1", fmt.Sprintf("lease-%d", i))); err != nil {
+		if _, err := w.Write(context.Background(), writeOpts(tenant, site, fmt.Sprintf("lease-%d", i))); err != nil {
 			t.Fatalf("write %d: %v", i, err)
 		}
 	}
@@ -241,7 +241,7 @@ func TestExpiredLeaseIsReclaimed(t *testing.T) {
 	p := migrated(t)
 	tenant, site := siteOf(t)
 	w := inbox.NewWriter(p)
-	if _, err := w.Write(context.Background(), writeOpts(tenant, site, "int-1", "expired-1")); err != nil {
+	if _, err := w.Write(context.Background(), writeOpts(tenant, site, "expired-1")); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 
@@ -270,7 +270,7 @@ func TestRenewFailsOnceTheLeaseIsLost(t *testing.T) {
 	p := migrated(t)
 	tenant, site := siteOf(t)
 	w := inbox.NewWriter(p)
-	if _, err := w.Write(context.Background(), writeOpts(tenant, site, "int-1", "renew-1")); err != nil {
+	if _, err := w.Write(context.Background(), writeOpts(tenant, site, "renew-1")); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	leases, err := w.ClaimFor(context.Background(), tenant, "worker-a", 1, time.Minute)
@@ -293,7 +293,7 @@ func TestFailReachesDeadLetterWithAReason(t *testing.T) {
 	p := migrated(t)
 	tenant, site := siteOf(t)
 	w := inbox.NewWriter(p)
-	if _, err := w.Write(context.Background(), writeOpts(tenant, site, "int-1", "doomed")); err != nil {
+	if _, err := w.Write(context.Background(), writeOpts(tenant, site, "doomed")); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 
@@ -358,7 +358,7 @@ func TestNormalizeProducesExactlyOneEvent(t *testing.T) {
 	w := inbox.NewWriter(p)
 	n := normalize.New(p)
 
-	if _, err := w.Write(context.Background(), writeOpts(tenant, site, "int-1", "n-1")); err != nil {
+	if _, err := w.Write(context.Background(), writeOpts(tenant, site, "n-1")); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	leases, err := w.ClaimFor(context.Background(), tenant, "worker", 1, time.Minute)
@@ -405,7 +405,7 @@ func TestReNormalizeIsANoOp(t *testing.T) {
 	w := inbox.NewWriter(p)
 	n := normalize.New(p)
 
-	if _, err := w.Write(context.Background(), writeOpts(tenant, site, "int-1", "dup-norm")); err != nil {
+	if _, err := w.Write(context.Background(), writeOpts(tenant, site, "dup-norm")); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	if _, err := w.ClaimFor(context.Background(), tenant, "worker", 1, time.Minute); err != nil {
@@ -481,7 +481,7 @@ func TestNormalizeIsAtomicWithTheInboxTransition(t *testing.T) {
 	w := inbox.NewWriter(p)
 	n := normalize.New(p)
 
-	if _, err := w.Write(context.Background(), writeOpts(tenant, site, "int-1", "atomic-1")); err != nil {
+	if _, err := w.Write(context.Background(), writeOpts(tenant, site, "atomic-1")); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	if _, err := w.ClaimFor(context.Background(), tenant, "worker-a", 1, time.Minute); err != nil {
@@ -536,7 +536,7 @@ func TestNormalizeCorrectsClockDrift(t *testing.T) {
 
 	w := inbox.NewWriter(p)
 	n := normalize.New(p)
-	if _, err := w.Write(context.Background(), writeOpts(tenant, site, "int-1", "drift-1")); err != nil {
+	if _, err := w.Write(context.Background(), writeOpts(tenant, site, "drift-1")); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	if _, err := w.ClaimFor(context.Background(), tenant, "worker", 1, time.Minute); err != nil {
@@ -579,7 +579,7 @@ func TestNormalizeFallsBackVisibly(t *testing.T) {
 	w := inbox.NewWriter(p)
 	n := normalize.New(p)
 
-	if _, err := w.Write(context.Background(), writeOpts(tenant, site, "int-1", "notime-1")); err != nil {
+	if _, err := w.Write(context.Background(), writeOpts(tenant, site, "notime-1")); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	if _, err := w.ClaimFor(context.Background(), tenant, "worker", 1, time.Minute); err != nil {

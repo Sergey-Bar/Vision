@@ -27,6 +27,8 @@ import (
 // Source names where a timestamp's authority came from.
 type Source string
 
+// Clock sources. What a timestamp's authority came from, which is a fact about
+// trust rather than a description of a device.
 const (
 	SourceNTP     Source = "ntp"
 	SourceVMS     Source = "vms"
@@ -139,7 +141,7 @@ type DeviceState struct {
 // unreadable timestamp produced a record with no trustworthy observation, and
 // the fallback to received_at must be visible rather than silent. The caller is
 // told which happened.
-func Normalized(observed, received time.Time, state *DeviceState, p Policy) (normalized time.Time, usedFallback bool) {
+func Normalized(observed, received time.Time, state *DeviceState) (normalized time.Time, usedFallback bool) {
 	if observed.IsZero() {
 		if received.IsZero() {
 			return time.Time{}, true

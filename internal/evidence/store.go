@@ -184,7 +184,7 @@ func (s *Store) resolve(ref string) (string, error) {
 				// Nothing to resolve; the write path will create it.
 				return full, nil
 			}
-			return "", fmt.Errorf("%w: cannot inspect %q: %v", ErrPathRejected, ref, err)
+			return "", fmt.Errorf("%w: cannot inspect %q: %w", ErrPathRejected, ref, err)
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
 			target, err := filepath.EvalSymlinks(current)

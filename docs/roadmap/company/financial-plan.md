@@ -2,9 +2,9 @@
 
 Owner: E1, with E2 on cost. Status: living. Last revised 2026-09-28.
 
-Read `00-strategy-and-north-star.md` §6 and §8, `01-master-roadmap.md`,
-`04-gtm-and-sales.md` §8, `12-release-sre-and-support.md` §7.3 and §9, and
-`17-pricing-and-packaging.md` first. This document is the one in the roadmap
+Read `` §6 and §8, ``,
+`` §8, `` §7.3 and §9, and
+`` first. This document is the one in the roadmap
 where being wrong is cheapest to discover today and most expensive to discover in
 month fourteen, so it is mostly assumptions with the arithmetic exposed.
 

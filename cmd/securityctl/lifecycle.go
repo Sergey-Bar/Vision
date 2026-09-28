@@ -80,7 +80,7 @@ claims and only the second one names where bytes land.
 		}
 
 		staged := programDir + ".staging"
-		if _, err := lifecycle.Extract(archive, staged, manifest, plan.Files); err != nil {
+		if _, err := lifecycle.Extract(archive, staged, plan.Files); err != nil {
 			_ = os.RemoveAll(staged)
 			return command.Refuse("%v", err)
 		}
@@ -207,7 +207,7 @@ A contract step may only ship alone, in a later release.`,
 		if err := os.RemoveAll(staged); err != nil {
 			return err
 		}
-		if _, err := lifecycle.Extract(archive, staged, manifest, plan.Files); err != nil {
+		if _, err := lifecycle.Extract(archive, staged, plan.Files); err != nil {
 			_ = os.RemoveAll(staged)
 			return command.Refuse("%v", err)
 		}
@@ -275,7 +275,7 @@ in and the only safe answer is a restore from backup.`,
 
 		// The window check. The previous version's own window is what decides
 		// whether it can read the schema as it now stands.
-		previousWindow, err := readVersionWindow(programDir, state.Previous)
+		previousWindow, err := readVersionWindow(programDir)
 		if err != nil {
 			return err
 		}
@@ -459,14 +459,14 @@ func envOr(key, def string) string {
 	return def
 }
 
-func usageErr(format string, args ...any) error {
-	return &command.UsageError{Err: fmt.Errorf(format, args...)}
+func usageErr(format string) error {
+	return &command.UsageError{Err: errors.New(format)}
 }
 
 // readVersionWindow reads a previously installed version's declared schema
 // window from its own manifest, so the rollback decision uses that build's
 // numbers rather than this one's.
-func readVersionWindow(programDir, version string) (release.Compatibility, error) {
+func readVersionWindow(programDir string) (release.Compatibility, error) {
 	path := filepath.Join(programDir+".previous", "release-manifest.json")
 	raw, err := os.ReadFile(path)
 	if err != nil {

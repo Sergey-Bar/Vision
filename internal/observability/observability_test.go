@@ -154,8 +154,8 @@ func TestReservoirQuantiles(t *testing.T) {
 		t.Errorf("the median of the retained window is %.1f, want about 96.5 (values 93 to 100)",
 			median)
 	}
-	if max := r.QuantileSeconds(1); max != 100 {
-		t.Errorf("the maximum of the retained window is %.1f, want 100", max)
+	if highest := r.QuantileSeconds(1); highest != 100 {
+		t.Errorf("the maximum of the retained window is %.1f, want 100", highest)
 	}
 }
 

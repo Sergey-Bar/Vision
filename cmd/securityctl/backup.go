@@ -212,6 +212,12 @@ func currentSchemaVersion() (int, error) {
 	return v, nil
 }
 
+// marshalIndented renders a manifest for a human to read.
+//
+// It does not fall back to compact JSON on failure. A backup manifest is read by
+// a restore and by an auditor, and a silently-unformatted one is a signal that
+// something is wrong that a restore would then have to diagnose from the dump
+// instead.
 func marshalIndented(v any) ([]byte, error) {
 	body, err := marshalJSON(v)
 	if err != nil {
@@ -219,7 +225,7 @@ func marshalIndented(v any) ([]byte, error) {
 	}
 	var pretty []byte
 	if err := jsonIndent(&pretty, body); err != nil {
-		return append(body, '\n'), nil
+		return nil, fmt.Errorf("lifecycle: format the manifest: %w", err)
 	}
 	return append(pretty, '\n'), nil
 }

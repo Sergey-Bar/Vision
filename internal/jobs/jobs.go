@@ -34,6 +34,8 @@ import (
 // operationally.
 type Queue string
 
+// Work queues. Each has its own workers, lease duration and retry bound, because
+// an inference and a rule-bulk compile have nothing in common operationally.
 const (
 	QueueVLM            Queue = "vlm"
 	QueueEvidenceFetch  Queue = "evidence_fetch"
@@ -44,6 +46,8 @@ const (
 // Status is a job's lifecycle.
 type Status string
 
+// Job states. done and dead_letter are terminal; dead_letter carries a reason and
+// is surfaced in the console and audited.
 const (
 	StatusPending    Status = "pending"
 	StatusLeased     Status = "leased"

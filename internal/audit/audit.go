@@ -34,6 +34,8 @@ import (
 // "the operator did it" and "the adapter did it" are different facts.
 type ActorType string
 
+// Actor types. A human with a role and a machine with a scope are different
+// facts, and every ledger row records which one acted.
 const (
 	ActorOperator  ActorType = "operator"
 	ActorAdmin     ActorType = "admin"
@@ -233,13 +235,6 @@ func jsonArray(v []string) (string, error) {
 		return "", err
 	}
 	return string(b), nil
-}
-
-func nullIfEmpty(s string) any {
-	if s == "" {
-		return nil
-	}
-	return s
 }
 
 // Verification is the result of recomputing a chain.

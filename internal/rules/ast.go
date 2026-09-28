@@ -60,6 +60,8 @@ type CompiledCondition struct {
 // switch rather than a walk of every field.
 type CompiledKind string
 
+// Compiled condition arms. Switching on the kind is what lets evaluation avoid
+// inspecting every field of every node on the hot path.
 const (
 	KindAll           CompiledKind = "all"
 	KindAny           CompiledKind = "any"

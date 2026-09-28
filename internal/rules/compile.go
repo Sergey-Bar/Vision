@@ -56,6 +56,8 @@ func (p Problem) String() string {
 	return b.String()
 }
 
+// Problem severities. Activation refuses on either, because a bundle that is
+// merely suspicious is still a bundle nobody reviewed.
 const (
 	SeverityError   = "error"
 	SeverityWarning = "warning"

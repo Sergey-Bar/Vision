@@ -3,8 +3,8 @@
 Owner: E1 (definition and reporting), E2 (instrumentation). Status: living.
 Last revised 2026-09-28. Live from M1.
 
-`01-master-roadmap.md` §"Product analytics" names this file. It is the definitions
-and sources behind every number in the roadmap. Read `00-strategy-and-north-star.md`
+`` §"Product analytics" names this file. It is the definitions
+and sources behind every number in the roadmap. Read ``
 §4 (the three buyer answers) and `01` §M7 (the North Star) first.
 
 The rule this document is built on, from `01`:
@@ -514,7 +514,7 @@ and there is no live signal that could detect a regression.
 
 Cost control, because this is a 2-person company: the operator labels in batches
 inside the bi-weekly review session already in the operating model's cadence
-(`03-team-structure-and-operating-model.md` §6.3), and the batch is capped at
+(`` §6.3), and the batch is capped at
 whatever fits in the session. A partial sample is a partial sample and is reported
 as one.
 
@@ -836,7 +836,7 @@ The three that are most likely to appear, and the reason each is refused:
 > *(real — `01` §"Product analytics")*.
 
 The test before adding anything, and it is the same test the intake filter uses
-(`03-team-structure-and-operating-model.md` §5):
+(`` §5):
 
 1. **Who reads it, and what decision does it change?** "The team" is not an answer.
 2. **What would we do differently at a different value?** A metric where no value

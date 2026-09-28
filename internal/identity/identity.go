@@ -180,6 +180,8 @@ func ShouldLock(lock Lockout, maxAttempts int, base time.Duration) (bool, time.D
 // a site's custom role works without a release.
 type Role string
 
+// The shipped roles. A site's custom role works without a release, because the
+// service layer checks capabilities rather than role names.
 const (
 	RoleTenantAdmin     Role = "tenant_admin"
 	RoleSecurityManager Role = "security_manager"
@@ -193,6 +195,9 @@ const (
 // "incident.read_all" and an operator would escalate by accident.
 type Capability string
 
+// Capabilities. The closed set the service layer checks, matched exactly rather
+// than by prefix: a prefix match would let incident.read satisfy
+// incident.read_all, and an operator would escalate by accident.
 const (
 	CapIncidentRead        Capability = "incident.read"
 	CapIncidentDisposition Capability = "incident.disposition"

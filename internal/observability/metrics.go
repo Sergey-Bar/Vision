@@ -256,10 +256,10 @@ func NewRegistry() *Registry {
 // Render writes the exposition format.
 func (r *Registry) Render() string {
 	var b strings.Builder
-	writeSorted(&b, r.Gauges.Snapshot(), func(name string, value float64) {
+	writeSorted(r.Gauges.Snapshot(), func(name string, value float64) {
 		fmtGauge(&b, name, value)
 	})
-	writeSorted(&b, map[string]int64(r.Counters.Snapshot()), func(name string, value int64) {
+	writeSorted(r.Counters.Snapshot(), func(name string, value int64) {
 		fmtCounter(&b, name, value)
 	})
 	for name, byLabel := range r.Counters.LabeledSnapshot() {
@@ -281,7 +281,7 @@ func fmtCounter(b *strings.Builder, name string, value int64) {
 	fmt.Fprintf(b, "# TYPE %s counter\n%s %d\n", name, name, value)
 }
 
-func writeSorted[T any](b *strings.Builder, m map[string]T, write func(string, T)) {
+func writeSorted[T any](m map[string]T, write func(string, T)) {
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)
@@ -301,7 +301,6 @@ type Reservoir struct {
 	mu     sync.Mutex
 	values []float64
 	next   int
-	filled bool
 }
 
 // NewReservoir builds a reservoir of the given size.

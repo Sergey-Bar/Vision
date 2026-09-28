@@ -70,8 +70,9 @@ func (t *ReplayTransport) WithSiteID(siteID string) *ReplayTransport {
 	return t
 }
 
-// Close satisfies Transport.
-func (t *ReplayTransport) Close() error { return nil }
+// Close satisfies Transport. A fixture transport holds no connection, so there
+// is nothing to release.
+func (*ReplayTransport) Close() error { return nil }
 
 // Get returns the next page of the named route.
 //
@@ -79,7 +80,7 @@ func (t *ReplayTransport) Close() error { return nil }
 // reports the route as exhausted by returning an empty page rather than an
 // error. An exhausted feed is a normal state at the end of a replay; an error
 // would make every scenario look like a source outage at the last event.
-func (t *ReplayTransport) Get(ctx context.Context, route Route, query Query) (*Response, error) {
+func (t *ReplayTransport) Get(_ context.Context, route Route, query Query) (*Response, error) {
 	key := route.Path
 	start := t.cursorByRoute[key]
 	t.cursorByRoute[key] = start + 1

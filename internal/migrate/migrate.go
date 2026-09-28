@@ -333,6 +333,8 @@ type Status struct {
 	Compatible     bool                     `json:"compatible"`
 }
 
+// PendingStatus is the preflight view of a database”s schema: what it is at
+// now, what this build would do, and whether the two are compatible.
 type PendingStatus struct {
 	Version int    `json:"version"`
 	Name    string `json:"name"`

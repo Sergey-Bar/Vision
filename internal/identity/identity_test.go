@@ -2,7 +2,14 @@ package identity_test
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha1"
+	"crypto/sha256"
+	"encoding/base32"
+	"encoding/binary"
 	"errors"
+	"fmt"
+	"hash"
 	"os"
 	"strings"
 	"testing"
@@ -158,7 +165,7 @@ func TestSiteScopeDeniesByDefault(t *testing.T) {
 
 func TestServiceAccountsNeverHoldAuditRead(t *testing.T) {
 	for _, cap := range identity.CapabilitiesFor(identity.RoleService) {
-		if identity.Capability(cap) == identity.CapAuditRead {
+		if cap == identity.CapAuditRead {
 			t.Errorf("the service role holds audit read: %s", cap)
 		}
 	}
@@ -529,5 +536,122 @@ func TestStepUpIsSingleUse(t *testing.T) {
 	}
 	if err := svc.ConsumeStepUp(ctx, tenant, admin, ""); !errors.Is(err, identity.ErrStepUpRequired) {
 		t.Errorf("an empty proof produced %v, want ErrStepUpRequired", err)
+	}
+}
+
+// An independent RFC 6238 implementation, written here rather than reusing the
+// package's own totpCode. Reusing it would assert that the package agrees with
+// itself, which is the property that was broken: the code hashed the base32
+// text instead of the bytes it encodes, and declared an algorithm it did not
+// implement, and every code computed by a real authenticator was rejected. A
+// test that calls the same function cannot see either defect.
+func rfc6238Code(t *testing.T, base32Secret string, at time.Time, h func() hash.Hash) string {
+	t.Helper()
+	raw, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(base32Secret)
+	if err != nil {
+		t.Fatalf("the enrolled secret is not base32: %v", err)
+	}
+	var counter [8]byte
+	binary.BigEndian.PutUint64(counter[:], uint64(at.Unix()/30))
+	mac := hmac.New(h, raw)
+	mac.Write(counter[:])
+	sum := mac.Sum(nil)
+	off := sum[len(sum)-1] & 0x0f
+	value := (uint32(sum[off])&0x7f)<<24 |
+		(uint32(sum[off+1])&0xff)<<16 |
+		(uint32(sum[off+2])&0xff)<<8 |
+		(uint32(sum[off+3]) & 0xff)
+	return fmt.Sprintf("%06d", value%1000000)
+}
+
+// The enrolment URI's declared algorithm has to be the algorithm the verifier
+// implements. Google Authenticator, Microsoft Authenticator and 1Password all
+// read `algorithm`; an authenticator that ignores it falls back to the RFC 6238
+// default of SHA-1. Both paths have to verify, or MFA is broken for whichever
+// client the operator happens to have.
+func TestTOTPURICAlgorithmMatchesTheVerifier(t *testing.T) {
+	svc, tenant, site := service(t)
+	ctx := context.Background()
+
+	admin, err := svc.BootstrapAdmin(ctx, tenant, "admin", "a-long-bootstrap-passphrase", site)
+	if err != nil {
+		t.Fatalf("BootstrapAdmin: %v", err)
+	}
+	secret, uri, err := svc.EnrollTOTP(ctx, tenant, admin, "admin")
+	if err != nil {
+		t.Fatalf("EnrollTOTP: %v", err)
+	}
+	if !strings.Contains(uri, "algorithm=SHA256") {
+		t.Errorf("the enrolment URI declares %q, want algorithm=SHA256 to match the verifier",
+			uri)
+	}
+	if !strings.Contains(uri, "digits=6") || !strings.Contains(uri, "period=30") {
+		t.Errorf("the enrolment URI must state digits and period explicitly, got %q", uri)
+	}
+
+	for _, tc := range []struct {
+		name   string
+		hash   func() hash.Hash
+		method string
+	}{
+		{"sha256-honouring-authenticator", sha256.New, "totp"},
+		{"sha1-fallback-authenticator", sha1.New, "totp"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code := rfc6238Code(t, secret, clock, tc.hash)
+			_, methodUsed, ok, err := svc.VerifyFactor(ctx, tenant, admin, tc.method, code)
+			if err != nil {
+				t.Fatalf("VerifyFactor: %v", err)
+			}
+			if !ok {
+				t.Errorf("a code computed by an independent RFC 6238 implementation was rejected")
+			}
+			if methodUsed != "totp" {
+				t.Errorf("verified with %q, want totp", methodUsed)
+			}
+		})
+	}
+
+	// A wrong code must still be refused. Accepting both algorithms must not
+	// have widened the search space.
+	if _, _, ok, err := svc.VerifyFactor(ctx, tenant, admin, "totp", "000000"); err != nil || ok {
+		t.Errorf("a wrong TOTP code was accepted (ok=%v err=%v)", ok, err)
+	}
+}
+
+// A full login through the challenge path, with a code produced by something
+// other than this package. This is the path an operator actually walks at 3am,
+// and it is the one that was broken end to end.
+func TestLoginWithAnExternallyComputedTOTPCode(t *testing.T) {
+	svc, tenant, site := service(t)
+	ctx := context.Background()
+
+	admin, err := svc.BootstrapAdmin(ctx, tenant, "admin", "a-long-bootstrap-passphrase", site)
+	if err != nil {
+		t.Fatalf("BootstrapAdmin: %v", err)
+	}
+	secret, _, err := svc.EnrollTOTP(ctx, tenant, admin, "admin")
+	if err != nil {
+		t.Fatalf("EnrollTOTP: %v", err)
+	}
+	if err := svc.VerifyTOTPEnrollment(ctx, tenant, admin, rfc6238Code(t, secret, clock, sha256.New)); err != nil {
+		t.Fatalf("the operator could not confirm their own enrolment: %v", err)
+	}
+
+	res, err := svc.PasswordStep(ctx, tenant, "admin", "a-long-bootstrap-passphrase", "10.0.0.1")
+	if err != nil {
+		t.Fatalf("PasswordStep: %v", err)
+	}
+	if !res.MFARequired || res.ChallengeID == "" {
+		t.Fatalf("PasswordStep did not issue a challenge: %+v", res)
+	}
+
+	sess, err := svc.CompleteChallenge(ctx, tenant, res.ChallengeID, "totp",
+		rfc6238Code(t, secret, clock, sha256.New), "10.0.0.1")
+	if err != nil {
+		t.Fatalf("CompleteChallenge: %v", err)
+	}
+	if sess.Token == "" {
+		t.Error("no session token was issued after a valid second factor")
 	}
 }

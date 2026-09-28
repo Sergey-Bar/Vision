@@ -177,9 +177,9 @@ func ScanForSecrets(name string, body []byte) error {
 	for _, re := range secretShaped {
 		if re.Match(body) {
 			return fmt.Errorf("%w: %s contains credential-shaped material matching %q. "+
-				"A release archive is installed at every site; a secret in one is a secret "+
-				"everywhere, and the release builder takes an explicit file list so this "+
-				"is only reachable by adding the file deliberately.",
+				"A release archive is installed at every site, so a secret in one is a secret "+
+				"everywhere; the release builder takes an explicit file list, which makes "+
+				"this reachable only by adding the file deliberately",
 				ErrVerification, name, re.String())
 		}
 	}
@@ -326,7 +326,7 @@ func readArchive(archivePath string) (map[string]archiveEntry, []string) {
 	if err != nil {
 		return nil, []string{fmt.Sprintf("cannot open archive: %v", err)}
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	if strings.HasSuffix(archivePath, ".zip") {
 		return readZip(f, add)
@@ -336,7 +336,7 @@ func readArchive(archivePath string) (map[string]archiveEntry, []string) {
 	if err != nil {
 		return nil, []string{fmt.Sprintf("cannot read archive: %v", err)}
 	}
-	defer gz.Close()
+	defer func() { _ = gz.Close() }()
 
 	tr := tar.NewReader(gz)
 	for {
@@ -415,7 +415,7 @@ func readZip(f *os.File, add func(string, ...any)) (map[string]archiveEntry, []s
 
 func verifySignature(m Manifest, trustedKey ed25519.PublicKey) error {
 	if m.Signature.Value == "" {
-		return fmt.Errorf("%w: the manifest is unsigned. An unsigned archive is a claim.", ErrVerification)
+		return fmt.Errorf("%w: the manifest is unsigned, and an unsigned archive is only a claim", ErrVerification)
 	}
 	embedded, err := hex.DecodeString(m.Signature.PublicKey)
 	if err != nil || len(embedded) != ed25519.PublicKeySize {
@@ -423,8 +423,8 @@ func verifySignature(m Manifest, trustedKey ed25519.PublicKey) error {
 	}
 	if trustedKey != nil && !equalBytes(trustedKey, embedded) {
 		return fmt.Errorf("%w: the archive was signed by key %q, not the trusted key. An attacker "+
-			"who can write the archive can also sign it, and without this check the signature "+
-			"proves only that they signed their own forgery.",
+			"who can write the archive can also sign it, and without this check the "+
+			"signature proves only that they signed their own forgery",
 			ErrVerification, m.Signature.KeyID)
 	}
 	sig, err := hex.DecodeString(m.Signature.Value)
@@ -519,7 +519,7 @@ func Build(outDir string, in BuildInput, key ed25519.PrivateKey, keyID string) (
 	if err != nil {
 		return "", m, fmt.Errorf("release: create archive: %w", err)
 	}
-	defer archive.Close()
+	defer func() { _ = archive.Close() }()
 
 	gz := gzip.NewWriter(archive)
 	tw := tar.NewWriter(gz)

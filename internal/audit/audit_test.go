@@ -69,7 +69,7 @@ func appendOne(ctx context.Context, pool *pgxpool.Pool, e audit.Entry) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	// The same per-tenant advisory lock the trigger takes, taken here so that two
 	// concurrent writers cannot both compute the same next sequence and race for
@@ -228,7 +228,7 @@ func TestSealerRefusesToSealABrokenChain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	if _, err := sealer.SealRange(ctx, tx, tenant, 1, 0, time.Now()); err == nil {
 		t.Fatal("a seal was produced over a chain that does not verify")

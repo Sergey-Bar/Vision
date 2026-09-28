@@ -17,7 +17,7 @@ func packTar(t *testing.T, path string, files map[string]string) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	gz := gzip.NewWriter(f)
 	tw := tar.NewWriter(gz)
 	for name, body := range files {

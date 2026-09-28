@@ -1092,7 +1092,7 @@ run again in that form.
 
 ### 8.2 Shift shadowing
 
-Twice a quarter per segment, as `05-product-and-backlog.md` §5.2 specifies. The
+Twice a quarter per segment, as `` §5.2 specifies. The
 UX yield is a timing and a vocabulary; the research yield is the answer to
 question 7 in that guide, which is consistently "what had it shown me".
 

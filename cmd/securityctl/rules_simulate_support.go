@@ -29,7 +29,7 @@ func configuredTenant() string {
 // schedules, which is what turns "this zone does not exist" from a guess into a
 // finding. Without a database it degrades to the closed vocabulary alone, and the
 // compiler warns on anything it cannot check rather than pretending.
-func newSiteCompiler(ctx context.Context) *rules.Compiler {
+func newSiteCompiler() *rules.Compiler {
 	c := rules.NewCompiler()
 	c.KnownAIFields = aiProfileFields()
 	return c
@@ -42,7 +42,7 @@ func newBundleService(ctx context.Context) *bundles.Service {
 	}
 	return &bundles.Service{
 		Pool:     pool,
-		Compiler: newSiteCompiler(ctx),
+		Compiler: newSiteCompiler(),
 		Audit:    &audit.Writer{Pool: pool},
 	}
 }
@@ -122,7 +122,7 @@ func scenariosFromFixtures(ctx context.Context, dir string) ([]simulate.Scenario
 				// rather than quietly skipping it.
 				continue
 			}
-			signals = append(signals, signalFromRecord(r, replayEpoch))
+			signals = append(signals, signalFromRecord(r))
 		}
 		if len(signals) == 0 {
 			continue
@@ -133,7 +133,7 @@ func scenariosFromFixtures(ctx context.Context, dir string) ([]simulate.Scenario
 }
 
 // signalFromRecord maps a replayed source record into a rule-engine signal.
-func signalFromRecord(r milestone.RawRecord, epoch time.Time) rules.Signal {
+func signalFromRecord(r milestone.RawRecord) rules.Signal {
 	observed := r.ObservedAt
 	if observed.IsZero() {
 		observed = r.ReceivedAt

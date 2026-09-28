@@ -9,9 +9,6 @@ import (
 
 var base = time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC)
 
-// p is the policy the normalization cases use.
-var p = clock.Policy{Reference: clock.SourceNTP, WarnMs: 2000, SevereMs: 10000, SkewToleranceMs: 5000}
-
 func TestPolicyValidation(t *testing.T) {
 	valid := []clock.Policy{
 		{Reference: clock.SourceNTP, WarnMs: 2000, SevereMs: 10000, SkewToleranceMs: 5000},
@@ -80,7 +77,7 @@ func TestBandIsSymmetric(t *testing.T) {
 func TestNormalizedAppliesDriftInTheRightDirection(t *testing.T) {
 	var got time.Time
 	// A camera 40 seconds FAST claims 09:00:40 when the true time is 09:00:00.
-	got, fallback := clock.Normalized(base.Add(40*time.Second), base, &clock.DeviceState{DriftMs: 40000}, p)
+	got, fallback := clock.Normalized(base.Add(40*time.Second), base, &clock.DeviceState{DriftMs: 40000})
 	if fallback {
 		t.Error("a device with an observed time was reported as a fallback")
 	}
@@ -89,7 +86,7 @@ func TestNormalizedAppliesDriftInTheRightDirection(t *testing.T) {
 	}
 
 	// And a device 40 seconds SLOW is pushed forward.
-	got, _ = clock.Normalized(base.Add(-40*time.Second), base, &clock.DeviceState{DriftMs: -40000}, p)
+	got, _ = clock.Normalized(base.Add(-40*time.Second), base, &clock.DeviceState{DriftMs: -40000})
 	if !got.Equal(base) {
 		t.Errorf("normalized is %s, want %s", got, base)
 	}
@@ -99,7 +96,7 @@ func TestNormalizedAppliesDriftInTheRightDirection(t *testing.T) {
 // substituting a plausible time is how "we guessed" and "the source said so" end
 // up looking identical in a stored record.
 func TestNormalizedFallsBackVisibly(t *testing.T) {
-	got, fallback := clock.Normalized(time.Time{}, base, nil, p)
+	got, fallback := clock.Normalized(time.Time{}, base, nil)
 	if !fallback {
 		t.Error("a missing observed time was not reported as a fallback")
 	}
@@ -112,7 +109,7 @@ func TestNormalizedFallsBackVisibly(t *testing.T) {
 // device that has never been checked is not a device measured at zero drift.
 func TestNoMeasurementMeansNoCorrection(t *testing.T) {
 	observed := base.Add(3 * time.Second)
-	got, fallback := clock.Normalized(observed, base, nil, p)
+	got, fallback := clock.Normalized(observed, base, nil)
 	if fallback {
 		t.Error("an observed time with no device state was reported as a fallback")
 	}
@@ -122,7 +119,7 @@ func TestNoMeasurementMeansNoCorrection(t *testing.T) {
 }
 
 func TestNormalizedWithNeitherTime(t *testing.T) {
-	got, fallback := clock.Normalized(time.Time{}, time.Time{}, nil, p)
+	got, fallback := clock.Normalized(time.Time{}, time.Time{}, nil)
 	if !fallback {
 		t.Error("no times at all was not reported as a fallback")
 	}

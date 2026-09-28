@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"strconv"
 
@@ -29,12 +30,15 @@ func copyStream(dst io.Writer, src io.Reader, buf []byte) (int64, error) {
 	return io.CopyBuffer(dst, struct{ io.Reader }{src}, buf)
 }
 
+// asGate reports whether an error is a bundle activation gate refusal.
+//
+// errors.As, not a type assertion: the gate's error is wrapped on its way out
+// of the store, and a type assertion against the wrapper's dynamic type would
+// miss it and hand the caller the generic "activation failed" instead of the
+// sentence that names which condition was not met. That sentence is the whole
+// point of the gate, so losing it is losing the feature.
 func asGate(err error, target **bundles.ErrGateNotSatisfied) bool {
-	g, ok := err.(*bundles.ErrGateNotSatisfied)
-	if ok {
-		*target = g
-	}
-	return ok
+	return errors.As(err, target)
 }
 
 // ctxContext aliases context.Context for the reader interfaces, so their

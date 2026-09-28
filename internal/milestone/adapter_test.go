@@ -38,19 +38,34 @@ func (s *stubTransport) Get(_ context.Context, route milestone.Route, _ mileston
 
 func (s *stubTransport) Close() error { return nil }
 
+// newAdapter builds an adapter over a stub transport, pinned to a fixed clock so
+// every timestamp in the tests is deterministic.
+//
+// Both are returned because every test needs the adapter to poll and the stub to
+// set up bodies and status codes. Splitting them would leave one of the two
+// unused at every call site, which is worse than a two-value return.
 func newAdapter() (*milestone.Adapter, *stubTransport) {
 	stub := &stubTransport{bodies: map[string]json.RawMessage{}, status: map[string]int{}}
-	return milestone.New(stub, "site-1", "int-1").WithClock(func() time.Time { return testEpoch }), stub
+	return milestone.New(stub, "site-1", "int-1").
+		WithClock(func() time.Time { return testEpoch }), stub
 }
 
-func poll(t *testing.T, tr milestone.Transport) []milestone.RawRecord {
+func poll(t *testing.T, a *milestone.Adapter) []milestone.RawRecord {
 	t.Helper()
-	a := milestone.New(tr, "site-1", "int-1").WithClock(func() time.Time { return testEpoch })
 	recs, err := a.Poll(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("Poll: %v", err)
 	}
 	return recs
+}
+
+// pollOver polls through a transport directly, for the cases that exercise the
+// transport rather than the adapter's own construction.
+func pollOver(t *testing.T, tr milestone.Transport) []milestone.RawRecord {
+	t.Helper()
+	a := milestone.New(tr, "site-1", "int-1").
+		WithClock(func() time.Time { return testEpoch })
+	return poll(t, a)
 }
 
 func feedEvents(t *testing.T, recs []milestone.RawRecord) map[string]milestone.RawRecord {
@@ -65,13 +80,13 @@ func feedEvents(t *testing.T, recs []milestone.RawRecord) map[string]milestone.R
 }
 
 func TestPollParsesAFeed(t *testing.T) {
-	_, stub := newAdapter()
+	a, stub := newAdapter()
 	stub.bodies[eventsRoute] = json.RawMessage(`[
 		{"Id":"e1","Type":"Motion","Timestamp":"2026-03-01T09:00:00Z"},
 		{"Id":"e2","Type":"Analytics","Timestamp":"2026-03-01T09:00:01.500Z"}
 	]`)
 
-	recs := poll(t, stub)
+	recs := poll(t, a)
 	events := feedEvents(t, recs)
 	if len(events) != 2 {
 		t.Fatalf("parsed %d events, want 2 (all records: %+v)", len(events), recs)
@@ -98,7 +113,7 @@ func TestPollParsesAFeed(t *testing.T) {
 // timezone. The difference decides how a DST-spanning window is reasoned about,
 // so conflating them is a correctness bug, not a tidiness one.
 func TestTimezoneProvenanceIsPreserved(t *testing.T) {
-	_, stub := newAdapter()
+	a, stub := newAdapter()
 	stub.bodies[eventsRoute] = json.RawMessage(`[
 		{"Id":"z1","Type":"Motion","Timestamp":"2026-03-01T09:00:00Z"},
 		{"Id":"z2","Type":"Motion","Timestamp":"2026-03-01T11:00:00+02:00"},
@@ -106,7 +121,7 @@ func TestTimezoneProvenanceIsPreserved(t *testing.T) {
 		{"Id":"z4","Type":"Motion","Timestamp":"nonsense"}
 	]`)
 
-	byID := feedEvents(t, poll(t, stub))
+	byID := feedEvents(t, poll(t, a))
 
 	if got := byID["z1"].SourceTimezone; got == "" {
 		t.Error("an explicit Z timestamp recorded no timezone")
@@ -132,7 +147,7 @@ func TestTimezoneProvenanceIsPreserved(t *testing.T) {
 // record with a reason, so an operator can be shown the source sent something the
 // platform could not read.
 func TestOneUnreadableItemDoesNotLoseThePage(t *testing.T) {
-	_, stub := newAdapter()
+	a, stub := newAdapter()
 	stub.bodies[eventsRoute] = json.RawMessage(`[
 		{"Id":"good-1","Type":"Motion","Timestamp":"2026-03-01T09:00:00Z"},
 		{"Type":"Motion","Timestamp":"2026-03-01T09:00:01Z"},
@@ -140,7 +155,7 @@ func TestOneUnreadableItemDoesNotLoseThePage(t *testing.T) {
 	]`)
 
 	var good, unparsed int
-	for _, r := range poll(t, stub) {
+	for _, r := range poll(t, a) {
 		switch r.EventType {
 		case "adapter_unparsed_item":
 			unparsed++
@@ -169,12 +184,12 @@ func TestOneUnreadableItemDoesNotLoseThePage(t *testing.T) {
 // An unrecognised type is carried, not dropped: a vendor adding an event type is
 // information the operator should see, not a reason to lose the event.
 func TestUnknownEventTypeIsCarriedNotDropped(t *testing.T) {
-	_, stub := newAdapter()
+	a, stub := newAdapter()
 	stub.bodies[eventsRoute] = json.RawMessage(`[
 		{"Id":"u1","Type":"QuantumFlux","Timestamp":"2026-03-01T09:00:00Z"}
 	]`)
 
-	byID := feedEvents(t, poll(t, stub))
+	byID := feedEvents(t, poll(t, a))
 	rec, ok := byID["u1"]
 	if !ok {
 		t.Fatal("the unrecognised event was dropped")
@@ -191,12 +206,12 @@ func TestUnknownEventTypeIsCarriedNotDropped(t *testing.T) {
 // deployed but failing must not take the whole poll down with it. Aborting on
 // the first bad endpoint would turn a partial outage into a total ingest outage.
 func TestFeedFailureIsIsolated(t *testing.T) {
-	_, stub := newAdapter()
+	a, stub := newAdapter()
 	stub.bodies[eventsRoute] = json.RawMessage(`[{"Id":"e1","Type":"Motion","Timestamp":"2026-03-01T09:00:00Z"}]`)
 	stub.status["/api/v1/Bookmarks"] = 500
 
 	var good, feedErr int
-	for _, r := range poll(t, stub) {
+	for _, r := range poll(t, a) {
 		switch r.EventType {
 		case "adapter_feed_error":
 			feedErr++
@@ -215,12 +230,12 @@ func TestFeedFailureIsIsolated(t *testing.T) {
 // A credential failure is an operator incident with a remedy; a malformed body
 // is a payload bug. They must not be reported the same way.
 func TestCredentialFailureIsNamedAsSuch(t *testing.T) {
-	_, stub := newAdapter()
+	a, stub := newAdapter()
 	stub.bodies[eventsRoute] = json.RawMessage(`[{"Id":"e1","Type":"Motion"}]`)
 	stub.status[eventsRoute] = 401
 
 	var found bool
-	for _, r := range poll(t, stub) {
+	for _, r := range poll(t, a) {
 		if r.EventType == "adapter_feed_error" && strings.Contains(r.MalformedReason, "401") {
 			found = true
 		}
@@ -242,10 +257,10 @@ func TestPollOrderIsDeterministic(t *testing.T) {
 
 	var first string
 	for run := 0; run < 5; run++ {
-		_, stub := newAdapter()
+		a, stub := newAdapter()
 		stub.bodies[eventsRoute] = body
 		var ids []string
-		for _, r := range poll(t, stub) {
+		for _, r := range poll(t, a) {
 			if r.SourceEventID != "" {
 				ids = append(ids, r.SourceEventID)
 			}
@@ -270,7 +285,7 @@ func TestReplayTransportIsDeterministic(t *testing.T) {
 	for run := 0; run < 3; run++ {
 		tr := milestone.NewReplayTransport(scenarios).WithEpoch(testEpoch)
 		var ids []string
-		for _, r := range poll(t, tr) {
+		for _, r := range pollOver(t, tr) {
 			ids = append(ids, r.SourceEventID+"|"+r.EventType)
 		}
 		if len(ids) == 0 {
@@ -294,8 +309,8 @@ func TestReplayEpochDoesNotChangeRelativeTiming(t *testing.T) {
 	scenarios := loadFixtures(t)
 	fiveYears := 5 * 365 * 24 * time.Hour
 
-	early := poll(t, milestone.NewReplayTransport(scenarios).WithEpoch(testEpoch))
-	late := poll(t, milestone.NewReplayTransport(scenarios).WithEpoch(testEpoch.Add(fiveYears)))
+	early := pollOver(t, milestone.NewReplayTransport(scenarios).WithEpoch(testEpoch))
+	late := pollOver(t, milestone.NewReplayTransport(scenarios).WithEpoch(testEpoch.Add(fiveYears)))
 
 	if len(early) != len(late) {
 		t.Fatalf("record counts differ: %d vs %d", len(early), len(late))
@@ -313,7 +328,7 @@ func TestReplayEpochDoesNotChangeRelativeTiming(t *testing.T) {
 // The required behaviours must actually appear in replay output. A fixture set
 // that loads cleanly but replays to nothing proves nothing.
 func TestReplayProducesEveryRequiredBehaviour(t *testing.T) {
-	recs := poll(t, milestone.NewReplayTransport(loadFixtures(t)).WithEpoch(testEpoch))
+	recs := pollOver(t, milestone.NewReplayTransport(loadFixtures(t)).WithEpoch(testEpoch))
 
 	seen := map[string]bool{}
 	for _, r := range recs {
@@ -337,7 +352,7 @@ func TestReplayDeliversDuplicatesVerbatim(t *testing.T) {
 	scenarios := loadFixtures(t)
 	var dupes int
 	byID := map[string]int{}
-	for _, r := range poll(t, milestone.NewReplayTransport(scenarios).WithEpoch(testEpoch)) {
+	for _, r := range pollOver(t, milestone.NewReplayTransport(scenarios).WithEpoch(testEpoch)) {
 		byID[r.SourceEventID]++
 		if r.SourceEventID == "dup-0001" || r.SourceEventID == "rr-0001" {
 			dupes++

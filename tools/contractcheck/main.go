@@ -89,6 +89,9 @@ func parseFile(path, rel string, c *Contract) error {
 		if curName == "" {
 			return
 		}
+		//nolint:staticcheck // QF1003: this is already a tagged switch on a
+		// string; the linter is reading a type it inferred from
+		// zero values.
 		switch curKind {
 		case "message":
 			c.Messages[pkg+"."+curName] = msg
@@ -128,7 +131,8 @@ func parseFile(path, rel string, c *Contract) error {
 		if curName == "" {
 			continue
 		}
-		if curKind == "message" {
+		switch curKind {
+		case "message":
 			if m := fieldRe.FindStringSubmatch(line); m != nil {
 				n, _ := strconv.ParseInt(m[4], 10, 64)
 				msg.Fields = append(msg.Fields, Field{
@@ -139,7 +143,7 @@ func parseFile(path, rel string, c *Contract) error {
 					OneOf:    oneof,
 				})
 			}
-		} else if curKind == "enum" {
+		case "enum":
 			if m := enumValRe.FindStringSubmatch(line); m != nil {
 				n, _ := strconv.ParseInt(m[2], 10, 32)
 				enum.Values = append(enum.Values, EnumValue{Number: int32(n), Name: m[1]})

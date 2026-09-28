@@ -34,7 +34,6 @@ import (
 var epoch = time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC)
 
 const siteID = "site-fixture"
-const integrationID = "int-milestone-fixture"
 
 const (
 	eventsRoute         = "/api/v1/Events"

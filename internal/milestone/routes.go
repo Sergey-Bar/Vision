@@ -156,32 +156,6 @@ type Query struct {
 	Cursor string
 }
 
-func (q Query) encode() string {
-	if q.Since == nil && q.Limit == 0 && q.Cursor == "" {
-		return ""
-	}
-	out := "?"
-	first := true
-	if q.Since != nil {
-		out += "since=" + q.Since.UTC().Format(time.RFC3339)
-		first = false
-	}
-	if q.Limit > 0 {
-		if !first {
-			out += "&"
-		}
-		out += fmt.Sprintf("limit=%d", q.Limit)
-		first = false
-	}
-	if q.Cursor != "" {
-		if !first {
-			out += "&"
-		}
-		out += "cursor=" + q.Cursor
-	}
-	return out
-}
-
 // Response is what a transport returns: the status, the allow-listed headers,
 // and the body bytes exactly as received.
 type Response struct {
@@ -193,7 +167,7 @@ type Response struct {
 	Route Route
 }
 
-// Unauthenticated is returned by a transport when the source rejected
+// UnauthenticatedError is returned by a transport when the source rejected
 // credentials. It is a distinct error because it is an operational incident with
 // an operator-visible remedy, not a malformed-payload bug to retry.
 type UnauthenticatedError struct {

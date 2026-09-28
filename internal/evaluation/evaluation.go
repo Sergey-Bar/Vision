@@ -22,14 +22,14 @@ import (
 type Outcome string
 
 const (
-	// OutcomeTruePositive: the observation was right and an incident was warranted.
+	// OutcomeTruePositive is the observation being right and an incident warranted.
 	OutcomeTruePositive Outcome = "true_positive"
-	// OutcomeFalsePositive: the observation was right that something happened and
+	// OutcomeFalsePositive is the observation being right that something happened and
 	// wrong that it mattered. The rule's noise floor.
 	OutcomeFalsePositive Outcome = "false_positive"
-	// OutcomeBenign: nothing to report.
+	// OutcomeBenign is nothing to report.
 	OutcomeBenign Outcome = "benign"
-	// OutcomeUndispositioned: no operator has said. A case nobody judged is not
+	// OutcomeUndispositioned is no operator having said. A case nobody judged is not
 	// evidence, and counting it as anything is how a harness makes a profile look
 	// better than it is.
 	OutcomeUndispositioned Outcome = "undispositioned"
@@ -238,7 +238,7 @@ func Evaluate(cases []Case, observations []Observation, gates Gates) Report {
 		pr.FalsePositiveRate = rate(pr.FalsePositives, pr.Labeled)
 		pr.Recall = rate(pr.DetectedRestricted, pr.TruePositives)
 		if labeledNonNil := pr.Labeled - pr.MissedRestricted; labeledNonNil > 0 {
-			pr.DisagreementRate = pr.DisagreementRate / float64(labeledNonNil)
+			pr.DisagreementRate /= float64(labeledNonNil)
 		}
 
 		pr.Failures = evaluateGates(pr, gates)

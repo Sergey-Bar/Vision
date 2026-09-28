@@ -18,18 +18,18 @@ import (
 // The password is deliberately not a parameter and not a flag. It is read from
 // the encrypted secret store at connect time, because a CLI that accepts a
 // password as an argument teaches operators to type it into a shell history.
-func connect(ctx context.Context, tenantID string) (*dbx.Pool, *dbx.Config, error) {
+func connect(ctx context.Context) (*dbx.Pool, error) {
 	cfg := dbx.DefaultConfig()
 	if v := os.Getenv("SP_DATABASE_URL"); v != "" {
 		if err := cfg.ApplyDSN(v); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 	}
 	pool, err := dbx.Open(ctx, cfg, os.Getenv("SP_DATABASE_PASSWORD"))
 	if err != nil {
-		return nil, &cfg, err
+		return nil, err
 	}
-	return pool, &cfg, nil
+	return pool, nil
 }
 
 // migrateCommand mirrors `security-migrate` inside the operator CLI, because an
@@ -69,7 +69,7 @@ func migrateCommand() *command.Command {
 			Name:    "verify",
 			Summary: "Confirm every applied migration still matches this build",
 			Run: func(ctx context.Context, env *command.Env, args []string) error {
-				pool, _, err := connect(ctx, "")
+				pool, err := connect(ctx)
 				if err != nil {
 					return err
 				}
@@ -86,7 +86,7 @@ func migrateCommand() *command.Command {
 }
 
 func runMigrate(ctx context.Context, env *command.Env, mode string) error {
-	pool, _, err := connect(ctx, "")
+	pool, err := connect(ctx)
 	if err != nil {
 		return err
 	}
@@ -123,7 +123,7 @@ func schemaWindow(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	pool, _, err := connect(ctx, "")
+	pool, err := connect(ctx)
 	if err != nil {
 		return "", err
 	}

@@ -2,8 +2,8 @@
 
 Owner: E1 (commercial), E2 (technical). Status: living. Last revised 2026-09-28.
 
-Read `01-master-roadmap.md` §M1/§M2/§M3, `04-gtm-and-sales.md` §4, and
-`00-strategy-and-north-star.md` §3 and §8 first. This document is the calendar for
+Read `` §M1/§M2/§M3, `` §4, and
+`` §3 and §8 first. This document is the calendar for
 telling anybody anything, which is the smallest and most dangerous part of
 building a security product.
 

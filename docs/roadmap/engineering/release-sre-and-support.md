@@ -6,7 +6,7 @@ For the product on a customer's isolated network at 03:00, with nobody from this
 company on the phone. Everything in §8 is written to be read by a site operator,
 not by us.
 
-`01-master-roadmap.md` owns the dates. `07-quality-engineering.md` owns the
+`` owns the dates. `` owns the
 release quality gate. This document owns the artefact, the topology, the
 observability surface, the recovery story, the support hours and the disclosure
 policy.
@@ -70,7 +70,7 @@ release-<version>-<platform>.tar.gz
 ```
 
 `Manifest` is the thing to read: `SchemaVersion` (currently 1), `Product`
-(`"security-platform"` — see `06-ux-and-design-system.md` §9.1 for why the
+(`"security-platform"` — see `` §9.1 for why the
 manifest string is not the brand), `Version`, `Platform`, `CreatedAt`,
 `GitCommit`, `Files`, `Migrations`, `Compatibility`, `SBOM`, `Provenance`,
 `Signature`.
@@ -142,7 +142,7 @@ It is never a different process — no "quick build", no unsigned binary, no
 ```
 
 The rule that matters: **a hotfix is a release.** Everything in §1.2 and
-`07-quality-engineering.md` §9 applies without exception, because the moment a
+`` §9 applies without exception, because the moment a
 hotfix skips the gate is the moment the gate stops existing.
 
 ---
@@ -273,7 +273,7 @@ That constraint has concrete consequences the design must keep:
   — a site that has lost its IdP connection and whose accounts are federated must
   still have operators who can sign in. This is in `01` M5 as
   "local authentication remains available for isolated sites, always", and it is
-  in `05-product-and-backlog.md` as row #87 with a note that "a non-requirement,
+  in `` as row #87 with a note that "a non-requirement,
   so it is a requirement".
 
 ### 2.3 What the M1 install/upgrade/backup/restore skeletons must become
@@ -755,7 +755,7 @@ propagated to the client in every `WriteError` body and on the console footer, a
 the panic handler logs it — but the access log line does not, and it cannot: the
 middleware runs outside the principal resolution. **This is a real gap against
 `AGENTS.md` and it is a named quality incident (Q-9 in
-`07-quality-engineering.md` §11.4).** The fix is a response-writer that captures
+`` §11.4).** The fix is a response-writer that captures
 the request id the handler generated and a post-handler hook that resolves the
 principal once, so a line reads:
 
@@ -823,7 +823,7 @@ lossless rather than accidentally so.
 **The drain timeout and what happens past it.** `TimeoutStopSec=120` on systemd.
 At T+120 systemd sends `SIGKILL`, which is a crash, which invariant 1 covers. The
 test for this is the fault-injection test at stage "job claim" in
-`07-quality-engineering.md` §5 — **a graceful shutdown that silently loses a
+`` §5 — **a graceful shutdown that silently loses a
 claim is worse than a crash that does not, because the crash is tested and the
 shutdown is not.** Until that test exists, graceful shutdown is a best effort and
 the drain timeout is the real bound. Named, not worked around.
@@ -900,7 +900,7 @@ and there is no `/v1/metrics` endpoint — `/v1/health`, `/v1/health/ready` and 
 So today, no operator can scrape a single number, and `01` M1's exit gate 3 —
 "Every SLO in `internal/observability/slo.go` is demonstrably met under a recorded
 load run" — cannot be met, because the SLOs evaluate against gauges that are
-always zero. This is quality incident **Q-3** in `07-quality-engineering.md`
+always zero. This is quality incident **Q-3** in ``
 §11.4, and it is on the critical path of a milestone gate, which makes it the
 highest-priority non-feature in M1.
 
@@ -927,7 +927,7 @@ authoritative one."
 | Go errors wrap with context | `fmt.Errorf("normalize: %w", err)` — a bare error at the top of a 12-frame stack is a wasted 20 minutes | review; and the panic handler's generic 500 body deliberately says nothing |
 | No query strings in access logs | "a habit is a habit and a future endpoint that does would leak into every log line" | `logRequests` already omits it, with the comment |
 | No secrets, tokens, credentials | A log file is a lower-protection store than a secret store, and it gets copied to a SIEM | `Config.DSN()` omits the password and is documented safe to log; `TestSecretMaterialIsRefused` scans release archives; the `contract-sync`-style check for the site config schema is `TestSiteConfigSchemaCannotCarryASecret` |
-| **No raw biometrics** | a face crop in a log is biometric data under every regulation this customer base operates in, and a log is copied to places nobody enumerated | review, plus the hard rule in `07-quality-engineering.md` §8.4: no real biometric data in the repository *or in CI* |
+| **No raw biometrics** | a face crop in a log is biometric data under every regulation this customer base operates in, and a log is copied to places nobody enumerated | review, plus the hard rule in `` §8.4: no real biometric data in the repository *or in CI* |
 | A refusal nobody can see is a refusal nobody can investigate | `auditDenied` writes `api.access.denied` to the **ledger**, not the log | `internal/api/server.go:289`; `TestEveryAuthEventIsAudited` |
 | The 500 body says nothing about what failed inside | "an error cannot leak a stack by omission" — one `ErrorBody` shape | `WriteError` / `ErrorBody` |
 
@@ -967,7 +967,7 @@ Three of these deserve a note:
   it as *the system protecting itself*, not as a failure.
 - **Two of the eight do not measure what their target says** —
   `correlation_under_drift` and `dead_letter_visibility`. Quality incident Q-1
-  and Q-2 in `07-quality-engineering.md` §11.4, with the fix stated there (the
+  and Q-2 in `` §11.4, with the fix stated there (the
   code should match the stated target, not the reverse, because "a gate that
   fires on one bad camera in a 2,000-camera site trains the operator to ignore
   it").
@@ -1269,7 +1269,7 @@ compromise for a customer whose compliance regime requires it, and it is a
 
 ### 7.1 Severity, from the customer's side
 
-The severity definitions in `07-quality-engineering.md` §10 are ours. A customer
+The severity definitions in `` §10 are ours. A customer
 reports in their language and we map:
 
 | They say | It is | Our commitment |
@@ -1278,7 +1278,7 @@ reports in their language and we map:
 | "it's escalated everything", "we can't work, the queue is unusable" | **Sev-2** | T+1 working day to a mitigation |
 | "the camera view is wrong", "the time is wrong on the timeline" | **Sev-2** if it affects a decision, **Sev-3** if cosmetic | |
 | "how do I…", "where is the button" | **Sev-3** | Next working day, and the runbook gets the answer |
-| "can it also do X" | a request, not a support ticket | `05-product-and-backlog.md` §5.4's three-similar-requests rule |
+| "can it also do X" | a request, not a support ticket | `` §5.4's three-similar-requests rule |
 
 **Mapping a "missed something" report to a Sev-1 without waiting to be sure is
 deliberate.** The cost of treating a false alarm as a Sev-1 is one person's
@@ -1347,7 +1347,7 @@ automatic and must not depend on a human noticing — the `dead_letter_count`,
 gauges, the seal-verification result, and a nightly scheduled
 `securityctl doctor` whose failure is an alert. A Sev-1 discovered by a customer
 is a detection failure as well as a product failure, and it is logged as both
-(`07-quality-engineering.md` §10.2).
+(`` §10.2).
 
 ### 7.4 Escalation to a named human
 
@@ -1829,7 +1829,7 @@ COST        A site visit at short notice, and the cost of an engineer off
 > `slo.go` give the real ingest and backlog numbers. Every number *derived* from
 > them below is a calculation, not a measurement, and none of it may be stated to
 > a customer or published until a recorded load run says otherwise
-> (`07-quality-engineering.md` §11.3, and `README.md`'s evidence rule).
+> (`` §11.3, and `README.md`'s evidence rule).
 
 ### 9.1 Sizing inputs (real)
 
@@ -1935,7 +1935,7 @@ customer's understanding of a security event, we tell them — before they find
 out, and before we understand it.** Not a changelog entry. Not "this was fixed in
 1.4.1". A notification, to a named person, with what we observed, what we believe,
 what we are doing, and when we will next update. The severity, the clock and the
-protocol are `07-quality-engineering.md` §10.3's, and the T+0.5h line is
+protocol are `` §10.3's, and the T+0.5h line is
 "**TELL THE CUSTOMER. Before we understand it. This is not optional and it is not
 negotiable.**"
 
@@ -2144,9 +2144,9 @@ useless to somebody who is not running a vulnerability scanner.
 
 **Eleven of the twenty-one lines are incomplete, and six of them are on the path
 to an M1 exit gate.** That is the honest state of the release story, and it is
-consistent with `docs/status.md` and with `05-product-and-backlog.md` §2.1's
+consistent with `docs/status.md` and with `` §2.1's
 finding that M1's backlog is roughly 2.5× the available capacity. The M1
 reduced-scope cut is applied to items 31–34 and 36–37 (the installer and the
 service units) per `01`, and the fault-injection harness
-(`07-quality-engineering.md` §5) is the last thing cut and never below the four
+(`` §5) is the last thing cut and never below the four
 stages that have a partial substitute.

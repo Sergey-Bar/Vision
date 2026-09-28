@@ -3,6 +3,7 @@ package incidents_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -474,7 +475,7 @@ func TestGetRefusesAnUnknownIncident(t *testing.T) {
 	if err == nil {
 		t.Fatal("an unknown incident was returned")
 	}
-	if err != incidents.ErrNotFound {
+	if !errors.Is(err, incidents.ErrNotFound) {
 		t.Errorf("error is %v, want ErrNotFound so absence and non-visibility are indistinguishable", err)
 	}
 }

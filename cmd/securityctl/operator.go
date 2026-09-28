@@ -458,7 +458,7 @@ func runAuditSeal(ctx context.Context, env *command.Env, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	seal, err := sealer.SealRange(ctx, tx, configuredTenant(), *from, 0, time.Now().UTC())
 	if err != nil {
@@ -766,7 +766,7 @@ func runEnrollWebAuthn(ctx context.Context, env *command.Env, ident *identity.Se
 		if err != nil {
 			return err
 		}
-		payload, err := identity.RegistrationPayload(rp, issued, user)
+		payload, err := identity.RegistrationPayload(rp, issued)
 		if err != nil {
 			return err
 		}
@@ -1124,11 +1124,12 @@ func walkForDegradation(c rules.Condition, out *[]string) {
 
 func describeAction(r rules.Rule, resolvedSeverity string) string {
 	parts := []string{}
-	if r.Then.Suppress {
+	switch {
+	case r.Then.Suppress:
 		parts = append(parts, "suppress")
-	} else if r.Then.MarkDuplicate {
+	case r.Then.MarkDuplicate:
 		parts = append(parts, "mark duplicate")
-	} else if r.Then.CreateIncident {
+	case r.Then.CreateIncident:
 		parts = append(parts, "incident at "+orNone(resolvedSeverity))
 	}
 	if r.Then.Escalate {

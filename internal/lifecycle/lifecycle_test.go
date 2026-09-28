@@ -100,7 +100,7 @@ func TestInstallOfAFreshDirectory(t *testing.T) {
 	}
 
 	dest := filepath.Join(t.TempDir(), "program")
-	out, err := lifecycle.Extract(archivePath, dest, manifest, plan.Files)
+	out, err := lifecycle.Extract(archivePath, dest, plan.Files)
 	if err != nil {
 		t.Fatalf("Extract: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestUnreadableStateVersionIsRefused(t *testing.T) {
 	if marshalErr != nil {
 		t.Fatalf("marshal: %v", marshalErr)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "install-state.json"), []byte(body), 0o640); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "install-state.json"), body, 0o640); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	_, err := lifecycle.ReadState(dir)
@@ -305,7 +305,7 @@ func TestExtractionRefusesATraversingEntry(t *testing.T) {
 		"../../etc/cron.d/evil": "owned",
 	})
 
-	_, err = lifecycle.Extract(evil, t.TempDir(), manifest, plan.Files)
+	_, err = lifecycle.Extract(evil, t.TempDir(), plan.Files)
 	if err == nil {
 		t.Fatal("an archive with a traversing entry was extracted")
 	}
@@ -337,7 +337,7 @@ func TestExtractionRefusesAnUnlistedFile(t *testing.T) {
 
 	// And extraction refuses it too, on a plan that somehow carried the list.
 	plan := lifecycle.Plan{Files: []release.FileEntry{{Path: "bin/x"}}}
-	if _, err := lifecycle.Extract(repacked, t.TempDir(), manifest, plan.Files); err == nil {
+	if _, err := lifecycle.Extract(repacked, t.TempDir(), plan.Files); err == nil {
 		t.Error("extraction accepted an entry the manifest did not list")
 	}
 }

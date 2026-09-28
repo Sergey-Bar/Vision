@@ -105,7 +105,7 @@ func NewTenant(t *testing.T, pool *pgxpool.Pool) (tenant, site, device string) {
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	if _, err := tx.Exec(ctx, `INSERT INTO tenants (tenant_id, name) VALUES ($1, $2)`, tenant, "Test Tenant"); err != nil {
 		t.Fatalf("insert tenant: %v", err)
@@ -164,7 +164,7 @@ func AsRole(t *testing.T, pool *pgxpool.Pool, role, tenant string, fn func(tx pg
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	// SECURITY_RESTRICTED_OPERATION would be the production shape, but the test
 	// database owner cannot SET ROLE into a role it does not have privileges

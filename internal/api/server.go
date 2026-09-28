@@ -56,9 +56,8 @@ type Server struct {
 	Pool *dbx.Pool
 	// HealthCheck is the readiness set. A check named "aiRuntime" is informational
 	// and never makes the core unready.
-	HealthCheck    map[string]func(context.Context) error
-	start          time.Time
-	csrfCookieName string
+	HealthCheck map[string]func(context.Context) error
+	start       time.Time
 }
 
 // Handler builds the HTTP handler with the security middleware applied.
@@ -208,14 +207,14 @@ func (s *Server) requirePrincipal(h func(http.ResponseWriter, *http.Request, ide
 }
 
 // requireCapability is the wrapper for a capability-gated handler.
-func (s *Server) requireCapability(cap identity.Capability, h func(http.ResponseWriter, *http.Request, identity.Principal)) http.HandlerFunc {
+func (s *Server) requireCapability(needed identity.Capability, h func(http.ResponseWriter, *http.Request, identity.Principal)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		p, ok := s.principal(w, r)
 		if !ok {
 			return
 		}
-		if err := p.Authorize(cap); err != nil {
-			s.auditDenied(r, p, cap)
+		if err := p.Authorize(needed); err != nil {
+			s.auditDenied(r, p, needed)
 			WriteError(w, http.StatusForbidden, "not_authorized", err.Error(), requestID(r))
 			return
 		}
@@ -286,14 +285,14 @@ func (s *Server) tenantHeader(r *http.Request, p identity.Principal) error {
 	return nil
 }
 
-func (s *Server) auditDenied(r *http.Request, p identity.Principal, cap identity.Capability) {
+func (s *Server) auditDenied(r *http.Request, p identity.Principal, needed identity.Capability) {
 	if s.Audit == nil || s.Pool == nil {
 		return
 	}
 	_ = s.Pool.InSystemTenant(r.Context(), func(tx pgx.Tx) error {
 		_, err := s.Audit.Append(r.Context(), tx, audit.Entry{
 			TenantID: p.TenantID, Actor: p.Username, ActorType: audit.ActorOperator,
-			Action: "api.access.denied", TargetType: "capability", TargetID: string(cap),
+			Action: "api.access.denied", TargetType: "capability", TargetID: string(needed),
 			RequestID: requestID(r), SessionID: p.SessionID, SiteScope: p.SiteScope,
 			Reason: "capability not held",
 		})
@@ -380,7 +379,7 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string, certFile, keyF
 		srv.TLSConfig = srv.TLSConfig.Clone()
 	}
 
-	ln, err := net.Listen("tcp", addr)
+	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", addr)
 	if err != nil {
 		return fmt.Errorf("api: listen on %s: %w", addr, err)
 	}
@@ -502,7 +501,7 @@ func DecodeJSON(r *http.Request, dst any) error {
 	return nil
 }
 
-func parseLimit(raw string, def, max int) int {
+func parseLimit(raw string, def, ceiling int) int {
 	if raw == "" {
 		return def
 	}
@@ -510,8 +509,8 @@ func parseLimit(raw string, def, max int) int {
 	if err != nil || n <= 0 {
 		return def
 	}
-	if n > max {
-		return max
+	if n > ceiling {
+		return ceiling
 	}
 	return n
 }

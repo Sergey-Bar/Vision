@@ -21,12 +21,20 @@ import (
 )
 
 func main() {
+	// The exit code is computed before os.Exit rather than inside it, because
+	// os.Exit skips every deferred call — including the signal handler's stop
+	// below, which releases the process's handler for SIGINT. Running the command
+	// inside a helper keeps the defer on the stack where it is registered.
+	os.Exit(run())
+}
+
+func run() int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
 	root := newRootCommand()
 	env := &command.Env{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr}
-	os.Exit(int(root.Execute(ctx, env, os.Args[1:])))
+	return int(root.Execute(ctx, env, os.Args[1:]))
 }
 
 func newRootCommand() *command.Command {

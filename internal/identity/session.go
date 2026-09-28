@@ -211,7 +211,7 @@ func (s *Service) PasswordStep(ctx context.Context, tenant, username, password, 
 		// from a password alone, and it exists only because a bootstrap admin has
 		// nobody to enrol against. It is audited at the highest volume precisely
 		// so a site that leaves it open is visible.
-		sess, err := s.createSession(ctx, tenant, user, sourceIP, "", "bootstrap", true)
+		sess, err := s.createSession(ctx, tenant, user, sourceIP, "bootstrap", true)
 		if err != nil {
 			return result, err
 		}
@@ -291,7 +291,7 @@ func (s *Service) CompleteChallenge(ctx context.Context, tenant, challengeID, me
 		return sess, errors.New("identity: the challenge has expired; start again with the password")
 	}
 
-	factorID, _, ok, err := s.verifyFactor(ctx, tenant, userID, method, code)
+	factorID, _, ok, err := s.VerifyFactor(ctx, tenant, userID, method, code)
 	if err != nil {
 		return sess, err
 	}
@@ -308,7 +308,7 @@ func (s *Service) CompleteChallenge(ctx context.Context, tenant, challengeID, me
 	// The challenge row is consumed and becomes the session row, in one
 	// transaction. A challenge that could be used twice would be a password
 	// equivalent.
-	sess, err = s.createSession(ctx, tenant, user, sourceIP, factorID, method, true)
+	sess, err = s.createSession(ctx, tenant, user, sourceIP, method, true)
 	if err != nil {
 		return sess, err
 	}
@@ -333,7 +333,7 @@ func (s *Service) CompleteChallenge(ctx context.Context, tenant, challengeID, me
 // a different act from being logged in, and a session that was fine fifteen
 // minutes ago is not evidence about the operator's intent now.
 func (s *Service) StepUp(ctx context.Context, tenant, userID, method, code, action, target string) (string, error) {
-	_, _, ok, err := s.verifyFactor(ctx, tenant, userID, method, code)
+	_, _, ok, err := s.VerifyFactor(ctx, tenant, userID, method, code)
 	if err != nil {
 		return "", err
 	}
@@ -570,7 +570,7 @@ func (s *Service) revoke(ctx context.Context, tenant, sessionID, reason string) 
 	return nil
 }
 
-func (s *Service) createSession(ctx context.Context, tenant string, user userRow, sourceIP, factorID, method string, mfa bool) (Session, error) {
+func (s *Service) createSession(ctx context.Context, tenant string, user userRow, sourceIP, method string, mfa bool) (Session, error) {
 	var sess Session
 	token, tokenHash, err := NewToken()
 	if err != nil {

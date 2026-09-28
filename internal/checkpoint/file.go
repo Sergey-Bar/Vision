@@ -44,7 +44,7 @@ func writeFileSync(path string, body []byte, perm os.FileMode, doSync bool) erro
 	}
 	if doSync {
 		if d, err := os.Open(dir); err == nil {
-			defer d.Close()
+			defer func() { _ = d.Close() }()
 			_ = d.Sync()
 		}
 	}

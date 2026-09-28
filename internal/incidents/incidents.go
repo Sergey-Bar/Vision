@@ -36,6 +36,8 @@ import (
 // State is an incident's lifecycle state.
 type State string
 
+// Incident states. A closed incident does not reopen silently, because closing
+// is what an operator signs.
 const (
 	StateOpen          State = "open"
 	StateInReview      State = "in_review"

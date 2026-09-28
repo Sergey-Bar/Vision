@@ -25,6 +25,9 @@ import (
 // ChangeKind classifies a difference between two runs.
 type ChangeKind string
 
+// Diff kinds, most consequential first. An incident appearing or disappearing
+// outranks a severity change, because that is what changes an operator's
+// workload.
 const (
 	ChangeCreated         ChangeKind = "created"
 	ChangeClosed          ChangeKind = "closed"

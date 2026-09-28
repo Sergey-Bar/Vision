@@ -3,8 +3,8 @@
 Owner: E1, with E2 on metering and licensing. Status: living. Last revised
 2026-09-28.
 
-Read `00-strategy-and-north-star.md` §3, §6 and §8, `01-master-roadmap.md`
-§M2/§M3/§M7, and `08-metrics-and-analytics.md` §8.1 first. This document is
+Read `` §3, §6 and §8, ``
+§M2/§M3/§M7, and `` §8.1 first. This document is
 decided **early enough to instrument** and **not published before the evidence
 exists**, and those two facts are in tension on purpose: an unmeasured price that
 was not anticipated is a pricing model we cannot implement, and a measured price
@@ -255,7 +255,7 @@ fact in this document:**
 > uplift visibly rather than absorbing it ($1,200/site/month — which nearly
 > halves the site count required, since it is the only change that raises
 > contribution as fast as it raises fixed cost), and every site count, runway
-> number and capital ask in `18-financial-plan.md` is computed with 24/7
+> number and capital ask in `` is computed with 24/7
 > **excluded** and then shown with it **included**. A plan that quietly assumes
 > 24/7 is a plan built on a promise we cannot staff.
 
@@ -516,10 +516,10 @@ Concretely:
 
 ## 6. Offline and air-gapped licensing
 
-> Cross-reference: `12-release-sre-and-support.md` §3.3, which states the same
+> Cross-reference: `` §3.3, which states the same
 > problem and records that **the decision has not been made**. §6.1–6.3 below do
 > not change `12`; they propose the options `12` §3.3 asks for and mark the
-> decision as an ADR required before M3 GA. `15-launch-plan.md` §3's technical
+> decision as an ADR required before M3 GA. `` §3's technical
 > gate is where the ADR is verified as present.
 
 ### 6.1 The honest problem statement

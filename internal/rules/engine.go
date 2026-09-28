@@ -112,6 +112,8 @@ type Outcome struct {
 // DegradedReason names why a Tier C signal was unavailable.
 type DegradedReason string
 
+// Degradation reasons. The same closed set the schema's CHECK allows: a value
+// outside it would be read downstream as no degradation at all.
 const (
 	DegradedNone             DegradedReason = "none"
 	DegradedModelUnavailable DegradedReason = "model_unavailable"

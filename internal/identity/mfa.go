@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/base32"
 	"encoding/base64"
@@ -12,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
 	"strings"
 	"time"
 
@@ -20,20 +22,20 @@ import (
 	"github.com/Sergey-Bar/Ai-Captain/internal/audit"
 )
 
-// totpSecret is the wrapped shared secret. Wrapping happens in the secret store,
-// never here, so this package never holds a key.
-type totpSecret struct {
-	Wrapped []byte
-	Label   string
-}
-
-// verifyFactor checks a second factor.
+// VerifyFactor checks a second factor.
 //
 // WebAuthn is verified by signature against the stored public key; TOTP by
 // comparing a counter-derived code. Both are constant-time comparisons, and
 // neither is a comparison against a value the client chose earlier in the
 // request.
-func (s *Service) verifyFactor(ctx context.Context, tenant, userID, method, code string) (factorID, methodUsed string, ok bool, err error) {
+// VerifyFactor checks a second factor and returns the credential that satisfied
+// it.
+//
+// Exported because it is a service boundary rather than an internal helper: the
+// login path and the step-up path both need it, and a test that could only reach a
+// private function could not have caught the signed-assertion path failing to
+// check a signature.
+func (s *Service) VerifyFactor(ctx context.Context, tenant, userID, method, code string) (factorID, methodUsed string, ok bool, err error) {
 	if strings.TrimSpace(code) == "" {
 		return "", "", false, errors.New("identity: a second factor code is required")
 	}
@@ -67,34 +69,67 @@ func (s *Service) verifyFactor(ctx context.Context, tenant, userID, method, code
 		// A TOTP code is 6 digits at a 30-second step. The previous and next
 		// steps are accepted because a client whose clock is a second fast
 		// otherwise fails in a way that looks like a credential problem.
-		secret, unwrapErr := s.unwrapTOTP(ctx, wrapped)
+		secret, unwrapErr := s.unwrapTOTP(wrapped)
 		if unwrapErr != nil {
 			return "", "", false, unwrapErr
 		}
+		// The stored value is the base32 text that was handed to the
+		// authenticator, and the HMAC runs over the bytes that text encodes. An
+		// authenticator decodes before hashing, so hashing the base32 characters
+		// themselves computes a different key and no code would ever match.
+		raw, decodeErr := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(string(secret))
+		if decodeErr != nil {
+			return "", "", false, fmt.Errorf("identity: stored TOTP secret is not base32: %w", decodeErr)
+		}
 		for _, skew := range []time.Duration{0, -30 * time.Second, 30 * time.Second} {
-			want := totpCode(secret, s.now().Add(skew))
-			if ConstantTimeEqual(want, code) {
+			// SHA-256 first, because that is the algorithm our own enrolment URI
+			// declares. SHA-1 is the RFC 6238 default that an authenticator which
+			// ignores the `algorithm` parameter will use, so a client that read the
+			// URI and a client that did not both verify. Both are HMAC over the same
+			// 160-bit secret with the same counter, so accepting the second does not
+			// widen what an attacker with a guess has to search in any way that
+			// matters, and it removes a support call at 3am.
+			if ConstantTimeEqual(totpCode(raw, sha256.New, s.now().Add(skew)), code) {
+				return id, storedMethod, true, nil
+			}
+			if ConstantTimeEqual(totpCode(raw, sha1.New, s.now().Add(skew)), code) {
 				return id, storedMethod, true, nil
 			}
 		}
 		return id, storedMethod, false, nil
 
 	case "webauthn":
-		// The assertion carries a client data hash, a challenge and a signature
-		// over both. The challenge is what stops a captured assertion being
-		// replayed, and the sign count is what stops a cloned authenticator.
-		// Verification needs the origin and the relying party, which are
-		// deployment configuration rather than request input.
-		var expectedOrigin, expectedRP string
-		_ = s.Pool.QueryRow(ctx,
-			`SELECT COALESCE(ip, ''), COALESCE(user_agent, '') FROM sessions
-			  WHERE tenant_id = $1 AND user_id = $2 ORDER BY created_at DESC LIMIT 1`,
-			tenant, userID).Scan(&expectedOrigin, &expectedRP)
-		verified, verr := verifyWebAuthnAssertion(code, publicKey, signCount)
+		// The assertion arrives as the base64url JSON the browser returned. It is
+		// decoded and passed to VerifyAssertion, which checks the signature over
+		// authenticatorData || SHA-256(clientDataJSON) and the sign counter.
+		//
+		// There is deliberately no query here for the origin or the relying party.
+		// Those live inside the client data, which is hashed into the signed
+		// payload — so a caller that edited the origin would invalidate the
+		// signature rather than pass an unchecked check. Reading them from
+		// somewhere else would be a second, unsigned, source of truth about where
+		// an assertion came from.
+		var assertion Assertion
+		raw, decErr := base64.RawURLEncoding.DecodeString(strings.TrimSpace(code))
+		if decErr != nil {
+			return "", "", false, errors.New("identity: the assertion is not base64url")
+		}
+		if err := json.Unmarshal(raw, &assertion); err != nil {
+			return "", "", false, errors.New("identity: the assertion is not the expected shape")
+		}
+		advanced, verr := VerifyAssertion(publicKey, signCount, assertion)
 		if verr != nil {
 			return "", "", false, fmt.Errorf("identity: webauthn: %w", verr)
 		}
-		return id, storedMethod, verified, nil
+		// The counter moves only when the assertion verified, so a later attempt
+		// cannot present the same one again.
+		if _, err := s.Pool.Exec(ctx, `
+			UPDATE mfa_credentials SET sign_count = $4
+			 WHERE tenant_id = $1 AND credential_id = $2 AND sign_count <= $3`,
+			tenant, id, signCount, advanced); err != nil {
+			return "", "", false, fmt.Errorf("identity: record the authenticator counter: %w", err)
+		}
+		return id, storedMethod, true, nil
 	}
 	return "", "", false, fmt.Errorf("identity: unsupported factor method %q", storedMethod)
 }
@@ -138,7 +173,12 @@ func (s *Service) EnrollTOTP(ctx context.Context, tenant, userID, label string) 
 		return "", "", fmt.Errorf("identity: store TOTP credential: %w", err)
 	}
 	issuer := "security-platform"
-	uri := fmt.Sprintf("otpauth://totp/%s:%s?secret=%s&issuer=%s&algorithm=SHA1&digits=6&period=30",
+	// The algorithm in this URI is the algorithm totpCode implements, and it is
+	// asserted by TestTOTPURICAlgorithmMatchesTheVerifier. An authenticator that
+	// honours the URI computes SHA-256; one that falls back to the RFC 6238
+	// default computes SHA-1. Both have to verify, because an operator whose app
+	// does not read the parameter cannot be told which one it used.
+	uri := fmt.Sprintf("otpauth://totp/%s:%s?secret=%s&issuer=%s&algorithm=SHA256&digits=6&period=30",
 		issuer, label, encoded, issuer)
 	return encoded, uri, nil
 }
@@ -149,7 +189,7 @@ func (s *Service) EnrollTOTP(ctx context.Context, tenant, userID, label string) 
 // A credential that is stored but never confirmed is a credential that will fail
 // at 3am, so the schema's `verified_at` is not left null by this path.
 func (s *Service) VerifyTOTPEnrollment(ctx context.Context, tenant, userID, code string) error {
-	_, _, ok, err := s.verifyFactor(ctx, tenant, userID, "totp", code)
+	_, _, ok, err := s.VerifyFactor(ctx, tenant, userID, "totp", code)
 	if err != nil {
 		return err
 	}
@@ -185,12 +225,16 @@ func (s *Service) EnrollWebAuthn(ctx context.Context, tenant, userID, credential
 // totpCode computes an RFC 6238 code. Implemented here rather than pulled in
 // because it is thirty lines, and every dependency on an air-gapped site is a
 // supply-chain decision somebody has to sign off on.
-func totpCode(secret []byte, at time.Time) string {
+//
+// The hash is a parameter because the enrolment URI declares SHA-256 while the
+// RFC 6238 default — and therefore the fallback for an authenticator that
+// ignores the `algorithm` parameter — is SHA-1. The caller tries both.
+func totpCode(secret []byte, h func() hash.Hash, at time.Time) string {
 	counter := uint64(at.Unix() / 30)
 	var buf [8]byte
 	binary.BigEndian.PutUint64(buf[:], counter)
 
-	mac := hmac.New(sha256.New, secret)
+	mac := hmac.New(h, secret)
 	mac.Write(buf[:])
 	sum := mac.Sum(nil)
 
@@ -204,40 +248,6 @@ func totpCode(secret []byte, at time.Time) string {
 	return fmt.Sprintf("%0*d", 6, mod)
 }
 
-// verifyWebAuthnAssertion checks a signed assertion.
-//
-// The signature is over clientDataJSON || authenticatorData, and the counter must
-// not have gone backwards — a counter that decreases is a cloned authenticator,
-// and that is exactly the signal this returns false for.
-func verifyWebAuthnAssertion(assertionB64 string, publicKey []byte, storedCount int64) (bool, error) {
-	raw, err := base64.RawURLEncoding.DecodeString(assertionB64)
-	if err != nil {
-		return false, errors.New("the assertion is not base64url")
-	}
-	var a struct {
-		ClientDataJSON    string `json:"clientData"`
-		AuthenticatorData string `json:"authenticatorData"`
-		Signature         string `json:"signature"`
-		SignCount         int64  `json:"signCount"`
-	}
-	if err := json.Unmarshal(raw, &a); err != nil {
-		return false, errors.New("the assertion is not the expected shape")
-	}
-	if a.ClientDataJSON == "" || a.Signature == "" {
-		return false, errors.New("the assertion is missing its data or signature")
-	}
-	if storedCount > 0 && a.SignCount <= storedCount {
-		// A counter that did not advance, or went backwards. Either the
-		// assertion is a replay or the authenticator is a clone, and the
-		// difference is not something this code can establish.
-		return false, nil
-	}
-	// The signature itself is verified by the platform's WebAuthn verifier, which
-	// holds the algorithm registry. This function is the state check that
-	// surrounds it.
-	return true, nil
-}
-
 // SecretStore wraps and unwraps secrets with a product-managed key.
 //
 // It is an interface because the key lives in a file with restricted permissions
@@ -248,7 +258,7 @@ type SecretStore interface {
 	Unwrap(ciphertext []byte) ([]byte, error)
 }
 
-func (s *Service) unwrapTOTP(ctx context.Context, wrapped []byte) ([]byte, error) {
+func (s *Service) unwrapTOTP(wrapped []byte) ([]byte, error) {
 	if s.SecretStore == nil {
 		return nil, errors.New("identity: no secret store is configured; the wrapped secret cannot be read")
 	}

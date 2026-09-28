@@ -58,12 +58,12 @@ func Breaches(r *Registry, accepted, deadLettered, driftExcluded, correlations, 
 	if lag < 0 {
 		lag = 0
 	}
-	lagSeconds := time.Duration(lag * float64(time.Second))
+	lagAsDuration := time.Duration(lag * float64(time.Second))
 	out = append(out, SLO{
 		Name:     "ingest_latency",
 		Target:   "p95 under 5s",
 		Breached: lag > 5,
-		Measured: fmt.Sprintf("p95 %.2fs", lagSeconds.Seconds()),
+		Measured: fmt.Sprintf("p95 %.2fs", lagAsDuration.Seconds()),
 		Remedy: "a source is falling behind or the normalizer is saturated. Check the backlog " +
 			"gauge before touching anything else.",
 	})

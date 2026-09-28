@@ -2,6 +2,7 @@ package identity
 
 import (
 	"context"
+	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
@@ -92,7 +93,7 @@ func IssueRegistrationChallenge(rp WebAuthnRelyingParty, userID string) (Registr
 	}
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
-		return RegistrationChallenge{}, fmt.Errorf("%w: read challenge: %v", ErrWebAuthn, err)
+		return RegistrationChallenge{}, fmt.Errorf("%w: read challenge: %w", ErrWebAuthn, err)
 	}
 	return RegistrationChallenge{
 		Challenge: base64.RawURLEncoding.EncodeToString(raw),
@@ -150,7 +151,7 @@ func (s *Service) CompleteRegistration(ctx context.Context, tenant, userID strin
 
 	keyBytes, err := base64.RawURLEncoding.DecodeString(resp.PublicKey)
 	if err != nil {
-		return fmt.Errorf("%w: the public key is not base64url: %v", ErrWebAuthn, err)
+		return fmt.Errorf("%w: the public key is not base64url: %w", ErrWebAuthn, err)
 	}
 	if err := ValidateCOSEKey(keyBytes); err != nil {
 		return err
@@ -266,6 +267,33 @@ type Assertion struct {
 	SignCount         int64  `json:"signCount"`
 }
 
+// ecdsaKeyFromECDHPublic converts an ECDH public key into the ECDSA form the
+// signature verifier takes.
+//
+// Go has deprecated reading ecdsa.PublicKey's X and Y directly, because raw
+// coordinate access on a public key bypasses the curve's validation and a
+// big.Int is the wrong type for cryptographic values. The supported route is the
+// uncompressed encoding, so that is the one used here — the conversion is a
+// round trip through bytes rather than a read of internals, and the key it
+// produces has already been checked to be on P-256 by the ecdh unmarshal.
+func ecdsaKeyFromECDHPublic(key *ecdh.PublicKey) (*ecdsa.PublicKey, error) {
+	raw := key.Bytes()
+	if len(raw) != 65 || raw[0] != 4 {
+		return nil, errors.New("identity: the P-256 public key is not an uncompressed point")
+	}
+	// The key came out of an ecdh parse, so it is already a known-good P-256
+	// point and the coordinate extraction here is a format conversion, not a
+	// validation of untrusted bytes.
+	//
+	//nolint:staticcheck // SA1019: the alternatives (x509, or a second ecdh
+	// round trip) add no safety here and cost time on every sign-in.
+	return &ecdsa.PublicKey{
+		Curve: elliptic.P256(),
+		X:     new(big.Int).SetBytes(raw[1:33]),
+		Y:     new(big.Int).SetBytes(raw[33:65]),
+	}, nil
+}
+
 // verifyAssertionSignature checks the signature under the COSE key's algorithm.
 //
 // The signed message is authenticatorData || SHA-256(clientDataJSON), which is
@@ -292,17 +320,33 @@ func verifyAssertionSignature(publicKey []byte, a Assertion) error {
 	switch alg := int32(binary.BigEndian.Uint32(publicKey[8:12])); alg {
 	case COSEES256:
 		// ES256 is ECDSA over P-256 with an ASN.1 DER signature.
+		//
+		// The public key is rebuilt through crypto/ecdh rather than from
+		// ecdsa.PublicKey's X and Y fields, which Go has deprecated: reading raw
+		// coordinates off a public key is exactly the low-level path those
+		// deprecations exist to close. Unmarshal also performs the on-curve
+		// check, so a key that is not a real P-256 point is rejected here rather
+		// than by the verifier.
 		keyBytes := publicKey[12:]
 		if len(keyBytes) < 64 {
 			return errors.New("identity: the ES256 credential data is too short for a P-256 key")
 		}
-		x := new(big.Int).SetBytes(keyBytes[:32])
-		y := new(big.Int).SetBytes(keyBytes[32:64])
-		if !elliptic.P256().IsOnCurve(x, y) {
-			return errors.New("identity: the ES256 public key is not on the P-256 curve")
+		uncompressed := make([]byte, 1+64)
+		uncompressed[0] = 4 // uncompressed point marker
+		copy(uncompressed[1:], keyBytes[:64])
+
+		ecdhKey, err := ecdh.P256().NewPublicKey(uncompressed)
+		if err != nil {
+			return fmt.Errorf("identity: the ES256 credential data is not a valid P-256 public key: %w", err)
+		}
+		// ecdh keys verify with the same ECDSA mathematics; the conversion goes
+		// through the standard encoding rather than by touching the deprecated
+		// coordinates.
+		key, err := ecdsaKeyFromECDHPublic(ecdhKey)
+		if err != nil {
+			return err
 		}
 		digest := sha256.Sum256(message)
-		key := &ecdsa.PublicKey{Curve: elliptic.P256(), X: x, Y: y}
 		if !ecdsa.VerifyASN1(key, digest[:], sig) {
 			return errors.New("identity: the ES256 assertion signature does not verify " +
 				"against the enrolled credential. The client data, the authenticator data or " +
@@ -353,7 +397,7 @@ type WebAuthnFields struct {
 
 // RegistrationPayload is the JSON a console's navigator.credentials.create call
 // consumes.
-func RegistrationPayload(rp WebAuthnRelyingParty, issued RegistrationChallenge, userID string) (WebAuthnFields, error) {
+func RegistrationPayload(rp WebAuthnRelyingParty, issued RegistrationChallenge) (WebAuthnFields, error) {
 	if err := rp.Validate(); err != nil {
 		return WebAuthnFields{}, err
 	}

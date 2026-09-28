@@ -50,7 +50,7 @@ func runRulesSimulate(ctx context.Context, env *command.Env, args []string) erro
 		return fmt.Errorf("rules simulate: %w", err)
 	}
 
-	compiler := newSiteCompiler(ctx)
+	compiler := newSiteCompiler()
 	candidate, problems := compiler.Compile(raw)
 	for _, p := range problems {
 		if p.Severity == "error" {
@@ -95,8 +95,7 @@ func runRulesSimulate(ctx context.Context, env *command.Env, args []string) erro
 		var baselineRaw []byte
 		var activeErr error
 		baselineVersion, baselineRaw, activeErr = activeBundle(ctx)
-		switch {
-		case activeErr == nil && len(baselineRaw) > 0:
+		if activeErr == nil && len(baselineRaw) > 0 {
 			baseline, _ := compiler.Compile(baselineRaw)
 			if baseline != nil {
 				baselineVersion = baseline.Version

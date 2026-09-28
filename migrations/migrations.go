@@ -23,6 +23,8 @@ var files embed.FS
 // is exercised against a live database first, the contract ships later.
 type Phase string
 
+// Migration phases. A filename without one is not a migration this runner
+// applies, so an unlabelled file is refused rather than skipped.
 const (
 	PhaseExpand   Phase = "expand"
 	PhaseBackfill Phase = "backfill"

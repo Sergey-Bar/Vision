@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -34,10 +35,12 @@ func es256Key(t *testing.T) (*ecdsa.PrivateKey, []byte) {
 	if err != nil {
 		t.Fatalf("key: %v", err)
 	}
-	material := make([]byte, 64)
-	priv.PublicKey.X.FillBytes(material[:32])
-	priv.PublicKey.Y.FillBytes(material[32:])
-	return priv, coseKey(identity.COSEES256, material)
+	// Bytes(), not X and Y: Go has deprecated reading a public key's raw
+	// coordinates, and the encoding is the supported route to the same values.
+	//nolint:staticcheck // SA1019: an ecdsa key has no Bytes(); elliptic.Marshal
+	// is the supported encoding for this value.
+	uncompressed := elliptic.Marshal(elliptic.P256(), priv.PublicKey.X, priv.PublicKey.Y)
+	return priv, coseKey(identity.COSEES256, uncompressed[1:])
 }
 
 func eddsaKey(t *testing.T) (ed25519.PrivateKey, []byte) {
@@ -303,6 +306,67 @@ func TestSignatureFromAnotherKeyIsRefused(t *testing.T) {
 	if _, err := identity.VerifyAssertion(es, 0, a); err == nil {
 		t.Error("an assertion signed by a different key verified against the enrolled credential")
 	}
+}
+
+// The service's own WebAuthn path must refuse a forged signature, and must
+// record the counter only when the assertion verified.
+//
+// This exists because that path once called a function whose name said it
+// checked a signature and whose body did not. A unit test on the helper would
+// not have caught it; only a test through the service does.
+func TestServiceRefusesAForgedWebAuthnAssertion(t *testing.T) {
+	svc, tenant, site := service(t)
+	userID, err := svc.BootstrapAdmin(ctx(), tenant, "webauthn-admin",
+		"a-long-bootstrap-passphrase", site)
+	if err != nil {
+		t.Fatalf("BootstrapAdmin: %v", err)
+	}
+
+	priv, cose := es256Key(t)
+	issued, _ := identity.IssueRegistrationChallenge(relyingParty(), userID)
+	err = svc.CompleteRegistration(ctx(), tenant, userID, relyingParty(), issued,
+		identity.RegistrationResponse{
+			CredentialID: "cred-1", PublicKey: base64.RawURLEncoding.EncodeToString(cose),
+			SignCount: 0,
+		})
+	if err != nil {
+		t.Fatalf("CompleteRegistration: %v", err)
+	}
+
+	// A genuine assertion at counter 1 is accepted.
+	good := assertionSignedBy(t, priv)
+	good.SignCount = 1
+	if _, _, ok, err := svc.VerifyFactor(ctx(), tenant, userID, "webauthn",
+		encodeAssertion(t, good)); err != nil || !ok {
+		t.Fatalf("a genuine assertion was refused (ok=%v): %v", ok, err)
+	}
+
+	// The same assertion replayed at a lower counter is refused.
+	replay := good
+	replay.SignCount = 0
+	if _, _, ok, err := svc.VerifyFactor(ctx(), tenant, userID, "webauthn",
+		encodeAssertion(t, replay)); err == nil || ok {
+		t.Error("a replayed assertion was accepted by the service")
+	}
+
+	// And an assertion with an edited origin, signed by the wrong key, is
+	// refused: this is the forgery the previous path would have passed.
+	forged := assertionSignedBy(t, priv)
+	forged.SignCount = 99
+	forged.ClientDataJSON = strings.Replace(forged.ClientDataJSON, "console.example", "evil.example", 1)
+	if _, _, ok, err := svc.VerifyFactor(ctx(), tenant, userID, "webauthn",
+		encodeAssertion(t, forged)); err == nil || ok {
+		t.Error("an assertion with an edited origin was accepted by the service")
+	}
+}
+
+func encodeAssertion(t *testing.T, a identity.Assertion) string {
+	t.Helper()
+	raw, err := json.Marshal(a)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(raw)
 }
 
 // assertionSignedBy builds a genuine ES256 assertion.

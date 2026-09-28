@@ -210,7 +210,7 @@ func (a *Adapter) Parse(route Route, resp *Response) ([]RawRecord, error) {
 	now := a.clock()
 	out := make([]RawRecord, 0, len(items))
 	for i, item := range items {
-		rec, err := a.toRecord(route, item, i, now)
+		rec, err := a.toRecord(item, i, now)
 		if err != nil {
 			// One unreadable item in a page must not lose the rest of the page.
 			// It becomes a malformed record with its own identity, so the
@@ -236,7 +236,7 @@ func (a *Adapter) Parse(route Route, resp *Response) ([]RawRecord, error) {
 
 func (a *Adapter) tenant() string { return "" }
 
-func (a *Adapter) toRecord(route Route, item map[string]any, index int, now time.Time) (RawRecord, error) {
+func (a *Adapter) toRecord(item map[string]any, index int, now time.Time) (RawRecord, error) {
 	id := stringField(item, "Id", "id", "ID", "EventId", "eventId")
 	if id == "" {
 		// A page item with no id cannot be deduplicated, and a record that

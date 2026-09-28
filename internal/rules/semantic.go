@@ -116,12 +116,6 @@ func (c *Compiler) checkRules(b *Bundle) []Problem {
 				Severity: SeverityError, Code: code, RuleID: r.ID, Message: msg,
 			})
 		}
-		warn := func(code, msg string) {
-			problems = append(problems, Problem{
-				Severity: SeverityWarning, Code: code, RuleID: r.ID, Message: msg,
-			})
-		}
-
 		if r.ID == "" {
 			add("rule_id", fmt.Sprintf("rule %d has no id", i))
 		} else if prior, dup := seen[r.ID]; dup {
@@ -136,18 +130,15 @@ func (c *Compiler) checkRules(b *Bundle) []Problem {
 			add("priority", "priority cannot be negative")
 		}
 
-		problems = append(problems, c.checkAction(r, add, warn)...)
+		problems = append(problems, c.checkAction(r)...)
 
 		disabled := !r.Enabled
-		problems = append(problems, c.checkCondition(r.ID, r.When, "when", disabled, add, warn)...)
+		problems = append(problems, c.checkCondition(r.ID, r.When, "when", disabled)...)
 	}
 	return problems
 }
 
-type addFn func(code, msg string)
-type warnFn func(code, msg string)
-
-func (c *Compiler) checkAction(r Rule, add addFn, warn warnFn) []Problem {
+func (c *Compiler) checkAction(r Rule) []Problem {
 	var problems []Problem
 	t := r.Then
 
@@ -215,7 +206,7 @@ func (c *Compiler) checkAction(r Rule, add addFn, warn warnFn) []Problem {
 	return problems
 }
 
-func (c *Compiler) checkCondition(ruleID string, cond Condition, path string, disabled bool, add addFn, warn warnFn) []Problem {
+func (c *Compiler) checkCondition(ruleID string, cond Condition, path string, disabled bool) []Problem {
 	var problems []Problem
 
 	switch {
@@ -242,16 +233,16 @@ func (c *Compiler) checkCondition(ruleID string, cond Condition, path string, di
 
 	if cond.All != nil {
 		for i, child := range cond.All {
-			problems = append(problems, c.checkCondition(ruleID, child, fmt.Sprintf("%s.all[%d]", path, i), disabled, add, warn)...)
+			problems = append(problems, c.checkCondition(ruleID, child, fmt.Sprintf("%s.all[%d]", path, i), disabled)...)
 		}
 	}
 	if cond.Any != nil {
 		for i, child := range cond.Any {
-			problems = append(problems, c.checkCondition(ruleID, child, fmt.Sprintf("%s.any[%d]", path, i), disabled, add, warn)...)
+			problems = append(problems, c.checkCondition(ruleID, child, fmt.Sprintf("%s.any[%d]", path, i), disabled)...)
 		}
 	}
 	if cond.Not != nil {
-		problems = append(problems, c.checkCondition(ruleID, *cond.Not, path+".not", disabled, add, warn)...)
+		problems = append(problems, c.checkCondition(ruleID, *cond.Not, path+".not", disabled)...)
 	}
 
 	for _, t := range cond.EventType {
@@ -384,12 +375,12 @@ func (c *Compiler) checkCondition(ruleID string, cond Condition, path string, di
 		})
 	}
 
-	problems = append(problems, c.checkCorroboration(ruleID, cond.Corroborate, path, add, warn)...)
-	problems = append(problems, c.checkAIObservation(ruleID, cond.AIObservation, path, add, warn)...)
+	problems = append(problems, c.checkCorroboration(ruleID, cond.Corroborate, path)...)
+	problems = append(problems, c.checkAIObservation(ruleID, cond.AIObservation, path)...)
 	return problems
 }
 
-func (c *Compiler) checkCorroboration(ruleID string, corr *Corroboration, path string, add addFn, warn warnFn) []Problem {
+func (c *Compiler) checkCorroboration(ruleID string, corr *Corroboration, path string) []Problem {
 	if corr == nil {
 		return nil
 	}
@@ -471,7 +462,7 @@ func (c *Compiler) checkCorroboration(ruleID string, corr *Corroboration, path s
 	return problems
 }
 
-func (c *Compiler) checkAIObservation(ruleID string, cond *AIObservationCondition, path string, add addFn, warn warnFn) []Problem {
+func (c *Compiler) checkAIObservation(ruleID string, cond *AIObservationCondition, path string) []Problem {
 	var problems []Problem
 	if cond == nil {
 		return nil

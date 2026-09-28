@@ -8,7 +8,11 @@ on:
 # No Milestone server is reachable from CI, and none is allowed to be. Every
 # scenario the pipeline runs comes from sanitized versioned fixtures.
 env:
-  GO_VERSION: "1.24"
+  # Must be >= the `go` directive in go.mod. With GOTOOLCHAIN=local a pin below
+  # the directive makes every job fail before it runs a test, so a green-looking
+  # pipeline is not a passing pipeline. Bump this in the same commit that raises
+  # the go directive.
+  GO_VERSION: "1.26"
   GOTOOLCHAIN: local
 
 jobs:

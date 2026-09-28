@@ -2,7 +2,7 @@
 
 Owner: E1. Status: living. Last revised 2026-09-28.
 
-Read `00-strategy-and-north-star.md` first. It defines who we sell to, what the
+Read `` first. It defines who we sell to, what the
 moat is, and the capacity law that constrains every date below.
 
 This document is the calendar: what ships, when, what gates it, and what is cut
@@ -272,7 +272,7 @@ genuinely different from anything a VMS vendor ships.
 **Exit gate.** A site where baselines, memory and drift detection are live; a
 proposed rule with a historical impact diff reviewed and approved by a customer
 operator; and the M6 review confirms the compounding claim in
-`00-strategy-and-north-star.md` §5 — a new site costs more to onboard than an
+`` §5 — a new site costs more to onboard than an
 existing site costs to keep. If it does not, the data moat did not materialise
 and M7–M8 are re-planned as automation on top of search.
 
@@ -384,7 +384,7 @@ matures, including ONVIF's media-signing direction and its tightening
 cybersecurity requirements, rather than building our own.
 
 The full program, with owners and cadence, is in
-`13-security-and-trust-program.md`. It is written against the five invariants in
+``. It is written against the five invariants in
 `AGENTS.md`, which are the law and which no milestone may weaken without an ADR
 and a test, in that order.
 
@@ -398,7 +398,7 @@ auto-resolved, human-intervention, failed-action rates); platform health
 availability, backlog, storage growth).
 
 Definitions, sources and reporting cadence are in
-`08-metrics-and-analytics.md`. A metric without a definition, an owner and a
+``. A metric without a definition, an owner and a
 report is not a metric, and adding one is a change with a cost.
 
 ## Sequence dependencies that are not negotiable
