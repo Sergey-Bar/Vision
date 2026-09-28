@@ -77,8 +77,33 @@ Not a promise, a description of the current state, verifiable in the code:
   unbounded regex.
 - The deterministic core runs with the AI plane entirely absent. A missing AI
   observation is never treated as a negative observation.
-- CI runs on every pull request, with the token scoped to read-only, and every
-  third-party action pinned to a commit SHA.
+- **`make verify` is the gate and it runs locally**, before a commit is made.
+  GitHub Actions is configured but does not run for this repository — it is
+  private, on the free plan, and the account's billing state prevents any job
+  from starting. The workflow is retained for manual use.
+- Every third-party action in the workflow, if it is ever run, is pinned to a
+  commit SHA with a read-only token.
+
+### Outstanding: third-party apps still have read access
+
+**This is the one place where this repository does not currently do what it
+says.** Six GitHub Apps are installed and receive the full repository on every
+pull request: `claude`, `coderabbitai`, `kilo-code-bot`, `sonarqubecloud`,
+`codecov` and `sentry`. They should be removed.
+
+They cannot be removed through the API with the token this project uses, which
+returns 403 for the installations endpoints, so it has to be done in the browser:
+**repository Settings → Installed GitHub Apps → Configure → Remove** for each.
+This is tracked as an open item rather than described as done, because a security
+policy that describes an intention as a fact is worse than one that admits a
+gap.
+
+The reason to remove them is not that they are malicious. It is that this
+codebase is the thing that makes the supply-chain claim, and sending it to be
+indexed by a service is the same mistake the product tells its customers not to
+make. The cost is real — an independent set of eyes is genuinely useful — and it
+is paid knowingly. `golangci-lint`, `go vet`, `gofmt` and the project's own
+tests continue to run locally and lose nothing.
 
 **Known gaps are listed rather than hidden.** See
 [`docs/status.md`](docs/status.md) §"What is not done, and why" and

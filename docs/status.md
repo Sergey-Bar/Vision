@@ -14,15 +14,17 @@ real Postgres 16, with the race detector on. `go vet` and `gofmt` clean.
 enums compatible with the baseline. The Python AI runtime's 21 contract tests
 pass under `py -m unittest`.
 
-> **CI has never run on this repository.** All 16 recorded workflow runs failed
-> with *"The job was not started because recent account payments have failed or
-> your spending limit needs to be increased"* — an account-level billing
-> problem, not a repository or code problem, and it affects `main` as much as any
-> branch. Until it is fixed, every verification claim above is a **local** claim:
-> true on the machine that ran it, and not evidence that the pipeline passes.
-> This is the highest-priority item in the repository, because a product whose
-> selling point is provability is currently relying on unpublished local runs.
-> See `PR #1`.
+> **Verification is local, by decision.** This repository is private and on
+> GitHub's free plan, and the account's billing state prevents any Actions job
+> from starting — every run fails in about three seconds with a billing error,
+> on `main` as much as on any branch. GitHub Actions is therefore configured but
+> triggered by hand only, and `make verify` is the gate.
+>
+> The consequence to be honest about: every verification claim in this document
+> is a **local** run on the machine that produced it, not pipeline evidence.
+> There is no check on a pull request, and nothing stops a force-push to `main`.
+> `scripts/enable-branch-protection.sh` fixes the second the day the plan is
+> upgraded, and the workflow's triggers are restored by deleting three lines.
 
 The linter configuration in `.golangci.yml` excludes four categories, each
 with a written reason rather than a blanket suppression: writes to stdout from a

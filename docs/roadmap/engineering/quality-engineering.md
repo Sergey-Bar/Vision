@@ -1149,11 +1149,14 @@ commit".
    dataset's provenance file, because an unrecorded anonymisation is an assertion
    rather than a control. Recorded licence and provenance per §9.5 of
    ``.
-3. **CI has no access to a customer's data.** CI runs on synthetic fixtures and
-   committed datasets only. A test that needs a live site is a manual test with a
-   person, and `AGENTS.md`'s rule generalises: **"CI must pass with no Milestone
-   server reachable. If a test needs one, the test is wrong."** The same applies
-   to a customer database, a customer VMS and a customer evidence store.
+3. **The suite has no access to a customer's data.** Tests run on synthetic
+   fixtures and committed datasets only. A test that needs a live site is a
+   manual test with a person, and `AGENTS.md`'s rule generalises: **the suite
+   must pass with no Milestone server reachable; if a test needs one, the test is
+   wrong.** The same applies to a customer database, a customer VMS and a
+   customer evidence store. This is now the only place the rule is enforced,
+   since the pipeline does not run for this repository — which makes it more
+   important, not less.
 4. **`SP_TEST_DATABASE_PASSWORD` is a local test password** and is only ever
    present in a local shell or a CI secret store. It never appears in a committed
    file, a log line or a test failure message. A failing test that prints a DSN
@@ -1183,7 +1186,7 @@ at the evidence.
 | 1 | Contracts unchanged or intentionally versioned | `make contract-check`; a diff to `contracts/compat/baseline.json` must cite an ADR | E2 | the wire moved without a decision |
 | 2 | Embedded schemas match published ones | `make contract-sync` | E2 | a bundle is validated against a contract nobody published |
 | 3 | Migrations legal and forward-only | `make migration-phases`; `internal/migrate`'s five tests | E2 | a contract step is bundled with an expand step, or a phase is unknown |
-| 4 | Built-in bundle compiles with no server | `make rules-lint` | E2 | `AGENTS.md`: CI must pass with no Milestone server reachable |
+| 4 | Built-in bundle compiles with no server | `make rules-lint` | E2 | `AGENTS.md`: the suite must pass with no Milestone server reachable |
 | 5 | Vet and lint clean | `make vet && make lint` | E2 | — |
 | 6 | Full suite green with `-race` | `make test-race` | E2 | any test fails **or any test skips** (see 9.2) |
 | 7 | Fault injection green for every stage a change touches | `go test ./internal/faultinjection/... -stage <stages>` | E2 | a stage has no test, or a test passes on a control that was removed |

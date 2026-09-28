@@ -275,7 +275,7 @@ the walkthrough.
 | M1-T54 | Path-traversal negative test on every evidence path touched, on every change: `../`, absolute, backslash, drive letter, NUL, symlink escape | M1-T23 | The database CHECK is half; the store is the other half; both are tested. A NUL test belongs to the evidence store because Postgres rejects it at the type level |
 | M1-T55 | Re-run the full threat-model control suite: 35 controls, each mapped to its failing test | — | A control with no failing test is a claim |
 | M1-T56 | Golden suite stays deterministic-only: fixture → canonical → verification → incident, byte-stable. **No VLM prose in any golden file** | M1-T16 | `AGENTS.md` §Testing |
-| M1-T57 | `make ci` green with no Milestone server reachable | M1-T02 | `contract-check contract-sync vet lint test-race migration-phases rules-lint`. CI must pass with no Milestone server reachable; if a test needs one, the test is wrong |
+| M1-T57 | `scripts/verify.ps1` green with no Milestone server reachable | M1-T02 | `contract-check contract-sync vet lint test-race migration-phases rules-lint`. The suite must pass with no Milestone server reachable; if a test needs one, the test is wrong |
 | M1-T58 | M1 branch: one signed commit per closed DoD item, each referencing the test that proves it | M1-T55 | `docs/status.md` is updated in the same commit, or it goes stale within a week |
 
 **Definition of done (W8).** `make ci` green; the fault-injection matrix complete

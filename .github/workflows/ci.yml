@@ -1,9 +1,21 @@
 name: ci
 
+# Manual only, and that is a deliberate state rather than a temporary one.
+#
+# This repository is private and on GitHub's free plan. GitHub Actions will not
+# start a job for this account — every run fails in about three seconds with
+# "recent account payments have failed or your spending limit needs to be
+# increased" — which is an account-level billing state, not something this
+# repository can fix. Before that, nine red checks on every pull request meant
+# nothing: they did not indicate a broken build, they indicated that no job had
+# ever started. A red X that carries no information is worse than no check.
+#
+# So this workflow is triggered by hand only, and `make verify` is the gate that
+# actually runs. It is deliberately kept runnable rather than deleted: when
+# billing is resolved, restoring the automatic triggers is a three-line change
+# and the pipeline is already correct.
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
 
 # No Milestone server is reachable from CI, and none is allowed to be. Every
 # scenario the pipeline runs comes from sanitized versioned fixtures.

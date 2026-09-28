@@ -59,9 +59,20 @@ $env:Path += ";C:\Program Files\Go\bin;$env:USERPROFILE\go\bin"
 make bootstrap     # fetch tools
 make generate      # contracts -> generated code + compatibility check
 make build
-make test          # -p 1 is not optional; see AGENTS.md
 make lint
 ```
+
+## Verify
+
+```powershell
+.\scripts\verify.ps1    # the gate: contract, vet, gofmt, test -race, migrations, rules
+```
+
+`make verify` is the same list of checks, but **`make` is not installed on this
+machine** — not on `PATH`, not in Git Bash, not in WSL — so the PowerShell script
+is the one that runs. It resolves `go` and `gofmt` itself, and it warns you when
+`SP_TEST_DATABASE_URL` is unset, because the database-backed tests **skip** rather
+than fail without it, and a green run that tested nothing is worse than a red one.
 
 Windows uses `make` through Git Bash, or the equivalent `go` invocations in
 `Makefile` directly from PowerShell. The database-backed tests **skip** rather

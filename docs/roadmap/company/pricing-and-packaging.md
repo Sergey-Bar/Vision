@@ -455,7 +455,7 @@ number is derived from a table the customer already owns and can query.
 ### 5.3 The offline constraint, and the design problem it creates
 
 **The constraint.** `00` §3, `01` §M1 and `12` §3.1: the product is local-first,
-an air-gapped site is a first-class customer, and CI must pass with no server
+an air-gapped site is a first-class customer, and the suite must pass with no server
 reachable. Metering therefore has to work with **no outbound connection, ever**.
 
 **The design problem, stated as a problem and not solved by waving:**

@@ -629,7 +629,7 @@ the failure mode it prevents — *product-looking failures from test interferenc
 — is exactly the failure mode that trains a team to ignore a red build. A new
 engineer who "fixes" this by retrying has introduced a worse problem.
 
-`CI must pass with no Milestone server reachable. If a test needs one, the test
+`the suite must pass with no Milestone server reachable. If a test needs one, the test
 is wrong` (`AGENTS.md`). Every scenario comes from `internal/fixture`.
 
 ### 6.5 Why the Python runtime exists in a different language, and how to run it
