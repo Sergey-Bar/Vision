@@ -1,0 +1,8 @@
+{
+  "minSchemaVersion": 1,
+  "maxSchemaVersion": 8,
+  "minCoreVersion": "0.1.0",
+  "maxCoreVersion": "0.x",
+  "contractsVersion": "security/v1",
+  "notes": "M1 schema window. Every release widens the window, never narrows it inside an expand window: the previous binary must remain usable until the matching contract step has shipped and been observed in the field."
+}

@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package security.v1;
+
+option go_package = "github.com/Sergey-Bar/Ai-Captain/internal/contracts/securityv1;securityv1";
+
+import "google/protobuf/timestamp.proto";
+
+// Operator disposition. It never overwrites the AI observation: "AI said X" and
+// "operator said Y" are both stored and both replay.
+message Disposition {
+  string disposition_id = 1;
+  string tenant_id = 2;
+  string incident_id = 3;
+  string actor_id = 4;
+  string actor_roles = 5;
+  string site_scope = 6;
+
+  DispositionOutcome outcome = 7;
+  string reason_code = 8;
+  string notes = 9;
+
+  // Operator agreement with the AI observation, when one existed. Feeds the
+  // evaluation harness; never fed back into the observation.
+  OperatorAgreement agreement = 10;
+  string related_observation_id = 11;
+
+  google.protobuf.Timestamp created_at = 12;
+  string session_id = 13;
+}
+
+enum DispositionOutcome {
+  DISPOSITION_OUTCOME_UNSPECIFIED = 0;
+  DISPOSITION_OUTCOME_TRUE_POSITIVE = 1;
+  DISPOSITION_OUTCOME_FALSE_POSITIVE = 2;
+  DISPOSITION_OUTCOME_BENIGN = 3;
+  DISPOSITION_OUTCOME_ESCALATED = 4;
+  DISPOSITION_OUTCOME_ACKNOWLEDGED = 5;
+  DISPOSITION_OUTCOME_DISMISSED = 6;
+}
+
+enum OperatorAgreement {
+  OPERATOR_AGREEMENT_UNSPECIFIED = 0;
+  OPERATOR_AGREEMENT_NO_AI_OBSERVATION = 1;
+  OPERATOR_AGREEMENT_AGREED = 2;
+  OPERATOR_AGREEMENT_DISAGREED = 3;
+  OPERATOR_AGREEMENT_UNSURE = 4;
+}

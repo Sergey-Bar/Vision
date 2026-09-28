@@ -1,0 +1,134 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# No Milestone server is reachable from CI, and none is allowed to be. Every
+# scenario the pipeline runs comes from sanitized versioned fixtures.
+env:
+  GO_VERSION: "1.24"
+  GOTOOLCHAIN: local
+
+jobs:
+  contract:
+    name: contract compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Install protoc and protoc-gen-go
+        run: |
+          set -euo pipefail
+          curl -fsSL -o protoc.zip \
+            https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-linux-x86_64.zip
+          unzip -q protoc.zip -d "$HOME/protoc"
+          echo "$HOME/protoc/bin" >> "$GITHUB_PATH"
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: Check contract compatibility
+        run: make contract-check
+      - name: Generated code is up to date
+        run: |
+          set -euo pipefail
+          make generate
+          if ! git diff --quiet -- internal/contracts; then
+            echo "::error::internal/contracts is out of date. Run 'make generate' and commit the result."
+            git diff --stat -- internal/contracts
+            exit 1
+          fi
+
+  build:
+    name: build and vet
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - run: go build -trimpath ./...
+      - run: go vet ./...
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=5m
+      - name: gofmt
+        run: test -z "$(gofmt -l . | tee /dev/stderr)"
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: security
+          POSTGRES_PASSWORD: security
+          POSTGRES_DB: security_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U security"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      SP_TEST_DATABASE_URL: postgres://security:security@localhost:5432/security_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      # -p 1: the database-backed suites share one database and rebuild the
+      # schema, so package test binaries must not run concurrently.
+      - run: go test -p 1 -race -count=1 ./...
+
+  rules:
+    name: rule bundle lint
+    runs-on: ubuntu-latest
+    # Not wired up yet. The rule engine is Track D, and until `securityctl rules
+    # lint` exists this job would either do nothing or pass vacuously — and a
+    # green job that checks nothing is worse than no job, because it is read as
+    # "the bundles are linted".
+    #
+    # It returns with the engine, and it runs in CI with no Milestone server
+    # reachable, which is the constraint that makes it possible at all.
+    if: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - run: go run ./cmd/securityctl rules lint --bundle rules/builtin
+
+  secrets:
+    name: no secrets in the tree
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Release archive contains no credential-shaped material
+        run: |
+          set -euo pipefail
+          # A build-time guard. The stronger statement — the release builder
+          # refuses to package a secret — is asserted by the builder's own tests.
+          if git ls-files | grep -EIn '(BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|AKIA[0-9A-Z]{16})'; then
+            echo "::error::credential-shaped material committed to the repository"
+            exit 1
+          fi
+          echo "no credential-shaped material in tracked files"

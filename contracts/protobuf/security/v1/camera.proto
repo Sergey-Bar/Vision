@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package security.v1;
+
+option go_package = "github.com/Sergey-Bar/Ai-Captain/internal/contracts/securityv1;securityv1";
+
+import "google/protobuf/timestamp.proto";
+
+message Camera {
+  string camera_id = 1;
+  string device_id = 2;
+  string tenant_id = 3;
+  string site_id = 4;
+  string source_camera_id = 5;
+  string display_name = 6;
+  CameraState state = 7;
+  google.protobuf.Timestamp last_seen_at = 8;
+  RecordingState recording_state = 9;
+  // Bit depth / resolution, used by the AI plane to scope a model profile.
+  int32 width = 10;
+  int32 height = 11;
+  bool low_light_capable = 12;
+}
+
+enum CameraState {
+  CAMERA_STATE_UNSPECIFIED = 0;
+  CAMERA_STATE_ONLINE = 1;
+  CAMERA_STATE_OFFLINE = 2;
+  CAMERA_STATE_MAINTENANCE = 3;
+  CAMERA_STATE_UNKNOWN = 4;
+}
+
+enum RecordingState {
+  RECORDING_STATE_UNSPECIFIED = 0;
+  RECORDING_STATE_RECORDING = 1;
+  RECORDING_STATE_STOPPED = 2;
+  RECORDING_STATE_ARCHIVED = 3;
+  RECORDING_STATE_UNKNOWN = 4;
+}

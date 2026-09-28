@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package security.v1;
+
+option go_package = "github.com/Sergey-Bar/Ai-Captain/internal/contracts/securityv1;securityv1";
+
+import "google/protobuf/timestamp.proto";
+
+// A dispatched action. Actions are recorded whether or not a downstream system
+// accepted them; a failed dispatch is an operational fact, not a silent drop.
+message Action {
+  string action_id = 1;
+  string tenant_id = 2;
+  string site_id = 3;
+  string incident_id = 4;
+  string action_type = 5;
+  string target_type = 6;
+  string target_id = 7;
+  ActionStatus status = 8;
+  google.protobuf.Timestamp requested_at = 9;
+  google.protobuf.Timestamp completed_at = 10;
+  string idempotency_key = 11;
+  string error_detail = 12;
+  string requested_by_actor = 13;
+}
+
+enum ActionStatus {
+  ACTION_STATUS_UNSPECIFIED = 0;
+  ACTION_STATUS_REQUESTED = 1;
+  ACTION_STATUS_DISPATCHED = 2;
+  ACTION_STATUS_COMPLETED = 3;
+  ACTION_STATUS_FAILED = 4;
+  ACTION_STATUS_DEDUPED = 5;
+}

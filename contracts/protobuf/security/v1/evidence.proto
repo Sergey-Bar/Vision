@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+package security.v1;
+
+option go_package = "github.com/Sergey-Bar/Ai-Captain/internal/contracts/securityv1;securityv1";
+
+import "google/protobuf/timestamp.proto";
+
+// Evidence metadata. Bytes live in the filesystem evidence directory behind the
+// EvidenceStore interface; Postgres holds the addressing, hash and retention law.
+message Evidence {
+  string evidence_id = 1;
+  string tenant_id = 2;
+  string site_id = 3;
+  string incident_id = 4;
+  string camera_id = 5;
+  string device_id = 6;
+
+  EvidenceKind kind = 7;
+  EvidenceTier tier = 8;
+
+  google.protobuf.Timestamp observed_at = 9;
+  google.protobuf.Timestamp captured_at = 10;
+  google.protobuf.Timestamp stored_at = 11;
+
+  // Storage-relative path. Never absolute; path traversal is rejected on write
+  // and on every fetch/export.
+  string storage_ref = 13;
+  string media_type = 14;
+  int64 size_bytes = 15;
+  // Lowercase hex SHA-256 of the stored bytes.
+  string sha256 = 16;
+
+  string retention_policy = 17;
+  bool legal_hold = 18;
+  google.protobuf.Timestamp retain_until = 19;
+  string fetched_by_actor = 20;
+}
+
+enum EvidenceKind {
+  EVIDENCE_KIND_UNSPECIFIED = 0;
+  EVIDENCE_KIND_SNAPSHOT = 1;
+  EVIDENCE_KIND_CLIP = 2;
+  EVIDENCE_KIND_BOOKMARK = 3;
+  EVIDENCE_KIND_EXPORT = 4;
+}
+
+enum EvidenceTier {
+  // Tier A: authoritative system state reported by the source of truth.
+  EVIDENCE_TIER_UNSPECIFIED = 0;
+  EVIDENCE_TIER_A_AUTHORITATIVE = 1;
+  // Tier B: deterministic derived fact computed by the core.
+  EVIDENCE_TIER_B_DERIVED = 2;
+  // Tier C: AI observation. May be absent; never treated as negative evidence.
+  EVIDENCE_TIER_C_AI_OBSERVATION = 3;
+}

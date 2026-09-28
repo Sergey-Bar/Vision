@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package security.v1;
+
+option go_package = "github.com/Sergey-Bar/Ai-Captain/internal/contracts/securityv1;securityv1";
+
+import "google/protobuf/timestamp.proto";
+
+message Policy {
+  string policy_id = 1;
+  string tenant_id = 2;
+  string version = 3;
+  string content_hash = 4;
+  bool active = 5;
+  google.protobuf.Timestamp activated_at = 6;
+  string activated_by = 7;
+  string notes = 8;
+}
+
+// Immutable, versioned rule bundle. Bundles are untrusted input: no shell, no
+// SQL, no network, no dynamic code, no unbounded regex. Activation requires a
+// passing lint and a reviewed simulate diff.
+message RuleBundle {
+  string bundle_id = 1;
+  string tenant_id = 2;
+  string version = 3;
+  // SHA-256 over the canonical bundle bytes.
+  string content_hash = 4;
+  bytes content = 5;
+  string source_reference = 6;
+  string created_by = 7;
+  google.protobuf.Timestamp created_at = 8;
+  bool active = 9;
+  string supersedes_version = 10;
+  string min_core_version = 11;
+  string max_core_version = 12;
+}
+
+enum RuleEvaluationMode {
+  RULE_EVALUATION_MODE_UNSPECIFIED = 0;
+  RULE_EVALUATION_MODE_LINT = 1;
+  RULE_EVALUATION_MODE_EXPLAIN = 2;
+  RULE_EVALUATION_MODE_SIMULATE = 3;
+  RULE_EVALUATION_MODE_PRODUCTION = 4;
+}

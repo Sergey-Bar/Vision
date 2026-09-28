@@ -1,0 +1,34 @@
+# Build artifacts
+/bin/
+/dist/
+/out/
+*.exe
+*.test
+*.out
+
+# Local runtime state — never commit evidence, logs, secrets or checkpoints
+/data/
+/evidence/
+/logs/
+/secrets/
+/checkpoints/
+*.key
+*.pem
+
+# Replay fixtures captured from a live system may contain real site data.
+# Sanitized, reviewed fixtures only. See docs/fixtures.md.
+/fixtures/private/
+/testdata/private/
+
+# Tooling
+/tools/bin/
+/.protoc/
+.env
+.env.*
+!.env.example
+
+# Editors
+.vscode/
+.idea/
+*.swp
+.DS_Store

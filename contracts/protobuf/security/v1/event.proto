@@ -1,0 +1,57 @@
+// Canonical event contract. Every ingested source event is normalized into a
+// security.v1.Event before it reaches the Security Graph, correlation or
+// verification. Uniqueness is scoped: (tenant_id, integration_id, source_event_id).
+syntax = "proto3";
+
+package security.v1;
+
+option go_package = "github.com/Sergey-Bar/Ai-Captain/internal/contracts/securityv1;securityv1";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
+
+enum ClockSource {
+  CLOCK_SOURCE_UNSPECIFIED = 0;
+  CLOCK_SOURCE_NTP = 1;
+  CLOCK_SOURCE_VMS = 2;
+  CLOCK_SOURCE_HOST = 3;
+  CLOCK_SOURCE_UNKNOWN = 4;
+}
+
+// Every canonical event carries this envelope. Field semantics are frozen:
+// a value is never rewritten, a new interpretation is a new row and a new event.
+message Event {
+  // --- identity ---
+  string event_id = 1;
+  string tenant_id = 2;
+  string site_id = 3;
+  string source_system_id = 4;
+  string source_event_id = 5;
+  string integration_id = 6;
+
+  // --- typing ---
+  string event_type = 7;
+  string schema_version = 8;
+
+  // --- time (all UTC; source timezone preserved separately in source_timezone) ---
+  google.protobuf.Timestamp observed_at = 9;
+  google.protobuf.Timestamp received_at = 10;
+  google.protobuf.Timestamp normalized_at = 11;
+  string source_timezone = 12;
+  ClockSource clock_source = 13;
+  int32 clock_drift_ms = 14;
+
+  // --- topology ---
+  string device_id = 15;
+  string zone_id = 16;
+  string correlation_id = 17;
+  string causation_id = 18;
+
+  // --- content ---
+  google.protobuf.Struct payload = 19;
+  // Reference to the immutable sanitized raw envelope in source_events.
+  string vendor_payload_ref = 20;
+
+  // SHA-256 over the canonical serialization of this event.
+  string integrity_hash = 21;
+}

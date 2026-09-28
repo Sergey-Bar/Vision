@@ -1,0 +1,62 @@
+syntax = "proto3";
+
+package security.v1;
+
+option go_package = "github.com/Sergey-Bar/Ai-Captain/internal/contracts/securityv1;securityv1";
+
+import "google/protobuf/timestamp.proto";
+
+// Physical or logical device in the Security Graph. M1 has no person model:
+// an entity is only ever a concrete thing a device reports.
+message Device {
+  string device_id = 1;
+  string tenant_id = 2;
+  string site_id = 3;
+  string zone_id = 4;
+  string integration_id = 5;
+  string source_device_id = 6;
+  DeviceKind kind = 7;
+  string display_name = 8;
+  bool enabled = 9;
+  // Free-form topology placement for the graph projection.
+  map<string, string> attributes = 10;
+  google.protobuf.Timestamp registered_at = 11;
+}
+
+enum DeviceKind {
+  DEVICE_KIND_UNSPECIFIED = 0;
+  DEVICE_KIND_CAMERA = 1;
+  DEVICE_KIND_DOOR = 2;
+  DEVICE_KIND_SENSOR = 3;
+  DEVICE_KIND_GATE = 4;
+  DEVICE_KIND_ALARM_PANEL = 5;
+  DEVICE_KIND_ACCESS_READER = 6;
+  DEVICE_KIND_OTHER = 7;
+}
+
+// Per-device clock state maintained by the time subsystem.
+message DeviceClock {
+  string device_id = 1;
+  string tenant_id = 2;
+  string site_id = 3;
+  ClockSourceState clock_source = 4;
+  int32 drift_ms = 5;
+  DriftBand band = 6;
+  google.protobuf.Timestamp measured_at = 7;
+  string reference_id = 8;
+}
+
+enum ClockSourceState {
+  CLOCK_SOURCE_STATE_UNSPECIFIED = 0;
+  CLOCK_SOURCE_STATE_NTP = 1;
+  CLOCK_SOURCE_STATE_VMS = 2;
+  CLOCK_SOURCE_STATE_HOST = 3;
+  CLOCK_SOURCE_STATE_UNKNOWN = 4;
+}
+
+enum DriftBand {
+  DRIFT_BAND_UNSPECIFIED = 0;
+  DRIFT_BAND_OK = 1;
+  DRIFT_BAND_WARN = 2;
+  DRIFT_BAND_SEVERE = 3;
+}

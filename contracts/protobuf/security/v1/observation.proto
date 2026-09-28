@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+package security.v1;
+
+option go_package = "github.com/Sergey-Bar/Ai-Captain/internal/contracts/securityv1;securityv1";
+
+import "google/protobuf/timestamp.proto";
+import "security/v1/incident.proto";
+
+// An immutable AI observation. Rules consume validated structured fields only,
+// never free text. A historical decision replays from this stored record; the
+// model is never re-run to reproduce a past outcome.
+message AIObservation {
+  string observation_id = 1;
+  string tenant_id = 2;
+  string site_id = 3;
+  string incident_id = 4;
+  string event_id = 5;
+  string profile_id = 6;
+
+  // --- attribution, mandatory on every observation ---
+  string model = 7;
+  string model_hash = 8;
+  string runtime_version = 9;
+  string prompt_template_id = 10;
+  string prompt_version = 11;
+  string model_bundle_signature = 12;
+
+  // --- provenance of the input ---
+  repeated string input_evidence_ids = 13;
+  repeated string input_evidence_hashes = 14;
+
+  // --- output ---
+  string output_schema_version = 15;
+  // Validated against the profile's versioned JSON schema before persistence.
+  bytes structured_output_json = 16;
+  bool insufficient_evidence = 17;
+  AIDegradation degraded_reason = 18;
+  string degraded_detail = 19;
+
+  int64 latency_ms = 20;
+  string hardware = 21;
+  string output_hash = 22;
+  google.protobuf.Timestamp created_at = 23;
+
+  // Set when this observation supersedes an earlier one. The earlier row is
+  // retained forever; re-evaluation is an explicitly new observation.
+  string supersedes_observation_id = 24;
+  bool production_profile = 25;
+}

@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+package security.v1;
+
+option go_package = "github.com/Sergey-Bar/Ai-Captain/internal/contracts/securityv1;securityv1";
+
+import "google/protobuf/timestamp.proto";
+import "security/v1/incident.proto";
+
+enum JobQueue {
+  JOB_QUEUE_UNSPECIFIED = 0;
+  JOB_QUEUE_VLM = 1;
+  JOB_QUEUE_EVIDENCE_FETCH = 2;
+  JOB_QUEUE_RULE_BULK = 3;
+  JOB_QUEUE_CHECKPOINT_SEAL = 4;
+}
+
+enum JobStatus {
+  JOB_STATUS_UNSPECIFIED = 0;
+  JOB_STATUS_PENDING = 1;
+  JOB_STATUS_LEASED = 2;
+  JOB_STATUS_DONE = 3;
+  JOB_STATUS_FAILED = 4;
+  JOB_STATUS_DEAD_LETTER = 5;
+}
+
+// Postgres-backed work queue. Claimed with FOR UPDATE SKIP LOCKED, so multiple
+// workers are safe without coordination. dead_letter is a first-class state and
+// is surfaced in the console and the audit chain, never silently dropped.
+message Job {
+  string job_id = 1;
+  string tenant_id = 2;
+  string site_id = 3;
+  JobQueue queue = 4;
+  JobStatus status = 5;
+  // Unique per queue. Enqueueing the same job twice is a no-op.
+  string idempotency_key = 6;
+  string payload_ref = 7;
+  int32 attempt_count = 8;
+  int32 max_attempts = 9;
+  string backoff_strategy = 10;
+  google.protobuf.Timestamp run_after = 11;
+  string lease_owner = 12;
+  google.protobuf.Timestamp lease_expires_at = 13;
+  string last_error = 14;
+  string dead_letter_reason = 15;
+  google.protobuf.Timestamp created_at = 16;
+  google.protobuf.Timestamp completed_at = 17;
+}
+
+message JobResult {
+  string job_id = 1;
+  bool succeeded = 2;
+  string observation_id = 3;
+  AIDegradation degradation = 4;
+  string error_detail = 5;
+}

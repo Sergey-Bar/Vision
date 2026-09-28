@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+package security.v1;
+
+option go_package = "github.com/Sergey-Bar/Ai-Captain/internal/contracts/securityv1;securityv1";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
+
+enum AlarmState {
+  ALARM_STATE_UNSPECIFIED = 0;
+  ALARM_STATE_CREATED = 1;
+  ALARM_STATE_UPDATED = 2;
+  ALARM_STATE_ACKNOWLEDGED = 3;
+  ALARM_STATE_CLOSED = 4;
+}
+
+enum AlarmPriority {
+  ALARM_PRIORITY_UNSPECIFIED = 0;
+  ALARM_PRIORITY_LOW = 1;
+  ALARM_PRIORITY_NORMAL = 2;
+  ALARM_PRIORITY_HIGH = 3;
+  ALARM_PRIORITY_CRITICAL = 4;
+}
+
+message Alarm {
+  string alarm_id = 1;
+  string tenant_id = 2;
+  string site_id = 3;
+  string source_alarm_id = 4;
+  string source_system_id = 5;
+  string event_id = 6;
+
+  AlarmState state = 7;
+  AlarmPriority priority = 8;
+  string alarm_type = 9;
+  string device_id = 10;
+  string zone_id = 11;
+  google.protobuf.Timestamp observed_at = 12;
+  google.protobuf.Timestamp acknowledged_at = 13;
+  string acknowledged_by = 14;
+  google.protobuf.Struct attributes = 15;
+}

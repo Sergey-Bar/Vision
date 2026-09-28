@@ -1,0 +1,39 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - copyloopvar
+    - errorlint
+    - gocritic
+    - misspell
+    - nilerr
+    - noctx
+    - revive
+    - unconvert
+    - unparam
+    - wastedassign
+  disable:
+    # SQL is intentionally built from table names in the test helpers, and the
+    # injection risk there is nil because the names are compile-time constants.
+    - gosec
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+issues:
+  exclude-rules:
+    # Test helpers build SQL with fmt.Sprintf for SET ROLE and CREATE POLICY
+    # loops; the interpolated value is always a literal from the test table.
+    - path: _test\.go$
+      linters:
+        - gosec
+        - unparam
+  max-issues-per-linter: 0
+  max-same-issues: 0

@@ -1,0 +1,935 @@
+openapi: 3.1.0
+info:
+  title: Physical Security Intelligence Layer — API
+  version: "1.0.0-m1"
+  description: |
+    Strict JSON API served by `security-core`. Every response is JSON; there is
+    no HTML content negotiation on these paths. The operator console is a
+    separate, server-rendered surface.
+
+    Tenancy: every authenticated request resolves to a principal and a set of
+    site assignments. `tenant_id` is never taken from the request body. A
+    `X-Tenant-Id` header is honoured only when it matches the session tenant;
+    a mismatch is 403 and is audited.
+
+    Authentication: session cookie plus CSRF token on every state-changing
+    method. Service accounts authenticate with a bearer token scoped to a
+    single integration.
+servers:
+  - url: https://localhost:8443
+    description: Local console/API listener.
+
+security:
+  - sessionCookie: []
+
+tags:
+  - name: auth
+  - name: incidents
+  - name: evidence
+  - name: disposition
+  - name: audit
+  - name: rules
+  - name: health
+  - name: ops
+
+paths:
+  /v1/auth/login:
+    post:
+      tags: [auth]
+      security: []
+      summary: Start an MFA session
+      description: |
+        Rate limited per source, with exponential lockout. A successful
+        password step without MFA returns 200 with `mfaRequired` and no session
+        cookie. Break-glass credentials return `breakGlass: true` and raise a
+        high-priority audit event.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginRequest" }
+      responses:
+        "200": { $ref: "#/components/responses/MFAPendingOrSuccess" }
+        "401": { $ref: "#/components/responses/Error" }
+        "423": { $ref: "#/components/responses/Locked" }
+        "429": { $ref: "#/components/responses/Error" }
+
+  /v1/auth/mfa/verify:
+    post:
+      tags: [auth]
+      security: []
+      summary: Complete an MFA challenge
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MFARequest" }
+      responses:
+        "200":
+          description: Authenticated. Sets a hardened session cookie.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionInfo" }
+        "401": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+
+  /v1/auth/session:
+    get:
+      tags: [auth]
+      summary: Current session
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionInfo" }
+        "401": { $ref: "#/components/responses/Error" }
+    delete:
+      tags: [auth]
+      summary: End session
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { description: Ended }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /v1/incidents:
+    get:
+      tags: [incidents]
+      summary: List incidents visible to the principal
+      parameters:
+        - { name: state, in: query, schema: { $ref: "#/components/schemas/IncidentState" } }
+        - { name: siteId, in: query, schema: { type: string } }
+        - { name: degraded, in: query, schema: { type: boolean }, description: Only incidents that hit the AI_UNAVAILABLE contract. }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/IncidentSummary" }
+                  nextCursor: { type: [string, "null"] }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /v1/incidents/{incidentId}:
+    get:
+      tags: [incidents]
+      summary: Incident with full provenance
+      description: |
+        Returns the exact event IDs, observation ID, model + prompt + hash, rule
+        id, bundle version and policy version that produced the decision.
+        Nothing in this response is re-inferred at read time.
+      parameters:
+        - { $ref: "#/components/parameters/IncidentId" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IncidentDetail" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/incidents/{incidentId}/explanation:
+    get:
+      tags: [incidents]
+      summary: Why did this incident exist
+      description: Reconstructed from stored facts and the stored AI observation only.
+      parameters:
+        - { $ref: "#/components/parameters/IncidentId" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Explanation" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/incidents/{incidentId}/dispositions:
+    post:
+      tags: [disposition]
+      summary: Record an operator disposition
+      description: Never overwrites the AI observation; both are stored and both replay.
+      parameters:
+        - { $ref: "#/components/parameters/IncidentId" }
+        - { $ref: "#/components/parameters/CSRFToken" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DispositionRequest" }
+      responses:
+        "201":
+          description: Recorded
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Disposition" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /v1/incidents/{incidentId}/evidence:
+    get:
+      tags: [evidence]
+      summary: Evidence attached to an incident
+      parameters:
+        - { $ref: "#/components/parameters/IncidentId" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Evidence" }
+        "401": { $ref: "#/components/responses/Error" }
+    post:
+      tags: [evidence]
+      summary: Request a snapshot or clip
+      description: |
+        Idempotent on `idempotencyKey`. Every `storageRef` returned is relative
+        to the evidence root; absolute paths, `..` segments, null bytes and
+        symlink escapes are rejected on fetch and on export.
+      parameters:
+        - { $ref: "#/components/parameters/IncidentId" }
+        - { $ref: "#/components/parameters/CSRFToken" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EvidenceRequest" }
+      responses:
+        "202":
+          description: Accepted; an evidence_fetch job was enqueued.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JobAccepted" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /v1/evidence/{evidenceId}/content:
+    get:
+      tags: [evidence]
+      summary: Stream stored evidence bytes
+      parameters:
+        - { name: evidenceId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Bytes
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/audit/ledger:
+    get:
+      tags: [audit]
+      summary: Read the audit ledger
+      description: Page by sequence. Adapters and AI runtimes have no grant on this path.
+      parameters:
+        - { name: fromSequence, in: query, schema: { type: integer, minimum: 0 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+        - { name: actorId, in: query, schema: { type: string } }
+        - { name: action, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, "chainValid"]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/AuditEntry" }
+                  chainValid: { type: boolean, description: Recomputed hash chain verification over the returned page. }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /v1/audit/checkpoints:
+    get:
+      tags: [audit]
+      summary: Sealed checkpoints
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/AuditCheckpoint" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /v1/rules/bundles:
+    get:
+      tags: [rules]
+      summary: List stored immutable bundles
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, "activeVersion"]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/RuleBundleMeta" }
+                  activeVersion: { type: [string, "null"] }
+        "401": { $ref: "#/components/responses/Error" }
+    post:
+      tags: [rules]
+      summary: Store a new immutable bundle
+      description: Storing is not activation. Activation requires lint and a reviewed simulate diff.
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RuleBundleUpload" }
+      responses:
+        "201":
+          description: Stored
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RuleBundleMeta" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /v1/rules/bundles/{version}/lint:
+    post:
+      tags: [rules]
+      summary: Lint a bundle
+      parameters:
+        - { $ref: "#/components/parameters/BundleVersion" }
+      responses:
+        "200":
+          description: Lint report
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LintReport" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /v1/rules/bundles/{version}/simulate:
+    post:
+      tags: [rules]
+      summary: Simulate a bundle and return the diff against the active bundle
+      parameters:
+        - { $ref: "#/components/parameters/BundleVersion" }
+        - { $ref: "#/components/parameters/CSRFToken" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SimulateRequest" }
+      responses:
+        "200":
+          description: Diff report
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SimulateReport" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /v1/rules/bundles/{version}/activate:
+    post:
+      tags: [rules]
+      summary: Activate a stored bundle
+      description: Fails unless lint passed and the simulate diff was acknowledged by digest.
+      parameters:
+        - { $ref: "#/components/parameters/BundleVersion" }
+        - { $ref: "#/components/parameters/CSRFToken" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [simulateDiffDigest]
+              properties:
+                simulateDiffDigest: { type: string, pattern: "^[0-9a-f]{64}$" }
+      responses:
+        "200": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/rules/bundles/active/rollback:
+    post:
+      tags: [rules]
+      summary: Roll back to the previous immutable bundle version
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "200": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /v1/ops/dead-letters:
+    get:
+      tags: [ops]
+      summary: Dead-lettered inbox events and jobs
+      description: |
+        Dead letters are surfaced within 60 s of entering the state. A dead
+        letter is never silently dropped and is always in the audit chain.
+      parameters:
+        - { name: kind, in: query, schema: { enum: [inbox, job] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/DeadLetter" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /v1/ops/clock-drift:
+    get:
+      tags: [ops]
+      summary: Per-device clock drift
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, "severeCount"]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/DeviceClockView" }
+                  severeCount: { type: integer }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /v1/health:
+    get:
+      tags: [health]
+    security: []
+    summary: Liveness
+    responses:
+      "200":
+        description: Process is up. Deliberately excludes the AI plane: core liveness must not depend on it.
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Health" }
+
+  /v1/health/ready:
+    get:
+      tags: [health]
+    security: []
+    summary: Readiness
+    description: Requires the database and the evidence root. Does not require the AI runtime.
+    responses:
+      "200":
+        description: Ready
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Readiness" }
+      "503": { $ref: "#/components/responses/Error" }
+
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: sp_session
+    serviceBearer:
+      type: http
+      scheme: bearer
+
+  parameters:
+    CSRFToken:
+      name: X-CSRF-Token
+      in: header
+      required: true
+      description: Required on every state-changing method.
+      schema: { type: string, minLength: 16, maxLength: 256 }
+    IncidentId:
+      name: incidentId
+      in: path
+      required: true
+      schema: { type: string, pattern: "^[A-Za-z0-9_-]{1,64}$" }
+    BundleVersion:
+      name: version
+      in: path
+      required: true
+      schema: { type: string, pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$" }
+
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Locked:
+      description: Account locked by exponential backoff
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    MFAPendingOrSuccess:
+      description: MFA required, or authenticated
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [mfaRequired]
+            properties:
+              mfaRequired: { type: boolean }
+              session: { $ref: "#/components/schemas/SessionInfo" }
+
+  schemas:
+    Error:
+      type: object
+      additionalProperties: false
+      required: [code, "message", "requestId"]
+      properties:
+        code: { type: string }
+        message: { type: string }
+        requestId: { type: string }
+        details: { type: array, items: { type: object } }
+
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [username, password]
+      properties:
+        username: { type: string, minLength: 1, maxLength: 128 }
+        password: { type: string, minLength: 1, maxLength: 1024, format: password }
+        breakGlass: { type: boolean, default: false }
+
+    MFARequest:
+      type: object
+      additionalProperties: false
+      required: [challengeId, "method", "code]
+      properties:
+        challengeId: { type: string, minLength: 1, maxLength: 128 }
+        method: { enum: [webauthn, totp] }
+        code: { type: string, minLength: 1, maxLength: 64 }
+        assertion: { type: object, description: WebAuthn assertion payload. } 
+
+    SessionInfo:
+      type: object
+      additionalProperties: false
+      required: [sessionId, principalId, "roles", "siteScope", "csrfToken", "mfaVerified"]
+      properties:
+        sessionId: { type: string }
+        principalId: { type: string }
+        displayName: { type: string }
+        roles: { type: array, items: { $ref: "#/components/schemas/Role" } }
+        siteScope: { type: array, items: { type: string } }
+        csrfToken: { type: string }
+        mfaVerified: { type: boolean }
+        breakGlass: { type: boolean }
+        expiresAt: { type: string, format: "date-time" }
+
+    Role:
+      enum: [tenant_admin, security_manager, operator, viewer, service]
+
+    IncidentState:
+      enum: [OPEN, IN_REVIEW, DISPOSITIONED, CLOSED]
+
+    IncidentSummary:
+      type: object
+      additionalProperties: false
+      required: [incidentId, siteId, state, severity, createdAt]
+      properties:
+        incidentId: { type: string }
+        siteId: { type: string }
+        state: { $ref: "#/components/schemas/IncidentState" }
+        severity: { enum: [info, low, medium, high, critical] }
+        title: { type: string }
+        createdAt: { type: string, format: "date-time" }
+        firstEventAt: { type: string, format: "date-time" }
+        degraded: { type: boolean }
+        disposition: { type: string }
+
+    IncidentDetail:
+      allOf:
+        - $ref: "#/components/schemas/IncidentSummary"
+        - type: object
+          properties:
+            ruleId: { type: string }
+            ruleBundleVersion: { type: string }
+            bundleContentHash: { type: string }
+            policyVersion: { type: string }
+            events:
+              type: array
+              items: { $ref: "#/components/schemas/EventRef" }
+            evidence:
+              type: array
+              items: { $ref: "#/components/schemas/Evidence" }
+            observations:
+              type: array
+              items: { $ref: "#/components/schemas/AIObservation" }
+            verifications:
+              type: array
+              items: { $ref: "#/components/schemas/VerificationResult" }
+            dispositions:
+              type: array
+              items: { $ref: "#/components/schemas/Disposition" }
+            degradedReasons: { type: array, items: { type: string } }
+
+    EventRef:
+      type: object
+      additionalProperties: false
+      required: [eventId, "eventType", "observedAt", "normalizedAt"]
+      properties:
+        eventId: { type: string }
+        sourceSystemId: { type: string }
+        sourceEventId: { type: string }
+        eventType: { type: string }
+        deviceId: { type: string }
+        zoneId: { type: string }
+        observedAt: { type: string, format: "date-time" }
+        receivedAt: { type: string, format: "date-time" }
+        normalizedAt: { type: string, format: "date-time" }
+        clockSource: { enum: [ntp, vms, host, unknown] }
+        clockDriftMs: { type: integer }
+        payload: { type: object }
+
+    AIObservation:
+      type: object
+      additionalProperties: false
+      required: [observationId, profileId, model, modelHash, promptTemplateId, promptVersion, createdAt]
+      properties:
+        observationId: { type: string }
+        profileId: { type: string }
+        productionProfile: { type: boolean }
+        model: { type: string }
+        modelHash: { type: string }
+        runtimeVersion: { type: string }
+        promptTemplateId: { type: string }
+        promptVersion: { type: string }
+        modelBundleSignature: { type: string }
+        inputEvidenceHashes: { type: array, items: { type: string } }
+        outputSchemaVersion: { type: integer }
+        structuredOutput: { type: object }
+        insufficientEvidence: { type: boolean }
+        degradedReason: { enum: [none, model_unavailable, no_runtime, timeout, error, absent] }
+        latencyMs: { type: integer }
+        hardware: { type: string }
+        outputHash: { type: string }
+        createdAt: { type: string, format: "date-time" }
+        supersedesObservationId: { type: [string, "null"] }
+
+    VerificationResult:
+      type: object
+      additionalProperties: false
+      required: [verificationId, ruleId, state, evaluatedAt]
+      properties:
+        verificationId: { type: string }
+        ruleId: { type: string }
+        ruleBundleVersion: { type: string }
+        state: { enum: [CORROBORATED, UNVERIFIED, CONTRADICTED, DUPLICATE, SUPPRESSED] }
+        minRequiredTier: { enum: [A, B, C] }
+        supportingEventIds: { type: array, items: { type: string } }
+        supportingObservationIds: { type: array, items: { type: string } }
+        contradictingEventIds: { type: array, items: { type: string } }
+        driftExclusions:
+          type: array
+          items:
+            type: object
+            required: [deviceId, driftMs, band, reason]
+            properties:
+              deviceId: { type: string }
+              driftMs: { type: integer }
+              band: { enum: [ok, warn, severe] }
+              reason: { type: string }
+        reasonCode: { type: string }
+        explanation: { type: string }
+        aiDegradation: { enum: [none, model_unavailable, no_runtime, timeout, error, absent] }
+        evaluatedAt: { type: string, format: "date-time" }
+        deterministic: { type: boolean }
+
+    Evidence:
+      type: object
+      additionalProperties: false
+      required: [evidenceId, kind, tier, sha256, "storedAt"]
+      properties:
+        evidenceId: { type: string }
+        incidentId: { type: string }
+        cameraId: { type: string }
+        kind: { enum: [snapshot, clip, bookmark, export] }
+        tier: { enum: [A, B, C] }
+        capturedAt: { type: string, format: "date-time" }
+        storedAt: { type: string, format: "date-time" }
+        mediaType: { type: string }
+        sizeBytes: { type: integer }
+        sha256: { type: string, pattern: "^[0-9a-f]{64}$" }
+        storageRef: { type: string, description: Relative to the evidence root. Never absolute. }
+        retentionPolicy: { type: string }
+        legalHold: { type: boolean }
+        retainUntil: { type: [string, "null"], format: "date-time" }
+
+    EvidenceRequest:
+      type: object
+      additionalProperties: false
+      required: [kind, cameraId, idempotencyKey]
+      properties:
+        kind: { enum: [snapshot, clip] }
+        cameraId: { type: string, minLength: 1, maxLength: 64 }
+        observedAt: { type: [string, "null"], format: "date-time" }
+        durationSeconds: { type: integer, minimum: 1, maximum: 3600 }
+        idempotencyKey: { type: string, minLength: 8, maxLength: 128 }
+
+    JobAccepted:
+      type: object
+      required: [jobId, status]
+      properties:
+        jobId: { type: string }
+        status: { enum: [pending, leased, done, failed, dead_letter] }
+
+    DispositionRequest:
+      type: object
+      additionalProperties: false
+      required: [outcome]
+      properties:
+        outcome:
+          enum: [true_positive, false_positive, benign, escalated, acknowledged, dismissed]
+        reasonCode: { type: string, maxLength: 64 }
+        notes: { type: string, maxLength: 4000 }
+        agreement: { enum: [no_ai_observation, agreed, disagreed, unsure] }
+        stepUpToken: { type: string, description: Required for escalated and dismissed outcomes. }
+
+    Disposition:
+      allOf:
+        - $ref: "#/components/schemas/DispositionRequest"
+        - type: object
+          required: [dispositionId, actorId, createdAt]
+          properties:
+            dispositionId: { type: string }
+            actorId: { type: string }
+            actorRoles: { type: array, items: { $ref: "#/components/schemas/Role" } }
+            siteScope: { type: array, items: { type: string } }
+            relatedObservationId: { type: [string, "null"] }
+            createdAt: { type: string, format: "date-time" }
+
+    Explanation:
+      type: object
+      additionalProperties: false
+      required: [incidentId, ruleId, bundleVersion, "steps", "replayedFromStoredFacts"]
+      properties:
+        incidentId: { type: string }
+        ruleId: { type: string }
+        bundleVersion: { type: string }
+        bundleContentHash: { type: string }
+        policyVersion: { type: string }
+        observationId: { type: [string, "null"] }
+        model: { type: [string, "null"] }
+        modelHash: { type: [string, "null"] }
+        promptTemplateId: { type: [string, "null"] }
+        promptVersion: { type: [string, "null"] }
+        replayedFromStoredFacts: { type: boolean, const: true }
+        steps:
+          type: array
+          items:
+            type: object
+            required: [order, description]
+            properties:
+              order: { type: integer }
+              kind: { enum: [condition, corroboration, contradiction, dedupe, suppression, action, degradation] }
+              description: { type: string }
+              eventIds: { type: array, items: { type: string } }
+              observationIds: { type: array, items: { type: string } }
+              driftExclusions: { type: array, items: { type: object } }
+
+    AuditEntry:
+      type: object
+      additionalProperties: false
+      required: [sequence, ts, actor, actorType, action, hash, prevHash]
+      properties:
+        sequence: { type: integer }
+        ts: { type: string, format: "date-time" }
+        actor: { type: string }
+        actorType: { enum: [operator, admin, service, adapter, ai_runtime, system] }
+        action: { type: string }
+        targetType: { type: string }
+        targetId: { type: string }
+        resultState: { type: object }
+        policyVersion: { type: string }
+        reason: { type: string }
+        evidenceRefs: { type: array, items: { type: string } }
+        prevHash: { type: string, pattern: "^[0-9a-f]{64}$" }
+        hash: { type: string, pattern: "^[0-9a-f]{64}$" }
+        requestId: { type: string }
+        sessionId: { type: string }
+        siteScope: { type: array, items: { type: string } }
+
+    AuditCheckpoint:
+      type: object
+      additionalProperties: false
+      required: [checkpointId, sealedAt, fromSequence, toSequence, digest, signature, "sinkRef"]
+      properties:
+        checkpointId: { type: string }
+        sealedAt: { type: string, format: "date-time" }
+        fromSequence: { type: integer }
+        toSequence: { type: integer }
+        entryCount: { type: integer }
+        digest: { type: string, pattern: "^[0-9a-f]{64}$" }
+        algorithm: { type: string }
+        signature: { type: string }
+        publicKey: { type: string }
+        sinkRef: { type: string }
+
+    RuleBundleMeta:
+      type: object
+      additionalProperties: false
+      required: [bundleId, version, contentHash, "createdAt", "active"]
+      properties:
+        bundleId: { type: string }
+        version: { type: string }
+        contentHash: { type: string, pattern: "^[0-9a-f]{64}$" }
+        sourceReference: { type: string }
+        createdBy: { type: string }
+        createdAt: { type: string, format: "date-time" }
+        active: { type: boolean }
+        supersedesVersion: { type: [string, "null"] }
+        lintStatus: { enum: [not_run, passed, failed] }
+        minCoreVersion: { type: string }
+        maxCoreVersion: { type: string }
+
+    RuleBundleUpload:
+      type: object
+      additionalProperties: false
+      required: [contentBase64, "sourceReference"]
+      properties:
+        contentBase64: { type: string, minLength: 1 }
+        sourceReference: { type: string, minLength: 1, maxLength: 512 }
+        minCoreVersion: { type: string }
+        maxCoreVersion: { type: string }
+
+    LintReport:
+      type: object
+      required: [version, ok, "problems"]
+      properties:
+        version: { type: string }
+        ok: { type: boolean }
+        problems:
+          type: array
+          items:
+            type: object
+            required: [severity, code, message]
+            properties:
+              severity: { enum: [error, warning] }
+              code: { type: string }
+              message: { type: string }
+              ruleId: { type: string }
+              path: { type: string }
+
+    SimulateRequest:
+      type: object
+      additionalProperties: false
+      required: ["fixtureSet"]
+      properties:
+        fixtureSet: { type: string, minLength: 1, maxLength: 256 }
+        maxEvents: { type: integer, minimum: 1, maximum: 1000000, default: 100000 }
+
+    SimulateReport:
+      type: object
+      required: [version, diffDigest, "changes", "totals"]
+      properties:
+        version: { type: string }
+        baselineVersion: { type: [string, "null"] }
+        diffDigest: { type: string, pattern: "^[0-9a-f]{64}$", description: Activation requires this exact digest. }
+        changes:
+          type: array
+          items:
+            type: object
+            required: [kind, "scenarioId", "before", "after"]
+            properties:
+              kind: { enum: [created, closed, severity_changed, degraded_flag_changed, no_change] }
+              scenarioId: { type: string }
+              before: { type: object }
+              after: { type: object }
+        totals:
+          type: object
+          properties:
+            scenarios: { type: integer }
+            created: { type: integer }
+            closed: { type: integer }
+            severityChanged: { type: integer }
+            degradedChanged: { type: integer }
+
+    DeadLetter:
+      type: object
+      required: [kind, id, status, reason, "lastError", "updatedAt"]
+      properties:
+        kind: { enum: [inbox, job] }
+        id: { type: string }
+        queue: { type: [string, "null"] }
+        integrationId: { type: [string, "null"] }
+        sourceEventId: { type: [string, "null"] }
+        attemptCount: { type: integer }
+        maxAttempts: { type: [integer, "null"] }
+        lastError: { type: string }
+        reason: { type: string }
+        firstSeenAt: { type: [string, "null"], format: "date-time" }
+        updatedAt: { type: string, format: "date-time" }
+        replayable: { type: boolean }
+
+    DeviceClockView:
+      type: object
+      required: [deviceId, driftMs, band, measuredAt]
+      properties:
+        deviceId: { type: string }
+        siteId: { type: string }
+        displayName: { type: string }
+        clockSource: { enum: [ntp, vms, host, unknown] }
+        driftMs: { type: integer }
+        band: { enum: [ok, warn, severe] }
+        measuredAt: { type: string, format: "date-time" }
+        excludedFromCorroboration: { type: boolean }
+
+    Health:
+      type: object
+      required: [status, version, uptimeSeconds]
+      properties:
+        status: { const: ok }
+        version: { type: string }
+        schemaVersion: { type: integer }
+        contractsVersion: { type: string }
+        uptimeSeconds: { type: number }
+        aiPlane: { type: object, description: Informational only. Never affects this status. }
+
+    Readiness:
+      type: object
+      required: [ready, checks]
+      properties:
+        ready: { type: boolean }
+        checks:
+          type: object
+          properties:
+            database: { $ref: "#/components/schemas/CheckResult" }
+            evidenceRoot: { $ref: "#/components/schemas/CheckResult" }
+            migrations: { $ref: "#/components/schemas/CheckResult" }
+        aiRuntime: { $ref: "#/components/schemas/CheckResult", description: Informational only. A false here does not make the core unready." }
+
+    CheckResult:
+      type: object
+      required: [ok]
+      properties:
+        ok: { type: boolean }
+        detail: { type: string }
+        required: { type: boolean, description: If false, readiness is unaffected (informational). }

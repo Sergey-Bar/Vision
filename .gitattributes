@@ -1,0 +1,29 @@
+# Normalize line endings in the repository, and check out LF everywhere.
+#
+# Go source with CRLF is legal but produces noisy diffs and confuses tooling that
+# compares fixtures byte-for-byte — which this product depends on, because the
+# deterministic-path golden tests must be byte-stable. Windows contributors get
+# LF in the working tree too, so a byte-level comparison means the same thing on
+# every developer's machine.
+* text=auto eol=lf
+
+*.go    text eol=lf
+*.proto text eol=lf
+*.sql   text eol=lf
+*.json  text eol=lf
+*.yaml  text eol=lf
+*.yml   text eol=lf
+
+# Binary release inputs. These are hashed and signed, so a line-ending rewrite
+# would break the manifest.
+*.tar   binary
+*.tar.gz  binary
+*.zip     binary
+*.exe     binary
+*.dll     binary
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.pdf     binary
+*.mp4     binary
+*.bin     binary

@@ -1,0 +1,1888 @@
+{
+  "messages": {
+    "security.v1.AIObservation": {
+      "fields": [
+        {
+          "number": 1,
+          "name": "observation_id",
+          "type": "string"
+        },
+        {
+          "number": 2,
+          "name": "tenant_id",
+          "type": "string"
+        },
+        {
+          "number": 3,
+          "name": "site_id",
+          "type": "string"
+        },
+        {
+          "number": 4,
+          "name": "incident_id",
+          "type": "string"
+        },
+        {
+          "number": 5,
+          "name": "event_id",
+          "type": "string"
+        },
+        {
+          "number": 6,
+          "name": "profile_id",
+          "type": "string"
+        },
+        {
+          "number": 7,
+          "name": "model",
+          "type": "string"
+        },
+        {
+          "number": 8,
+          "name": "model_hash",
+          "type": "string"
+        },
+        {
+          "number": 9,
+          "name": "runtime_version",
+          "type": "string"
+        },
+        {
+          "number": 10,
+          "name": "prompt_template_id",
+          "type": "string"
+        },
+        {
+          "number": 11,
+          "name": "prompt_version",
+          "type": "string"
+        },
+        {
+          "number": 12,
+          "name": "model_bundle_signature",
+          "type": "string"
+        },
+        {
+          "number": 13,
+          "name": "input_evidence_ids",
+          "type": "string",
+          "repeated": true
+        },
+        {
+          "number": 14,
+          "name": "input_evidence_hashes",
+          "type": "string",
+          "repeated": true
+        },
+        {
+          "number": 15,
+          "name": "output_schema_version",
+          "type": "string"
+        },
+        {
+          "number": 16,
+          "name": "structured_output_json",
+          "type": "bytes"
+        },
+        {
+          "number": 17,
+          "name": "insufficient_evidence",
+          "type": "bool"
+        },
+        {
+          "number": 18,
+          "name": "degraded_reason",
+          "type": "AIDegradation"
+        },
+        {
+          "number": 19,
+          "name": "degraded_detail",
+          "type": "string"
+        },
+        {
+          "number": 20,
+          "name": "latency_ms",
+          "type": "int64"
+        },
+        {
+          "number": 21,
+          "name": "hardware",
+          "type": "string"
+        },
+        {
+          "number": 22,
+          "name": "output_hash",
+          "type": "string"
+        },
+        {
+          "number": 23,
+          "name": "created_at",
+          "type": "google.protobuf.Timestamp"
+        },
+        {
+          "number": 24,
+          "name": "supersedes_observation_id",
+          "type": "string"
+        },
+        {
+          "number": 25,
+          "name": "production_profile",
+          "type": "bool"
+        }
+      ]
+    },
+    "security.v1.Action": {
+      "fields": [
+        {
+          "number": 1,
+          "name": "action_id",
+          "type": "string"
+        },
+        {
+          "number": 2,
+          "name": "tenant_id",
+          "type": "string"
+        },
+        {
+          "number": 3,
+          "name": "site_id",
+          "type": "string"
+        },
+        {
+          "number": 4,
+          "name": "incident_id",
+          "type": "string"
+        },
+        {
+          "number": 5,
+          "name": "action_type",
+          "type": "string"
+        },
+        {
+          "number": 6,
+          "name": "target_type",
+          "type": "string"
+        },
+        {
+          "number": 7,
+          "name": "target_id",
+          "type": "string"
+        },
+        {
+          "number": 8,
+          "name": "status",
+          "type": "ActionStatus"
+        },
+        {
+          "number": 9,
+          "name": "requested_at",
+          "type": "google.protobuf.Timestamp"
+        },
+        {
+          "number": 10,
+          "name": "completed_at",
+          "type": "google.protobuf.Timestamp"
+        },
+        {
+          "number": 11,
+          "name": "idempotency_key",
+          "type": "string"
+        },
+        {
+          "number": 12,
+          "name": "error_detail",
+          "type": "string"
+        },
+        {
+          "number": 13,
+          "name": "requested_by_actor",
+          "type": "string"
+        }
+      ]
+    },
+    "security.v1.Alarm": {
+      "fields": [
+        {
+          "number": 1,
+          "name": "alarm_id",
+          "type": "string"
+        },
+        {
+          "number": 2,
+          "name": "tenant_id",
+          "type": "string"
+        },
+        {
+          "number": 3,
+          "name": "site_id",
+          "type": "string"
+        },
+        {
+          "number": 4,
+          "name": "source_alarm_id",
+          "type": "string"
+        },
+        {
+          "number": 5,
+          "name": "source_system_id",
+          "type": "string"
+        },
+        {
+          "number": 6,
+          "name": "event_id",
+          "type": "string"
+        },
+        {
+          "number": 7,
+          "name": "state",
+          "type": "AlarmState"
+        },
+        {
+          "number": 8,
+          "name": "priority",
+          "type": "AlarmPriority"
+        },
+        {
+          "number": 9,
+          "name": "alarm_type",
+          "type": "string"
+        },
+        {
+          "number": 10,
+          "name": "device_id",
+          "type": "string"
+        },
+        {
+          "number": 11,
+          "name": "zone_id",
+          "type": "string"
+        },
+        {
+          "number": 12,
+          "name": "observed_at",
+          "type": "google.protobuf.Timestamp"
+        },
+        {
+          "number": 13,
+          "name": "acknowledged_at",
+          "type": "google.protobuf.Timestamp"
+        },
+        {
+          "number": 14,
+          "name": "acknowledged_by",
+          "type": "string"
+        },
+        {
+          "number": 15,
+          "name": "attributes",
+          "type": "google.protobuf.Struct"
+        }
+      ]
+    },
+    "security.v1.Camera": {
+      "fields": [
+        {
+          "number": 1,
+          "name": "camera_id",
+          "type": "string"
+        },
+        {
+          "number": 2,
+          "name": "device_id",
+          "type": "string"
+        },
+        {
+          "number": 3,
+          "name": "tenant_id",
+          "type": "string"
+        },
+        {
+          "number": 4,
+          "name": "site_id",
+          "type": "string"
+        },
+        {
+          "number": 5,
+          "name": "source_camera_id",
+          "type": "string"
+        },
+        {
+          "number": 6,
+          "name": "display_name",
+          "type": "string"
+        },
+        {
+          "number": 7,
+          "name": "state",
+          "type": "CameraState"
+        },
+        {
+          "number": 8,
+          "name": "last_seen_at",
+          "type": "google.protobuf.Timestamp"
+        },
+        {
+          "number": 9,
+          "name": "recording_state",
+          "type": "RecordingState"
+        },
+        {
+          "number": 10,
+          "name": "width",
+          "type": "int32"
+        },
+        {
+          "number": 11,
+          "name": "height",
+          "type": "int32"
+        },
+        {
+          "number": 12,
+          "name": "low_light_capable",
+          "type": "bool"
+        }
+      ]
+    },
+    "security.v1.Device": {
+      "fields": [
+        {
+          "number": 1,
+          "name": "device_id",
+          "type": "string"
+        },
+        {
+          "number": 2,
+          "name": "tenant_id",
+          "type": "string"
+        },
+        {
+          "number": 3,
+          "name": "site_id",
+          "type": "string"
+        },
+        {
+          "number": 4,
+          "name": "zone_id",
+          "type": "string"
+        },
+        {
+          "number": 5,
+          "name": "integration_id",
+          "type": "string"
+        },
+        {
+          "number": 6,
+          "name": "source_device_id",
+          "type": "string"
+        },
+        {
+          "number": 7,
+          "name": "kind",
+          "type": "DeviceKind"
+        },
+        {
+          "number": 8,
+          "name": "display_name",
+          "type": "string"
+        },
+        {
+          "number": 9,
+          "name": "enabled",
+          "type": "bool"
+        },
+        {
+          "number": 11,
+          "name": "registered_at",
+          "type": "google.protobuf.Timestamp"
+        }
+      ]
+    },
+    "security.v1.DeviceClock": {
+      "fields": [
+        {
+          "number": 1,
+          "name": "device_id",
+          "type": "string"
+        },
+        {
+          "number": 2,
+          "name": "tenant_id",
+          "type": "string"
+        },
+        {
+          "number": 3,
+          "name": "site_id",
+          "type": "string"
+        },
+        {
+          "number": 4,
+          "name": "clock_source",
+          "type": "ClockSourceState"
+        },
+        {
+          "number": 5,
+          "name": "drift_ms",
+          "type": "int32"
+        },
+        {
+          "number": 6,
+          "name": "band",
+          "type": "DriftBand"
+        },
+        {
+          "number": 7,
+          "name": "measured_at",
+          "type": "google.protobuf.Timestamp"
+        },
+        {
+          "number": 8,
+          "name": "reference_id",
+          "type": "string"
+        }
+      ]
+    },
+    "security.v1.Disposition": {
+      "fields": [
+        {
+          "number": 1,
+          "name": "disposition_id",
+          "type": "string"
+        },
+        {
+          "number": 2,
+          "name": "tenant_id",
+          "type": "string"
+        },
+        {
+          "number": 3,
+          "name": "incident_id",
+          "type": "string"
+        },
+        {
+          "number": 4,
+          "name": "actor_id",
+          "type": "string"
+        },
+        {
+          "number": 5,
+          "name": "actor_roles",
+          "type": "string"
+        },
+        {
+          "number": 6,
+          "name": "site_scope",
+          "type": "string"
+        },
+        {
+          "number": 7,
+          "name": "outcome",
+          "type": "DispositionOutcome"
+        },
+        {
+          "number": 8,
+          "name": "reason_code",
+          "type": "string"
+        },
+        {
+          "number": 9,
+          "name": "notes",
+          "type": "string"
+        },
+        {
+          "number": 10,
+          "name": "agreement",
+          "type": "OperatorAgreement"
+        },
+        {
+          "number": 11,
+          "name": "related_observation_id",
+          "type": "string"
+        },
+        {
+          "number": 12,
+          "name": "created_at",
+          "type": "google.protobuf.Timestamp"
+        },
+        {
+          "number": 13,
+          "name": "session_id",
+          "type": "string"
+        }
+      ]
+    },
+    "security.v1.DriftExclusion": {
+      "fields": [
+        {
+          "number": 1,
+          "name": "device_id",
+          "type": "string"
+        },
+        {
+          "number": 2,
+          "name": "drift_ms",
+          "type": "int32"
+        },
+        {
+          "number": 3,
+          "name": "band",
+          "type": "DriftBand"
+        },
+        {
+          "number": 4,
+          "name": "reason",
+          "type": "string"
+        }
+      ]
+    },
+    "security.v1.Edge": {
+      "fields": [
+        {
+          "number": 1,
+          "name": "edge_id",
+          "type": "string"
+        },
+        {
+          "number": 2,
+          "name": "tenant_id",
+          "type": "string"
+        },
+        {
+          "number": 3,
+          "name": "from_type",
+          "type": "string"
+        },
+        {
+          "number": 4,
+          "name": "from_id",
+          "type": "string"
+        },
+        {
+          "number": 5,
+          "name": "relation",
+          "type": "string"
+        },
+        {
+          "number": 6,
+          "name": "to_type",
+          "type": "string"
+        },
+        {
+          "number": 7,
+          "name": "to_id",
+          "type": "string"
+        },
+        {
+          "number": 8,
+          "name": "provenance",
+          "type": "Provenance"
+        },
+        {
+          "number": 9,
+          "name": "created_at",
+          "type": "google.protobuf.Timestamp"
+        }
+      ]
+    },
+    "security.v1.EdgeEvidence": {
+      "fields": [
+        {
+          "number": 1,
+          "name": "edge_id",
+          "type": "string"
+        },
+        {
+          "number": 2,
+          "name": "tenant_id",
+          "type": "string"
+        },
+        {
+          "number": 3,
+          "name": "evidence_id",
+          "type": "string"
+        },
+        {
+          "number": 4,
+          "name": "observation_id",
+          "type": "string"
+        }
+      ]
+    },
+    "security.v1.Entity": {
+      "fields": [
+        {
+          "number": 1,
+          "name": "entity_id",
+          "type": "string"
+        },
+        {
+          "number": 2,
+          "name": "tenant_id",
+          "type": "string"
+        },
+        {
+          "number": 3,
+          "name": "site_id",
+          "type": "string"
+        },
+        {
+          "number": 4,
+          "name": "kind",
+          "type": "EntityKind"
+        },
+        {
+          "number": 5,
+          "name": "observed_value",
+          "type": "string"
+        },
+        {
+          "number": 6,
+          "name": "zone_id",
+          "type": "string"
+        },
+        {
+          "number": 7,
+          "name": "device_id",
+          "type": "string"
+        },
+        {
+          "number": 8,
+          "name": "first_observed_at",
+          "type": "google.protobuf.Timestamp"
+        },
+        {
+          "number": 9,
+          "name": "last_observed_at",
+          "type": "google.protobuf.Timestamp"
+        },
+        {
+          "number": 10,
+          "name": "observation_count",
+          "type": "int64"
+        }
+      ]
+    },
+    "security.v1.Event": {
+      "fields": [
+        {
+          "number": 1,
+          "name": "event_id",
+          "type": "string"
+        },
+        {
+          "number": 2,
+          "name": "tenant_id",
+          "type": "string"
+        },
+        {
+          "number": 3,
+          "name": "site_id",
+          "type": "string"
+        },
+        {
+          "number": 4,
+          "name": "source_system_id",
+          "type": "string"
+        },
+        {
+          "number": 5,
+          "name": "source_event_id",
+          "type": "string"
+        },
+        {
+          "number": 6,
+          "name": "integration_id",
+          "type": "string"
+        },
+        {
+          "number": 7,
+          "name": "event_type",
+          "type": "string"
+        },
+        {
+          "number": 8,
+          "name": "schema_version",
+          "type": "string"
+        },
+        {
+          "number": 9,
+          "name": "observed_at",
+          "type": "google.protobuf.Timestamp"
+        },
+        {
+          "number": 10,
+          "name": "received_at",
+          "type": "google.protobuf.Timestamp"
+        },
+        {
+          "number": 11,
+          "name": "normalized_at",
+          "type": "google.protobuf.Timestamp"
+        },
+        {
+          "number": 12,
+          "name": "source_timezone",
+          "type": "string"
+        },
+        {
+          "number": 13,
+          "name": "clock_source",
+          "type": "ClockSource"
+        },
+        {
+          "number": 14,
+          "name": "clock_drift_ms",
+          "type": "int32"
+        },
+        {
+          "number": 15,
+          "name": "device_id",
+          "type": "string"
+        },
+        {
+          "number": 16,
+          "name": "zone_id",
+          "type": "string"
+        },
+        {
+          "number": 17,
+          "name": "correlation_id",
+          "type": "string"
+        },
+        {
+          "number": 18,
+          "name": "causation_id",
+          "type": "string"
+        },
+        {
+          "number": 19,
+          "name": "payload",
+          "type": "google.protobuf.Struct"
+        },
+        {
+          "number": 20,
+          "name": "vendor_payload_ref",
+          "type": "string"
+        },
+        {
+          "number": 21,
+          "name": "integrity_hash",
+          "type": "string"
+        }
+      ]
+    },
+    "security.v1.Evidence": {
+      "fields": [
+        {
+          "number": 1,
+          "name": "evidence_id",
+          "type": "string"
+        },
+        {
+          "number": 2,
+          "name": "tenant_id",
+          "type": "string"
+        },
+        {
+          "number": 3,
+          "name": "site_id",
+          "type": "string"
+        },
+        {
+          "number": 4,
+          "name": "incident_id",
+          "type": "string"
+        },
+        {
+          "number": 5,
+          "name": "camera_id",
+          "type": "string"
+        },
+        {
+          "number": 6,
+          "name": "device_id",
+          "type": "string"
+        },
+        {
+          "number": 7,
+          "name": "kind",
+          "type": "EvidenceKind"
+        },
+        {
+          "number": 8,
+          "name": "tier",
+          "type": "EvidenceTier"
+        },
+        {
+          "number": 9,
+          "name": "observed_at",
+          "type": "google.protobuf.Timestamp"
+        },
+        {
+          "number": 10,
+          "name": "captured_at",
+          "type": "google.protobuf.Timestamp"
+        },
+        {
+          "number": 11,
+          "name": "stored_at",
+          "type": "google.protobuf.Timestamp"
+        },
+        {
+          "number": 13,
+          "name": "storage_ref",
+          "type": "string"
+        },
+        {
+          "number": 14,
+          "name": "media_type",
+          "type": "string"
+        },
+        {
+          "number": 15,
+          "name": "size_bytes",
+          "type": "int64"
+        },
+        {
+          "number": 16,
+          "name": "sha256",
+          "type": "string"
+        },
+        {
+          "number": 17,
+          "name": "retention_policy",
+          "type": "string"
+        },
+        {
+          "number": 18,
+          "name": "legal_hold",
+          "type": "bool"
+        },
+        {
+          "number": 19,
+          "name": "retain_until",
+          "type": "google.protobuf.Timestamp"
+        },
+        {
+          "number": 20,
+          "name": "fetched_by_actor",
+          "type": "string"
+        }
+      ]
+    },
+    "security.v1.Incident": {
+      "fields": [
+        {
+          "number": 1,
+          "name": "incident_id",
+          "type": "string"
+        },
+        {
+          "number": 2,
+          "name": "tenant_id",
+          "type": "string"
+        },
+        {
+          "number": 3,
+          "name": "primary_site_id",
+          "type": "string"
+        },
+        {
+          "number": 4,
+          "name": "related_site_ids",
+          "type": "string",
+          "repeated": true
+        },
+        {
+          "number": 5,
+          "name": "rule_id",
+          "type": "string"
+        },
+        {
+          "number": 6,
+          "name": "rule_bundle_version",
+          "type": "string"
+        },
+        {
+          "number": 7,
+          "name": "bundle_content_hash",
+          "type": "string"
+        },
+        {
+          "number": 8,
+          "name": "policy_version",
+          "type": "string"
+        },
+        {
+          "number": 9,
+          "name": "state",
+          "type": "IncidentState"
+        },
+        {
+          "number": 10,
+          "name": "severity",
+          "type": "Severity"
+        },
+        {
+          "number": 11,
+          "name": "title",
+          "type": "string"
+        },
+        {
+          "number": 12,
+          "name": "first_event_at",
+          "type": "google.protobuf.Timestamp"
+        },
+        {
+          "number": 13,
+          "name": "last_event_at",
+          "type": "google.protobuf.Timestamp"
+        },
+        {
+          "number": 14,
+          "name": "created_at",
+          "type": "google.protobuf.Timestamp"
+        },
+        {
+          "number": 15,
+          "name": "degraded",
+          "type": "bool"
+        },
+        {
+          "number": 16,
+          "name": "degraded_reasons",
+          "type": "string",
+          "repeated": true
+        },
+        {
+          "number": 17,
+          "name": "evidence",
+          "type": "Evidence",
+          "repeated": true
+        }
+      ]
+    },
+    "security.v1.Job": {
+      "fields": [
+        {
+          "number": 1,
+          "name": "job_id",
+          "type": "string"
+        },
+        {
+          "number": 2,
+          "name": "tenant_id",
+          "type": "string"
+        },
+        {
+          "number": 3,
+          "name": "site_id",
+          "type": "string"
+        },
+        {
+          "number": 4,
+          "name": "queue",
+          "type": "JobQueue"
+        },
+        {
+          "number": 5,
+          "name": "status",
+          "type": "JobStatus"
+        },
+        {
+          "number": 6,
+          "name": "idempotency_key",
+          "type": "string"
+        },
+        {
+          "number": 7,
+          "name": "payload_ref",
+          "type": "string"
+        },
+        {
+          "number": 8,
+          "name": "attempt_count",
+          "type": "int32"
+        },
+        {
+          "number": 9,
+          "name": "max_attempts",
+          "type": "int32"
+        },
+        {
+          "number": 10,
+          "name": "backoff_strategy",
+          "type": "string"
+        },
+        {
+          "number": 11,
+          "name": "run_after",
+          "type": "google.protobuf.Timestamp"
+        },
+        {
+          "number": 12,
+          "name": "lease_owner",
+          "type": "string"
+        },
+        {
+          "number": 13,
+          "name": "lease_expires_at",
+          "type": "google.protobuf.Timestamp"
+        },
+        {
+          "number": 14,
+          "name": "last_error",
+          "type": "string"
+        },
+        {
+          "number": 15,
+          "name": "dead_letter_reason",
+          "type": "string"
+        },
+        {
+          "number": 16,
+          "name": "created_at",
+          "type": "google.protobuf.Timestamp"
+        },
+        {
+          "number": 17,
+          "name": "completed_at",
+          "type": "google.protobuf.Timestamp"
+        }
+      ]
+    },
+    "security.v1.JobResult": {
+      "fields": [
+        {
+          "number": 1,
+          "name": "job_id",
+          "type": "string"
+        },
+        {
+          "number": 2,
+          "name": "succeeded",
+          "type": "bool"
+        },
+        {
+          "number": 3,
+          "name": "observation_id",
+          "type": "string"
+        },
+        {
+          "number": 4,
+          "name": "degradation",
+          "type": "AIDegradation"
+        },
+        {
+          "number": 5,
+          "name": "error_detail",
+          "type": "string"
+        }
+      ]
+    },
+    "security.v1.Policy": {
+      "fields": [
+        {
+          "number": 1,
+          "name": "policy_id",
+          "type": "string"
+        },
+        {
+          "number": 2,
+          "name": "tenant_id",
+          "type": "string"
+        },
+        {
+          "number": 3,
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "number": 4,
+          "name": "content_hash",
+          "type": "string"
+        },
+        {
+          "number": 5,
+          "name": "active",
+          "type": "bool"
+        },
+        {
+          "number": 6,
+          "name": "activated_at",
+          "type": "google.protobuf.Timestamp"
+        },
+        {
+          "number": 7,
+          "name": "activated_by",
+          "type": "string"
+        },
+        {
+          "number": 8,
+          "name": "notes",
+          "type": "string"
+        }
+      ]
+    },
+    "security.v1.Provenance": {
+      "fields": [
+        {
+          "number": 1,
+          "name": "asserted_by",
+          "type": "string"
+        },
+        {
+          "number": 2,
+          "name": "source_event_id",
+          "type": "string"
+        },
+        {
+          "number": 3,
+          "name": "observed_at",
+          "type": "google.protobuf.Timestamp"
+        },
+        {
+          "number": 4,
+          "name": "confidence",
+          "type": "double"
+        },
+        {
+          "number": 5,
+          "name": "method",
+          "type": "EdgeMethod"
+        },
+        {
+          "number": 6,
+          "name": "rule_or_model_id",
+          "type": "string"
+        }
+      ]
+    },
+    "security.v1.RuleBundle": {
+      "fields": [
+        {
+          "number": 1,
+          "name": "bundle_id",
+          "type": "string"
+        },
+        {
+          "number": 2,
+          "name": "tenant_id",
+          "type": "string"
+        },
+        {
+          "number": 3,
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "number": 4,
+          "name": "content_hash",
+          "type": "string"
+        },
+        {
+          "number": 5,
+          "name": "content",
+          "type": "bytes"
+        },
+        {
+          "number": 6,
+          "name": "source_reference",
+          "type": "string"
+        },
+        {
+          "number": 7,
+          "name": "created_by",
+          "type": "string"
+        },
+        {
+          "number": 8,
+          "name": "created_at",
+          "type": "google.protobuf.Timestamp"
+        },
+        {
+          "number": 9,
+          "name": "active",
+          "type": "bool"
+        },
+        {
+          "number": 10,
+          "name": "supersedes_version",
+          "type": "string"
+        },
+        {
+          "number": 11,
+          "name": "min_core_version",
+          "type": "string"
+        },
+        {
+          "number": 12,
+          "name": "max_core_version",
+          "type": "string"
+        }
+      ]
+    },
+    "security.v1.VerificationResult": {
+      "fields": [
+        {
+          "number": 1,
+          "name": "verification_id",
+          "type": "string"
+        },
+        {
+          "number": 2,
+          "name": "tenant_id",
+          "type": "string"
+        },
+        {
+          "number": 3,
+          "name": "site_id",
+          "type": "string"
+        },
+        {
+          "number": 4,
+          "name": "incident_id",
+          "type": "string"
+        },
+        {
+          "number": 5,
+          "name": "rule_id",
+          "type": "string"
+        },
+        {
+          "number": 6,
+          "name": "rule_bundle_version",
+          "type": "string"
+        },
+        {
+          "number": 7,
+          "name": "state",
+          "type": "VerificationState"
+        },
+        {
+          "number": 8,
+          "name": "min_required_tier",
+          "type": "EvidenceTier"
+        },
+        {
+          "number": 9,
+          "name": "supporting_event_ids",
+          "type": "string",
+          "repeated": true
+        },
+        {
+          "number": 10,
+          "name": "supporting_observation_ids",
+          "type": "string",
+          "repeated": true
+        },
+        {
+          "number": 11,
+          "name": "contradicting_event_ids",
+          "type": "string",
+          "repeated": true
+        },
+        {
+          "number": 12,
+          "name": "drift_exclusions",
+          "type": "DriftExclusion",
+          "repeated": true
+        },
+        {
+          "number": 13,
+          "name": "reason_code",
+          "type": "string"
+        },
+        {
+          "number": 14,
+          "name": "explanation",
+          "type": "string"
+        },
+        {
+          "number": 15,
+          "name": "evaluated_at",
+          "type": "google.protobuf.Timestamp"
+        },
+        {
+          "number": 16,
+          "name": "ai_degradation",
+          "type": "AIDegradation"
+        },
+        {
+          "number": 17,
+          "name": "deterministic",
+          "type": "bool"
+        }
+      ]
+    }
+  },
+  "enums": {
+    "security.v1.AIDegradation": {
+      "values": [
+        {
+          "number": 0,
+          "name": "AI_DEGRADATION_NONE"
+        },
+        {
+          "number": 1,
+          "name": "AI_DEGRADATION_MODEL_UNAVAILABLE"
+        },
+        {
+          "number": 2,
+          "name": "AI_DEGRADATION_NO_RUNTIME"
+        },
+        {
+          "number": 3,
+          "name": "AI_DEGRADATION_TIMEOUT"
+        },
+        {
+          "number": 4,
+          "name": "AI_DEGRADATION_ERROR"
+        },
+        {
+          "number": 5,
+          "name": "AI_DEGRADATION_ABSENT"
+        }
+      ]
+    },
+    "security.v1.ActionStatus": {
+      "values": [
+        {
+          "number": 0,
+          "name": "ACTION_STATUS_UNSPECIFIED"
+        },
+        {
+          "number": 1,
+          "name": "ACTION_STATUS_REQUESTED"
+        },
+        {
+          "number": 2,
+          "name": "ACTION_STATUS_DISPATCHED"
+        },
+        {
+          "number": 3,
+          "name": "ACTION_STATUS_COMPLETED"
+        },
+        {
+          "number": 4,
+          "name": "ACTION_STATUS_FAILED"
+        },
+        {
+          "number": 5,
+          "name": "ACTION_STATUS_DEDUPED"
+        }
+      ]
+    },
+    "security.v1.AlarmPriority": {
+      "values": [
+        {
+          "number": 0,
+          "name": "ALARM_PRIORITY_UNSPECIFIED"
+        },
+        {
+          "number": 1,
+          "name": "ALARM_PRIORITY_LOW"
+        },
+        {
+          "number": 2,
+          "name": "ALARM_PRIORITY_NORMAL"
+        },
+        {
+          "number": 3,
+          "name": "ALARM_PRIORITY_HIGH"
+        },
+        {
+          "number": 4,
+          "name": "ALARM_PRIORITY_CRITICAL"
+        }
+      ]
+    },
+    "security.v1.AlarmState": {
+      "values": [
+        {
+          "number": 0,
+          "name": "ALARM_STATE_UNSPECIFIED"
+        },
+        {
+          "number": 1,
+          "name": "ALARM_STATE_CREATED"
+        },
+        {
+          "number": 2,
+          "name": "ALARM_STATE_UPDATED"
+        },
+        {
+          "number": 3,
+          "name": "ALARM_STATE_ACKNOWLEDGED"
+        },
+        {
+          "number": 4,
+          "name": "ALARM_STATE_CLOSED"
+        }
+      ]
+    },
+    "security.v1.CameraState": {
+      "values": [
+        {
+          "number": 0,
+          "name": "CAMERA_STATE_UNSPECIFIED"
+        },
+        {
+          "number": 1,
+          "name": "CAMERA_STATE_ONLINE"
+        },
+        {
+          "number": 2,
+          "name": "CAMERA_STATE_OFFLINE"
+        },
+        {
+          "number": 3,
+          "name": "CAMERA_STATE_MAINTENANCE"
+        },
+        {
+          "number": 4,
+          "name": "CAMERA_STATE_UNKNOWN"
+        }
+      ]
+    },
+    "security.v1.ClockSource": {
+      "values": [
+        {
+          "number": 0,
+          "name": "CLOCK_SOURCE_UNSPECIFIED"
+        },
+        {
+          "number": 1,
+          "name": "CLOCK_SOURCE_NTP"
+        },
+        {
+          "number": 2,
+          "name": "CLOCK_SOURCE_VMS"
+        },
+        {
+          "number": 3,
+          "name": "CLOCK_SOURCE_HOST"
+        },
+        {
+          "number": 4,
+          "name": "CLOCK_SOURCE_UNKNOWN"
+        }
+      ]
+    },
+    "security.v1.ClockSourceState": {
+      "values": [
+        {
+          "number": 0,
+          "name": "CLOCK_SOURCE_STATE_UNSPECIFIED"
+        },
+        {
+          "number": 1,
+          "name": "CLOCK_SOURCE_STATE_NTP"
+        },
+        {
+          "number": 2,
+          "name": "CLOCK_SOURCE_STATE_VMS"
+        },
+        {
+          "number": 3,
+          "name": "CLOCK_SOURCE_STATE_HOST"
+        },
+        {
+          "number": 4,
+          "name": "CLOCK_SOURCE_STATE_UNKNOWN"
+        }
+      ]
+    },
+    "security.v1.DeviceKind": {
+      "values": [
+        {
+          "number": 0,
+          "name": "DEVICE_KIND_UNSPECIFIED"
+        },
+        {
+          "number": 1,
+          "name": "DEVICE_KIND_CAMERA"
+        },
+        {
+          "number": 2,
+          "name": "DEVICE_KIND_DOOR"
+        },
+        {
+          "number": 3,
+          "name": "DEVICE_KIND_SENSOR"
+        },
+        {
+          "number": 4,
+          "name": "DEVICE_KIND_GATE"
+        },
+        {
+          "number": 5,
+          "name": "DEVICE_KIND_ALARM_PANEL"
+        },
+        {
+          "number": 6,
+          "name": "DEVICE_KIND_ACCESS_READER"
+        },
+        {
+          "number": 7,
+          "name": "DEVICE_KIND_OTHER"
+        }
+      ]
+    },
+    "security.v1.DispositionOutcome": {
+      "values": [
+        {
+          "number": 0,
+          "name": "DISPOSITION_OUTCOME_UNSPECIFIED"
+        },
+        {
+          "number": 1,
+          "name": "DISPOSITION_OUTCOME_TRUE_POSITIVE"
+        },
+        {
+          "number": 2,
+          "name": "DISPOSITION_OUTCOME_FALSE_POSITIVE"
+        },
+        {
+          "number": 3,
+          "name": "DISPOSITION_OUTCOME_BENIGN"
+        },
+        {
+          "number": 4,
+          "name": "DISPOSITION_OUTCOME_ESCALATED"
+        },
+        {
+          "number": 5,
+          "name": "DISPOSITION_OUTCOME_ACKNOWLEDGED"
+        },
+        {
+          "number": 6,
+          "name": "DISPOSITION_OUTCOME_DISMISSED"
+        }
+      ]
+    },
+    "security.v1.DriftBand": {
+      "values": [
+        {
+          "number": 0,
+          "name": "DRIFT_BAND_UNSPECIFIED"
+        },
+        {
+          "number": 1,
+          "name": "DRIFT_BAND_OK"
+        },
+        {
+          "number": 2,
+          "name": "DRIFT_BAND_WARN"
+        },
+        {
+          "number": 3,
+          "name": "DRIFT_BAND_SEVERE"
+        }
+      ]
+    },
+    "security.v1.EdgeMethod": {
+      "values": [
+        {
+          "number": 0,
+          "name": "EDGE_METHOD_UNSPECIFIED"
+        },
+        {
+          "number": 1,
+          "name": "EDGE_METHOD_OBSERVED"
+        },
+        {
+          "number": 2,
+          "name": "EDGE_METHOD_ASSERTED"
+        },
+        {
+          "number": 3,
+          "name": "EDGE_METHOD_INFERRED"
+        }
+      ]
+    },
+    "security.v1.EntityKind": {
+      "values": [
+        {
+          "number": 0,
+          "name": "ENTITY_KIND_UNSPECIFIED"
+        },
+        {
+          "number": 1,
+          "name": "ENTITY_KIND_LICENSE_PLATE"
+        },
+        {
+          "number": 2,
+          "name": "ENTITY_KIND_BADGE"
+        },
+        {
+          "number": 3,
+          "name": "ENTITY_KIND_DOOR"
+        },
+        {
+          "number": 4,
+          "name": "ENTITY_KIND_GATE"
+        },
+        {
+          "number": 5,
+          "name": "ENTITY_KIND_VEHICLE"
+        },
+        {
+          "number": 6,
+          "name": "ENTITY_KIND_DEVICE"
+        },
+        {
+          "number": 7,
+          "name": "ENTITY_KIND_OTHER"
+        }
+      ]
+    },
+    "security.v1.EvidenceKind": {
+      "values": [
+        {
+          "number": 0,
+          "name": "EVIDENCE_KIND_UNSPECIFIED"
+        },
+        {
+          "number": 1,
+          "name": "EVIDENCE_KIND_SNAPSHOT"
+        },
+        {
+          "number": 2,
+          "name": "EVIDENCE_KIND_CLIP"
+        },
+        {
+          "number": 3,
+          "name": "EVIDENCE_KIND_BOOKMARK"
+        },
+        {
+          "number": 4,
+          "name": "EVIDENCE_KIND_EXPORT"
+        }
+      ]
+    },
+    "security.v1.EvidenceTier": {
+      "values": [
+        {
+          "number": 0,
+          "name": "EVIDENCE_TIER_UNSPECIFIED"
+        },
+        {
+          "number": 1,
+          "name": "EVIDENCE_TIER_A_AUTHORITATIVE"
+        },
+        {
+          "number": 2,
+          "name": "EVIDENCE_TIER_B_DERIVED"
+        },
+        {
+          "number": 3,
+          "name": "EVIDENCE_TIER_C_AI_OBSERVATION"
+        }
+      ]
+    },
+    "security.v1.IncidentState": {
+      "values": [
+        {
+          "number": 0,
+          "name": "INCIDENT_STATE_UNSPECIFIED"
+        },
+        {
+          "number": 1,
+          "name": "INCIDENT_STATE_OPEN"
+        },
+        {
+          "number": 2,
+          "name": "INCIDENT_STATE_IN_REVIEW"
+        },
+        {
+          "number": 3,
+          "name": "INCIDENT_STATE_DISPOSITIONED"
+        },
+        {
+          "number": 4,
+          "name": "INCIDENT_STATE_CLOSED"
+        }
+      ]
+    },
+    "security.v1.JobQueue": {
+      "values": [
+        {
+          "number": 0,
+          "name": "JOB_QUEUE_UNSPECIFIED"
+        },
+        {
+          "number": 1,
+          "name": "JOB_QUEUE_VLM"
+        },
+        {
+          "number": 2,
+          "name": "JOB_QUEUE_EVIDENCE_FETCH"
+        },
+        {
+          "number": 3,
+          "name": "JOB_QUEUE_RULE_BULK"
+        },
+        {
+          "number": 4,
+          "name": "JOB_QUEUE_CHECKPOINT_SEAL"
+        }
+      ]
+    },
+    "security.v1.JobStatus": {
+      "values": [
+        {
+          "number": 0,
+          "name": "JOB_STATUS_UNSPECIFIED"
+        },
+        {
+          "number": 1,
+          "name": "JOB_STATUS_PENDING"
+        },
+        {
+          "number": 2,
+          "name": "JOB_STATUS_LEASED"
+        },
+        {
+          "number": 3,
+          "name": "JOB_STATUS_DONE"
+        },
+        {
+          "number": 4,
+          "name": "JOB_STATUS_FAILED"
+        },
+        {
+          "number": 5,
+          "name": "JOB_STATUS_DEAD_LETTER"
+        }
+      ]
+    },
+    "security.v1.OperatorAgreement": {
+      "values": [
+        {
+          "number": 0,
+          "name": "OPERATOR_AGREEMENT_UNSPECIFIED"
+        },
+        {
+          "number": 1,
+          "name": "OPERATOR_AGREEMENT_NO_AI_OBSERVATION"
+        },
+        {
+          "number": 2,
+          "name": "OPERATOR_AGREEMENT_AGREED"
+        },
+        {
+          "number": 3,
+          "name": "OPERATOR_AGREEMENT_DISAGREED"
+        },
+        {
+          "number": 4,
+          "name": "OPERATOR_AGREEMENT_UNSURE"
+        }
+      ]
+    },
+    "security.v1.RecordingState": {
+      "values": [
+        {
+          "number": 0,
+          "name": "RECORDING_STATE_UNSPECIFIED"
+        },
+        {
+          "number": 1,
+          "name": "RECORDING_STATE_RECORDING"
+        },
+        {
+          "number": 2,
+          "name": "RECORDING_STATE_STOPPED"
+        },
+        {
+          "number": 3,
+          "name": "RECORDING_STATE_ARCHIVED"
+        },
+        {
+          "number": 4,
+          "name": "RECORDING_STATE_UNKNOWN"
+        }
+      ]
+    },
+    "security.v1.RuleEvaluationMode": {
+      "values": [
+        {
+          "number": 0,
+          "name": "RULE_EVALUATION_MODE_UNSPECIFIED"
+        },
+        {
+          "number": 1,
+          "name": "RULE_EVALUATION_MODE_LINT"
+        },
+        {
+          "number": 2,
+          "name": "RULE_EVALUATION_MODE_EXPLAIN"
+        },
+        {
+          "number": 3,
+          "name": "RULE_EVALUATION_MODE_SIMULATE"
+        },
+        {
+          "number": 4,
+          "name": "RULE_EVALUATION_MODE_PRODUCTION"
+        }
+      ]
+    },
+    "security.v1.Severity": {
+      "values": [
+        {
+          "number": 0,
+          "name": "SEVERITY_UNSPECIFIED"
+        },
+        {
+          "number": 1,
+          "name": "SEVERITY_INFO"
+        },
+        {
+          "number": 2,
+          "name": "SEVERITY_LOW"
+        },
+        {
+          "number": 3,
+          "name": "SEVERITY_MEDIUM"
+        },
+        {
+          "number": 4,
+          "name": "SEVERITY_HIGH"
+        },
+        {
+          "number": 5,
+          "name": "SEVERITY_CRITICAL"
+        }
+      ]
+    },
+    "security.v1.VerificationState": {
+      "values": [
+        {
+          "number": 0,
+          "name": "VERIFICATION_STATE_UNSPECIFIED"
+        },
+        {
+          "number": 1,
+          "name": "VERIFICATION_STATE_CORROBORATED"
+        },
+        {
+          "number": 2,
+          "name": "VERIFICATION_STATE_UNVERIFIED"
+        },
+        {
+          "number": 3,
+          "name": "VERIFICATION_STATE_CONTRADICTED"
+        },
+        {
+          "number": 4,
+          "name": "VERIFICATION_STATE_DUPLICATE"
+        },
+        {
+          "number": 5,
+          "name": "VERIFICATION_STATE_SUPPRESSED"
+        }
+      ]
+    }
+  }
+}

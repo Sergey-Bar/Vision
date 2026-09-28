@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+package security.v1;
+
+option go_package = "github.com/Sergey-Bar/Ai-Captain/internal/contracts/securityv1;securityv1";
+
+import "google/protobuf/timestamp.proto";
+
+// Every Security Graph edge carries provenance. An edge with no asserted_by is
+// not allowed into the graph.
+message Edge {
+  string edge_id = 1;
+  string tenant_id = 2;
+  string from_type = 3;
+  string from_id = 4;
+  string relation = 5;
+  string to_type = 6;
+  string to_id = 7;
+
+  Provenance provenance = 8;
+  google.protobuf.Timestamp created_at = 9;
+}
+
+message Provenance {
+  string asserted_by = 1;
+  string source_event_id = 2;
+  google.protobuf.Timestamp observed_at = 3;
+  // 0.0 - 1.0. Deterministic asserted edges use 1.0; inferred edges lower it.
+  double confidence = 4;
+  EdgeMethod method = 5;
+  string rule_or_model_id = 6;
+}
+
+enum EdgeMethod {
+  EDGE_METHOD_UNSPECIFIED = 0;
+  // Reported by a device or source system.
+  EDGE_METHOD_OBSERVED = 1;
+  // Declared by an operator or configuration.
+  EDGE_METHOD_ASSERTED = 2;
+  // Computed by the core from stored facts.
+  EDGE_METHOD_INFERRED = 3;
+}
+
+// Evidence supporting an edge, kept separate so an edge can be justified by
+// several independent artifacts.
+message EdgeEvidence {
+  string edge_id = 1;
+  string tenant_id = 2;
+  string evidence_id = 3;
+  string observation_id = 4;
+}

@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package security.v1;
+
+option go_package = "github.com/Sergey-Bar/Ai-Captain/internal/contracts/securityv1;securityv1";
+
+import "google/protobuf/timestamp.proto";
+
+// An entity is a concrete thing a device reported: a plate, a badge, a door.
+// M1 deliberately has no person model, no cross-camera identity and no aliasing.
+message Entity {
+  string entity_id = 1;
+  string tenant_id = 2;
+  string site_id = 3;
+  EntityKind kind = 4;
+  string observed_value = 5;
+  string zone_id = 6;
+  string device_id = 7;
+  google.protobuf.Timestamp first_observed_at = 8;
+  google.protobuf.Timestamp last_observed_at = 9;
+  int64 observation_count = 10;
+}
+
+enum EntityKind {
+  ENTITY_KIND_UNSPECIFIED = 0;
+  ENTITY_KIND_LICENSE_PLATE = 1;
+  ENTITY_KIND_BADGE = 2;
+  ENTITY_KIND_DOOR = 3;
+  ENTITY_KIND_GATE = 4;
+  ENTITY_KIND_VEHICLE = 5;
+  ENTITY_KIND_DEVICE = 6;
+  ENTITY_KIND_OTHER = 7;
+}

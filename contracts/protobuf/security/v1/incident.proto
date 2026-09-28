@@ -1,0 +1,102 @@
+syntax = "proto3";
+
+package security.v1;
+
+option go_package = "github.com/Sergey-Bar/Ai-Captain/internal/contracts/securityv1;securityv1";
+
+import "google/protobuf/timestamp.proto";
+import "security/v1/evidence.proto";
+import "security/v1/device.proto";
+
+enum IncidentState {
+  INCIDENT_STATE_UNSPECIFIED = 0;
+  INCIDENT_STATE_OPEN = 1;
+  INCIDENT_STATE_IN_REVIEW = 2;
+  INCIDENT_STATE_DISPOSITIONED = 3;
+  INCIDENT_STATE_CLOSED = 4;
+}
+
+enum Severity {
+  SEVERITY_UNSPECIFIED = 0;
+  SEVERITY_INFO = 1;
+  SEVERITY_LOW = 2;
+  SEVERITY_MEDIUM = 3;
+  SEVERITY_HIGH = 4;
+  SEVERITY_CRITICAL = 5;
+}
+
+message Incident {
+  string incident_id = 1;
+  string tenant_id = 2;
+  string primary_site_id = 3;
+  repeated string related_site_ids = 4;
+
+  string rule_id = 5;
+  string rule_bundle_version = 6;
+  string bundle_content_hash = 7;
+  string policy_version = 8;
+
+  IncidentState state = 9;
+  Severity severity = 10;
+  string title = 11;
+
+  google.protobuf.Timestamp first_event_at = 12;
+  google.protobuf.Timestamp last_event_at = 13;
+  google.protobuf.Timestamp created_at = 14;
+
+  // True when any contributing signal was degraded (see the AI_UNAVAILABLE
+  // contract). A pilot must be able to measure how often the AI path was live.
+  bool degraded = 15;
+  repeated string degraded_reasons = 16;
+
+  repeated Evidence evidence = 17;
+}
+
+// A verification result is the deterministic outcome attached to an event or an
+// incident. It carries the exclusion record when a time-windowed corroboration
+// was refused because of clock drift.
+message VerificationResult {
+  string verification_id = 1;
+  string tenant_id = 2;
+  string site_id = 3;
+  string incident_id = 4;
+  string rule_id = 5;
+  string rule_bundle_version = 6;
+  VerificationState state = 7;
+  EvidenceTier min_required_tier = 8;
+  repeated string supporting_event_ids = 9;
+  repeated string supporting_observation_ids = 10;
+  repeated string contradicting_event_ids = 11;
+  repeated DriftExclusion drift_exclusions = 12;
+  string reason_code = 13;
+  string explanation = 14;
+  google.protobuf.Timestamp evaluated_at = 15;
+  // Filled when the rule declared an explicit if_ai_unavailable behavior.
+  AIDegradation ai_degradation = 16;
+  bool deterministic = 17;
+}
+
+enum VerificationState {
+  VERIFICATION_STATE_UNSPECIFIED = 0;
+  VERIFICATION_STATE_CORROBORATED = 1;
+  VERIFICATION_STATE_UNVERIFIED = 2;
+  VERIFICATION_STATE_CONTRADICTED = 3;
+  VERIFICATION_STATE_DUPLICATE = 4;
+  VERIFICATION_STATE_SUPPRESSED = 5;
+}
+
+message DriftExclusion {
+  string device_id = 1;
+  int32 drift_ms = 2;
+  DriftBand band = 3;
+  string reason = 4;
+}
+
+enum AIDegradation {
+  AI_DEGRADATION_NONE = 0;
+  AI_DEGRADATION_MODEL_UNAVAILABLE = 1;
+  AI_DEGRADATION_NO_RUNTIME = 2;
+  AI_DEGRADATION_TIMEOUT = 3;
+  AI_DEGRADATION_ERROR = 4;
+  AI_DEGRADATION_ABSENT = 5;
+}
