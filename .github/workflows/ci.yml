@@ -8,20 +8,34 @@ on:
 # No Milestone server is reachable from CI, and none is allowed to be. Every
 # scenario the pipeline runs comes from sanitized versioned fixtures.
 env:
-  # Must be >= the `go` directive in go.mod. With GOTOOLCHAIN=local a pin below
+  # Must be >= the `go` directive in go.mod. With GOTOOLCHAIN: local a pin below
   # the directive makes every job fail before it runs a test, so a green-looking
   # pipeline is not a passing pipeline. Bump this in the same commit that raises
   # the go directive.
   GO_VERSION: "1.26"
   GOTOOLCHAIN: local
 
+# Least privilege. The default GITHUB_TOKEN is read/write on many repositories,
+# and this pipeline needs to read the tree and nothing else. A compromised step
+# in a third-party action inherits this, so this line is the difference between
+# a supply-chain incident and a supply-chain write.
+permissions:
+  contents: read
+
+# A second push to a branch cancels the run still in flight for it. Without this
+# a rapid fix-push-push-fix sequence burns four runs' worth of the free tier's
+# monthly minutes to learn what the last one already knows.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   contract:
     name: contract compatibility
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: ${{ env.GO_VERSION }}
       - name: Install protoc and protoc-gen-go
@@ -53,8 +67,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: ${{ env.GO_VERSION }}
       - run: go build -trimpath ./...
@@ -64,14 +78,14 @@ jobs:
     name: lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: ${{ env.GO_VERSION }}
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@55c2c1448f86e01eaae002a5a3a9624417608d84 # v6
         with:
-          version: latest
+          version: v2.14.0
           args: --timeout=5m
       - name: gofmt
         run: test -z "$(gofmt -l . | tee /dev/stderr)"
@@ -95,8 +109,8 @@ jobs:
     env:
       SP_TEST_DATABASE_URL: postgres://security:security@localhost:5432/security_test?sslmode=disable
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: ${{ env.GO_VERSION }}
       # -p 1: the database-backed suites share one database and rebuild the
@@ -110,8 +124,8 @@ jobs:
     # makes it possible at all: the bundles are static input and the compiler
     # needs nothing else.
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: ${{ env.GO_VERSION }}
       - run: go run ./cmd/securityctl rules lint --bundle rules/builtin
@@ -120,8 +134,8 @@ jobs:
     name: AI runtime contract
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
       # The plane has no third-party dependencies on purpose: a service that runs
@@ -142,7 +156,7 @@ jobs:
     name: no secrets in the tree
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Release archive contains no credential-shaped material
         run: |
           set -euo pipefail
@@ -153,3 +167,20 @@ jobs:
             exit 1
           fi
           echo "no credential-shaped material in tracked files"
+
+  migrations:
+    name: migration phases
+    runs-on: ubuntu-latest
+    # Every migration filename must carry an expand/backfill/contract phase, and
+    # no expand step may ship with a contract step in the same commit. Both are
+    # safety rules about a running site, and neither was enforced by any job
+    # before this one existed — `make ci` ran them, but CI never called `make ci`.
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Every migration declares a phase
+        run: make migration-phases
+      - name: No contract step ships with the expand that makes it safe
+        run: go test -count=1 -run 'TestM1ContainsNoContractStep' ./migrations/...

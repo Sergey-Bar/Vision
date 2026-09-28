@@ -1,0 +1,37 @@
+# Keeps the two dependency surfaces current without anyone having to remember.
+#
+# The Python runtime is deliberately absent from this file: it has no
+# third-party imports, and CI enforces that. A Dependabot entry for a package
+# set that is meant to stay empty would be a way to quietly add a dependency to
+# a service that runs on a customer's site and touches camera footage.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: Etc/UTC
+    # Grouped, so a routine bump is one PR rather than nine, and grouped by
+    # minor so a security patch never waits behind an unrelated minor bump.
+    open-pull-requests-limit: 5
+    groups:
+      go-minor:
+        update-types: [minor, patch]
+      go-security:
+        applies-to: security-updates
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: Etc/UTC
+    # The workflow pins every action to a commit SHA, so a version bump arrives
+    # as a pull request to the pinned line. That is the point: the tag is never
+    # followed silently.
+    groups:
+      actions:
+        patterns: ["*"]
