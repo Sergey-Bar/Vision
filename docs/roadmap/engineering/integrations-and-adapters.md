@@ -4,14 +4,14 @@ Owner: E1 (Product/Architecture). Status: living. Last revised 2026-09-28.
 
 Scope: the M1–M4 integration architecture track. This is the most important
 architectural track in the company, because the second VMS adapter is the real
-test of whether the abstraction holds, and because `master-roadmap.md` §M4 sets
+test of whether the abstraction holds, and because `../master-roadmap.md` §M4 sets
 one gate that is not negotiable: **nothing outside the adapter may change to
 support the second adapter.** That statement is a claim about code we have not
 written yet, so this document's job is to make it cheap to falsify.
 
-Read `strategy-and-north-star.md` §6 (the capacity law), `master-roadmap.md` §M4,
-`quality-engineering.md` §2.4 and §2.5, `trust-and-security-program.md` §3.7,
-`decisions-and-process.md` §2.2, and `status.md` first. `docs/status.md` is the
+Read `../strategy-and-north-star.md` §6 (the capacity law), `../master-roadmap.md` §M4,
+`quality-engineering.md` §2.4 and §2.5, `../security/trust-and-security-program.md` §3.7,
+`decisions-and-process.md` §2.2, and `docs/status.md` first. `docs/status.md` is the
 authoritative build state; this document does not restate it.
 
 Everything asserted below was read in the tree. Where something does not exist,
@@ -96,7 +96,7 @@ future adapter must copy verbatim:
   counts accepted events, not whole feeds.
 - **Order is by `(SourceEventID, ObservedAt)`, never arrival** (`adapter.go:157-163`).
   The comment names the reason: an adapter that returns socket order is one whose
-  replay mode and integration mode can disagree, and `master-roadmap.md` §M1 gate 1
+  replay mode and integration mode can disagree, and `../master-roadmap.md` §M1 gate 1
   depends on them not.
 
 `Adapter.Parse` adds two more policies:
@@ -170,7 +170,7 @@ err error)`) or an equivalent, plus a worker, or the `DriftBand` severe path in
 downstream expression, and the reason string travels nowhere.
 
 **(c) `KnownMilestoneEventTypes` is a vendor-shaped map checked against a
-normalized name, and 13 of its 19 keys are unreachable.**
+normalized name, and 12 of its 18 keys are unreachable.**
 `toRecord` calls `deriveEventType` first (`adapter.go:255`) and then does
 `if !KnownMilestoneEventTypes[eventType]` (`adapter.go:277`). But
 `deriveEventType` always returns one of the outputs of `normalizeEventType`
@@ -197,7 +197,7 @@ the day someone wires `Malformed` to a dead-letter or a quarantine, the entire
 site's motion feed dead-letters at once. The fix is a rename to
 `KnownCanonicalEventTypes` keyed on the *output* vocabulary, ideally generated
 from the same source as `rules.KnownEventTypes` (`rules/bundle.go:285-292`) so
-the two cannot drift. See also `status.md` deviation 7.
+the two cannot drift. See also `docs/status.md` deviation 7.
 
 **(d) `ReplayTransport`'s epoch override is dead code.**
 `replay.go:92-104` computes `epoch` from `t.epoch.At` or `sc.Epoch` and then
@@ -243,7 +243,7 @@ Fifteen names: `motion`, `analytics`, `alarm.created`, `alarm.acknowledged`,
 `recording.started`, `recording.stopped`, `bookmark`, `metadata`,
 `access.granted`, `access.denied`, `gate`.
 
-**The adapter is the source of truth for this vocabulary, and `status.md`
+**The adapter is the source of truth for this vocabulary, and `docs/status.md`
 deviation 7 says so explicitly**: "The rule schema's `eventType` vocabulary
 follows the adapter's normalized names." That is the correct direction of
 dependency and the M4 second adapter must not change it. A second adapter that
@@ -360,7 +360,7 @@ of the tree be diffed against a second adapter with no behavioural change."
 | 5 | **Vendor string reaching a rule as identity** | `field.path: vendor.Message` (which the shipped bundle does, twice) | A rule's `field.path` must resolve into the *canonical* half of `canonicalPayload` (`normalize.go:314-326`), which is five keys plus `unregisteredDevice`. Anything under `vendor` is untrusted vendor text | **PARTIAL.** `validFieldPath` (`semantic.go:337-343`) checks the *shape* of the path, not which half it addresses. **Recommended:** the semantic validator refuses any `field.path` whose first segment is `vendor`, with a diagnostic naming the canonical replacement. See §3.5. |
 | 6 | **Vendor device identity as a primary key** | `SourceDeviceRef` matching "Entrance Camera 01 [CAM-001]" being stored as `device_id` | The adapter emits an *opaque* `source_device_ref`; the caller resolves it to a registered `device_id`; an unresolvable reference stays empty and the event is marked `unregisteredDevice: true` (`normalize.go:321-325`) — "unattributable rather than attributed to something guessed" | **EXISTS in the adapter** (`sourceDeviceRef`, `adapter.go:95-110`, with the explicit refusal to treat a bare human-readable label as an id). **MISSING above it:** the resolver. No code maps `source_device_ref` → `device_id`; `normalize.Input.DeviceID` is set by a caller that does not exist yet. |
 | 7 | **Vendor event-type spelling in a bundle** | `eventType: [MotionDetected]` | `KnownEventTypes` + `knownEventType` (`rules/bundle.go:294`), error code `unknown_event_type` (`semantic.go:248-256`): "a rule that can never match is a rule an operator believes is running" | **EXISTS.** Plus the JSON Schema enum, so a bundle is refused at parse time too. `TestUnknownEventTypeIsRejected` (`compile_test.go:224`). |
-| 8 | **Vendor credential or host material** | A committed fixture containing a MAC address, a person image, an absolute path, or an unexpected header | Sanitize at capture time by `internal/fixture/sanitize.go`; keep only allow-listed headers (`fixture.go:154-159` rejects a non-allow-listed one); `/api/v1/System/UserGroups` is used for "camera identity only" (`routes.go:61-62`) | **EXISTS** and is enforced in the fixture format itself. `trust-and-security-program.md` §3.7 is the owning policy. |
+| 8 | **Vendor credential or host material** | A committed fixture containing a MAC address, a person image, an absolute path, or an unexpected header | Sanitize at capture time by `internal/fixture/sanitize.go`; keep only allow-listed headers (`fixture.go:154-159` rejects a non-allow-listed one); `/api/v1/System/UserGroups` is used for "camera identity only" (`routes.go:61-62`) | **EXISTS** and is enforced in the fixture format itself. `../security/trust-and-security-program.md` §3.7 is the owning policy. |
 | 9 | **Vendor error string as an alert** | "Milestone returned 500" paging an operator at 03:00 | Typed errors, per-feed isolation, and an explicit `adapter_feed_error` record type the console can group rather than surface | **EXISTS** (`adapter.go:145-153`, `Parse`'s status switch at `adapter.go:192-200`). `TestFeedFailureIsIsolated` (`adapter_test.go:208`). |
 | 10 | **Vendor route list in the core** | A `switch route.Path` in `internal/api` or `internal/incidents` | Routes are adapter data; the core never names a path. The core knows `integration_id` and nothing else about the source | **EXISTS structurally.** `rg 'milestone\.' --glob '*.go'` outside the package returns only `tools/fixturegen`, `cmd/securityctl/rules_simulate_support.go`, `internal/fixture/sanitize.go` and tests. Note the last two are fixture-side, not core-side. |
 | 11 | **Vendor concepts in the schema migrations** | A `milestone_alarm_id` column, a `genetec_device` enum | SQL lives in `migrations/`, forward-only, and a schema change is a contract decision (`decisions-and-process.md` §2.3) | **EXISTS.** No vendor-named table, column or enum in `0001`–`0012`. Verified by reading the `CREATE TABLE`/`CREATE INDEX` inventory. |
@@ -381,7 +381,7 @@ of the tree be diffed against a second adapter with no behavioural change."
 3. **Severity laundering.** Assert `internal/milestone` (and every future
    adapter) does not import or construct `securityv1.Severity` or
    `securityv1.AlarmPriority`. Cost: a lint rule or a `go/ast` test, ~30 lines.
-   `release-sre-and-support.md` §4 and `trust-and-security-program.md` §6.2 both
+   `release-sre-and-support.md` §4 and `../security/trust-and-security-program.md` §6.2 both
    want a "definition of done for a hardening item", and this is a one-line
    version of it.
 
@@ -480,7 +480,7 @@ source.
 This is a first-class M2 backlog item and its blocker is stated nowhere. It
 should be in `product-and-backlog.md` §2.2 as a named dependency of the evidence
 engine, because the evidence engine is the milestone's first deliverable
-(`master-roadmap.md` §M2 scope 1) and cannot start.
+(`../master-roadmap.md` §M2 scope 1) and cannot start.
 
 ---
 
@@ -488,7 +488,7 @@ engine, because the evidence engine is the milestone's first deliverable
 
 ### 5.1 Scope
 
-`master-roadmap.md` §M4 item 1: Profile T and Profile M — discovery, events,
+`../master-roadmap.md` §M4 item 1: Profile T and Profile M — discovery, events,
 analytics metadata (people, vehicles, licence plates, object counters), PTZ, and
 streaming capability discovery. "Profile M is where the free signal density is."
 
@@ -513,7 +513,7 @@ people count, the vehicle count and the licence plate that `restricted-person` a
 | W8 | Interop lab: a device matrix, and the conformance report | all | 4 |
 | | **Total** | | **26** |
 
-W8 is not optional overhead. `financial-plan.md` §5.4 already classifies
+W8 is not optional overhead. `../company/financial-plan.md` §5.4 already classifies
 "ONVIF device interop testing against other vendors' hardware" as a
 **contractor** engagement because "access to hardware is the thing being bought".
 That classification is correct and should not change.
@@ -584,7 +584,7 @@ Design rules, each of which exists because of the failure it prevents:
    `device_capability_history` (or reuse the `revises` relation the graph
    already has) and set `source='probe'`. Capability *drift* is operationally
    meaningful: a camera that stops publishing analytics is a camera-health
-   finding (`master-roadmap.md` §M6 item 7), not a silent downgrade.
+   finding (`../master-roadmap.md` §M6 item 7), not a silent downgrade.
 3. **A missing capability row is a first-class answer.** It is not `false`. It
    means "never probed", which behaves like the AI plane's absence case
    (`observations.Degradation` — no observation vs degraded vs
@@ -613,8 +613,8 @@ Design rules, each of which exists because of the failure it prevents:
 
 ### 6.1 Vendor selection criteria
 
-Selection is by **customer pipeline, not preference** (`master-roadmap.md` §M4
-item 2). `gtm-and-sales.md` §2.3 and §7 own the pipeline; the criteria below are
+Selection is by **customer pipeline, not preference** (`../master-roadmap.md` §M4
+item 2). `../company/gtm-and-sales.md` §2.3 and §7 own the pipeline; the criteria below are
 how the engineering side scores a candidate once the commercial side has named
 one. Candidates named in the roadmap: Genetec, FLIR, Avigilon, the Axis
 ecosystem.
@@ -623,7 +623,7 @@ ecosystem.
 |---|---|---|---|
 | C1 | **Pipeline, not preference** | A named design partner or paid pilot is blocked without this adapter | Count of committed sites naming it. If zero, the adapter is not M4's second adapter, regardless of how good the API is |
 | C2 | **Documented, reachable API** | A published REST/SDK surface, not a reverse-engineered one | Counting: a documented API is a two-week integration; an undocumented one is a six-week one and carries a legal question |
-| C3 | **Read-only tolerance** | A read-only integration account is *supported and normal*, not a licence-upgrade conversation | Ask the vendor. A vendor that requires write access for a read integration is disqualified: `strategy-and-north-star.md` §3's anti-segments forbid a dependency on a physical-action control path we do not own |
+| C3 | **Read-only tolerance** | A read-only integration account is *supported and normal*, not a licence-upgrade conversation | Ask the vendor. A vendor that requires write access for a read integration is disqualified: `../strategy-and-north-star.md` §3's anti-segments forbid a dependency on a physical-action control path we do not own |
 | C4 | **Event model that maps without loss** | Vendor events cover ≥ 80% of our canonical vocabulary, or the gap is explainable | Map the vendor's event list onto the 15 canonical names before writing code. A vendor whose model is 40% analytics and 60% proprietary is a permanent vocabulary-debt cost |
 | C5 | **Evidence retrieval available** | Snapshots and clips are reachable through a documented interface | If not, M2's evidence intelligence cannot run on that vendor's sites, and M4's adapter is a partial product |
 | C6 | **Local-first fit** | Works with the VMS on the customer's LAN; no cloud dependency | A cloud-only VMS in a security product is a deployment objection, not an integration detail |
@@ -656,7 +656,7 @@ week 7 is placed early on purpose.
 
 **The name: `make non-adapter-diff <vendorA> <vendorB>`.**
 
-The claim it tests, verbatim from `master-roadmap.md` §M4: "A second full VMS
+The claim it tests, verbatim from `../master-roadmap.md` §M4: "A second full VMS
 adapter works with zero changes outside the adapter."
 
 **What "behavioural" means.** The test must compare *behaviour*, not text. A
@@ -738,11 +738,11 @@ only thing that actually proves it.
 
 ### 7.1 The requirement, quoted from the roadmap
 
-`master-roadmap.md` §M4 item 3: "A third party must be able to write a working
+`../master-roadmap.md` §M4 item 3: "A third party must be able to write a working
 adapter without reading our source." The M4 gate requires that the certification
-suite "has been run by someone outside the company". `gtm-and-sales.md` §7.4
+suite "has been run by someone outside the company". `../company/gtm-and-sales.md` §7.4
 argues the SDK must exist *before* the OEM conversation for exactly this reason,
-and `financial-plan.md` §5.3's recommendation (cut M4 to the second adapter and
+and `../company/financial-plan.md` §5.3's recommendation (cut M4 to the second adapter and
 the SDK, then use the partner's engineers) is only possible because the SDK
 exists. This is the highest-leverage item in M4 and it should be built as a
 library, not as documentation.
@@ -855,7 +855,7 @@ invariant:
   the observation by the platform.
 - **No shell, no SQL, no network egress, no dynamic code, no unbounded regex.**
   `AGENTS.md` states this for rule bundles; the same posture applies to a
-  third-party adapter binary, and `trust-and-security-program.md` §3.7 owns the
+  third-party adapter binary, and `../security/trust-and-security-program.md` §3.7 owns the
   untrusted-input policy for all three kinds.
 
 ### 7.4 The fixture framework and the source simulator
@@ -909,7 +909,7 @@ Waivers are allowed (some vendors cannot satisfy a case); a waiver that is not
 named is a failure.
 
 **Publishing the conformance suite as an artefact** is an M4 gate line
-(`master-roadmap.md` §M4). It is also the cheapest possible way to make the
+(`../master-roadmap.md` §M4). It is also the cheapest possible way to make the
 "third party can build an adapter" claim falsifiable: a published suite is a
 contract a stranger can run.
 
@@ -923,7 +923,7 @@ contract a stranger can run.
   named reason ("a silent field rename is how a version skew becomes a wrong
   observation"). The SDK should use the same pattern.
 - **Deprecation window: two milestone releases minimum, published in a
-  `deprecated-versions.md`, with the adapter still building and still passing its
+  a `deprecated-versions` file (planned SDK artifact, not yet written), with the adapter still building and still passing its
   suite.** A site upgrading from M4 to M5 must not be told its adapter no longer
   compiles.
 - **Adding a capability to `Source` is a major version.** Adding a `Route` field
@@ -1129,13 +1129,13 @@ Four reasons, and the first is a commercial one.
    badge is routine. A denied badge is often a misread card at 6am. A door
    forced, or held open past policy, is *almost never* routine, and it is
    reported by a contact on a door the customer already owns — no analytics, no
-   tuning, no licence. `master-roadmap.md` §M4 item 4 calls them "among the
+   tuning, no licence. `../master-roadmap.md` §M4 item 4 calls them "among the
    highest-value correlations in the whole product". The honest reading: they are
    the *cheapest* high-value correlations in the whole product, and the roadmap's
    placement of access control before sensors (§M4's reduced scope) is correct for
    exactly this reason.
 2. **It is the correlation that decides the trust question at a pilot.** A buyer
-   asks "what happens when the AI is down?" (`strategy-and-north-star.md` §4). The
+   asks "what happens when the AI is down?" (`../strategy-and-north-star.md` §4). The
    strongest possible answer is: *"A door forced at 02:14 on a badge reader is
    Tier A — the reader's own state, reported by the customer's system. It needs no
    model. The model's contribution is corroborating who it was, and that
@@ -1154,7 +1154,7 @@ Four reasons, and the first is a commercial one.
    where the operator will always look.
 4. **It is the correlation with the clearest escalation semantics.** Forced door
    → notify. Held open → escalate. Neither is a page, and both are auditable
-   with a name attached. That is the `master-roadmap.md` §M3 bounded auto-
+   with a name attached. That is the `../master-roadmap.md` §M3 bounded auto-
    resolution's first candidate class, and the one where "auto-resolve after N
    seconds if no motion" is *correct* rather than reckless.
 
@@ -1179,7 +1179,7 @@ should be an ADR before any code (`decisions-and-process.md` §2.2/§2.3).
 | **Intercom** (call, door release, request for entry) | A **request**, and the grant or refusal of that request | `access.intercom_request`, `access.intercom_granted`, `access.intercom_denied` | A | Intercom is a *conversational* medium: the "signal" is often a video-and-audio event, and the canonical model has no way to represent a conversation |
 | **Gate / barrier** | A barrier state transition plus the **loop detector** as a separate signal | `gate` (exists today, at its lowest resolution) + `gate.loop_detected` | A | `gate` is currently a single undifferentiated canonical name. It is the weakest name in the vocabulary and should be split |
 | **LPR** | A **plate observation** with a legibility flag. Not an identity | `lpr.read` with `canonical.plateText`, `canonical.confidence` | A (device) / the plate is an `Entity` | Plate normalisation (case, separators, country) is a *canonicalisation* decision with privacy consequences, and it is exactly the kind of thing a vendor will get wrong in a different way from every other vendor. `vehicle-at-gate`'s schema says `plateText` is "Not normalized, not resolved to a vehicle identity in M1" — that decision should be re-examined at M4 rather than inherited |
-| **BMS** (HVAC, power, access-controlled building systems) | A **point change** in a building system, and it is usually not a security event at all | `bms.point_changed` | A | The temptation is to make BMS a general SCADA ingest. The anti-segment rule (`strategy-and-north-star.md` §3: not a generic SIEM) applies. BMS is in scope only where a point change bears on a security outcome — occupancy feeding a zone's baseline, a power loss feeding a door's held-open state |
+| **BMS** (HVAC, power, access-controlled building systems) | A **point change** in a building system, and it is usually not a security event at all | `bms.point_changed` | A | The temptation is to make BMS a general SCADA ingest. The anti-segment rule (`../strategy-and-north-star.md` §3: not a generic SIEM) applies. BMS is in scope only where a point change bears on a security outcome — occupancy feeding a zone's baseline, a power loss feeding a door's held-open state |
 
 **The taxonomy rule:** *a signal is a transition or a threshold crossing, not a
 level.* A device that reports "closed" every second produces no events; a device
@@ -1267,7 +1267,7 @@ Enforced in four places, and the layering is the point:
    site-bound tables.
 3. **The system worker boundary.** `app_is_system_worker()` (line 163) is
    `coalesce(current_setting('app.system_worker', true), '') = 'true'`, set by
-   `dbx.InSystemTenant`. `status.md` deviation 3 is the reason this is worth
+   `dbx.InSystemTenant`. `docs/status.md` deviation 3 is the reason this is worth
    stating: "Background workers reach other tenants through an explicit
    `app.system_worker` setting, bounded by grants, not a role exemption." And
    deviation 4: "`security_core` has no `BYPASSRLS`. Only the migrator does."
@@ -1280,7 +1280,7 @@ Enforced in four places, and the layering is the point:
 
 | Change | Why | Risk if done late |
 |---|---|---|
-| **A person model — and only then** | M5's requirement is "the same credential denied at Site A, denied at Site B, attempted at Site C is one incident, not three" (`master-roadmap.md` §M5 item 6). That is a *credential* correlation, not a person correlation, and it is achievable without a person model: the same `Entity` value across sites. **`entity.proto`'s `ENTITY_KIND_BADGE` and the `entities` table's `entities_identity_idx` are the hook.** A person model is *not* required for M5's stated gate | The temptation at M5 is exactly the temptation `graph.go:16-22` was written to resist, and the M6 exit gate adds a behavioural layer on top. See the finding below |
+| **A person model — and only then** | M5's requirement is "the same credential denied at Site A, denied at Site B, attempted at Site C is one incident, not three" (`../master-roadmap.md` §M5 item 6). That is a *credential* correlation, not a person correlation, and it is achievable without a person model: the same `Entity` value across sites. **`entity.proto`'s `ENTITY_KIND_BADGE` and the `entities` table's `entities_identity_idx` are the hook.** A person model is *not* required for M5's stated gate | The temptation at M5 is exactly the temptation `graph.go:16-22` was written to resist, and the M6 exit gate adds a behavioural layer on top. See the finding below |
 | **Cross-site `Entity` identity** | `entities` is currently tenant-keyed; a multi-site tenant needs the same badge to resolve to one entity | Duplicated entity rows, and M5's headline correlation silently does not work |
 | **A `SITE`-scoped traversal default** | `Walk` is tenant-scoped; M5 needs site-scoped as the common case with tenant-wide as the deliberate choice | Every M5 query writes a site filter by hand, and one of them will forget |
 | **Central-plane consistency rules** | M5's central plane is optional and sites stay autonomous. That means the graph is *eventually* consistent across sites, and every cross-site correlation must be able to say "Site B's data is 4 minutes stale" | A cross-site incident that quietly omits a site is worse than no cross-site incident |
@@ -1317,7 +1317,7 @@ no work, not an error.
 `SourceEventID` that is **stable across polls and unique per event**.
 `adapter.go:239-244` enforces it at the item level: an item with no id becomes
 `adapter_unparsed_item` with a synthetic, position-derived id, precisely so it is
-not re-ingested forever. `status.md` deviation 1 explains why the key lives on a
+not re-ingested forever. `docs/status.md` deviation 1 explains why the key lives on a
 non-partitioned table: "A unique index on a partitioned table must include the
 partition key, so the planned constraint would only have deduplicated within a
 month."
@@ -1392,8 +1392,8 @@ and a feed that fails for a reason the adapter could not parse becomes a
 | **T11 — determinism** | Two runs over one fixture produce identical records and identical `integrity_hash` | `IntegrityHash` excludes `received_at` on purpose (`normalize.go:335-340`) | Yes |
 | **T12 — tenant scoping** | Every row the adapter's path produces is tenant-scoped and RLS-enforced; a cross-tenant read returns nothing | RLS suite | Yes (`quality-engineering.md` §3 Inv 5) |
 
-**T1 is the gate and the blocker.** `master-roadmap.md` §M1 gate 1 requires it
-and `status.md` names it as one of three DoD items that "cannot be signed here".
+**T1 is the gate and the blocker.** `../master-roadmap.md` §M1 gate 1 requires it
+and `docs/status.md` names it as one of three DoD items that "cannot be signed here".
 
 ---
 
@@ -1476,7 +1476,7 @@ No adapter ships without all six. Each is a file, not a feeling.
 ## 12. Open questions this document cannot close
 
 1. **Which vendor is the second adapter?** C1 makes it a commercial decision
-   (`gtm-and-sales.md` §2.3, §7). Engineering's job is to score it, and the score
+   (`../company/gtm-and-sales.md` §2.3, §7). Engineering's job is to score it, and the score
    depends on answers we do not have: whether a read-only integration account is
    supported, and what fraction of the vendor's event model maps cleanly.
 2. **Does the epoch defect block M1 gate 1?** If the parity comparison is
@@ -1503,6 +1503,6 @@ No adapter ships without all six. Each is a file, not a feeling.
    `vendor.Analytics.Confidence`). Both need a canonical replacement first. This
    is a small, high-value ADR candidate.
 
-See `risk-register.md` §2.1 for the technical risks this document's open items
+See `../company/risk-register.md` §2.1 for the technical risks this document's open items
 map onto, and `decisions-and-process.md` §2.2 for the contract-side decisions
 items 2, 3, 4 and 6 above would need.

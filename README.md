@@ -41,9 +41,9 @@ Five invariants that the rest of the code exists to protect.
 | `internal/` | Core: adapters, durability, graph, rules, verification, policy, audit, identity, API, console. |
 | `migrations/` | Ordered SQL. `expand` steps ship separately from `contract` steps. |
 | `rules/builtin/` | The built-in bundle, shipped in the release archive. |
-| `docs/` | Threat model, roadmap, operational runbook. |
-| `docs/roadmap/` | The plan: strategy, the M1–M8 calendar, and every R&D, GTM, trust and company track. Start at `docs/roadmap/README.md`. |
-| `deploy/` | Windows Service, systemd, optional OCI profile, and the AI runtime. |
+| `docs/` | Build status and threat model. |
+| `docs/roadmap/` | The plan: strategy, the M1–M8 calendar, and every R&D, GTM, trust and company track. |
+| `deploy/` | Windows Service, systemd, and the AI runtime. |
 
 ## Build
 
@@ -60,16 +60,28 @@ Windows uses `make` through Git Bash, or the equivalent `go` invocations in
 
 ## Status
 
-Milestone 1 is in progress. See `docs/status.md` for what is built and what is
-not — the doc is the source of truth, not this file.
+Milestone 1 is in progress. `docs/status.md` is the source of truth for what is
+built and what is not — not this file.
 
 ## Plan
 
 `docs/roadmap/` holds the roadmap from today to product: the M1–M8 calendar with
 dated exit gates, and the track documents behind it — product, UX, QA, metrics,
-adapters, AI, security, compliance, GTM, pricing, launch, risk, hiring, finance.
-Its index is `docs/roadmap/README.md`, and it is deliberately readable by someone
-who is not an engineer.
+adapters, AI, release, security, compliance, GTM, pricing, launch, risk, hiring
+and finance. It is organised so that a non-engineer can navigate it, and it is
+readable by one.
+
+| | |
+|---|---|
+| Start here | [`docs/roadmap/README.md`](docs/roadmap/README.md) |
+| What and why | [`strategy-and-north-star.md`](docs/roadmap/strategy-and-north-star.md) |
+| What ships when | [`master-roadmap.md`](docs/roadmap/master-roadmap.md) |
+| What we do this quarter | [`milestones/m1-trust-spine-execution-plan.md`](docs/roadmap/milestones/m1-trust-spine-execution-plan.md) |
+
+The master roadmap's final section lists the ten code defects found while
+writing the plan, two of which (a bundle check that verifies a digest rather
+than a signature, and an adapter event-type table keyed on spellings
+normalisation never emits) are worth fixing before anything ships.
 
 ## Evidence rule
 

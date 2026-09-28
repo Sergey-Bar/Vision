@@ -1,81 +1,93 @@
-# Roadmap — index and operating rules
+# Roadmap
 
-This directory is the company's plan. It answers: what we build, in what order,
-on what dates, gated by what, sold to whom, and what happens when it slips.
+The plan, from today to product. What we build, in what order, on what dates,
+gated by what, sold to whom, and what happens when it slips.
 
-**Order of reading.** `00` then `01`, then the document for whatever you own.
-Do not read a track document before `00` and `01`; they set the dates and the
-constraints that the track documents obey.
+Start at **[`strategy-and-north-star.md`](strategy-and-north-star.md)**. It
+overrides everything else in this directory on conflict.
 
-## The documents
+## Read this much and stop
 
-### Spine — read these first
-
-| Doc | What it decides |
+| If you have | Read |
 |---|---|
-| [00 — Strategy and North Star](00-strategy-and-north-star.md) | Positioning, the five segments in order, the anti-segments, the three buyer questions, the North Star metric and its four mandatory companions, the moat sequence, the capacity law, the evidence discipline. **Overrides everything else on conflict.** |
-| [01 — Master Product Roadmap](01-master-roadmap.md) | The calendar. M1–M8 with windows, missions, exit gates, commercial states, pre-declared reduced-scope cuts, moats, the two parallel tracks, the non-negotiable sequence dependencies, and what the first review pass got wrong. |
+| Five minutes | This page, then the two spine documents below |
+| One hour | Both spine documents, then the track you own |
+| A milestone to run | The spine, the milestone plan, and the two tracks it touches |
 
-### Execution
+The full set is about 17,000 lines. It is not a set to read end to end; it is a
+set to navigate. Every document states what it decides and what it defers to.
 
-| Doc | What it decides |
+## The spine — the two documents everything obeys
+
+| Document | What it decides |
 |---|---|
-| [02 — M1 execution plan](02-m1-trust-spine-execution-plan.md) | Item-level plan for the milestone running now: W1–W9, 65 task IDs, a 26-week calendar with the 40%-tax weeks marked, the critical path with float, M1 risks, and the exit gate as a signed checklist with the artefact each line requires. |
-| [03 — Team structure and operating model](03-team-structure-and-operating-model.md) | Every R&D role and who holds it, the AI-agent roster and its limits, the week, the RACI, the intake filter, customer communication, and the single-human on-call reality. |
-| [05 — Product and backlog](05-product-and-backlog.md) | Product principles, the M1–M8 capability backlog, work-item anatomy with fill-in templates, the prioritisation model, discovery, and the product–engineering contract. |
-| [19 — Decision log and process](19-decision-log-and-process.md) | Decision taxonomy, the ADR process, AI-agent rules of engagement reconciled with `AGENTS.md`, the settled-decisions index seeded from the code, and the open decisions with dates. |
+| [`strategy-and-north-star.md`](strategy-and-north-star.md) | Positioning; the five customer segments in order; the anti-segments; the three questions every buyer asks; the North Star metric and its four mandatory companions; the moat sequence; the capacity law; the evidence discipline. |
+| [`master-roadmap.md`](master-roadmap.md) | The calendar. M1–M8 from 2026-09-28 to 2032-12-31, each with a mission, a signed exit gate, a commercial state, a pre-declared reduced-scope cut, and a moat. Plus the two parallel tracks, the non-negotiable sequence dependencies, and a frank list of what this plan got wrong and what it found in the code. |
 
-### Engineering tracks
+## Milestones
 
-| Doc | What it decides |
+| Document | What it decides |
 |---|---|
-| [06 — UX and design system](06-ux-and-design-system.md) | The operator's actual context, IA and routes, the three critical flows wireframed, design tokens and the CSP-constrained component table, AI-unavailable as a first-class state, accessibility targets, and visual identity. |
-| [07 — Quality engineering](07-quality-engineering.md) | The quality thesis, the real test shape, the invariant→test matrix, golden discipline, the kill -9 programme, path-traversal testing, the release gate, domain severities, and the coverage-theatre refusals. |
-| [08 — Metrics and analytics](08-metrics-and-analytics.md) | The metric tree, real definitions with real Postgres sources, what is measured when, the M2 exit-gate experiment design, AI quality measurement, guardrails that halt a release, and the metrics we refuse to track. |
-| [09 — Integration and adapter track](09-integration-and-adapter-track.md) | The adapter contract as built, the canonical vocabulary, vendor-leak prevention, ONVIF, the second VMS adapter and the non-adapter diff test, the Adapter SDK, access control and sensors, the Security Graph, and the durability contract every adapter must pass. |
-| [10 — AI and data track](10-ai-and-data-track.md) | The AI tiers as built, invariant 3 operationally, the VLM profile programme and its statistics, the local LLM and prompt injection, evidence intelligence, semantic search, site intelligence, autonomy A0–A4, the model abstraction, evaluation, and the AI risk register. |
-| [11 — Hiring plan and org growth](11-hiring-plan-and-org-growth.md) | Why the first hire is not an engineer, a dated headcount plan tied to milestone gates, first-90-days for the three hires that matter, the fractional route, interview design including AI-usage assessment, and a 12-month forward view. |
-| [12 — Release, SRE and support](12-release-sre-and-support.md) | The release train, deployment topology, offline and air-gapped operation, service units, observability, backup/DR including the honest restore-behind-seal finding, the support model, the 02:00 operations playbook, and disclosure intake. |
+| [`milestones/m1-trust-spine-execution-plan.md`](milestones/m1-trust-spine-execution-plan.md) | The plan running right now: workstreams, 65 task IDs, a 26-week calendar with the 40% tax weeks marked, the critical path with float, M1 risks, and the exit gate as a signed checklist with the artefact each line requires. |
 
-### Trust, compliance, risk
+## Engineering tracks
 
-| Doc | What it decides |
+| Document | What it decides |
 |---|---|
-| [13 — Security and trust program](13-security-and-trust-program.md) | The continuous program: supply chain, AI governance, privacy, hardening, evidence integrity and media provenance, vulnerability management, the invariant→control matrix, accepted risks, and when to re-threat-model. |
-| [14 — Compliance and certifications](14-compliance-and-certifications.md) | Separates complying with a control set from independent confirmation from regulatory approval. SOC 2, ISO 27001, ISO 42001, pen test, EU AI Act readiness, privacy regimes, data residency, and the contract inventory. |
-| [16 — Risk register](16-risk-register.md) | 54 scored risks with owners, early-warning signals and pre-agreed responses; a top ten by expected damage; pre-mortems for M1, M2 and M3 GA; the escalation ladder. |
+| [`engineering/product-and-backlog.md`](engineering/product-and-backlog.md) | Product principles, the M1–M8 capability backlog, work-item anatomy with fill-in templates, the prioritisation model, discovery, and the product–engineering contract. |
+| [`engineering/ux-and-design-system.md`](engineering/ux-and-design-system.md) | The operator's actual context, IA and routes, the three critical flows wireframed, design tokens and the CSP-constrained component table, AI-unavailable as a first-class state, accessibility targets, visual identity. |
+| [`engineering/quality-engineering.md`](engineering/quality-engineering.md) | The quality thesis, the real test shape, the invariant→test matrix, golden discipline, the kill -9 programme, path-traversal testing, the release gate, domain severities, and the coverage-theatre refusals. |
+| [`engineering/metrics-and-analytics.md`](engineering/metrics-and-analytics.md) | The metric tree, real definitions with real Postgres sources, what is measured when, the M2 exit-gate experiment design, AI quality measurement, guardrails that halt a release, and the metrics we refuse to track. |
+| [`engineering/integrations-and-adapters.md`](engineering/integrations-and-adapters.md) | The adapter contract as built, the canonical vocabulary, vendor-leak prevention, ONVIF, the second VMS adapter and the non-adapter diff test, the Adapter SDK, access control and sensors, the Security Graph. |
+| [`engineering/ai-and-data.md`](engineering/ai-and-data.md) | The AI tiers as built, invariant 3 operationally, the VLM profile programme and its statistics, the local LLM and prompt injection, evidence intelligence, semantic search, site intelligence, autonomy A0–A4, evaluation, the AI risk register. |
+| [`engineering/release-sre-and-support.md`](engineering/release-sre-and-support.md) | The release train, deployment topology, offline and air-gapped operation, service units, observability, backup and DR including the honest restore-behind-seal finding, the support model, the 02:00 operations playbook, disclosure intake. |
+| [`engineering/team-and-operating-model.md`](engineering/team-and-operating-model.md) | Every R&D role and who holds it, the AI-agent roster and its limits, the week, the RACI, the intake filter, customer communication, and the single-human on-call reality. |
+| [`engineering/decisions-and-process.md`](engineering/decisions-and-process.md) | Decision taxonomy, the ADR process, AI-agent rules of engagement reconciled with `AGENTS.md`, the settled-decisions index seeded from the code, and the open decisions with dates. |
 
-### Company
+## Trust and compliance
 
-| Doc | What it decides |
+| Document | What it decides |
 |---|---|
-| [04 — GTM and sales](04-gtm-and-sales.md) | Segment playbooks, the design-partner motion, paid-pilot and GA motion, the 25-minute demo run sheet, sales collateral, the OEM channel, founder time budget, the competitive frame, and pipeline hygiene. |
-| [15 — Launch plan](15-launch-plan.md) | The GA checklist T-90 to T+30, the four readiness gates, launch assets, rollout and rollback, the capability kill switch, hypercare, the 30-day scorecard, and the unglamorous risks. |
-| [17 — Pricing and packaging](17-pricing-and-packaging.md) | Pricing principles, packaging options per milestone, the autonomy pricing question, the OEM model, metering, offline licensing, unit economics, and procurement readiness. |
-| [18 — Financial plan](18-financial-plan.md) | Assumptions, an 18-month cash model with three scenarios, break-even, the capital plan and what each stage's diligence will hit hardest, cost structure by milestone, and the three financial risks that kill companies like this. |
+| [`security/trust-and-security-program.md`](security/trust-and-security-program.md) | The continuous program: supply chain, AI governance, privacy, hardening, evidence integrity and media provenance, vulnerability management, the invariant→control matrix, accepted risks, when to re-threat-model. |
+| [`security/compliance-and-certifications.md`](security/compliance-and-certifications.md) | Separates complying with a control set from independent confirmation from regulatory approval. SOC 2, ISO 27001, ISO 42001, pen test, EU AI Act readiness, privacy regimes, data residency, the contract inventory. |
+
+## Company
+
+| Document | What it decides |
+|---|---|
+| [`company/gtm-and-sales.md`](company/gtm-and-sales.md) | Segment playbooks, the design-partner motion, paid-pilot and GA motion, the 25-minute demo run sheet, sales collateral, the OEM channel, founder time budget, the competitive frame, pipeline hygiene. |
+| [`company/pricing-and-packaging.md`](company/pricing-and-packaging.md) | Pricing principles, packaging per milestone, the autonomy pricing question, the OEM model, metering, offline licensing, unit economics, procurement readiness. |
+| [`company/launch-plan.md`](company/launch-plan.md) | The GA checklist T-90 to T+30, the four readiness gates, launch assets, rollout and rollback, the capability kill switch, hypercare, the 30-day scorecard. |
+| [`company/risk-register.md`](company/risk-register.md) | 54 scored risks with owners, early-warning signals and pre-agreed responses; a top ten by expected damage; pre-mortems for M1, M2 and M3 GA; the escalation ladder. |
+| [`company/financial-plan.md`](company/financial-plan.md) | Assumptions, an 18-month cash model with three scenarios, break-even, the capital plan and what each stage's diligence will hit hardest, cost structure by milestone, the three financial risks that kill companies like this. |
+| [`company/hiring-and-org-growth.md`](company/hiring-and-org-growth.md) | Why the first hire is not an engineer, a dated headcount plan tied to milestone gates, first-90-days for the three hires that matter, the fractional route, interview design including AI-usage assessment. |
 
 ## How this directory is used
 
-- **`00` and `01` are the contract.** A track document that contradicts either is
-  wrong, and the fix is to the track document.
+- **The spine is the contract.** A track document that contradicts
+  `strategy-and-north-star.md` or `master-roadmap.md` is wrong, and the fix is
+  to the track document.
 - **Numbers carry their provenance.** `PROPOSED`, `ESTIMATE`, `ASSUMPTION` and
-  `NOT YET KNOWN` are load-bearing. A bare number in this directory is either
-  measured, in which case the document says where, or it is a defect.
+  `NOT YET KNOWN` are load-bearing. A bare number here is either measured — and
+  the document says where — or it is a defect.
 - **Exit gates are signed by a human, always.** The AI agents in
-  `03-team-structure-and-operating-model.md` write code and draft tests. They do
+  `engineering/team-and-operating-model.md` write code and draft tests. They do
   not decide scope, sign a gate, contact anyone, or commit a date.
-- **Review cadence.** `00`, `01`, `02` and `16` are reviewed monthly, immediately
-  at any milestone boundary, and whenever an exit gate changes. Everything else
-  is reviewed when its milestone enters its final quarter. Every document carries
-  a last-revised date; a document without one is stale and should not be cited.
+- **Review cadence.** The two spine documents, the M1 plan and the risk register
+  are reviewed monthly, immediately at any milestone boundary, and whenever an
+  exit gate changes. Everything else is reviewed when its milestone enters its
+  final quarter. Every document carries a last-revised date; one without it is
+  stale and should not be cited.
 - **The build state lives elsewhere.** `docs/status.md` is the source of truth
-  for what is built and what is not. This directory plans; that one reports.
+  for what is built. This directory plans; that one reports.
+- **Cross-references use relative paths**, so a document can be moved without
+  breaking its links, and every link in this directory is verified to resolve.
 
 ## The five invariants, which are the law
 
-Restated here because every document in this directory defers to them, and
-because they are the only rules in the company that cannot be traded away.
-Weakening any one requires an ADR and a failing test, in that order.
+Restated here because every document above defers to them, and because they are
+the only rules in the company that cannot be traded away. Weakening any one
+requires an ADR and a failing test, in that order.
 
 1. **Zero accepted event loss.** Anything reaching `inbox_events` reaches a
    terminal state unless explicitly dead-lettered. `kill -9` at any stage: no
@@ -91,13 +103,14 @@ Weakening any one requires an ADR and a failing test, in that order.
    everywhere and is never read from a request body. `site_id` is `NOT NULL`
    only on physically site-bound records.
 
-Working agreement, treated with the same weight: **bundles are untrusted input.**
-Rule bundles, release archives and model bundles are verified before execution.
-No shell, no SQL, no network, no dynamic code, no unbounded regex.
+Treated with the same weight: **bundles are untrusted input.** Rule bundles,
+release archives and model bundles are verified before execution. No shell, no
+SQL, no network, no dynamic code, no unbounded regex.
 
 ## The 26-week question
 
 A useful thing to be able to answer at any moment, and the reason this
 directory is shaped the way it is: *what is the product, and what can it prove,
-26 weeks from today?* The answer is in `02-m1-trust-spine-execution-plan.md`.
+26 weeks from today?* The answer is in
+[`milestones/m1-trust-spine-execution-plan.md`](milestones/m1-trust-spine-execution-plan.md).
 If that answer ever becomes vague, the roadmap has drifted from the plan.

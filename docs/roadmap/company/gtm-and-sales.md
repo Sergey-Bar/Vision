@@ -284,7 +284,7 @@ each one has to be *delivered*, because the exchange is worthless without it.
 ### 3.3 Pilot agreement contents
 
 A short document, in plain language, eleven sections. The template lives at
-`docs/roadmap/templates/design-partner-agreement.md` and is created before the
+the design-partner agreement template, to be written before the first pilot is signed and is created before the
 first signature.
 
 1. **What this is.** A no-charge evaluation of pre-GA software at one site, with

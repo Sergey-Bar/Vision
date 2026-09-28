@@ -6,6 +6,28 @@ This is the document every other roadmap document is measured against. If a
 plan somewhere else in `docs/roadmap/` contradicts this one, this one wins and
 the other is wrong.
 
+## The North Star metric
+
+**Human Attention Minutes per 1,000 security events.**
+
+It becomes the headline metric at M7, but it is instrumented from M1 — the
+components exist (operator actions per incident, incident durations, automated
+resolution, human-intervention events) long before the autonomy they measure.
+
+It must **always** be reported with its four companions, and a report showing
+the North Star falling while any companion regresses is a failed quarter, not a
+successful one:
+
+| Companion | Why it is not optional |
+|---|---|
+| Missed-incident rate | The failure that costs a customer an intrusion. Asymmetric against a false alarm by orders of magnitude. |
+| Operator override rate | Measures whether the operator trusts us. A falling North Star with a rising override rate means we are hiding work, not removing it. |
+| False escalation rate | The noise that burns out a desk. If this rises, the customer will turn us off. |
+| Evidence completeness | The audit story. An incident closed without evidence is a claim, not a record. |
+
+**Automation alone is not success. Trusted automation is success**, and these
+four numbers are how we prove the difference rather than assert it.
+
 ## 1. The one-sentence product
 
 Captain is the local-first intelligence and autonomy layer that sits **above**
@@ -109,13 +131,15 @@ not materialise and M7–M8 are an automation project on top of a search product
 ## 6. The capacity law
 
 Two engineers plus heavy AI assistance. This is the constraint that shapes
-every date in ``, so it is written down rather than
-discovered later.
+every date in [the master roadmap](master-roadmap.md), so it is written down
+rather than discovered later.
 
 - **2 engineers, 13 weeks per quarter, ~60% of that on new build.** The
   remaining 40% is the tax that quietly kills two-person companies: support,
   demos, sales calls, incident response, hiring, admin, and the AI review pass.
-  No milestone in this roadmap plans above that line.
+  No milestone in this roadmap plans above that line. A quarter of new build
+  capacity is therefore **15.6 engineer-weeks**, and a 26-week milestone window
+  is **~31 engineer-weeks**. Every document is sized against that number.
 - **AI multiplies implementation, not judgement.** AI writes most of the code
   and most of the first-draft tests. It does not decide what to build, decide
   whether a decision is defensible, talk to a customer, or sign an exit gate.

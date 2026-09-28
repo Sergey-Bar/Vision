@@ -6,6 +6,17 @@
 *.test
 *.out
 
+# Python bytecode. The AI runtime targets 3.11+ and the standard library only,
+# so a committed .pyc is a build artifact that pins an interpreter nobody else
+# runs, and it gets stale silently.
+__pycache__/
+*.py[cod]
+
+# Test and coverage output. `go test -coverprofile=coverage` writes a plain
+# file at the repo root, which is easy to stage by accident.
+/coverage
+/coverage.*
+
 # Local runtime state — never commit evidence, logs, secrets or checkpoints
 /data/
 /evidence/

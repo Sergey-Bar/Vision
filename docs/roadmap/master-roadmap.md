@@ -24,14 +24,20 @@ on. Each milestone has:
 
 | # | Milestone | Window | Exit gate summary | Commercial state | Moat |
 |---|---|---|---|---|---|
-| M1 | Trust Spine | now → Q1 2027 | One real XProtect site, one real AI-assisted incident class, end to end, replayable, audited | Design partner, technical pilot | Trust |
-| M2 | AI Investigator | Q2–Q3 2027 | Operators investigate supported incident classes measurably faster than with the VMS alone | Paid pilot | Investigation |
-| M3 | AI Operator Copilot | Q4 2027 – Q1 2028 | Incident classes resolved under playbook without operator action, at a quality that does not regress | **First production GA** | Workflow |
-| M4 | Universal Security Layer | Q2–Q4 2028 | A second full VMS adapter works with zero changes outside the adapter; Adapter SDK v1 is public | Platform expansion; first OEM talks | Integration |
-| M5 | Enterprise Command Platform | Q4 2028 – Q3 2029 | Multi-site, HA, OIDC/SCIM, and a site that keeps operating with the control plane disconnected | **Enterprise GA** | Enterprise |
-| M6 | Site Intelligence | Q4 2029 – Q2 2030 | Baselines, site memory and drift detection live; a proposed rule shows a historical impact diff before approval | Intelligence premium tier | Context |
-| M7 | Autonomous Security Operations | Q3 2030 – Q2 2031 | A4 sites run routine operations on policy; the exception queue is the operator's primary surface | Autonomous operations | Autonomy |
-| M8 | Physical Security OS | Q3 2031 → 2032 | Third-party adapters, rule packs and model bundles install from a signed marketplace | Platform / marketplace | Ecosystem |
+| M1 | Trust Spine | 2026-09-28 → 2027-03-31 | One real XProtect site, one real AI-assisted incident class, end to end, replayable, audited | Design partner, technical pilot | Trust |
+| M2 | AI Investigator | 2027-04-01 → 2027-09-30 | Operators investigate supported incident classes measurably faster than with the VMS alone | Paid pilot | Investigation |
+| M3 | AI Operator Copilot | 2027-10-01 → 2028-03-31 | Incident classes resolved under playbook without operator action, at a quality that does not regress | **First production GA on 2028-03-31** | Workflow |
+| M4 | Universal Security Layer | 2028-04-01 → 2028-12-22 | A second full VMS adapter works with zero changes outside the adapter; Adapter SDK v1 is public | Platform expansion; first OEM talks | Integration |
+| M5 | Enterprise Command Platform | 2029-01-04 → 2029-09-28 | Multi-site, HA, OIDC/SCIM, and a site that keeps operating with the control plane disconnected | **Enterprise GA** | Enterprise |
+| M6 | Site Intelligence | 2029-10-01 → 2030-06-28 | Baselines, site memory and drift detection live; a proposed rule shows a historical impact diff before approval | Intelligence premium tier | Context |
+| M7 | Autonomous Security Operations | 2030-07-01 → 2031-06-30 | A4 sites run routine operations on policy; the exception queue is the operator's primary surface | Autonomous operations | Autonomy |
+| M8 | Physical Security OS | 2031-07-01 → 2032-12-31 | Third-party adapters, rule packs and model bundles install from a signed marketplace | Platform / marketplace | Ecosystem |
+
+Windows are given in full dates because the capacity law in
+[the strategy document](strategy-and-north-star.md) §6 makes a quarter a real
+unit of capacity, and a milestone boundary that ignores a quarter is a date
+nobody defends. The **M4 → M5 gap of 13 days** (2028-12-22 → 2029-01-04) is a
+deliberate holiday buffer and carries no work.
 
 ## The calendar in detail
 
@@ -41,12 +47,34 @@ on. Each milestone has:
 installation, with one AI-assisted operator workflow that a real operator
 actually prefers to the VMS workflow.
 
-State today: the deterministic spine is built and green — 21 Go packages,
+State today: the deterministic spine is built and green — 24 Go packages,
 twelve forward-only migrations, thirteen contracts, a hash-chained audit
 ledger, a fixture-driven replay path, a content-addressed evidence store, a
 rule engine with no shell, SQL, network, dynamic code or regex in the language,
-and an evaluation harness for AI observation profiles. `docs/status.md` is the
-authoritative build state and this roadmap does not restate it.
+an evaluation harness for AI observation profiles, a working
+install/upgrade/rollback/backup lifecycle, Windows Service and systemd units,
+and a dependency-free Python AI runtime that validates and attributes
+observations but holds no model. `docs/status.md` is the authoritative build
+state and this roadmap does not restate it.
+
+What that leaves for M1 is narrow and hard, which is the right shape for a
+milestone whose purpose is proof rather than surface area:
+
+1. **The Milestone endpoint surface has never touched a real server.** Every
+   route is still `Unverified` and the fixtures are synthetic.
+2. **There is no model, no GPU, no signed model bundle, and no Go client for
+   the runtime.** Nothing in the Go tree calls the inference endpoint, so gate 4
+   is blocked by a missing *connection* as much as by a missing model.
+3. **No SLO has been demonstrated under load**, because the observability
+   package has no production caller yet.
+4. **No design partner has run this for 14 consecutive days.**
+
+Note for a future reader: M1's first cut assumed the installer, the service
+units and the Python runtime were outstanding. They were built, which is why
+the remaining M1 scope is roughly a quarter of what the first plan assumed. The
+reduced-scope tier below has been narrowed accordingly, and
+[the M1 execution plan](milestones/m1-trust-spine-execution-plan.md) is the
+authoritative item-level plan.
 
 **Exit gate.** All four, signed by E1 and E2:
 
@@ -62,9 +90,36 @@ authoritative build state and this roadmap does not restate it.
    shadow mode, for at least 14 consecutive days at a design-partner site, with
    the evaluation report attached.
 
-**Reduced scope if slipping.** Ship with ONVIF-agnostic synthetic fixtures and
-a demo site, and defer the live-Milestone parity proof to M2. Do not cut the
-audit, the replay path, or the kill -9 fault-injection tests to make a date.
+**Reduced scope if slipping, in two tiers.** The first tier is a real M1. The
+second is an M1 that has slipped its date, and it is named here so the decision
+is made now rather than in week 20.
+
+*Tier 1 — cut, M1 still signs:*
+- Ship **one** VLM profile, not three. Gates 2 and 4 say "a" profile, not three.
+- Run gate 3 against one incident class and a bounded event rate rather than the
+  full designed load, provided the published SLO numbers are restated to match
+  what was actually demonstrated. Publishing an SLO the run did not cover is the
+  one thing that is not cuttable.
+- Do not cut the audit, the replay path, the tenant-scoping tests, or the
+  fault-injection tests. These are the invariants, not features.
+- The installer, the service units and the Python runtime are already built, so
+  they are not available as cuts. Do not re-open them.
+
+*Tier 2 — the cut does not reach, M1 slips instead:* gates 1, 2 and 4 all
+require a real customer installation with live data, and gate 4 requires 14
+consecutive days of shadow-mode running at that site. A synthetic demo site
+cannot produce a signed M1, so if a real site is not available by **2026-12-01**
+the date moves and the milestone re-plans. That decision is made on 2026-12-01
+by E1 and E2, not deferred into the slip.
+
+**Capacity reconciliation.** M1's committed scope is sized against the capacity
+law (26 weeks × 2 engineers × 60% ≈ 31 engineer-weeks), and the arithmetic is
+in [the M1 execution plan](milestones/m1-trust-spine-execution-plan.md) rather
+than hidden. The full M1 inventory in
+[the product backlog](engineering/product-and-backlog.md) is larger
+than that and is therefore **not** a commitment: it is the ordered pool the
+committed set was selected from. Moving a row into M1 requires removing
+another, in writing, with both recorded in the milestone plan.
 
 **Commercial state.** Design partners only. Up to three, at no charge, in
 exchange for a named reference, a measured before/after investigation time, and
@@ -158,7 +213,7 @@ workflow."
 no PTZ. Auto-resolution is the milestone's most valuable and most dangerous
 feature; it is the correct thing to cut first.
 
-**Commercial state.** First production GA. Self-serve is not the goal; a
+**Commercial state.** First production GA on **2028-03-31**, the last day of the milestone. GA cannot precede its own exit gate: an earlier date is reachable only through this milestone's pre-declared reduced scope, and if that scope is taken the GA slips with the gate rather than shipping ahead of it. Self-serve is not the goal; a
 repeatable sales motion with three named production references is. This is the
 first milestone at which a customer other than a design partner can be declined
 for capacity rather than for trust.
@@ -390,7 +445,7 @@ and a test, in that order.
 
 ### Product analytics
 
-From M1 onward: operator efficiency (MTTV, MTTI, human attention minutes,
+From M1 onward: operator efficiency (Mean Time To Verify, MTTI = Mean Time To Investigate, human attention minutes,
 operator actions per incident); AI effectiveness (agreement, false-positive,
 false-negative, insufficient-evidence, override rate); automation (auto-triaged,
 auto-resolved, human-intervention, failed-action rates); platform health
@@ -398,8 +453,9 @@ auto-resolved, human-intervention, failed-action rates); platform health
 availability, backlog, storage growth).
 
 Definitions, sources and reporting cadence are in
-``. A metric without a definition, an owner and a
-report is not a metric, and adding one is a change with a cost.
+[the metrics program](engineering/metrics-and-analytics.md). A metric without a
+definition, an owner and a report is not a metric, and adding one is a change
+with a cost.
 
 ## Sequence dependencies that are not negotiable
 
@@ -418,3 +474,50 @@ report is not a metric, and adding one is a change with a cost.
 - M4's second adapter is the architecture test. The M1 adapter's existence does
   not prove the abstraction holds.
 - M6's compounding claim is checked, not assumed. See the M6 exit gate.
+- **There is no `internal/policy` package yet**, and M3's recommendation engine,
+  M6's rule-approval flow and all of M7's autonomy levels depend on it. It is a
+  first-class M3 deliverable, not an incidental component, and it is the
+  component that decides what the AI is permitted to do. Treat it as the
+  highest-consequence new package in the plan.
+
+## What this review got wrong, and what it found
+
+A plan that pretends its own review found nothing is not a reviewed plan. These
+were found while writing this document set and are carried as open items with
+owners in [the risk register](company/risk-register.md).
+
+**Defects in the plan itself, now fixed in the text above:**
+
+1. **M1 was oversubscribed by roughly 2.5×** — a ~78 engineer-week backlog
+   against ~31 weeks of capacity. The committed set is now stated separately
+   from the pool it was selected from.
+2. **The original M1 reduced-scope cut could not produce a signed milestone**,
+   because it permitted a synthetic demo site while the exit gate requires a
+   real one. Now split into two tiers with a decision date of 2026-12-01.
+3. **The North Star metric was absent from the document named for it**, first
+   appearing five years out in the M7 section. Now stated up front with its four
+   mandatory companions.
+4. **GA was dated before its own exit gate.** GA and the M3 window are now both
+   2028-03-31, and the coupling is explicit.
+5. **An M4 → M5 gap of 13 days was unlabelled.** Now a declared holiday buffer.
+
+**Defects in the code, found while grounding the plan, and not yet fixed.** These
+are more serious than anything above and are listed here because the plan is the
+document a reader is most likely to trust:
+
+| # | Finding | Consequence |
+|---|---|---|
+| C1 | **The Go core has no client for the AI runtime.** Nothing in any `.go` file calls the inference endpoint; `jobs.QueueVLM` is a queue name with no producer or consumer. | M1 gate 4 is blocked by a missing *connection*, not only a missing model. `docs/status.md` names three unsigned DoD items and this is a fourth. |
+| C2 | **The runtime's bundle check verifies a digest, not a signature.** `ModelBundle.verify()` compares `sha256(manifest)` against the *contents* of `manifest.sig` and never uses `public_key`, while the docstring and error message both say "signature". | A bundle whose `.sig` file contains a hash is accepted as if it were signed. This is the one finding that undermines a supply-chain claim in a document that is otherwise careful about them. |
+| C3 | **The adapter's known-event-type table is keyed on spellings normalisation never produces.** 12 of 18 keys are unreachable and 9 types that are produced are missing. | Real motion, analytics and access events are marked malformed. Bounded today only because `RawRecord.Malformed` has no consumer outside the adapter. |
+| C4 | **`evaluation.Evaluate` hard-codes the `restricted-person` field**, so every other profile scores recall 0 and can never pass a gate. | Blocks M2's "the M1 incident class plus two more". |
+| C5 | **The labelled-case minimum is statistically insufficient.** At n=30 an observed 0.20 false-positive rate has a Wilson upper bound of 0.373, and a 0.70 recall has a lower bound of 0.521. ~200 cases are needed for the stated gates. | A profile could pass its gates on evidence that cannot support them. Full working in [the AI track](engineering/ai-and-data.md) §3. |
+| C6 | **`internal/observability` has no production caller**, so no metric is emitted. | M1 gate 3 is unreachable, not merely unmet. |
+| C7 | **A rule can legally name `aiObservation.field: summary`** although the schema says it is never evaluated by a rule, and nothing enforces either. | A weak, invariable constraint on the AI trust boundary. |
+| C8 | **`internal/graph`'s package doc claims a test asserts the absence of `entity_aliases`; no such test exists.** | M1's no-person-model decision is protected by a comment. |
+| C9 | **`fixture.Event.ObservedAt` is never called and `ReplayTransport.Get` discards the epoch it computes.** | Replay parity today is byte-parity, not timing-parity, which changes what M1 gate 1 means. Needs an E1 decision before the gate is attempted. |
+| C10 | **CI pinned Go 1.24 with `GOTOOLCHAIN: local` against a `go 1.26.0` module.** | CI could not build the project at all. Fixed to `1.26`; `docs/status.md`'s "Go 1.27" is the remaining stale claim. |
+
+C2 and C3 are the two I would fix this week. Both are small, both are
+contained, and both are the kind of defect that a security buyer's engineer
+finds in an afternoon.
