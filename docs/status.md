@@ -14,6 +14,16 @@ real Postgres 16, with the race detector on. `go vet` and `gofmt` clean.
 enums compatible with the baseline. The Python AI runtime's 21 contract tests
 pass under `py -m unittest`.
 
+> **CI has never run on this repository.** All 16 recorded workflow runs failed
+> with *"The job was not started because recent account payments have failed or
+> your spending limit needs to be increased"* — an account-level billing
+> problem, not a repository or code problem, and it affects `main` as much as any
+> branch. Until it is fixed, every verification claim above is a **local** claim:
+> true on the machine that ran it, and not evidence that the pipeline passes.
+> This is the highest-priority item in the repository, because a product whose
+> selling point is provability is currently relying on unpublished local runs.
+> See `PR #1`.
+
 The linter configuration in `.golangci.yml` excludes four categories, each
 with a written reason rather than a blanket suppression: writes to stdout from a
 CLI, helper failures a test asserts for itself, `httptest.NewRequest` in tests
