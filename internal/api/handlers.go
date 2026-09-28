@@ -155,12 +155,18 @@ func (s *Server) RegisterRoutes(d Deps) func(*http.ServeMux) {
 
 		// The console.
 		mux.HandleFunc("GET /{$}", s.handleConsoleRoot)
-		mux.Handle("GET /incidents", s.requirePrincipal(func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
-			s.handleConsoleIncidents(w, r, p, d)
-		}))
-		mux.Handle("GET /incidents/{id}", s.requirePrincipal(func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
-			s.handleConsoleIncident(w, r, p, d)
-		}))
+		// The console's incident pages are gated exactly as the API's are. They
+		// render the same rows, so a principal without the capability must not
+		// reach them by asking for HTML instead of JSON — which is a distinction
+		// an attacker does not have to be clever about.
+		mux.Handle("GET /incidents", s.requireCapability(identity.CapIncidentRead,
+			func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleConsoleIncidents(w, r, p, d)
+			}))
+		mux.Handle("GET /incidents/{id}", s.requireCapability(identity.CapIncidentRead,
+			func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleConsoleIncident(w, r, p, d)
+			}))
 		mux.HandleFunc("GET /login", func(w http.ResponseWriter, r *http.Request) {
 			s.handleConsoleLogin(w, r)
 		})
