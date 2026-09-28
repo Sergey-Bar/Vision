@@ -77,12 +77,12 @@ Not a promise, a description of the current state, verifiable in the code:
   unbounded regex.
 - The deterministic core runs with the AI plane entirely absent. A missing AI
   observation is never treated as a negative observation.
-- **`make verify` is the gate and it runs locally**, before a commit is made.
-  GitHub Actions is configured but does not run for this repository — it is
-  private, on the free plan, and the account's billing state prevents any job
-  from starting. The workflow is retained for manual use.
-- Every third-party action in the workflow, if it is ever run, is pinned to a
-  commit SHA with a read-only token.
+- **`scripts/verify.ps1` is the gate and it runs locally**, before a commit is
+  made. There is no pipeline: GitHub Actions cannot start a job for this
+  account — the repository is private, on the free plan, and the account's
+  billing state blocks it — so the workflow was removed rather than left in
+  place. Nothing automated gates a pull request here, which is a real gap and is
+  why the gate is run by a person before committing.
 
 ### Outstanding: third-party apps still have read access
 

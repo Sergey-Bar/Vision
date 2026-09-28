@@ -1,9 +1,16 @@
-# Keeps the two dependency surfaces current without anyone having to remember.
+# Keeps the dependency surface current without anyone having to remember.
+#
+# There is no `github-actions` entry because the repository has no workflows.
+# GitHub Actions cannot start a job for this account — it is private, on the
+# free plan, and the account's billing state blocks it — so the pipeline was
+# removed rather than left as decoration that would never run. `scripts/verify.ps1`
+# is the gate, and `AGENTS.md` is where that is recorded.
 #
 # The Python runtime is deliberately absent from this file: it has no
-# third-party imports, and CI enforces that. A Dependabot entry for a package
-# set that is meant to stay empty would be a way to quietly add a dependency to
-# a service that runs on a customer's site and touches camera footage.
+# third-party imports, and verify.ps1's sibling check in CI history enforced
+# that. A Dependabot entry for a package set that is meant to stay empty would
+# be a way to quietly add a dependency to a service that runs on a customer's
+# site and touches camera footage.
 version: 2
 updates:
   - package-ecosystem: gomod
@@ -21,17 +28,3 @@ updates:
         update-types: [minor, patch]
       go-security:
         applies-to: security-updates
-
-  - package-ecosystem: github-actions
-    directory: /
-    schedule:
-      interval: weekly
-      day: monday
-      time: "07:00"
-      timezone: Etc/UTC
-    # The workflow pins every action to a commit SHA, so a version bump arrives
-    # as a pull request to the pinned line. That is the point: the tag is never
-    # followed silently.
-    groups:
-      actions:
-        patterns: ["*"]

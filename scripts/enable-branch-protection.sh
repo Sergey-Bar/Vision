@@ -3,34 +3,30 @@
 #
 # This is a no-op on GitHub Free for a private repository: both the classic
 # protection API and rulesets return 403 until the plan is upgraded. Until then
-# `main` is unprotected — nothing stops a force-push, and nothing makes CI
-# block a merge. That is the one real gap in this repository's safety net, and
-# this script is the fix, ready to run the day you upgrade.
+# `main` is unprotected — nothing stops a force-push, and nothing gates a merge.
+# That is the one real gap in this repository's safety net, and this script is
+# the fix, ready to run the day you upgrade.
 #
 #   gh auth login
 #   ./scripts/enable-branch-protection.sh
 #
 # Re-run it freely. It is idempotent.
+#
+# Note on required status checks: the repository has no pipeline, so there are
+# no checks to require. That is deliberate and not an oversight — GitHub Actions
+# cannot start a job for this account, so requiring a check that never runs would
+# block every merge permanently. The list below is therefore empty, and what
+# this actually buys is: no force-push, no deletions, no direct push, a PR
+# required, and conversations must be resolved. If CI is ever rebuilt, add the
+# job names here at the same time.
 set -euo pipefail
 
 REPO="${REPO:-Sergey-Bar/Ai-Captain}"
 BRANCH="${BRANCH:-main}"
 API="repos/$REPO/branches/$BRANCH/protection"
 
-# The status checks CI must pass before a PR can merge. The names are the
-# `name:` of each job in .github/workflows/ci.yml — GitHub matches on the job
-# name as it appears in the checks list, not the job id. If you rename a job,
-# rename it here too or the check silently stops being required.
 CHECKS=(
-  "contract compatibility"
-  "build and vet (ubuntu-latest)"
-  "build and vet (windows-latest)"
-  "lint"
-  "test"
-  "rule bundle lint"
-  "AI runtime contract"
-  "no secrets in the tree"
-  "migration phases"
+  # Intentionally empty. See the note above.
 )
 
 required='['
@@ -42,6 +38,7 @@ done
 required+=']'
 
 echo "==> Applying protection to $REPO/$BRANCH"
+echo "==> ${#CHECKS[@]} required status check(s) — no pipeline exists to produce any"
 
 if gh api "$API" --method PUT --input - >/dev/null 2>&1 <<JSON
 {
