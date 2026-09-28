@@ -507,8 +507,7 @@ func (s *Service) CheckCSRF(ctx context.Context, tenant, sessionID, presented st
 		return errors.New("identity: a CSRF token is required on every state-changing method")
 	}
 	var stored string
-	err := s.Pool.QueryRow(ctx,
-		`SELECT csrf_hash FROM sessions WHERE tenant_id = $1 AND session_id = $2 AND revoked_at IS NULL`,
+	err := s.Pool.For(tenant, "identity").QueryRow(ctx, `SELECT csrf_hash FROM sessions WHERE tenant_id = $1 AND session_id = $2 AND revoked_at IS NULL`,
 		tenant, sessionID).Scan(&stored)
 	if err != nil {
 		return errors.New("identity: no such session")
@@ -532,7 +531,7 @@ func (s *Service) Logout(ctx context.Context, tenant, sessionID, actor, reason s
 // an account has to do: leaving the existing sessions alive would make
 // "disabled" a label rather than a control.
 func (s *Service) RevokeUserSessions(ctx context.Context, tenant, userID, reason string) (int64, error) {
-	tag, err := s.Pool.Exec(ctx, `
+	tag, err := s.Pool.For(tenant, "identity").Exec(ctx, `
 		UPDATE sessions SET revoked_at = now(), revoked_reason = $3
 		 WHERE tenant_id = $1 AND user_id = $2 AND revoked_at IS NULL`,
 		tenant, userID, reason)
@@ -547,7 +546,7 @@ func (s *Service) RevokeUserSessions(ctx context.Context, tenant, userID, reason
 // It is safe to run often and removes only rows that can no longer be used, so
 // there is no window in which a live session is collected.
 func (s *Service) PurgeExpired(ctx context.Context, tenant string) (int64, error) {
-	tag, err := s.Pool.Exec(ctx, `
+	tag, err := s.Pool.For(tenant, "identity").Exec(ctx, `
 		DELETE FROM sessions
 		 WHERE tenant_id = $1
 		   AND (absolute_expiry < $2
@@ -559,8 +558,36 @@ func (s *Service) PurgeExpired(ctx context.Context, tenant string) (int64, error
 	return tag.RowsAffected(), nil
 }
 
+// CheckCSRFByToken compares a presented CSRF token with the one the session
+// named by a session token holds.
+//
+// By token rather than by session id, because the session token is rotated on
+// every request: an id derived from the token that just arrived is one rotation
+// stale, and every correctly-tokened request would be refused.
+func (s *Service) CheckCSRFByToken(ctx context.Context, tenant, sessionToken, presented string) error {
+	if strings.TrimSpace(presented) == "" {
+		return errors.New("identity: a CSRF token is required on every state-changing method")
+	}
+	var stored string
+	err := s.Pool.For(tenant, "session").
+		QueryRow(ctx, `
+			SELECT csrf_hash FROM sessions
+			 WHERE tenant_id = $1 AND token_hash = $2 AND revoked_at IS NULL`,
+			tenant, HashToken(sessionToken)).Scan(&stored)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errors.New("identity: no such session")
+		}
+		return fmt.Errorf("identity: check CSRF: %w", err)
+	}
+	if !ConstantTimeEqual(stored, HashToken(presented)) {
+		return errors.New("identity: the CSRF token does not match this session")
+	}
+	return nil
+}
+
 func (s *Service) revoke(ctx context.Context, tenant, sessionID, reason string) error {
-	_, err := s.Pool.Exec(ctx, `
+	_, err := s.Pool.For(tenant, "identity").Exec(ctx, `
 		UPDATE sessions SET revoked_at = now(), revoked_reason = $3
 		 WHERE tenant_id = $1 AND session_id = $2 AND revoked_at IS NULL`,
 		tenant, sessionID, reason)
@@ -598,19 +625,20 @@ func (s *Service) createSession(ctx context.Context, tenant string, user userRow
 	rolesJSON, _ := jsonMarshal(rolesStrings(roles))
 	scopeJSON, _ := jsonMarshal(scope)
 
-	if err := s.Pool.InTx(ctx, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `
+	if err := s.Pool.InTenant(ctx, dbx.TenantContext{TenantID: tenant, ActorID: "auth"},
+		func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `
 			INSERT INTO sessions (session_id, tenant_id, user_id, token_hash, csrf_hash, roles,
 			                      site_scope, mfa_verified, break_glass, ip, user_agent,
 			                      created_at, last_seen_at, absolute_expiry)
 			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12,$13)`,
-			sess.ID, tenant, user.UserID, tokenHash, csrfHash, rolesJSON, scopeJSON,
-			mfa, user.BreakGlass, sourceIP, method, now, sess.ExpiresAt)
-		if err != nil {
-			return fmt.Errorf("identity: create session: %w", err)
-		}
-		return nil
-	}); err != nil {
+				sess.ID, tenant, user.UserID, tokenHash, csrfHash, rolesJSON, scopeJSON,
+				mfa, user.BreakGlass, sourceIP, method, now, sess.ExpiresAt)
+			if err != nil {
+				return fmt.Errorf("identity: create session: %w", err)
+			}
+			return nil
+		}); err != nil {
 		return sess, err
 	}
 	return sess, nil
@@ -618,7 +646,7 @@ func (s *Service) createSession(ctx context.Context, tenant string, user userRow
 
 func (s *Service) loadUser(ctx context.Context, tenant, userID string) (userRow, error) {
 	var u userRow
-	err := s.Pool.QueryRow(ctx, `
+	err := s.Pool.For(tenant, "identity").QueryRow(ctx, `
 		SELECT tenant_id, user_id, username, display_name, password_hash, enabled,
 		       break_glass, failed_attempts, locked_until
 		  FROM users WHERE tenant_id = $1 AND user_id = $2`,
@@ -633,42 +661,71 @@ func (s *Service) loadUser(ctx context.Context, tenant, userID string) (userRow,
 	return u, nil
 }
 
+// principalScope reads a user's roles and site assignments.
+//
+// The query runs inside the tenant context, and that is not a formality. Both
+// tables carry tenant_id and therefore row-level security, so a query issued
+// without the context sees zero rows — not an error, just an empty result. A
+// principal built from that has no roles and no site scope, so every capability
+// check and every site check refuses, and the whole console is unreachable while
+// the login itself keeps returning a session. It fails closed, which is the right
+// direction, and it is still an outage.
+//
+// The reason this survived until now is that the test database connects as a
+// superuser, which bypasses RLS. A test that only ever runs as a superuser cannot
+// see this class of bug, which is why the RLS suites in internal/schemalaws set
+// the context explicitly.
 func (s *Service) principalScope(ctx context.Context, tenant, userID string) ([]Role, []string, error) {
-	rows, err := s.Pool.Query(ctx, `
-		SELECT r.name FROM user_roles ur
-		  JOIN roles r ON r.role_id = ur.role_id
-		 WHERE ur.tenant_id = $1 AND ur.user_id = $2
-		 ORDER BY r.name`, tenant, userID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("identity: load roles: %w", err)
-	}
 	var roles []Role
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			rows.Close()
-			return nil, nil, fmt.Errorf("identity: scan role: %w", err)
-		}
-		roles = append(roles, Role(name))
-	}
-	rows.Close()
-
-	sites, err := s.Pool.Query(ctx, `
-		SELECT site_id FROM user_site_assignments WHERE tenant_id = $1 AND user_id = $2 ORDER BY site_id`,
-		tenant, userID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("identity: load sites: %w", err)
-	}
-	defer sites.Close()
 	var scope []string
-	for sites.Next() {
-		var site string
-		if err := sites.Scan(&site); err != nil {
-			return nil, nil, fmt.Errorf("identity: scan site: %w", err)
-		}
-		scope = append(scope, site)
+
+	err := s.Pool.InTenant(ctx, dbx.TenantContext{TenantID: tenant, ActorID: "identity"},
+		func(tx pgx.Tx) error {
+			// role_id, not name. The capability table in this package is keyed by
+			// role_id, and joining to the human-readable name gives a principal
+			// whose role is "Tenant Admin" while the code looks for
+			// "tenant_admin" — so no capability resolves and every operator is
+			// denied everything. The name is a label for a person; the id is the
+			// thing a program matches on.
+			rows, err := tx.Query(ctx, `
+				SELECT ur.role_id FROM user_roles ur
+				 WHERE ur.tenant_id = $1 AND ur.user_id = $2
+				 ORDER BY ur.role_id`, tenant, userID)
+			if err != nil {
+				return fmt.Errorf("identity: load roles: %w", err)
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var name string
+				if err := rows.Scan(&name); err != nil {
+					return fmt.Errorf("identity: scan role: %w", err)
+				}
+				roles = append(roles, Role(name))
+			}
+			if err := rows.Err(); err != nil {
+				return fmt.Errorf("identity: load roles: %w", err)
+			}
+
+			sites, err := tx.Query(ctx, `
+				SELECT site_id FROM user_site_assignments
+				 WHERE tenant_id = $1 AND user_id = $2 ORDER BY site_id`, tenant, userID)
+			if err != nil {
+				return fmt.Errorf("identity: load sites: %w", err)
+			}
+			defer sites.Close()
+			for sites.Next() {
+				var site string
+				if err := sites.Scan(&site); err != nil {
+					return fmt.Errorf("identity: scan site: %w", err)
+				}
+				scope = append(scope, site)
+			}
+			return sites.Err()
+		})
+	if err != nil {
+		return nil, nil, err
 	}
-	return roles, scope, sites.Err()
+	return roles, scope, nil
 }
 
 func (s *Service) registerFailure(ctx context.Context, tenant string, user userRow) (int, *time.Time) {
@@ -699,7 +756,7 @@ func (s *Service) clearFailures(ctx context.Context, tenant, userID string) erro
 
 func (s *Service) enrolledFactor(ctx context.Context, tenant, userID string) (string, error) {
 	var method string
-	err := s.Pool.QueryRow(ctx, `
+	err := s.Pool.For(tenant, "identity").QueryRow(ctx, `
 		SELECT method FROM mfa_credentials
 		 WHERE tenant_id = $1 AND user_id = $2 AND revoked_at IS NULL
 		 ORDER BY verified_at NULLS FIRST, created_at LIMIT 1`,

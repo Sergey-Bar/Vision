@@ -45,3 +45,12 @@ __pycache__/
 .idea/
 *.swp
 .DS_Store
+
+# The agent's own workspace state. Not part of the product: it is machine-local,
+# it changes on every run, and committing it makes every diff noisy for whoever
+# reads the repository.
+.kilo/
+
+# Python bytecode from the AI runtime tests
+__pycache__/
+*.pyc

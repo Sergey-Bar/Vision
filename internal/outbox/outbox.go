@@ -198,7 +198,7 @@ func (r *Relay) deliver(ctx context.Context, d Delivery) error {
 	// Delivered is terminal. A redelivery after a crash between the handler
 	// succeeding and this write is why handlers must be idempotent; marking it
 	// here is what stops the common case, not the rare one.
-	_, err := r.Pool.Exec(ctx, `
+	_, err := r.Pool.For(d.TenantID, "outbox").Exec(ctx, `
 		UPDATE outbox_events
 		   SET status = 'delivered', delivered_at = now(),
 		       lease_owner = NULL, lease_expires_at = NULL, last_error = NULL
@@ -215,7 +215,7 @@ func (r *Relay) markFailed(ctx context.Context, d Delivery, cause error) error {
 		maxAttempts = 8
 	}
 	var status string
-	if err := r.Pool.QueryRow(ctx, `
+	if err := r.Pool.For(d.TenantID, "outbox").QueryRow(ctx, `
 		UPDATE outbox_events
 		   SET status = CASE WHEN attempt_count >= $2 THEN 'dead_letter' ELSE 'failed' END,
 		       last_error = $3,

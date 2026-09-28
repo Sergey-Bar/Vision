@@ -198,7 +198,7 @@ func (s *Service) AddEdges(ctx context.Context, edges []Edge) (int, error) {
 // claimed, and then withdrawn" — and deleting the row would make a rebuilt
 // projection disagree with the live one. `edges_active` is what traversal reads.
 func (s *Service) Revoke(ctx context.Context, tenant, edgeID, by, reason, replacement string) error {
-	_, err := s.Pool.Exec(ctx, `
+	_, err := s.Pool.For(tenant, "graph").Exec(ctx, `
 		INSERT INTO edge_revocations (tenant_id, edge_id, revoked_at, revoked_by, reason, replacement_edge_id)
 		VALUES ($1, $2, now(), $3, $4, $5)
 		ON CONFLICT (tenant_id, edge_id) DO NOTHING`,
@@ -330,7 +330,7 @@ const MaxSnapshotEdges = 250_000
 // Snapshot exports the active graph.
 func (s *Service) Snapshot(ctx context.Context, tenant string) (Snapshot, error) {
 	out := Snapshot{TenantID: tenant, TakenAt: time.Now().UTC()}
-	rows, err := s.Pool.Query(ctx, `
+	rows, err := s.Pool.For(tenant, "graph").Query(ctx, `
 		SELECT edge_id, from_type, from_id, relation, to_type, to_id,
 		       asserted_by, COALESCE(source_event_id, ''), observed_at, confidence, method,
 		       COALESCE(rule_or_model_id, '')
@@ -382,11 +382,10 @@ type RebuildReport struct {
 func (s *Service) CheckRebuild(ctx context.Context, tenant string) (RebuildReport, error) {
 	var r RebuildReport
 
-	if err := s.Pool.QueryRow(ctx,
-		`SELECT count(*) FROM edges_active WHERE tenant_id = $1`, tenant).Scan(&r.Edges); err != nil {
+	if err := s.Pool.For(tenant, "graph").QueryRow(ctx, `SELECT count(*) FROM edges_active WHERE tenant_id = $1`, tenant).Scan(&r.Edges); err != nil {
 		return r, fmt.Errorf("graph: count edges: %w", err)
 	}
-	if err := s.Pool.QueryRow(ctx, `
+	if err := s.Pool.For(tenant, "graph").QueryRow(ctx, `
 		SELECT count(*) FROM edges_active e
 		 WHERE e.tenant_id = $1
 		   AND e.source_event_id IS NOT NULL
@@ -396,7 +395,7 @@ func (s *Service) CheckRebuild(ctx context.Context, tenant string) (RebuildRepor
 		   )`, tenant).Scan(&r.OrphanSourceEvents); err != nil {
 		return r, fmt.Errorf("graph: count orphans: %w", err)
 	}
-	if err := s.Pool.QueryRow(ctx, `
+	if err := s.Pool.For(tenant, "graph").QueryRow(ctx, `
 		SELECT count(*) FROM zones z
 		 WHERE z.tenant_id = $1
 		   AND EXISTS (SELECT 1 FROM edges_active e
@@ -451,8 +450,7 @@ type Device struct {
 func (s *Service) LoadTopology(ctx context.Context, tenant string) (Topology, error) {
 	var out Topology
 
-	rows, err := s.Pool.Query(ctx,
-		`SELECT zone_id, site_id, COALESCE(parent_id, ''), name, path, depth
+	rows, err := s.Pool.For(tenant, "graph").Query(ctx, `SELECT zone_id, site_id, COALESCE(parent_id, ''), name, path, depth
 		   FROM zones WHERE tenant_id = $1 ORDER BY path`, tenant)
 	if err != nil {
 		return out, fmt.Errorf("graph: load zones: %w", err)
@@ -470,8 +468,7 @@ func (s *Service) LoadTopology(ctx context.Context, tenant string) (Topology, er
 		return out, err
 	}
 
-	drows, err := s.Pool.Query(ctx,
-		`SELECT device_id, site_id, COALESCE(zone_id, ''), kind
+	drows, err := s.Pool.For(tenant, "graph").Query(ctx, `SELECT device_id, site_id, COALESCE(zone_id, ''), kind
 		   FROM devices WHERE tenant_id = $1 AND enabled
 		 ORDER BY device_id`, tenant)
 	if err != nil {
@@ -491,8 +488,7 @@ func (s *Service) LoadTopology(ctx context.Context, tenant string) (Topology, er
 // ZonePaths returns the site's zone path set, which is what the rule compiler
 // checks a `zone.pathPrefix` against.
 func (s *Service) ZonePaths(ctx context.Context, tenant string) (map[string]bool, error) {
-	rows, err := s.Pool.Query(ctx,
-		`SELECT path FROM zones WHERE tenant_id = $1`, tenant)
+	rows, err := s.Pool.For(tenant, "graph").Query(ctx, `SELECT path FROM zones WHERE tenant_id = $1`, tenant)
 	if err != nil {
 		return nil, fmt.Errorf("graph: load zone paths: %w", err)
 	}

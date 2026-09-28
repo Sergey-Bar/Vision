@@ -389,7 +389,7 @@ func (w *Writer) Get(ctx context.Context, tenant, observationID string) (Observa
 	var ids, hashes, output []byte
 	var degraded string
 	var supersedes *string
-	err := w.Pool.QueryRow(ctx, `
+	err := w.Pool.For(tenant, "observations").QueryRow(ctx, `
 		SELECT observation_id, tenant_id, site_id, incident_id, event_id, profile_id,
 		       model, model_hash, runtime_version, prompt_template_id, prompt_version,
 		       COALESCE(model_bundle_signature, ''), input_evidence_ids, input_evidence_hashes,
@@ -423,7 +423,7 @@ func (w *Writer) Get(ctx context.Context, tenant, observationID string) (Observa
 // the one a decision cited when the verification did not name one.
 func (w *Writer) LatestForIncident(ctx context.Context, tenant, incidentID string) (*Observation, error) {
 	var id string
-	err := w.Pool.QueryRow(ctx, `
+	err := w.Pool.For(tenant, "observations").QueryRow(ctx, `
 		SELECT observation_id FROM ai_observations
 		 WHERE tenant_id = $1 AND incident_id = $2
 		 ORDER BY created_at DESC LIMIT 1`, tenant, incidentID).Scan(&id)
@@ -446,7 +446,7 @@ func (w *Writer) LatestForIncident(ctx context.Context, tenant, incidentID strin
 // walkable and the delta between an observation and its replacement is a
 // query rather than a reconstruction.
 func (w *Writer) SupersededBy(ctx context.Context, tenant, observationID string) ([]Observation, error) {
-	rows, err := w.Pool.Query(ctx, `
+	rows, err := w.Pool.For(tenant, "observations").Query(ctx, `
 		SELECT observation_id FROM ai_observations
 		 WHERE tenant_id = $1 AND supersedes_observation_id = $2
 		 ORDER BY created_at`, tenant, observationID)
@@ -499,7 +499,7 @@ func (w *Writer) Stats(ctx context.Context, tenant string, since time.Time) (Sta
 	s.DegradedByReason = map[string]int64{}
 	s.ByProfile = map[string]int64{}
 
-	rows, err := w.Pool.Query(ctx, `
+	rows, err := w.Pool.For(tenant, "observations").Query(ctx, `
 		SELECT profile_id, degraded_reason, insufficient_evidence, count(*)
 		  FROM ai_observations
 		 WHERE tenant_id = $1 AND created_at >= $2

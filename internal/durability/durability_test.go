@@ -775,7 +775,7 @@ func TestJobDeadLetterIsVisibleWithAReason(t *testing.T) {
 	if len(claimed) != 1 {
 		t.Fatalf("claimed %d", len(claimed))
 	}
-	status, err := w.Fail(context.Background(), claimed[0].ID, "worker",
+	status, err := w.Fail(context.Background(), tenant, claimed[0].ID, "worker",
 		fmt.Errorf("bundle references an unknown zone"))
 	if err != nil {
 		t.Fatalf("fail: %v", err)
@@ -798,7 +798,7 @@ func TestJobDeadLetterIsVisibleWithAReason(t *testing.T) {
 	// Replay is an operator action, not an automatic behaviour: a dead letter
 	// usually means the dependency is broken, and retrying in a loop turns a
 	// visible incident into invisible load.
-	if err := w.Replay(context.Background(), letters[0].ID); err != nil {
+	if err := w.Replay(context.Background(), tenant, letters[0].ID); err != nil {
 		t.Fatalf("Replay: %v", err)
 	}
 	after, err := w.DeadLetters(context.Background(), tenant, 10)
@@ -822,10 +822,10 @@ func TestCompletingAJobSomebodyElseLeasesFails(t *testing.T) {
 	if len(claimed) != 1 {
 		t.Fatalf("claimed %d", len(claimed))
 	}
-	if err := w.Complete(context.Background(), claimed[0].ID, "worker-b"); err == nil {
+	if err := w.Complete(context.Background(), tenant, claimed[0].ID, "worker-b"); err == nil {
 		t.Error("a worker completed a job it does not hold")
 	}
-	if err := w.Complete(context.Background(), claimed[0].ID, "worker-a"); err != nil {
+	if err := w.Complete(context.Background(), tenant, claimed[0].ID, "worker-a"); err != nil {
 		t.Errorf("the holder could not complete its own job: %v", err)
 	}
 }

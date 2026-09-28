@@ -321,7 +321,7 @@ func (w *Writer) Renew(ctx context.Context, key Key, owner string, lease time.Du
 	if seconds < 1 {
 		seconds = 1
 	}
-	tag, err := w.Pool.Exec(ctx, `
+	tag, err := w.Pool.For(key.TenantID, "inbox").Exec(ctx, `
 		UPDATE inbox_events
 		   SET lease_expires_at = now() + make_interval(secs => $4)
 		 WHERE tenant_id = $1 AND integration_id = $2 AND source_event_id = $3
@@ -342,7 +342,7 @@ func (w *Writer) Renew(ctx context.Context, key Key, owner string, lease time.Du
 
 // Complete marks a lease processed and records what it produced.
 func (w *Writer) Complete(ctx context.Context, key Key, canonicalEventID string) error {
-	tag, err := w.Pool.Exec(ctx, `
+	tag, err := w.Pool.For(key.TenantID, "inbox").Exec(ctx, `
 		UPDATE inbox_events
 		   SET status = 'processed', completed_at = now(),
 		       canonical_event_id = $4,
@@ -408,7 +408,7 @@ func (w *Writer) DeadLetters(ctx context.Context, tenantID string, limit int) ([
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	rows, err := w.Pool.Query(ctx, `
+	rows, err := w.Pool.For(tenantID, "inbox").Query(ctx, `
 		SELECT tenant_id, integration_id, source_event_id, site_id,
 		       attempt_count, COALESCE(dead_letter_reason, last_error, ''),
 		       first_seen_at, received_at
@@ -440,7 +440,7 @@ func (w *Writer) DeadLetters(ctx context.Context, tenantID string, limit int) ([
 // platform cannot read, and retrying that in a loop turns a visible incident
 // into invisible load.
 func (w *Writer) Replay(ctx context.Context, key Key) error {
-	tag, err := w.Pool.Exec(ctx, `
+	tag, err := w.Pool.For(key.TenantID, "inbox").Exec(ctx, `
 		UPDATE inbox_events
 		   SET status = 'received', attempt_count = 0, last_error = NULL,
 		       dead_letter_reason = NULL, completed_at = NULL,
@@ -468,18 +468,28 @@ type Counts struct {
 
 // Counts reads the backlog for a tenant. The backpressure thresholds in the SLO
 // are evaluated against this, so it is one round trip rather than four.
+// Counts reads the backlog for one tenant.
+//
+// The query runs inside the tenant context, because inbox_events carries
+// tenant_id and therefore row-level security. Without the context the database
+// returns zero rows rather than an error, so the backlog would read as empty on
+// every site and the backpressure alert would never fire — the SLO's own
+// monitoring silently blind exactly when it is needed.
 func (w *Writer) Counts(ctx context.Context, tenantID string) (Counts, error) {
 	var c Counts
-	err := w.Pool.QueryRow(ctx, `
-		SELECT
-		    count(*) FILTER (WHERE status = 'received'),
-		    count(*) FILTER (WHERE status = 'processing'),
-		    count(*) FILTER (WHERE status = 'failed'),
-		    count(*) FILTER (WHERE status = 'dead_letter'),
-		    count(*) FILTER (WHERE status = 'processed')
-		  FROM inbox_events
-		 WHERE tenant_id = $1`, tenantID).
-		Scan(&c.Received, &c.Processing, &c.Failed, &c.DeadLetter, &c.Processed)
+	err := w.Pool.InTenant(ctx, dbx.TenantContext{TenantID: tenantID, ActorID: "inbox"},
+		func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `
+				SELECT
+				    count(*) FILTER (WHERE status = 'received'),
+				    count(*) FILTER (WHERE status = 'processing'),
+				    count(*) FILTER (WHERE status = 'failed'),
+				    count(*) FILTER (WHERE status = 'dead_letter'),
+				    count(*) FILTER (WHERE status = 'processed')
+				  FROM inbox_events
+				 WHERE tenant_id = $1`, tenantID).
+				Scan(&c.Received, &c.Processing, &c.Failed, &c.DeadLetter, &c.Processed)
+		})
 	if err != nil {
 		return c, fmt.Errorf("inbox: counts: %w", err)
 	}

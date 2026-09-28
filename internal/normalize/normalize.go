@@ -248,7 +248,7 @@ func (n *Normalizer) loadDrift(ctx context.Context, in Input) (int32, error) {
 		return 0, nil
 	}
 	var drift int32
-	err := n.Pool.QueryRow(ctx, `
+	err := n.Pool.For(in.Key.TenantID, "normalizer").QueryRow(ctx, `
 		SELECT drift_ms FROM device_clocks WHERE tenant_id = $1 AND device_id = $2`,
 		in.Key.TenantID, in.DeviceID).Scan(&drift)
 	if err != nil {

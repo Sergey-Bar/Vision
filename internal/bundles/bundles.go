@@ -140,7 +140,7 @@ func (s *Service) Meta(ctx context.Context, tenant, version string) (Meta, error
 	var m Meta
 	var supersedes *string
 	var digest *string
-	err := s.Pool.QueryRow(ctx, `
+	err := s.Pool.For(tenant, "bundles").QueryRow(ctx, `
 		SELECT bundle_id, version, content_hash, source_reference, created_by, created_at,
 		       active, COALESCE(supersedes_version, ''), lint_status, COALESCE(activate_diff_digest, '')
 		  FROM rule_bundles WHERE tenant_id = $1 AND version = $2`,
@@ -164,8 +164,7 @@ func (s *Service) Meta(ctx context.Context, tenant, version string) (Meta, error
 // Content reads a stored bundle's bytes.
 func (s *Service) Content(ctx context.Context, tenant, version string) ([]byte, error) {
 	var content []byte
-	err := s.Pool.QueryRow(ctx,
-		`SELECT content FROM rule_bundles WHERE tenant_id = $1 AND version = $2`,
+	err := s.Pool.For(tenant, "bundles").QueryRow(ctx, `SELECT content FROM rule_bundles WHERE tenant_id = $1 AND version = $2`,
 		tenant, version).Scan(&content)
 	if err != nil {
 		if isNoRows(err) {
@@ -178,8 +177,7 @@ func (s *Service) Content(ctx context.Context, tenant, version string) ([]byte, 
 
 // Active reads the active bundle's version and bytes.
 func (s *Service) Active(ctx context.Context, tenant string) (version string, content []byte, err error) {
-	err = s.Pool.QueryRow(ctx,
-		`SELECT version, content FROM rule_bundles WHERE tenant_id = $1 AND active`,
+	err = s.Pool.For(tenant, "bundles").QueryRow(ctx, `SELECT version, content FROM rule_bundles WHERE tenant_id = $1 AND active`,
 		tenant).Scan(&version, &content)
 	if err != nil {
 		if isNoRows(err) {
@@ -192,7 +190,7 @@ func (s *Service) Active(ctx context.Context, tenant string) (version string, co
 
 // List returns every stored bundle, newest first.
 func (s *Service) List(ctx context.Context, tenant string) ([]Meta, error) {
-	rows, err := s.Pool.Query(ctx, `
+	rows, err := s.Pool.For(tenant, "bundles").Query(ctx, `
 		SELECT bundle_id, version, content_hash, source_reference, created_by, created_at,
 		       active, COALESCE(supersedes_version, ''), lint_status, COALESCE(activate_diff_digest, '')
 		  FROM rule_bundles WHERE tenant_id = $1
@@ -297,7 +295,7 @@ func (s *Service) Rollback(ctx context.Context, tenant, actor string) (string, e
 	}
 
 	var target Meta
-	err = s.Pool.QueryRow(ctx, `
+	err = s.Pool.For(tenant, "bundles").QueryRow(ctx, `
 		SELECT bundle_id, version FROM rule_bundles
 		 WHERE tenant_id = $1 AND version <> $2
 		   AND created_at < (SELECT created_at FROM rule_bundles WHERE tenant_id = $1 AND version = $2)

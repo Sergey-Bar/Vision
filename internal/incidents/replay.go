@@ -104,7 +104,7 @@ func (s *Service) Replay(ctx context.Context, in ReplayInputs) (Explanation, err
 	// The rule the decision was made by, named from the incident rather than
 	// guessed from the explanation.
 	var ruleID string
-	if err := s.Pool.QueryRow(ctx,
+	if err := s.Pool.For(in.TenantID, "incidents").QueryRow(ctx,
 		`SELECT rule_id FROM incidents WHERE tenant_id = $1 AND incident_id = $2`,
 		in.TenantID, in.IncidentID).Scan(&ruleID); err != nil {
 		return ex, fmt.Errorf("incidents: replay rule: %w", err)

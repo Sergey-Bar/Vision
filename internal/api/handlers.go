@@ -445,7 +445,7 @@ func (s *Server) handleIncidentEvidence(w http.ResponseWriter, r *http.Request, 
 func (s *Server) handleEvidenceContent(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
 	id := r.PathValue("evidenceId")
 	var ref, wantHash string
-	err := d.Incidents.Pool.QueryRow(r.Context(), `
+	err := d.Incidents.Pool.For(p.TenantID, "api").QueryRow(r.Context(), `
 		SELECT storage_ref, sha256 FROM evidence WHERE tenant_id = $1 AND evidence_id = $2`,
 		p.TenantID, id).Scan(&ref, &wantHash)
 	if err != nil {
@@ -615,7 +615,7 @@ func (s *Server) handleAuditLedger(w http.ResponseWriter, r *http.Request, p ide
 	limit := parseLimit(r.URL.Query().Get("limit"), 100, 500)
 	from := int64(parseLimit(r.URL.Query().Get("fromSequence"), 1, 1<<40))
 
-	rows, err := s.Pool.Query(r.Context(), `
+	rows, err := s.Pool.For(p.TenantID, "api").Query(r.Context(), `
 		SELECT sequence, ts, actor, actor_type, action, target_type, target_id,
 		       prev_state_hash, result_state_hash, policy_version, reason,
 		       evidence_refs, request_id, session_id, site_scope, prev_hash, hash
@@ -629,15 +629,18 @@ func (s *Server) handleAuditLedger(w http.ResponseWriter, r *http.Request, p ide
 	defer rows.Close()
 
 	type entry struct {
-		Sequence        int64    `json:"sequence"`
-		TS              string   `json:"ts"`
-		Actor           string   `json:"actor"`
-		ActorType       string   `json:"actorType"`
-		Action          string   `json:"action"`
-		TargetType      string   `json:"targetType"`
-		TargetID        string   `json:"targetId"`
-		PrevStateHash   string   `json:"prevStateHash,omitempty"`
-		ResultStateHash string   `json:"resultStateHash,omitempty"`
+		Sequence   int64     `json:"sequence"`
+		TS         time.Time `json:"ts"`
+		Actor      string    `json:"actor"`
+		ActorType  string    `json:"actorType"`
+		Action     string    `json:"action"`
+		TargetType string    `json:"targetType"`
+		TargetID   string    `json:"targetId"`
+		// Nullable, because an action that changed nothing has neither a prior
+		// state nor a result. Scanning NULL into a string is an error, which is how
+		// this endpoint came to fail on every row that had no state transition.
+		PrevStateHash   *string  `json:"prevStateHash,omitempty"`
+		ResultStateHash *string  `json:"resultStateHash,omitempty"`
 		PolicyVersion   string   `json:"policyVersion"`
 		Reason          string   `json:"reason"`
 		EvidenceRefs    []string `json:"evidenceRefs"`

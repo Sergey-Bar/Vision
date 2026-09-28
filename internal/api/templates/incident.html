@@ -11,10 +11,10 @@
     <dt>Severity</dt><dd><span class="badge {{severityClass .Severity}}">{{.Severity}}</span></dd>
     <dt>Site</dt><dd>{{.SiteID}}</dd>
     <dt>Rule</dt><dd><code>{{.RuleID}}</code></dd>
-    <dt>Bundle</dt><dd>{{.BundleVersion}} <code>{{.BundleContentHash}}</code></dd>
+    <dt>Bundle</dt><dd>{{.BundleVersion}}</dd>
     <dt>Policy</dt><dd>{{.PolicyVersion}}</dd>
     <dt>First event</dt><dd>{{$.Time .FirstEvent}}</dd>
-    <dt>Created</dt><dd>{{$.Time .Created}}</dd>
+    <dt>Created</dt><dd>{{$.Time .CreatedAt}}</dd>
   </dl>
 
   {{if .Degraded}}

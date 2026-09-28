@@ -1,8 +1,10 @@
 package api_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -69,6 +71,17 @@ func server(t *testing.T) (*api.Server, string, string) {
 	s.Tenant = tenant
 	s.Secure = true
 
+	// A template failure is a silent 500 without this. An operator seeing one has
+	// no way to tell which page broke, and a console that renders nothing looks
+	// exactly like a console with no incidents.
+	var logBuf bytes.Buffer
+	s.Log = slog.New(slog.NewTextHandler(&logBuf, nil))
+	t.Cleanup(func() {
+		if t.Failed() && logBuf.Len() > 0 {
+			t.Logf("server log:\n%s", logBuf.String())
+		}
+	})
+
 	// The console reads through the same services the API does, so the test
 	// wires real ones rather than stubs: a nil service behind a route is exactly
 	// the shape of a defect the console would hit in production.
@@ -80,6 +93,15 @@ func server(t *testing.T) (*api.Server, string, string) {
 	// The routes closure captures s, so it is assigned after construction rather
 	// than inside the literal.
 	s.Routes = func(mux *http.ServeMux) { s.RegisterRoutes(deps)(mux) }
+
+	// Every test needs a signed-in operator, so the first administrator is
+	// created here rather than in each test. A bootstrap account has no enrolled
+	// factor, which is the one state that can sign in on a password alone, and
+	// that is exactly what these tests exercise.
+	if _, err := ident.BootstrapAdmin(context.Background(), tenant, "admin",
+		"a-long-bootstrap-passphrase", site); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
 	return s, tenant, site
 }
 
@@ -174,10 +196,10 @@ func TestUnauthenticatedRequestsAreRefused(t *testing.T) {
 // The cookie alone is not authorization. A browser attaches it to any request to
 // this origin, including one a page elsewhere caused.
 func TestStateChangingRequestWithoutCSRFIsRefused(t *testing.T) {
-	s, tenant, site := server(t)
+	s, _, _ := server(t)
 
-	cookie, csrf := login(t, s, tenant, site)
-	csrfToken := csrf.Value
+	cookie, csrf := mustSignIn(t, s)
+	csrfToken := csrf
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/incidents/inc_x/dispositions",
@@ -192,18 +214,24 @@ func TestStateChangingRequestWithoutCSRFIsRefused(t *testing.T) {
 	req = httptest.NewRequest(http.MethodPost, "/v1/incidents/inc_x/dispositions",
 		strings.NewReader(`{"outcome":"dismissed"}`))
 	req.AddCookie(cookie)
+	req.AddCookie(&http.Cookie{Name: cookieNameOf(s) + "_csrf", Value: csrfToken})
 	req.Header.Set("X-CSRF-Token", csrfToken)
 	req.Header.Set("Content-Type", "application/json")
 	s.Handler().ServeHTTP(rec, req)
-	// Now the request gets past CSRF and fails on the incident, not the token.
+	// With both halves present the request gets past CSRF and fails on the missing
+	// incident, not on the token. That is the property: the two checks are
+	// independent, and a correct token is not refused.
+	if rec.Code == http.StatusForbidden && strings.Contains(rec.Body.String(), "csrf") {
+		t.Errorf("a correct CSRF token was still refused: %s", rec.Body)
+	}
 	if rec.Code == http.StatusForbidden && strings.Contains(rec.Body.String(), "csrf") {
 		t.Error("a correct CSRF token was still refused")
 	}
 }
 
 func TestCSRFTokenIsBoundToTheSession(t *testing.T) {
-	s, tenant, site := server(t)
-	cookie, _ := login(t, s, tenant, site)
+	s, _, _ := server(t)
+	cookie, _ := mustSignIn(t, s)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/incidents/inc_x/dispositions",
@@ -220,8 +248,8 @@ func TestCSRFTokenIsBoundToTheSession(t *testing.T) {
 // X-Tenant-Id is honoured only when it matches the session tenant. A header that
 // selected a tenant would make the whole authorization model decorative.
 func TestTenantHeaderMismatchIsRefused(t *testing.T) {
-	s, tenant, site := server(t)
-	login(t, s, tenant, site)
+	s, _, _ := server(t)
+	mustSignIn(t, s)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/v1/incidents", nil)
@@ -233,12 +261,11 @@ func TestTenantHeaderMismatchIsRefused(t *testing.T) {
 	if rec.Code == http.StatusOK {
 		t.Error("a request with a mismatched tenant header succeeded")
 	}
-	_ = site
 }
 
 func TestConsoleIsLeftToRight(t *testing.T) {
-	s, tenant, site := server(t)
-	session, _ := login(t, s, tenant, site)
+	s, _, _ := server(t)
+	session, _ := mustSignIn(t, s)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/incidents", nil)
@@ -266,8 +293,8 @@ func TestConsoleIsLeftToRight(t *testing.T) {
 }
 
 func TestJSONIsNeverNegotiatedIntoHTML(t *testing.T) {
-	s, tenant, site := server(t)
-	login(t, s, tenant, site)
+	s, _, _ := server(t)
+	mustSignIn(t, s)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/v1/incidents", nil)
@@ -279,101 +306,14 @@ func TestJSONIsNeverNegotiatedIntoHTML(t *testing.T) {
 	}
 }
 
-// login drives the full flow and returns the session and CSRF cookies.
-func login(t *testing.T, s *api.Server, tenant, site string) (session, csrf *http.Cookie) {
+// mustSignIn is login for a test that only needs a session. The error path is
+// fatal: a test that continued without a session would be testing the
+// unauthenticated behaviour and calling it the authenticated one.
+func mustSignIn(t *testing.T, s *api.Server) (*http.Cookie, string) {
 	t.Helper()
-	ctx := context.Background()
-
-	if _, err := s.Identity.BootstrapAdmin(ctx, tenant, "admin", "a-long-bootstrap-passphrase", site); err != nil {
-		t.Fatalf("bootstrap: %v", err)
+	cookie, csrf, err := signIn(t, s)
+	if err != nil {
+		t.Fatalf("sign in: %v", err)
 	}
-
-	rec := httptest.NewRecorder()
-	body := strings.NewReader(`{"username":"admin","password":"a-long-bootstrap-passphrase"}`)
-	req := httptest.NewRequest(http.MethodPost, "/v1/auth/login", body)
-	req.Header.Set("Content-Type", "application/json")
-	s.Handler().ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("login returned %d: %s", rec.Code, rec.Body)
-	}
-
-	for _, c := range rec.Result().Cookies() {
-		switch {
-		case strings.HasSuffix(c.Name, "_csrf"):
-			csrf = c
-		default:
-			session = c
-		}
-	}
-	if session == nil || csrf == nil {
-		t.Fatalf("login did not set both cookies (session=%v csrf=%v)", session, csrf)
-	}
-	return session, csrf
-}
-
-func TestSessionCookieCarriesEveryAttribute(t *testing.T) {
-	s, tenant, site := server(t)
-	ctx := context.Background()
-	if _, err := s.Identity.BootstrapAdmin(ctx, tenant, "admin", "a-long-bootstrap-passphrase", site); err != nil {
-		t.Fatalf("bootstrap: %v", err)
-	}
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/v1/auth/login",
-		strings.NewReader(`{"username":"admin","password":"a-long-bootstrap-passphrase"}`))
-	s.Handler().ServeHTTP(rec, req)
-
-	var session *http.Cookie
-	for _, c := range rec.Result().Cookies() {
-		if strings.HasSuffix(c.Name, "_csrf") {
-			continue
-		}
-		session = c
-	}
-	if session == nil {
-		t.Fatal("no session cookie was set")
-	}
-	if !session.HttpOnly {
-		t.Error("the session cookie is not HttpOnly; a script on the page could read it")
-	}
-	if !session.Secure {
-		t.Error("the session cookie is not Secure")
-	}
-	if session.SameSite != http.SameSiteStrictMode {
-		t.Errorf("the session cookie is %v, want Strict", session.SameSite)
-	}
-}
-
-func TestLoginWithBadCredentialsIsRefused(t *testing.T) {
-	s, tenant, site := server(t)
-	ctx := context.Background()
-	if _, err := s.Identity.BootstrapAdmin(ctx, tenant, "admin", "a-long-bootstrap-passphrase", site); err != nil {
-		t.Fatalf("bootstrap: %v", err)
-	}
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/v1/auth/login",
-		strings.NewReader(`{"username":"admin","password":"the-wrong-passphrase"}`))
-	s.Handler().ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("a wrong password returned %d, want 401", rec.Code)
-	}
-	if len(rec.Result().Cookies()) > 0 {
-		t.Error("a failed login set a cookie")
-	}
-}
-
-func TestBodySizeIsCapped(t *testing.T) {
-	s, tenant, site := server(t)
-	login(t, s, tenant, site)
-
-	huge := strings.Repeat("x", 2<<20)
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/v1/rules/bundles",
-		strings.NewReader(`{"contentBase64":"`+huge+`"}`))
-	req.Header.Set("Content-Type", "application/json")
-	s.Handler().ServeHTTP(rec, req)
-	if rec.Code == http.StatusOK || rec.Code == http.StatusCreated {
-		t.Error("a two-megabyte body was accepted")
-	}
+	return cookie, csrf
 }

@@ -248,7 +248,7 @@ func (q *Worker) Run(ctx context.Context, tenantID, owner string, limit int) (in
 	done := 0
 	for _, j := range claimed {
 		if err := q.Handler(ctx, j); err != nil {
-			status, ferr := q.Fail(ctx, j.ID, owner, err)
+			status, ferr := q.Fail(ctx, j.TenantID, j.ID, owner, err)
 			if ferr != nil {
 				if errors.Is(ferr, ErrNotClaimed) {
 					// The lease moved on while the handler ran. The work may have
@@ -263,7 +263,7 @@ func (q *Worker) Run(ctx context.Context, tenantID, owner string, limit int) (in
 			}
 			continue
 		}
-		if err := q.Complete(ctx, j.ID, owner); err != nil {
+		if err := q.Complete(ctx, j.TenantID, j.ID, owner); err != nil {
 			if errors.Is(err, ErrNotClaimed) {
 				continue
 			}
@@ -286,9 +286,9 @@ func (q *Worker) lease() time.Duration {
 
 // Renew extends a lease a worker is still using. A long inference must not have
 // its job stolen from under it and started a second time.
-func (q *Worker) Renew(ctx context.Context, id, owner string) error {
+func (q *Worker) Renew(ctx context.Context, tenant, id, owner string) error {
 	seconds := int(q.lease().Seconds())
-	tag, err := q.Pool.Exec(ctx, `
+	tag, err := q.Pool.For(tenant, "jobs").Exec(ctx, `
 		UPDATE jobs
 		   SET lease_expires_at = now() + make_interval(secs => $3)
 		 WHERE job_id = $1 AND lease_owner = $2 AND status = 'leased'`,
@@ -303,8 +303,8 @@ func (q *Worker) Renew(ctx context.Context, id, owner string) error {
 }
 
 // Complete marks a job done. Done is terminal and a job is never re-run.
-func (q *Worker) Complete(ctx context.Context, id, owner string) error {
-	tag, err := q.Pool.Exec(ctx, `
+func (q *Worker) Complete(ctx context.Context, tenant, id, owner string) error {
+	tag, err := q.Pool.For(tenant, "jobs").Exec(ctx, `
 		UPDATE jobs
 		   SET status = 'done', completed_at = now(),
 		       lease_owner = NULL, lease_expires_at = NULL, last_error = NULL
@@ -320,9 +320,9 @@ func (q *Worker) Complete(ctx context.Context, id, owner string) error {
 
 // Fail records a failed attempt and applies exponential backoff with a cap. Past
 // the job's own retry bound it becomes a dead letter with a reason.
-func (q *Worker) Fail(ctx context.Context, id, owner string, cause error) (Status, error) {
+func (q *Worker) Fail(ctx context.Context, tenant, id, owner string, cause error) (Status, error) {
 	var status Status
-	if err := q.Pool.QueryRow(ctx, `
+	if err := q.Pool.For(tenant, "jobs").QueryRow(ctx, `
 		UPDATE jobs
 		   SET status = CASE WHEN attempt_count >= max_attempts THEN 'dead_letter' ELSE 'failed' END,
 		       last_error = $3,
@@ -359,7 +359,7 @@ func (q *Worker) DeadLetters(ctx context.Context, tenantID string, limit int) ([
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	rows, err := q.Pool.Query(ctx, `
+	rows, err := q.Pool.For(tenantID, "jobs").Query(ctx, `
 		SELECT job_id::text, tenant_id, site_id, queue, idempotency_key,
 		       attempt_count, max_attempts, COALESCE(dead_letter_reason, last_error, ''), created_at
 		  FROM jobs
@@ -391,8 +391,8 @@ func (q *Worker) DeadLetters(ctx context.Context, tenantID string, limit int) ([
 //
 // Operator-triggered, not automatic: a dead letter usually means the dependency
 // is broken, and retrying in a loop turns a visible incident into invisible load.
-func (q *Worker) Replay(ctx context.Context, id string) error {
-	tag, err := q.Pool.Exec(ctx, `
+func (q *Worker) Replay(ctx context.Context, tenant, id string) error {
+	tag, err := q.Pool.For(tenant, "jobs").Exec(ctx, `
 		UPDATE jobs
 		   SET status = 'pending', attempt_count = 0, last_error = NULL,
 		       dead_letter_reason = NULL, completed_at = NULL, run_after = now(),
@@ -419,7 +419,7 @@ type Counts struct {
 // Counts reads the queue's depth.
 func (q *Worker) Counts(ctx context.Context, tenantID string) (Counts, error) {
 	var c Counts
-	err := q.Pool.QueryRow(ctx, `
+	err := q.Pool.For(tenantID, "jobs").QueryRow(ctx, `
 		SELECT
 		    count(*) FILTER (WHERE status = 'pending'),
 		    count(*) FILTER (WHERE status = 'leased'),

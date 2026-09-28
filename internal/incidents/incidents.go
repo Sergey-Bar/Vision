@@ -265,7 +265,7 @@ func (s *Service) List(ctx context.Context, tenant, siteID string, limit int) ([
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	rows, err := s.Pool.Query(ctx, `
+	rows, err := s.Pool.For(tenant, "incidents").Query(ctx, `
 		SELECT incident_id, primary_site_id, state, severity, title, rule_id,
 		       created_at, first_event_at, degraded, degraded_reasons,
 		       rule_bundle_version, policy_version
@@ -588,8 +588,7 @@ func (s *Service) SetState(ctx context.Context, tenant, incidentID string, to St
 
 func (s *Service) currentState(ctx context.Context, tenant, incidentID string) (State, error) {
 	var st State
-	err := s.Pool.QueryRow(ctx,
-		`SELECT state FROM incidents WHERE tenant_id = $1 AND incident_id = $2`,
+	err := s.Pool.For(tenant, "incidents").QueryRow(ctx, `SELECT state FROM incidents WHERE tenant_id = $1 AND incident_id = $2`,
 		tenant, incidentID).Scan(&st)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

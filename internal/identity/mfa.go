@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Sergey-Bar/Ai-Captain/internal/audit"
+	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
 )
 
 // VerifyFactor checks a second factor.
@@ -43,7 +44,7 @@ func (s *Service) VerifyFactor(ctx context.Context, tenant, userID, method, code
 	var id, storedMethod string
 	var publicKey, wrapped []byte
 	var signCount int64
-	rowErr := s.Pool.QueryRow(ctx, `
+	rowErr := s.Pool.For(tenant, "identity").QueryRow(ctx, `
 		SELECT credential_id, method, COALESCE(public_key, ''::bytea),
 		       COALESCE(wrapped_secret, ''::bytea), sign_count
 		  FROM mfa_credentials
@@ -123,7 +124,7 @@ func (s *Service) VerifyFactor(ctx context.Context, tenant, userID, method, code
 		}
 		// The counter moves only when the assertion verified, so a later attempt
 		// cannot present the same one again.
-		if _, err := s.Pool.Exec(ctx, `
+		if _, err := s.Pool.For(tenant, "identity").Exec(ctx, `
 			UPDATE mfa_credentials SET sign_count = $4
 			 WHERE tenant_id = $1 AND credential_id = $2 AND sign_count <= $3`,
 			tenant, id, signCount, advanced); err != nil {
@@ -277,8 +278,7 @@ func (s *Service) unwrapTOTP(wrapped []byte) ([]byte, error) {
 // a way to create an account nobody knows about.
 func (s *Service) BootstrapAdmin(ctx context.Context, tenant, username, passphrase, siteID string) (string, error) {
 	var existing int
-	if err := s.Pool.QueryRow(ctx,
-		`SELECT count(*) FROM users WHERE tenant_id = $1 AND user_id IN
+	if err := s.Pool.For(tenant, "identity").QueryRow(ctx, `SELECT count(*) FROM users WHERE tenant_id = $1 AND user_id IN
 		   (SELECT user_id FROM user_roles WHERE tenant_id = $1 AND role_id = 'tenant_admin')`,
 		tenant).Scan(&existing); err != nil {
 		return "", fmt.Errorf("identity: check for existing admin: %w", err)
@@ -292,9 +292,17 @@ func (s *Service) BootstrapAdmin(ctx context.Context, tenant, username, passphra
 	// The tenant and the site have to exist. Booting an administrator into a
 	// tenant that is not there would surface as a raw foreign-key error, which
 	// tells an operator nothing about what to do next.
+	//
+	// Both existence checks run inside the tenant context. tenants and sites
+	// carry tenant_id and therefore row-level security, so a query without the
+	// context returns zero rows rather than an error — and bootstrap would report
+	// "the tenant does not exist" for a tenant that plainly does.
 	var tenants, sites int
-	if err := s.Pool.QueryRow(ctx,
-		`SELECT count(*) FROM tenants WHERE tenant_id = $1`, tenant).Scan(&tenants); err != nil {
+	if err := s.Pool.InTenant(ctx, dbx.TenantContext{TenantID: tenant, ActorID: "identity"},
+		func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx,
+				`SELECT count(*) FROM tenants WHERE tenant_id = $1`, tenant).Scan(&tenants)
+		}); err != nil {
 		return "", fmt.Errorf("identity: check tenant: %w", err)
 	}
 	if tenants == 0 {
@@ -302,9 +310,12 @@ func (s *Service) BootstrapAdmin(ctx context.Context, tenant, username, passphra
 			"tenant and its sites; bootstrap-admin runs afterwards", tenant)
 	}
 	if siteID != "" {
-		if err := s.Pool.QueryRow(ctx,
-			`SELECT count(*) FROM sites WHERE tenant_id = $1 AND site_id = $2`,
-			tenant, siteID).Scan(&sites); err != nil {
+		if err := s.Pool.InTenant(ctx, dbx.TenantContext{TenantID: tenant, ActorID: "identity"},
+			func(tx pgx.Tx) error {
+				return tx.QueryRow(ctx,
+					`SELECT count(*) FROM sites WHERE tenant_id = $1 AND site_id = $2`,
+					tenant, siteID).Scan(&sites)
+			}); err != nil {
 			return "", fmt.Errorf("identity: check site: %w", err)
 		}
 		if sites == 0 {
@@ -322,7 +333,12 @@ func (s *Service) BootstrapAdmin(ctx context.Context, tenant, username, passphra
 	}
 	userID := "admin-" + hex.EncodeToString(sha256.New().Sum([]byte(tenant + username)))[:8]
 
-	if err := s.Pool.InTx(ctx, func(tx pgx.Tx) error {
+	// The write runs as a system worker, and that is the correct context rather
+	// than a workaround: this is the installer creating a tenant's first
+	// principal, which happens before anyone is authenticated and is not scoped by
+	// a session. Under the ordinary tenant predicate the insert is refused by RLS
+	// outright, which is the right refusal for everything except this operation.
+	if err := s.Pool.InSystemTenant(ctx, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO users (user_id, tenant_id, username, display_name, password_hash,
 			                   password_algo, enabled, recovery_required)
@@ -365,8 +381,7 @@ func (s *Service) SetPassword(ctx context.Context, tenant, userID, current, newP
 		return err
 	}
 	recovery := false
-	if err := s.Pool.QueryRow(ctx,
-		`SELECT recovery_required FROM users WHERE tenant_id = $1 AND user_id = $2`,
+	if err := s.Pool.For(tenant, "identity").QueryRow(ctx, `SELECT recovery_required FROM users WHERE tenant_id = $1 AND user_id = $2`,
 		tenant, userID).Scan(&recovery); err != nil {
 		return fmt.Errorf("identity: read recovery flag: %w", err)
 	}

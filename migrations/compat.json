@@ -1,6 +1,6 @@
 {
   "minSchemaVersion": 1,
-  "maxSchemaVersion": 12,
+  "maxSchemaVersion": 13,
   "minCoreVersion": "0.1.0",
   "maxCoreVersion": "0.x",
   "contractsVersion": "security/v1",

@@ -176,7 +176,7 @@ func (s *Service) MeasureFromSourceTimes(ctx context.Context, policy clock.Polic
 // has never been checked, the second has been checked and is fine.
 func (s *Service) State(ctx context.Context, tenant, deviceID string) (state clock.DeviceState, found bool, err error) {
 	var source, band, ref string
-	err = s.Pool.QueryRow(ctx, `
+	err = s.Pool.For(tenant, "clocksub").QueryRow(ctx, `
 		SELECT site_id, clock_source, drift_ms, band, COALESCE(reference_id, ''), measured_at
 		  FROM device_clocks WHERE tenant_id = $1 AND device_id = $2`,
 		tenant, deviceID).Scan(&state.SiteID, &source, &state.DriftMs, &band, &ref, &state.MeasuredAt)
@@ -198,8 +198,7 @@ func (s *Service) State(ctx context.Context, tenant, deviceID string) (state clo
 // surfaces and the SLO alerts on.
 func (s *Service) SevereCount(ctx context.Context, tenant string) (int64, error) {
 	var n int64
-	err := s.Pool.QueryRow(ctx,
-		`SELECT count(*) FROM device_clocks WHERE tenant_id = $1 AND band = 'severe'`,
+	err := s.Pool.For(tenant, "clocksub").QueryRow(ctx, `SELECT count(*) FROM device_clocks WHERE tenant_id = $1 AND band = 'severe'`,
 		tenant).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("clocksub: severe count: %w", err)
@@ -226,7 +225,7 @@ func (s *Service) View(ctx context.Context, policy clock.Policy, tenant string, 
 	if limit <= 0 || limit > 2000 {
 		limit = 500
 	}
-	rows, err := s.Pool.Query(ctx, `
+	rows, err := s.Pool.For(tenant, "clocksub").Query(ctx, `
 		SELECT device_id, site_id, clock_source, drift_ms, band, measured_at
 		  FROM device_clocks WHERE tenant_id = $1
 		 ORDER BY abs(drift_ms) DESC, device_id

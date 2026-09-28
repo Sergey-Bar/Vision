@@ -60,7 +60,13 @@ type Server struct {
 	start       time.Time
 }
 
-// Handler builds the HTTP handler with the security middleware applied.
+// Handler builds the HTTP handler with every security layer applied.
+//
+// The layers live here rather than in ListenAndServe, because a security
+// property that only exists on one call path is a property that a test, a
+// benchmark, or a future embedder silently does without. The CSRF check in
+// particular was on the listener only, which meant Handler served every
+// state-changing route with no token at all.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	if s.Routes != nil {
@@ -74,6 +80,7 @@ func (s *Server) Handler() http.Handler {
 	h = s.securityHeaders(h)
 	h = s.recoverPanics(h)
 	h = s.logRequests(h)
+	h = s.requireCSRF(h)
 	return h
 }
 
@@ -222,14 +229,34 @@ func (s *Server) requireCapability(needed identity.Capability, h func(http.Respo
 	}
 }
 
+// csrfExempt lists the routes a CSRF token cannot protect.
+//
+// Login and its second step are exempt because a caller has no session yet, and
+// therefore no token to present — requiring one would make authentication
+// impossible. They are not left unprotected by accident: a forged login request
+// can only log the attacker in as themselves, which costs them nothing, and the
+// routes are rate limited and audited.
+//
+// Everything that acts on an existing session is covered, logout included.
+var csrfExempt = map[string]bool{
+	"POST /v1/auth/login":      true,
+	"POST /v1/auth/mfa/verify": true,
+}
+
 // requireCSRF rejects a state-changing method without a matching token.
 //
 // The cookie alone is not authorization: a browser attaches it to any request to
-// this origin, including one a page elsewhere caused.
+// this origin, including one another page caused. The token is read from a
+// readable cookie so a server-rendered form can carry it, and is checked against
+// the session row, so it authorises nothing on its own.
 func (s *Server) requireCSRF(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			next.ServeHTTP(w, r)
+			return
+		}
+		if csrfExempt[r.Method+" "+r.URL.Path] {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -246,7 +273,7 @@ func (s *Server) requireCSRF(next http.Handler) http.Handler {
 		// The CSRF token lives in a separate, readable cookie so a form can
 		// carry it. It is bound to the session server-side, so its value alone
 		// authorises nothing.
-		csrfCookie, err := r.Cookie(s.CookieName + "_csrf")
+		csrfCookie, err := r.Cookie(s.cookieName() + "_csrf")
 		if err != nil {
 			WriteError(w, http.StatusForbidden, "csrf_missing",
 				"This request is missing its CSRF token. Reload the page and try again.", requestID(r))
@@ -260,7 +287,13 @@ func (s *Server) requireCSRF(next http.Handler) http.Handler {
 		// The CSRF cookie is deliberately not HttpOnly: the server-rendered console
 		// reads it to stamp the token into a form. It authorises nothing on its
 		// own, because the server checks it against the session row.
-		if err := s.Identity.CheckCSRF(r.Context(), s.Tenant, sessionIDOf(cookie.Value), presented); err != nil {
+		//
+		// The session is found by the token, not by an id derived from it. Resolve
+		// rotates the token on every request, so a session id derived from the
+		// token that just arrived is always one rotation stale — and a check
+		// against a stale session refuses every correctly-tokened request, which
+		// looks exactly like a CSRF attack.
+		if err := s.Identity.CheckCSRFByToken(r.Context(), s.Tenant, cookie.Value, presented); err != nil {
 			WriteError(w, http.StatusForbidden, "csrf_mismatch", err.Error(), requestID(r))
 			return
 		}
@@ -301,6 +334,10 @@ func (s *Server) auditDenied(r *http.Request, p identity.Principal, needed ident
 }
 
 func (s *Server) cookieName() string {
+	return s.cookieNameOrDefault()
+}
+
+func (s *Server) cookieNameOrDefault() string {
 	if s.CookieName == "" {
 		return "sp_session"
 	}
@@ -328,16 +365,11 @@ func (s *Server) setSessionCookie(w http.ResponseWriter, sessionToken, csrfToken
 		return
 	}
 	http.SetCookie(w, &http.Cookie{
-		Name: s.CookieName + "_csrf", Value: csrfToken, Path: "/",
+		Name: s.cookieName() + "_csrf", Value: csrfToken, Path: "/",
 		Secure: s.Secure, SameSite: http.SameSiteStrictMode,
 		MaxAge: int((12 * time.Hour).Seconds()),
 	})
 }
-
-// sessionIDOf derives the session id from its token, which is the same derivation
-// the identity package uses. Kept here so the middleware can name the session it
-// is checking without a database round trip.
-func sessionIDOf(token string) string { return "sess_" + identity.HashToken(token)[:16] }
 
 // clearSessionCookie removes the session cookie.
 func (s *Server) clearSessionCookie(w http.ResponseWriter) {
@@ -346,7 +378,7 @@ func (s *Server) clearSessionCookie(w http.ResponseWriter) {
 		HttpOnly: true, Secure: s.Secure, SameSite: http.SameSiteStrictMode, MaxAge: -1,
 	})
 	http.SetCookie(w, &http.Cookie{
-		Name: s.CookieName + "_csrf", Value: "", Path: "/",
+		Name: s.cookieName() + "_csrf", Value: "", Path: "/",
 		Secure: s.Secure, SameSite: http.SameSiteStrictMode, MaxAge: -1,
 	})
 }
@@ -359,7 +391,7 @@ func (s *Server) clearSessionCookie(w http.ResponseWriter) {
 func (s *Server) ListenAndServe(ctx context.Context, addr string, certFile, keyFile string) error {
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           s.requireCSRF(s.Handler()),
+		Handler:           s.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,
