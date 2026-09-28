@@ -589,7 +589,7 @@ small, and it is deferred rather than absent — nothing else depends on it and 
 should be written against a real service manager." §3.6 above is the point at
 which nothing-else-depends-on-it stops being true, and there is a customer.
 
-**`deploy/windows/captain-core.xml`** — a Windows Service definition, installed
+**`deploy/windows/SecurityPlatformCore.xml`** — a Windows Service definition, installed
 from the verified archive by `securityctl install`:
 
 ```xml
@@ -614,7 +614,7 @@ from the verified archive by `securityctl install`:
 - `ServiceSid="none"` — the service does not get a session SID, because it
   serves no session.
 
-**`deploy/systemd/captain-core.service`**:
+**`deploy/systemd/security-core.service`**:
 
 ```ini
 [Unit]
@@ -2131,8 +2131,8 @@ useless to somebody who is not running a vulnerability scanner.
 | **SLOs observed** | ❌ — Q-3 and gate 3 | no values to evaluate |
 | **Two SLOs measure something other than their stated target** | ❌ Q-1, Q-2 | `slo.go:115-122`, `:127-134` |
 | **HTTP access log carries `tenant_id` / `site_id` / `request_id`** | ❌ Q-9 | `internal/api`'s `logRequests` omits all three |
-| Windows Service unit | ❌ deferred | `deploy/` created and removed |
-| systemd unit | ❌ deferred | as above |
+| Windows Service unit | ⚠️ written, not startable | `deploy/windows/SecurityPlatformCore.xml` exists but there is no `cmd/security-core` binary for it to run |
+| systemd unit | ⚠️ written, not startable | `deploy/systemd/security-core.service` exists, declares `Type=notify` with no notifier, and hardens away GPU access |
 | `install` / `upgrade` / `rollback` / `backup` / `restore` | ❌ skeletons that refuse with a named reason | `docs/status.md`; specified in §2.3 |
 | OCI profile | ❌ not started, and §4.1 explains why | `README.md` mentions it in the `deploy/` row |
 | Load generator | ❌ not started | needed for gate 3 |

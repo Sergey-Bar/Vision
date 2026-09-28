@@ -1,12 +1,14 @@
 # Status
 
+Last revised 2026-09-28.
+
 Milestone 1. This document is the source of truth for what is built. The README
 is not, and neither is the commit history.
 
 Green means: written, building, and covered by a test that would fail if it broke.
 Everything in the table below is that. Where a thing is not done it says why.
 
-**Verification:** `go test -p 1 -race ./...` green across 24 packages against a
+**Verification:** `go test -p 1 -race ./...` green across 30 packages against a
 real Postgres 16, with the race detector on. `go vet` and `gofmt` clean.
 `golangci-lint` reports zero issues. `contractcheck` reports 20 messages and 22
 enums compatible with the baseline. The Python AI runtime's 21 contract tests
@@ -87,16 +89,34 @@ tested.
 
 ## What is not done, and why
 
+**The service binary does not exist.** There is no `cmd/security-core`.
+`make build` produces only `securityctl` and `security-migrate`.
+`internal/api.Server.ListenAndServe` is implemented and nothing calls it from a
+`main`, while both `deploy/systemd/security-core.service` and
+`deploy/windows/SecurityPlatformCore.xml` invoke a `security-core` executable.
+The units are therefore not startable as written, which means the lifecycle
+commands have been exercised against a manually run process rather than a
+supervised service. The systemd unit additionally declares `Type=notify` while
+nothing in the tree implements an `sd_notify` handshake, so it would wait out the
+start timeout; and `MemoryDenyWriteExecute=yes`, `SystemCallFilter=@system-service`
+and `PrivateDevices=yes` are each incompatible with binding a GPU runtime.
+
 **The inference engine.** There is no model, no weights, no GPU and no signed
 bundle. The runtime refuses rather than pretending, and `docs/status.md` says so
 because a pilot's first question is whether the AI plane is doing anything.
 
+**The Go core has no client for the AI runtime.** No `.go` file calls the
+inference endpoint and `jobs.QueueVLM` has no producer or consumer, so the plane
+has no path from a job to a model even once one exists. This is a fourth M1
+Definition-of-Done item, and it is not listed below because it was found after
+that list was written.
+
 **The Milestone endpoint surface is unverified.** Every route in
 `internal/milestone/routes.go` is marked `Unverified` and the fixtures are
-synthetic. No Milestone server has been reachable from this codebase. This is the
-single most important open item: everything else is proven against a fixture, and
-the one component that has not touched the real thing is the one that talks to the
-customer.
+synthetic. No Milestone server has ever been reachable from this codebase. This
+is the single most important open item: everything else is proven against a
+fixture, and the one component that has not touched the real thing is the one
+that talks to the customer.
 
 **Automated database restore.** `restore --verify` checks the backup's hashes and
 reports what a restore would do, then refuses to perform it, because a restore that
@@ -159,6 +179,6 @@ rebuild the schema, so package test binaries must not run concurrently.
 
 ## Local toolchain
 
-- Go 1.27, `protoc` and MinGW-w64 (for `-race` on Windows), all via winget.
+- Go 1.26, `protoc` and MinGW-w64 (for `-race` on Windows), all via winget.
 - Python 3.14 via the `py` launcher. The runtime targets 3.11+ syntax and uses
   the standard library only, which CI asserts.

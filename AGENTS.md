@@ -1,5 +1,69 @@
 # Working agreements
 
+## Start here
+
+| You want to | Read |
+|---|---|
+| The plan for the next six years | [`ROADMAP.md`](ROADMAP.md) |
+| What is actually built | [`docs/status.md`](docs/status.md) |
+| Where each package is and what owns what | [`internal/README.md`](internal/README.md) |
+| The rules below | this file |
+
+`docs/status.md` is the only source of truth for build state. The README and the
+commit history are not. A stale claim in any other document is a defect.
+
+## Environment — read this before running anything
+
+The toolchain is installed but **not on `PATH`** on a default Windows shell.
+This is the first thing that will waste your time.
+
+| Tool | Where | On `PATH`? |
+|---|---|---|
+| `go` | `C:\Program Files\Go\bin\go.exe` | **No** |
+| `protoc` | winget | **No** |
+| `golangci-lint` | `$(go env GOPATH)\bin`, installed by `make bootstrap` | **No** |
+| `make` | Git Bash, or use the `go` invocations directly | **No** |
+| `py`, `git`, `docker` | — | Yes |
+
+```powershell
+# PowerShell, for this session
+$env:Path += ";C:\Program Files\Go\bin;$env:USERPROFILE\go\bin"
+```
+
+Verify before you trust anything:
+
+```powershell
+& "C:\Program Files\Go\bin\go.exe" build ./...   # must exit 0
+& "C:\Program Files\Go\bin\go.exe" version        # 1.26.x; go.mod says 1.26.0
+```
+
+The module declares `go 1.26.0` and CI pins `GO_VERSION: "1.26"` with
+`GOTOOLCHAIN: local`. A pin below the `go` directive is a hard build failure, so
+if you change one you must change the other in the same commit.
+
+### The database
+
+The database-backed tests **skip** rather than fail when the environment
+variable is absent, which means a green run can be a run that tested nothing.
+Always confirm they actually ran.
+
+```powershell
+docker run -d --name sp-pg -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres `
+  -e POSTGRES_DB=security_test -p 55432:5432 postgres:16
+$env:SP_TEST_DATABASE_URL='postgres://postgres@127.0.0.1:55432/security_test?sslmode=disable'
+$env:SP_TEST_DATABASE_PASSWORD='postgres'
+go run ./cmd/security-migrate up
+go test -p 1 -count=1 ./...
+```
+
+`-p 1` is not optional. The database-backed suites share one database and
+rebuild the schema, so package test binaries must not run concurrently; without
+it one suite's `DROP SCHEMA` lands inside another's test and the failures look
+like product bugs.
+
+`go test -coverprofile=coverage` writes a plain file at the repo root. It is
+ignored; do not stage it. Same for `__pycache__/`.
+
 ## Before writing code
 
 - The plan of record lives in the milestone plan. Scope is locked; a new
@@ -10,6 +74,12 @@
 - Rule bundles, release archives and model bundles are untrusted input. If you
   are adding a code path that executes anything derived from them, the threat
   model owns the answer, not the convenience of the call site.
+- An AI agent may not change an invariant, change a published contract, activate
+  a capability, contact anyone, or commit to a date. It may write code, tests
+  and documentation, and it may propose. A human signs every exit gate.
+- Migrations, `contracts/`, anything touching an invariant, dependencies, auth,
+  crypto and the rule language all require a human to read the diff before it
+  lands.
 
 ## Invariants that tests must protect
 
@@ -65,9 +135,13 @@ Two consequences that are easy to get wrong:
 - Time rendering is unaffected. A site's timezone is still the site's timezone and
   never the host's, and every rendered time carries an explicit offset. Dropping
   RTL does not mean dropping the site's clock.
-- `sites.default_locale` stays in the schema. It is a rendering input, not a
-  security control, and a site that later needs another locale should not require
-  a migration to express it.
+- `sites.default_locale` **does not exist**. It was dropped by migration
+  `0010_drop_default_locale.expand.sql`, which is the correct call: a locale is a
+  rendering input, not a security control, and a schema column that no code
+  reads is one more thing to keep in sync. A site that needs another locale gets
+  it from its profile at render time, not from a column. If you are reading an
+  older revision of this file that says the column "stays in the schema", that
+  sentence was wrong.
 
 ## Verification
 

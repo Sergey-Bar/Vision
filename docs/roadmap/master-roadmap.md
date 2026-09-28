@@ -516,8 +516,13 @@ document a reader is most likely to trust:
 | C7 | **A rule can legally name `aiObservation.field: summary`** although the schema says it is never evaluated by a rule, and nothing enforces either. | A weak, invariable constraint on the AI trust boundary. |
 | C8 | **`internal/graph`'s package doc claims a test asserts the absence of `entity_aliases`; no such test exists.** | M1's no-person-model decision is protected by a comment. |
 | C9 | **`fixture.Event.ObservedAt` is never called and `ReplayTransport.Get` discards the epoch it computes.** | Replay parity today is byte-parity, not timing-parity, which changes what M1 gate 1 means. Needs an E1 decision before the gate is attempted. |
-| C10 | **CI pinned Go 1.24 with `GOTOOLCHAIN: local` against a `go 1.26.0` module.** | CI could not build the project at all. Fixed to `1.26`; `docs/status.md`'s "Go 1.27" is the remaining stale claim. |
+| C10 | **CI pinned Go 1.24 with `GOTOOLCHAIN: local` against a `go 1.26.0` module.** | CI could not build the project at all. Fixed to `1.26`; `docs/status.md`'s "Go 1.27" was the remaining stale claim, now corrected. |
+| C11 | **There is no `cmd/security-core`, but both service units invoke one.** `make build` produces only `securityctl` and `security-migrate`; `internal/api.Server.ListenAndServe` has no `main` caller. | The service units cannot start as written, so the lifecycle has been exercised against a manually run process rather than a supervised service. The unit also declares `Type=notify` with no `sd_notify` handshake, and its `MemoryDenyWriteExecute`, `SystemCallFilter=@system-service` and `PrivateDevices` hardening each preclude a GPU runtime. |
+| C12 | **`contractcheck` silently ignores `map<...>` fields and never diffs OpenAPI or the JSON Schemas.** `Device.attributes` is absent from the baseline. | The compatibility gate is narrower than "the contracts are the source of truth" implies. A breaking change to a map field, or to any HTTP or JSON-Schema surface, passes silently. |
+| C13 | **`VerifyChecksums` hashes the migration file body, not its name.** | Renaming an applied migration passes verification while the ledger's `name` column silently diverges from the file. |
+| C14 | **The API access log carries no `tenant_id`, `site_id` or `request_id`**, which the conventions require on every line. | An operator cannot correlate an HTTP request to a ledger row or a log line. |
 
 C2 and C3 are the two I would fix this week. Both are small, both are
 contained, and both are the kind of defect that a security buyer's engineer
-finds in an afternoon.
+finds in an afternoon. C11 is close behind, because a customer whose service
+will not start is a customer we cannot pilot with.

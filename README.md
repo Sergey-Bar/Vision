@@ -35,28 +35,38 @@ Five invariants that the rest of the code exists to protect.
 
 | Path | Contents |
 |---|---|
-| `contracts/` | Protobuf `security/v1`, OpenAPI `v1`, JSON Schema. No language owns the schema. |
+| `contracts/` | Protobuf `security/v1`, OpenAPI `v1`, JSON Schema. No language owns the schema. See [`contracts/README.md`](contracts/README.md). |
 | `cmd/securityctl` | Operator and installer CLI. |
 | `cmd/security-migrate` | Expand/contract migration runner. |
-| `internal/` | Core: adapters, durability, graph, rules, verification, policy, audit, identity, API, console. |
-| `migrations/` | Ordered SQL. `expand` steps ship separately from `contract` steps. |
+| `internal/` | Core: adapters, durability, graph, rules, verification, audit, identity, API, console. Start at [`internal/README.md`](internal/README.md). |
+| `migrations/` | Ordered SQL. `expand` steps ship separately from `contract` steps. See [`migrations/README.md`](migrations/README.md). |
 | `rules/builtin/` | The built-in bundle, shipped in the release archive. |
-| `docs/` | Build status and threat model. |
-| `docs/roadmap/` | The plan: strategy, the M1–M8 calendar, and every R&D, GTM, trust and company track. |
-| `deploy/` | Windows Service, systemd, and the AI runtime. |
+| `docs/` | Build status and threat model. Index: [`docs/README.md`](docs/README.md). |
+| `docs/roadmap/` | The full plan. Start at [`docs/roadmap/README.md`](docs/roadmap/README.md). |
+| `deploy/` | Windows Service, systemd, and the AI runtime. See [`deploy/README.md`](deploy/README.md). |
 
 ## Build
+
+The toolchain is installed but **not on `PATH`** in a default Windows shell.
+`go`, `protoc`, `golangci-lint` and `make` are all missing from it.
+
+```powershell
+$env:Path += ";C:\Program Files\Go\bin;$env:USERPROFILE\go\bin"
+& "C:\Program Files\Go\bin\go.exe" build ./...   # must exit 0
+```
 
 ```sh
 make bootstrap     # fetch tools
 make generate      # contracts -> generated code + compatibility check
 make build
-make test
+make test          # -p 1 is not optional; see AGENTS.md
 make lint
 ```
 
 Windows uses `make` through Git Bash, or the equivalent `go` invocations in
-`Makefile` directly from PowerShell.
+`Makefile` directly from PowerShell. The database-backed tests **skip** rather
+than fail when `SP_TEST_DATABASE_URL` is unset, so a green run can be a run that
+tested nothing — `AGENTS.md` has the setup.
 
 ## Status
 
@@ -65,23 +75,16 @@ built and what is not — not this file.
 
 ## Plan
 
-`docs/roadmap/` holds the roadmap from today to product: the M1–M8 calendar with
-dated exit gates, and the track documents behind it — product, UX, QA, metrics,
-adapters, AI, release, security, compliance, GTM, pricing, launch, risk, hiring
-and finance. It is organised so that a non-engineer can navigate it, and it is
-readable by one.
+[`ROADMAP.md`](ROADMAP.md) is the one-page entry point. The full set of
+documents lives in `docs/roadmap/`: the M1–M8 calendar with dated exit gates, and
+the track documents behind it — product, UX, QA, metrics, adapters, AI, release,
+security, compliance, GTM, pricing, launch, risk, hiring and finance. It is
+organised so that a non-engineer can navigate it, and it is readable by one.
 
-| | |
-|---|---|
-| Start here | [`docs/roadmap/README.md`](docs/roadmap/README.md) |
-| What and why | [`strategy-and-north-star.md`](docs/roadmap/strategy-and-north-star.md) |
-| What ships when | [`master-roadmap.md`](docs/roadmap/master-roadmap.md) |
-| What we do this quarter | [`milestones/m1-trust-spine-execution-plan.md`](docs/roadmap/milestones/m1-trust-spine-execution-plan.md) |
-
-The master roadmap's final section lists the ten code defects found while
-writing the plan, two of which (a bundle check that verifies a digest rather
+The master roadmap's final section lists the fourteen code defects found while
+writing the plan, two of which — a bundle check that verifies a digest rather
 than a signature, and an adapter event-type table keyed on spellings
-normalisation never emits) are worth fixing before anything ships.
+normalisation never emits — are worth fixing before anything ships.
 
 ## Evidence rule
 

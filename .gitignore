@@ -27,7 +27,9 @@ __pycache__/
 *.pem
 
 # Replay fixtures captured from a live system may contain real site data.
-# Sanitized, reviewed fixtures only. See docs/fixtures.md.
+# Sanitized, reviewed fixtures only. The sanitiser is the single choke point
+# between a live source and a committed file: internal/fixture/sanitize.go.
+# See internal/README.md.
 /fixtures/private/
 /testdata/private/
 
