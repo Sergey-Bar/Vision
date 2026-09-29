@@ -2,6 +2,7 @@ package checkpoint
 
 import (
 	"crypto/ed25519"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -52,9 +53,6 @@ func TestVerifyRejectsForeignKey(t *testing.T) {
 	attacker, _ := NewSigner("attacker")
 
 	seal := newSealed(t, attacker, "tenant-a", 1, 10)
-	if err := VerifySeal(seal, nil); err != nil {
-		t.Fatalf("a self-consistent seal should verify with no trust anchor: %v", err)
-	}
 	err := VerifySeal(seal, trusted.PublicKey())
 	if err == nil {
 		t.Fatal("a seal signed by an untrusted key was accepted")
@@ -64,20 +62,46 @@ func TestVerifyRejectsForeignKey(t *testing.T) {
 	}
 }
 
+// No trust anchor is a refusal, not a weaker check.
+//
+// This used to assert the opposite: that a self-consistent seal verifies with a
+// nil key. That is the whole vulnerability. A seal checked against the key it
+// carries is a seal that proves only that whoever wrote it signed their own
+// forgery, and the command whose whole job is to detect a re-signed seal was
+// the one accepting them. There is no reading under which "I have nobody to
+// trust" should mean "therefore I will trust the thing I am verifying".
+func TestVerifyRefusesWithoutATrustAnchor(t *testing.T) {
+	attacker, _ := NewSigner("attacker")
+	seal := newSealed(t, attacker, "tenant-a", 1, 10)
+
+	err := VerifySeal(seal, nil)
+	if err == nil {
+		t.Fatal("a seal verified with no trusted key. The offline verifier now accepts any " +
+			"self-consistent forgery, which is the input it exists to reject")
+	}
+	if !errors.Is(err, ErrVerify) {
+		t.Errorf("the refusal should be a verification error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "trusted") {
+		t.Errorf("the error should say what is missing, got %q", err)
+	}
+}
+
 func TestVerifyDetectsFieldTampering(t *testing.T) {
 	s, _ := NewSigner("key-1")
 	seal := newSealed(t, s, "tenant-a", 1, 10)
 
 	cases := map[string]func(Seal) Seal{
-		"tenant":              func(x Seal) Seal { x.TenantID = "tenant-b"; return x },
-		"from sequence":       func(x Seal) Seal { x.FromSequence = 2; return x },
-		"to sequence":         func(x Seal) Seal { x.ToSequence = 11; return x },
-		"entry count":         func(x Seal) Seal { x.EntryCount = 99; return x },
-		"chain digest":        func(x Seal) Seal { x.ChainDigest = strings.Repeat("b", 64); return x },
-		"sealed at":           func(x Seal) Seal { x.SealedAt = x.SealedAt.Add(time.Hour); return x },
-		"sequence hashes":     func(x Seal) Seal { x.SequenceHashes = nil; return x },
-		"checkpoint id":       func(x Seal) Seal { x.CheckpointID = "cp-2"; return x },
-		"key id (not signed)": func(x Seal) Seal { x.KeyID = "key-2"; return x },
+		"tenant":          func(x Seal) Seal { x.TenantID = "tenant-b"; return x },
+		"from sequence":   func(x Seal) Seal { x.FromSequence = 2; return x },
+		"to sequence":     func(x Seal) Seal { x.ToSequence = 11; return x },
+		"entry count":     func(x Seal) Seal { x.EntryCount = 99; return x },
+		"chain digest":    func(x Seal) Seal { x.ChainDigest = strings.Repeat("b", 64); return x },
+		"sealed at":       func(x Seal) Seal { x.SealedAt = x.SealedAt.Add(time.Hour); return x },
+		"sequence hashes": func(x Seal) Seal { x.SequenceHashes = nil; return x },
+		"checkpoint id":   func(x Seal) Seal { x.CheckpointID = "cp-2"; return x },
+		"key id":          func(x Seal) Seal { x.KeyID = "key-2"; return x },
+		"public key":      func(x Seal) Seal { x.PublicKey = strings.Repeat("c", 64); return x },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {

@@ -18,8 +18,23 @@ linters:
     - unparam
     - wastedassign
   disable:
-    # SQL is intentionally built from table names in a few test helpers, and the
-    # injection risk there is nil because the names are compile-time constants.
+    # gosec is disabled, and the reason is a gap rather than a position.
+    #
+    # The previous reason here was "SQL is intentionally built from table names
+    # in a few test helpers" — which is true, and which justifies a rule
+    # exclusion on two test files, not the whole linter across a security
+    # product. A linter disabled by a two-line justification is a linter nobody
+    # decided to run, and this repository's own working rule is that a control
+    # which has never been seen red is not a control. The honest statement is
+    # the one below.
+    #
+    # golangci-lint is not installed on the machine this was written on, so
+    # enabling gosec here would add a linter nobody has run and whose findings
+    # are unknown — decoration that reads as coverage. The work is: install
+    # MinGW-w64 and golangci-lint, enable gosec, triage what it reports, and
+    # either fix the findings or replace this note with a narrowly-scoped
+    # exclusion naming the rule and the file. Until then this is a known gap,
+    # recorded in docs/status.md, not a decision.
     - gosec
 
   exclusions:

@@ -149,17 +149,17 @@ archive signed it. Get the key out of band with 'securityctl release-key'.`,
 		if err != nil {
 			return err
 		}
-		var trusted ed25519.PublicKey
-		if trustedKeyHex != "" {
-			trusted, err = decodePublicKey(trustedKeyHex)
-			if err != nil {
-				return err
-			}
-		} else {
-			fmt.Fprintln(env.Stderr,
-				"warning: no --trusted-key was given. The archive's own signature will be checked "+
-					"against the key it carries, which proves only that whoever wrote the archive "+
-					"signed it. Get the key out of band.")
+		// The trusted key is required, not optional. `release verify` exists to
+		// answer "did the party I trust build this", and with no key supplied the
+		// only answer available is "did whoever wrote the archive sign their own
+		// work". The previous version printed a warning and continued, which made
+		// the warning the only thing standing between an operator and a self-signed
+		// forgery on the one command whose job is to detect one.
+		trusted, err := decodePublicKey(trustedKeyHex)
+		if err != nil {
+			return &command.UsageError{Err: fmt.Errorf(
+				"--trusted-key is required: %w. Without it this command cannot distinguish a "+
+					"genuine archive from one an attacker signed themselves", err)}
 		}
 
 		files, err := release.Verify(archive, manifest, trusted)

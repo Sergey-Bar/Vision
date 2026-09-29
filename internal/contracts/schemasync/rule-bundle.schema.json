@@ -1,0 +1,253 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.aicaptain.dev/security/v1/rule-bundle.schema.json",
+  "title": "Rule bundle",
+  "description": "Immutable, versioned rule bundle. Untrusted input: no shell, SQL, network, dynamic code or unbounded regex is permitted by the schema or the semantic validator.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "version", "site", "settings", "rules"],
+  "properties": {
+    "apiVersion": { "const": "security.io/v1" },
+    "kind": { "const": "RuleBundle" },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$",
+      "description": "Bundle version. Activated immutably; rollback restores a previous version verbatim."
+    },
+    "description": { "type": "string", "maxLength": 2000 },
+    "site": { "$ref": "#/$defs/siteRef" },
+    "settings": { "$ref": "#/$defs/settings" },
+    "rules": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 2000,
+      "items": { "$ref": "#/$defs/rule" }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(\\.[a-z0-9-]+)+$",
+      "maxLength": 128
+    },
+    "siteRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["siteId", "timezones"],
+      "properties": {
+        "siteId": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "timezones": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "description": "IANA zone names. Wall-clock predicates resolve against these, never against the host."
+        }
+      }
+    },
+    "settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["clock"],
+      "properties": {
+        "clock": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["skewTolerance", "driftWarnMs", "driftSevereMs", "referenceSource"],
+          "properties": {
+            "skewTolerance": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 600000,
+              "description": "Per-site bound on normalized_at divergence permitted inside a time window. Site parameter, not a global constant."
+            },
+            "driftWarnMs": { "type": "integer", "minimum": 0, "maximum": 600000 },
+            "driftSevereMs": { "type": "integer", "minimum": 0, "maximum": 600000 },            "referenceSource": { "enum": ["ntp", "vms", "host"] }
+          }
+        },
+        "dedupe": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "windowSeconds": { "type": "integer", "minimum": 0, "maximum": 86400 },
+            "keys": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/identifier" },
+              "maxItems": 16
+            }
+          }
+        },
+        "burstMerge": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "windowSeconds": { "type": "integer", "minimum": 0, "maximum": 86400 },
+            "maxEvents": { "type": "integer", "minimum": 1, "maximum": 100000 }
+          }
+        }
+      }
+    },
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "enabled", "priority", "when", "then"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "description": { "type": "string", "maxLength": 2000 },
+        "enabled": { "type": "boolean" },
+        "priority": { "type": "integer", "minimum": 0, "maximum": 1000 },
+        "tags": { "type": "array", "items": { "type": "string", "maxLength": 64 }, "maxItems": 32 },
+        "when": { "$ref": "#/$defs/condition" },
+        "then": { "$ref": "#/$defs/action" }
+      }
+    },
+    "condition": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "all": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "$ref": "#/$defs/condition" } },
+        "any": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "$ref": "#/$defs/condition" } },
+        "not": { "$ref": "#/$defs/condition" },
+        "eventType": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "description": "The adapter's normalized vocabulary. The vendor's PascalCase spellings are an adapter detail that never appear here, so a bundle is portable between sites and between replay and integration mode. A name outside this set is a semantic error: a rule that can never match is a rule an operator believes is running.",
+          "items": {
+            "enum": [
+              "motion", "analytics",
+              "alarm.created", "alarm.acknowledged", "alarm.closed",
+              "device.camera_offline", "device.camera_online", "device_state",
+              "recording.started", "recording.stopped",
+              "bookmark", "metadata",
+              "access.granted", "access.denied", "gate"
+            ]
+          }
+        },
+        "device": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": { "type": "string", "maxLength": 64 },
+            "kind": { "$ref": "#/$defs/deviceKind" },
+            "tags": { "type": "array", "items": { "type": "string", "maxLength": 64 }, "maxItems": 32 }
+          }
+        },
+        "zone": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": { "type": "string", "maxLength": 64 },
+            "ancestorOf": { "type": "string", "maxLength": 64 },
+            "pathPrefix": { "type": "string", "maxLength": 256 }
+          }
+        },
+        "schedule": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id"],
+          "properties": {
+            "id": { "type": "string", "maxLength": 64 },
+            "invert": { "type": "boolean" }
+          }
+        },
+        "timeWindow": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["field"],
+          "description": "Evaluated against normalized_at only. Rules never read wall clock outside the evaluation context.",
+          "properties": {
+            "field": { "const": "normalized_at" },
+            "durationSeconds": { "type": "integer", "minimum": 1, "maximum": 604800 },
+            "direction": { "enum": ["before", "after", "either"] }
+          }
+        },
+        "corroborate": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["eventTypes", "minSignals"],
+          "description": "Requires a second independent signal inside the time window. minEvidenceTier bounds what counts.",
+          "properties": {
+            "eventTypes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 16,
+              "items": { "type": "string", "maxLength": 64 }
+            },
+            "minSignals": { "type": "integer", "minimum": 1, "maximum": 16 },
+            "minEvidenceTier": { "enum": ["A", "B", "C"] },
+            "requiresAIObservation": { "type": "boolean" },
+            "ifAIAvailable": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["degradeTo"],
+              "description": "Mandatory whenever an AI observation participates in the decision. A missing AI observation is never a negative observation.",
+              "properties": {
+                "degradeTo": { "enum": ["UNVERIFIED", "proceed_without"] }
+              }
+            }
+          }
+        },
+        "field": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "op", "value"],
+          "description": "Comparison against a whitelisted payload path. Never a script, never a template. There is deliberately no regex operator: an unbounded pattern in a bundle that an operator uploads is a denial-of-service with a YAML file, so the strongest form available is a fixed prefix match.",
+          "properties": {
+            "path": { "type": "string", "pattern": "^[a-z][a-zA-Z0-9_]*(\\.[a-zA-Z0-9_]+){0,7}$" },
+            "op": { "enum": ["eq", "ne", "gt", "gte", "lt", "lte", "in", "not_in", "contains_prefix", "exists"] },
+            "value": {}
+          }
+        },
+        "clockDrift": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "maxMs": { "type": "integer", "minimum": 0, "maximum": 600000 }
+          }
+        },
+        "aiObservation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["profileId"],
+          "properties": {
+            "profileId": { "type": "string", "maxLength": 64 },
+            "field": { "type": "string", "maxLength": 128 },
+            "equals": {}
+          }
+        }
+      }
+    },
+    "deviceKind": {
+      "enum": ["camera", "door", "sensor", "gate", "alarm_panel", "access_reader", "other"]
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["createIncident"],
+      "properties": {
+        "createIncident": { "type": "boolean" },
+        "severity": { "enum": ["info", "low", "medium", "high", "critical"] },
+        "title": { "type": "string", "maxLength": 200 },
+        "suppress": { "type": "boolean" },
+        "markDuplicate": { "type": "boolean" },
+        "escalate": { "type": "boolean" },
+        "requireAIObservation": { "type": "boolean" },
+        "dispatch": {
+          "type": "array",
+          "maxItems": 8,
+          "items": { "$ref": "#/$defs/dispatch" }
+        }
+      }
+    },
+    "dispatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "target"],
+      "properties": {
+        "type": { "enum": ["notify_operator", "notify_supervisor", "request_vlm", "fetch_evidence"] },
+        "target": { "type": "string", "maxLength": 256 }
+      }
+    }
+  }
+}

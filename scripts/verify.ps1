@@ -10,8 +10,12 @@
 
     The checks, in order, and why each is here:
 
-      contract-check   the wire has not changed incompatibly
-      contract-sync    the embedded rule schema is the published one
+      contract-check-* the wire has not changed incompatibly, across all three
+                       published contract surfaces: protobuf messages and enums,
+                       the JSON Schemas' properties and required sets, and the
+                       OpenAPI path/method set
+      contract-sync    every schema with a Go-side embedded copy is byte-identical
+                       to the published one
       vet              Go's own static checks
       gofmt            formatting, without rewriting files
       test-race        the full suite with the race detector, -p 1
@@ -42,9 +46,25 @@ param(
     [switch]$NoRace
 )
 
-$ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 Set-Location $repo
+
+# Gates report through the exit code, and only through the exit code.
+#
+# With 'Stop' in effect, PowerShell turns anything a native command writes to
+# stderr into a terminating error, so a tool that prints a diagnostic — a
+# contract mismatch it wants to show you, a deprecation notice, a warning about
+# a malformed document it worked around — aborts the whole script before the
+# exit code is ever read. The first two gates of this script never wrote to
+# stderr, so it went unnoticed for as long as it went unnoticed; adding the
+# OpenAPI gate surfaced it on a warning, not on a failure.
+#
+# 'Continue' is the right setting here precisely because $LASTEXITCODE is the
+# signal and stderr is not. A gate that fails still fails, and a diagnostic is
+# still printed. What stops happening is a diagnostic being promoted to a
+# failure because of where it was written. Anything that genuinely must abort —
+# a missing interpreter, an unreadable file — calls exit itself.
+$ErrorActionPreference = 'Continue'
 
 # Go is installed but not on PATH. Resolve it rather than assuming.
 # Written for Windows PowerShell 5.1: no ?. operator, no ?? coalescing.
@@ -80,17 +100,21 @@ function Invoke-Gate {
     }
 }
 
-Invoke-Gate 'contract-check' { & $go run ./tools/contractcheck -mode check -baseline contracts/compat/baseline.json -root contracts/protobuf }
+# Three contract surfaces, because there are three published contract files. The
+# protobuf gate ran alone while the JSON Schemas and the OpenAPI document were
+# never diffed, so a breaking change to either published nothing. AGENTS.md
+# requires `make verify` and this script to be the same list, and the Makefile
+# now runs all three; if the two drift again, one of them is lying about what
+# the gate checks.
+Invoke-Gate 'contract-check-protobuf' { & $go run ./tools/contractcheck -mode check -baseline contracts/compat/baseline.json -root contracts/protobuf }
+Invoke-Gate 'contract-check-schema' { & $go run ./tools/contractcheck -mode check -baseline contracts/compat/baseline.json -root contracts/json-schema }
+Invoke-Gate 'contract-check-openapi' { & $go run ./tools/contractcheck -mode check -baseline contracts/compat/baseline.json -root contracts/openapi }
 
-Invoke-Gate 'contract-sync' {
-    $a = 'contracts/json-schema/rule-bundle.schema.json'
-    $b = 'internal/rules/schema/rule-bundle.schema.json'
-    if (-not ((Get-Content -LiteralPath $a -Raw) -eq (Get-Content -LiteralPath $b -Raw))) {
-        Write-Host "    internal/rules/schema is stale; copy the published contract:"
-        Write-Host "      Copy-Item $a $b"
-        exit 1
-    }
-}
+# Every published schema with a Go-side embedded copy, not just rule-bundle. The
+# six schemas are embedded in internal/contracts/schemasync and byte-compared by
+# its own tests; running that package here makes the copy step a gate rather than
+# something the full test run happens to cover.
+Invoke-Gate 'contract-sync' { & $go test -p 1 -count=1 ./internal/contracts/... }
 
 Invoke-Gate 'vet' { & $go vet ./... }
 

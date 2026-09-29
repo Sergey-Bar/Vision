@@ -1,7 +1,7 @@
 # migrations
 
-Ordered, forward-only SQL that builds the Postgres 16 schema. Twelve files,
-`0001` through `0012`, every one of them an `expand` step.
+Ordered, forward-only SQL that builds the Postgres 16 schema. Fourteen files,
+`0001` through `0014`, every one of them an `expand` step.
 
 There is no `down`. There is no rollback of a migration. The only recovery
 direction is a new, higher-numbered file — and the whole design exists so that
@@ -36,6 +36,8 @@ The files, in order:
 | 0010 | `0010_drop_default_locale.expand.sql` | Drops `sites.default_locale` — by a new migration, **not** by editing 0001. |
 | 0011 | `0011_source_clock_state.expand.sql` | Lets `device_clocks` hold a source system's clock, namespaced `source:<id>`. |
 | 0012 | `0012_canonical_events_primary_key.expand.sql` | Gives `canonical_events` the primary key it never had. |
+| 0013 | `0013_audit_insert_trigger_without_update_privilege.expand.sql` | Removes the locking read from the audit insert trigger, which needed an UPDATE privilege the application deliberately does not hold. |
+| 0014 | `0014_edges_active_view_access.expand.sql` | Grants `security_core` SELECT on the `edges_active` view and marks it `security_invoker`, so a graph traversal is both permitted and tenant-scoped. |
 
 0010 and 0012 are the two worth reading as worked examples of the discipline
 before you write anything. 0010's own comment: "Dropped by a new migration

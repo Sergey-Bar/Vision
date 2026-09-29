@@ -15,6 +15,7 @@ import (
 	"github.com/Sergey-Bar/Ai-Captain/internal/api"
 	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
 	"github.com/Sergey-Bar/Ai-Captain/internal/incidents"
+	"github.com/Sergey-Bar/Ai-Captain/internal/observability"
 	"github.com/Sergey-Bar/Ai-Captain/internal/rules"
 	"github.com/Sergey-Bar/Ai-Captain/internal/testutil"
 )
@@ -280,6 +281,190 @@ func TestUnwiredReadModelSaysSoRatherThanReturningNothing(t *testing.T) {
 	if !strings.Contains(body["message"].(string), "empty list") {
 		t.Errorf("the message does not explain why an empty answer would be a lie: %q", body["message"])
 	}
+}
+
+// ---------------------------------------------------------------------------
+// The metrics route.
+//
+// The three cases are the whole authorization matrix for this endpoint: no
+// session, a session without audit.read, and a session with it. A metrics
+// endpoint is a map of the whole pipeline's behaviour, so "who can read it" is
+// the question, not "is it gated".
+// ---------------------------------------------------------------------------
+
+func TestMetricsRequiresASession(t *testing.T) {
+	registry := observability.NewRegistry()
+	s, _, _, _ := serverWithRegistry(t, registry)
+
+	rec := callAnon(t, s, http.MethodGet, "/v1/metrics", nil)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("/v1/metrics with no session returned %d, want 401: %s", rec.Code, rec.Body)
+	}
+	// The refusal must not leak the exposition on the way out.
+	if strings.Contains(rec.Body.String(), "inbox_accepted_total") {
+		t.Error("an unauthenticated refusal carried the exposition in its body")
+	}
+}
+
+func TestMetricsRefusesWithoutTheAuditCapability(t *testing.T) {
+	registry := observability.NewRegistry()
+	s, tenant, site, _ := serverWithRegistry(t, registry)
+
+	// The bootstrap administrator holds audit.read, so testing "a principal
+	// without it" against the administrator asserts nothing. Reduce the account
+	// to a viewer, which reads incidents and evidence and nothing else — the
+	// least-privileged principal that can still sign in.
+	reduceToViewer(t, tenant, site)
+
+	rec := call(t, s, http.MethodGet, "/v1/metrics", nil)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("/v1/metrics as a viewer returned %d, want 403: %s", rec.Code, rec.Body)
+	}
+	if body := decodeBody(t, rec); body["code"] != "not_authorized" {
+		t.Errorf("the refusal is %v, want not_authorized", body["code"])
+	}
+	// The refusal must not leak the exposition.
+	if strings.Contains(rec.Body.String(), "inbox_accepted_total") {
+		t.Error("a forbidden response carried the exposition in its body")
+	}
+}
+
+func TestMetricsRendersForTheAuditRole(t *testing.T) {
+	registry := observability.NewRegistry()
+	s, tenant, _, registry := serverWithRegistry(t, registry)
+
+	grantAuditRead(t, tenant)
+
+	// Recorded before the scrape, not after: the exposition is a point-in-time
+	// read, and a test that increments afterwards is asserting about a different
+	// scrape than the one it made.
+	registry.Counters.Inc(observability.CounterInboxAccepted)
+	registry.Gauges.Set(observability.GaugeBacklogDepth, 7)
+
+	rec := call(t, s, http.MethodGet, "/v1/metrics", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("/v1/metrics returned %d: %s", rec.Code, rec.Body)
+	}
+
+	// The content type is the contract with the collector. A scrape handed JSON
+	// is a parse failure that looks like a broken core.
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/plain") {
+		t.Errorf("Content-Type is %q, want text/plain", ct)
+	}
+	if !strings.Contains(rec.Header().Get("Content-Type"), "version=0.0.4") {
+		t.Errorf("Content-Type %q does not state the exposition version",
+			rec.Header().Get("Content-Type"))
+	}
+	if cc := rec.Header().Get("Cache-Control"); !strings.Contains(cc, "no-store") {
+		t.Errorf("a scrape is cacheable (%q); a collector could be showing a stale number", cc)
+	}
+
+	// Counters are seeded at zero so a metric exists before anything has
+	// happened: a counter that appears only after a fault is one nobody has a
+	// baseline for.
+	body := rec.Body.String()
+	for _, want := range []string{
+		"# TYPE inbox_accepted_total counter",
+		"inbox_accepted_total 1",
+		// A counter nobody has touched still appears, at zero.
+		"# TYPE vlm_invocations_total counter\nvlm_invocations_total 0",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the exposition is missing %q:\n%s", want, body)
+		}
+	}
+	// Gauges are not seeded. A gauge nobody has measured is absent, and absent is
+	// honest; a fabricated zero is a reading nobody took.
+	for _, want := range []string{
+		"# TYPE backlog_depth gauge\nbacklog_depth 7",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the exposition is missing %q:\n%s", want, body)
+		}
+	}
+
+	// A name carrying two type declarations is a scrape the parser rejects, and
+	// a collector reports that as a broken core. The registry used to emit every
+	// gauge twice, once from each set.
+	seen := map[string]int{}
+	for _, line := range strings.Split(body, "\n") {
+		if !strings.HasPrefix(line, "# TYPE ") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		seen[fields[2]+" "+fields[3]]++
+	}
+	for decl, n := range seen {
+		if n > 1 {
+			t.Errorf("the exposition declares %q %d time(s): a metric name with two type "+
+				"declarations is a scrape the parser rejects\n%s", decl, n, body)
+		}
+	}
+	for name := range registry.Counters.Snapshot() {
+		if observability.IsGauge(name) {
+			t.Errorf("the gauge %q is present in the counter set", name)
+		}
+	}
+}
+
+func TestUnwiredMetricsRegistrySaysSoRatherThanScrapingEmpty(t *testing.T) {
+	// No registry at all. An empty exposition is indistinguishable from a core
+	// that has done no work, and only one of those is true.
+	s, _, _ := server(t)
+	grantAuditRead(t, s.Tenant)
+
+	rec := call(t, s, http.MethodGet, "/v1/metrics", nil)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("an unwired registry returned %d, want 503: %s", rec.Code, rec.Body)
+	}
+	body := decodeBody(t, rec)
+	if body["code"] != "not_wired" {
+		t.Errorf("the body is %v, want not_wired", body["code"])
+	}
+}
+
+// grantAuditRead gives the administrator the audit capability.
+func grantAuditRead(t *testing.T, tenant string) {
+	t.Helper()
+	raw := testutil.Pool(t)
+	if _, err := raw.Exec(ctx(),
+		`INSERT INTO roles (role_id, name, capabilities) VALUES ('auditor','Auditor','["audit.read"]')
+		 ON CONFLICT (role_id) DO UPDATE SET capabilities = EXCLUDED.capabilities`); err != nil {
+		t.Fatalf("add role: %v", err)
+	}
+	if _, err := raw.Exec(ctx(),
+		`INSERT INTO user_roles (tenant_id, user_id, role_id)
+		 VALUES ($1, $2, 'auditor') ON CONFLICT DO NOTHING`,
+		tenant, adminUserID(t, tenant)); err != nil {
+		t.Fatalf("grant role: %v", err)
+	}
+}
+
+// reduceToViewer strips the administrator down to the viewer role, which is the
+// least-privileged principal that can still sign in and read incidents.
+//
+// It exists because the bootstrap administrator holds audit.read, so "a
+// principal without the capability" cannot be tested by signing in as the
+// administrator — that test would pass for the wrong reason, or fail while the
+// route is correctly gated.
+func reduceToViewer(t *testing.T, tenant, site string) {
+	t.Helper()
+	raw := testutil.Pool(t)
+	if _, err := raw.Exec(ctx(),
+		`DELETE FROM user_roles WHERE tenant_id = $1 AND user_id = $2`,
+		tenant, adminUserID(t, tenant)); err != nil {
+		t.Fatalf("clear roles: %v", err)
+	}
+	if _, err := raw.Exec(ctx(),
+		`INSERT INTO user_roles (tenant_id, user_id, role_id)
+		 VALUES ($1, $2, 'viewer') ON CONFLICT DO NOTHING`,
+		tenant, adminUserID(t, tenant)); err != nil {
+		t.Fatalf("grant viewer: %v", err)
+	}
+	_ = site
 }
 
 // ---------------------------------------------------------------------------

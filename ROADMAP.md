@@ -105,15 +105,30 @@ Full detail and evidence in
 [`master-roadmap.md`](docs/roadmap/master-roadmap.md) §"What this review got
 wrong". The two worth fixing first:
 
-- **The AI runtime's bundle check verifies a digest, not a signature.** It
-  compares `sha256(manifest)` against the *contents* of `manifest.sig` and never
-  uses the public key, while the docstring says "signature". A bundle "signed"
-  with a hash is accepted as if it were signed.
-- **The adapter's known-event-type table is keyed on spellings normalisation
-  never emits.** Twelve keys are unreachable and nine produced types are
-  missing, so real motion, analytics and access events are marked malformed.
+- **The AI runtime's bundle check verified a digest, not a signature.** It
+  compared `sha256(manifest)` against the *contents* of `manifest.sig` and never
+  used the public key, while the docstring said "signature". A bundle "signed"
+  with a hash was accepted as if it were signed. **Fixed**: `runtime.py` now
+  verifies a real Ed25519 signature over the manifest, in pure-Python RFC 8032
+  code with no dependency, because the air-gap supply-chain decision forbids one.
+- **The adapter's known-event-type table was keyed on spellings normalisation
+  never emits.** Twelve keys were unreachable and five produced types were
+  missing, so real motion, analytics and access events were marked malformed.
+  **Fixed**: the table is now derived from the normalizer's own output and
+  `TestEveryTypeTheAdapterProducesIsKnown` asserts both directions.
 
-Also open: the Go core has no client for the AI runtime at all, which blocks
-M1 gate 4 as much as the missing model does; `internal/observability` has no
-production caller, which makes gate 3 unreachable; and there is no
-`cmd/security-core` binary, though both service units name one.
+Also open, and unchanged by the runnable core work: `slo.go`'s `Breaches` still
+has no caller. The metrics are emitted and the SLO thresholds are not yet
+evaluated in-process, so gate 3 is closer but not closed.
+
+The other two items this section used to list are now done. The known-event-type
+table is derived from the normalizer's own output and both directions are
+asserted by a test. `internal/observability` has a production caller — the
+pipeline's gauge loop and the `/v1/metrics` route — and `cmd/security-core`
+exists and runs the pipeline.
+
+The 2026-09-29 sweep closed the M1-code items this file had no entry for. The
+full list, with the red-check evidence for each control, is in
+[`docs/status.md`](docs/status.md); the two with a date attached are the
+2027-01-01 partition boundary, which migration 0015 removes permanently, and the
+verifiers that accepted self-signed forgeries, which now refuse.

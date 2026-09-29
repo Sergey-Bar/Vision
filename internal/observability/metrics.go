@@ -23,17 +23,26 @@ import (
 
 // Metric names, exactly as the plan states them.
 const (
-	CounterInboxAccepted       = "inbox_accepted_total"
-	CounterInboxDeadLettered   = "inbox_dead_lettered_total"
-	CounterCanonicalEvents     = "canonical_events_total"
-	CounterCorroborated        = "corroborated_total"
-	CounterContradicted        = "contradicted_total"
-	CounterUnverified          = "unverified_total"
-	CounterVLMInvocations      = "vlm_invocations_total"
-	CounterVLMErrors           = "vlm_errors_total"
-	CounterEvidenceFetched     = "evidence_fetched_total"
-	CounterEvidenceFailed      = "evidence_fetch_failed_total"
-	CounterActionsDispatched   = "actions_dispatched_total"
+	CounterInboxAccepted     = "inbox_accepted_total"
+	CounterInboxDeadLettered = "inbox_dead_lettered_total"
+	CounterCanonicalEvents   = "canonical_events_total"
+	CounterCorroborated      = "corroborated_total"
+	CounterContradicted      = "contradicted_total"
+	CounterUnverified        = "unverified_total"
+	CounterVLMInvocations    = "vlm_invocations_total"
+	CounterVLMErrors         = "vlm_errors_total"
+	CounterEvidenceFetched   = "evidence_fetched_total"
+	CounterEvidenceFailed    = "evidence_fetch_failed_total"
+	// OutboxMessagesDelivered, not actions_dispatched_total.
+	//
+	// The old name said "actions dispatched", and the thing being counted is the
+	// relay acknowledging an outbox message it then logged and discarded. In M1
+	// no action has physical impact, so the name described a class of thing that
+	// does not exist — and a dashboard built on it would show a site taking
+	// physical action when it was doing nothing but counting its own log writes.
+	// The name has to say what is measured; the roadmap's metric table records
+	// what a future real dispatch will be called, and it will be a new name.
+	CounterOutboxDelivered     = "outbox_messages_delivered_total"
 	CounterDeadLettersVisible  = "dead_letter_visible_total"
 	CounterRuleBundleActivated = "rule_bundle_activated_total"
 	CounterCheckpointsSealed   = "checkpoints_sealed_total"
@@ -53,22 +62,53 @@ const (
 	GaugePostgresConns      = "postgres_conns_in_use"
 )
 
-// knownMetrics is the closed set, so a typo in a call site fails a test rather
-// than creating a metric no dashboard will ever read.
-var knownMetrics = map[string]bool{
+// The closed set, split by kind.
+//
+// Splitting it is not tidiness. The two sets were one map, and NewCounters
+// seeded *every* name into the counter map — including the gauges. Render then
+// emitted each gauge twice: once from Gauges with `# TYPE x gauge` and once from
+// Counters with `# TYPE x counter`. Prometheus rejects a metric name carrying
+// two conflicting type declarations, so the whole scrape failed to parse and a
+// collector reported a broken core.
+//
+// A gauge can also legitimately hold a value the counter map does not, and the
+// counter copy is always zero, so the number a dashboard reads would have been
+// whichever declaration the parser happened to keep.
+var counterMetrics = map[string]bool{
 	CounterInboxAccepted: true, CounterInboxDeadLettered: true,
 	CounterCanonicalEvents: true, CounterCorroborated: true,
 	CounterContradicted: true, CounterUnverified: true,
 	CounterVLMInvocations: true, CounterVLMErrors: true,
 	CounterEvidenceFetched: true, CounterEvidenceFailed: true,
-	CounterActionsDispatched: true, CounterDeadLettersVisible: true,
+	CounterOutboxDelivered: true, CounterDeadLettersVisible: true,
 	CounterRuleBundleActivated: true, CounterCheckpointsSealed: true,
 	CounterAuditAppends: true,
-	GaugeBacklogDepth:   true, GaugeIngestLagSeconds: true, GaugeOutboxPending: true,
+}
+
+var gaugeMetrics = map[string]bool{
+	GaugeBacklogDepth: true, GaugeIngestLagSeconds: true, GaugeOutboxPending: true,
 	GaugeJobQueueDepth: true, GaugeClockDriftMS: true, GaugeDeadLetterCount: true,
 	GaugeEvidenceDiskFree: true, GaugeIncidentOpen: true, GaugeIncidentDegraded: true,
 	GaugeAIUnavailable: true, GaugeClockSevereDevices: true, GaugePostgresConns: true,
 }
+
+// knownMetrics is the union, so a call site can ask whether a name is legal at
+// all without caring which kind it is.
+var knownMetrics = func() map[string]bool {
+	out := make(map[string]bool, len(counterMetrics)+len(gaugeMetrics))
+	for k := range counterMetrics {
+		out[k] = true
+	}
+	for k := range gaugeMetrics {
+		out[k] = true
+	}
+	return out
+}()
+
+// IsGauge reports whether a name is a gauge. Exported so a caller that records
+// against the registry from a background sampler does not have to keep its own
+// copy of the split.
+func IsGauge(name string) bool { return gaugeMetrics[name] }
 
 // Counters is a monotonic counter set.
 //
@@ -84,16 +124,20 @@ type Counters struct {
 	labels map[string]map[string]int64
 }
 
-// NewCounters builds a counter set seeded from the known names, so a scrape
-// before the first event still reports every metric as zero rather than
+// NewCounters builds a counter set seeded from the counter names, so a scrape
+// before the first event still reports every counter as zero rather than
 // omitting it. A metric that appears only after something goes wrong is a metric
 // nobody has a baseline for.
+//
+// Only counters are seeded. A gauge seeded here would be emitted twice, once as
+// each kind, and a metric name with two type declarations is a scrape the parser
+// rejects.
 func NewCounters() *Counters {
 	c := &Counters{
-		values: make(map[string]int64, len(knownMetrics)),
+		values: make(map[string]int64, len(counterMetrics)),
 		labels: make(map[string]map[string]int64),
 	}
-	for name := range knownMetrics {
+	for name := range counterMetrics {
 		c.values[name] = 0
 	}
 	return c

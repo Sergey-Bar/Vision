@@ -100,19 +100,31 @@ type Gates struct {
 // The false-positive rate is the tightest of these, and deliberately so: a
 // security operator who is shown noise twice a week learns to dismiss the feed,
 // and everything the product does afterwards depends on them not doing that.
+//
+// MinLabelledCases is 200, and the arithmetic is the reason. At n=30 a profile
+// landing exactly on the 0.20 false-positive gate is still consistent with a
+// true rate anywhere near 37%, and a true recall of 52% passes the "at least 0.70
+// recall" gate. Thirty cases is not a small sample, it is a sample too small for
+// the numbers the gates are written in.
 func DefaultGates() Gates {
 	return Gates{
 		MaxFalsePositiveRate:     0.20,
 		MinRecallOnTruePositives: 0.70,
 		MaxMedianLatencyMS:       8000,
 		MaxDisagreementRate:      0.25,
-		MinLabelledCases:         30,
+		MinLabelledCases:         200,
 	}
 }
 
 // ShadowGates is the bar for a profile being measured against live traffic
 // without affecting anything. It is looser, because the point of shadow evaluation
 // is to collect cases, not to promote.
+//
+// Its case floor is deliberately and explicitly lower than the promotion floor,
+// and it is called out in the field's own documentation: a shadow run is a data
+// collection exercise and must not fail for lack of cases, a promotion run is a
+// decision and must not pass on a handful. The two numbers used to be 30 and 10
+// against a promotion gate that thirty cases could not support.
 func ShadowGates() Gates {
 	g := DefaultGates()
 	g.MinLabelledCases = 10
@@ -133,6 +145,20 @@ type ProfileReport struct {
 	Insufficient       int
 	DetectedRestricted int
 	MissedRestricted   int
+	// Answered is the count of cases the profile actually returned a judgement
+	// for. It is the denominator every rate below uses, and it is smaller than
+	// Labeled whenever a case was absent, degraded or insufficient. A missing AI
+	// observation is never a negative observation (invariant 3), so folding those
+	// cases into a denominator lowers the measured noise floor by measuring less —
+	// which is the exact failure this package's own doc says it exists to prevent.
+	Answered int
+	// Disagreements is how many answered cases the operator contradicted.
+	Disagreements int
+	// DisagreementMeasurable is false when no case was both answered and
+	// accompanied by an operator's verdict. An un-normalised count left in a rate
+	// field renders as 500% and fails a gate for a reason that has nothing to do
+	// with the profile; this flag says "not measurable" instead.
+	DisagreementMeasurable bool
 
 	FalsePositiveRate  float64
 	Recall             float64
@@ -210,6 +236,22 @@ func Evaluate(cases []Case, observations []Observation, gates Gates) Report {
 				continue
 			}
 			pr.Labeled++
+			dispositions = append(dispositions, c.HoursToDisposition)
+
+			if restricted == nil {
+				// No judgement. Labeled counts it, because an operator did judge the
+				// case; nothing else does, because there was no answer to score. Every
+				// rate below divides by Answered, so a profile cannot improve its
+				// numbers by declining to answer — which is the failure the package doc
+				// names, and which the previous denominator (Labeled) invited.
+				continue
+			}
+			pr.Answered++
+
+			// The outcome sub-counts are answered counts, not label counts, for the
+			// same reason: an absent case is not a false positive, and counting it as
+			// one is how a profile that fails to answer is scored as noisier than a
+			// profile that answers and gets it wrong.
 			switch c.Outcome {
 			case OutcomeTruePositive:
 				pr.TruePositives++
@@ -218,27 +260,35 @@ func Evaluate(cases []Case, observations []Observation, gates Gates) Report {
 			case OutcomeBenign:
 				pr.Benign++
 			}
-			dispositions = append(dispositions, c.HoursToDisposition)
 
-			if restricted == nil {
-				continue
+			// Recall counts only true positives. Counting every case the profile
+			// flagged as restricted — including benign ones, where "restricted" is
+			// simply wrong — put a numerator of 21 on a denominator of 1 and produced
+			// a recall of 21.0, which passes any gate written as "at least 0.70". The
+			// gate that decides M1 exit gate 4 was not measuring what it said.
+			if c.Outcome == OutcomeTruePositive {
+				if *restricted {
+					pr.DetectedRestricted++
+				} else {
+					pr.MissedRestricted++
+				}
 			}
-			if *restricted {
-				pr.DetectedRestricted++
-			} else {
-				pr.MissedRestricted++
-			}
-			if obs.OperatorAgreed != nil && *obs.OperatorAgreed != *restricted {
-				pr.DisagreementRate++
+			if obs.OperatorAgreed != nil {
+				pr.DisagreementMeasurable = true
+				if *obs.OperatorAgreed != *restricted {
+					pr.Disagreements++
+				}
 			}
 		}
 
 		pr.MedianLatencyMS = median(latencies)
 		pr.HoursToDisposition = mean(dispositions)
-		pr.FalsePositiveRate = rate(pr.FalsePositives, pr.Labeled)
+		// Every denominator is the number of cases that produced an answer, never the
+		// number of cases an operator looked at.
+		pr.FalsePositiveRate = rate(pr.FalsePositives, pr.Answered)
 		pr.Recall = rate(pr.DetectedRestricted, pr.TruePositives)
-		if labeledNonNil := pr.Labeled - pr.MissedRestricted; labeledNonNil > 0 {
-			pr.DisagreementRate /= float64(labeledNonNil)
+		if pr.DisagreementMeasurable {
+			pr.DisagreementRate = rate(pr.Disagreements, pr.Answered)
 		}
 
 		pr.Failures = evaluateGates(pr, gates)
@@ -279,7 +329,7 @@ func evaluateGates(pr ProfileReport, g Gates) []string {
 			"median latency %dms exceeds %dms: the profile sits on the p95 incident-visibility path",
 			pr.MedianLatencyMS, g.MaxMedianLatencyMS))
 	}
-	if pr.DisagreementRate > g.MaxDisagreementRate {
+	if pr.DisagreementMeasurable && pr.DisagreementRate > g.MaxDisagreementRate {
 		failures = append(failures, fmt.Sprintf(
 			"disagreement rate %.2f exceeds %.2f: either the profile is wrong or its output "+
 				"is not legible, and both are reasons not to promote it",
@@ -308,7 +358,10 @@ func predictedRestricted(obs Observation) *bool {
 	return &b
 }
 
-// r1 is the promotion contract in one place.
+// rate is the promotion contract in one place. A zero denominator is 0, never a
+// divide by zero and never a leftover count: a rate field holding an
+// un-normalised integer is a number that means nothing and reads as a real
+// measurement.
 func rate(numerator, denominator int) float64 {
 	if denominator == 0 {
 		return 0

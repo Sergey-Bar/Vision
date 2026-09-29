@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.aicaptain.dev/security/v1/ai-observations/restricted-person.schema.json",
+  "title": "AI observation output: restricted person detection",
+  "description": "Production profile. Rules consume these validated structured fields only, never free text. The model must be able to say 'insufficient evidence' rather than guess.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "insufficientEvidence", "persons", "summary"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "profileId": { "const": "restricted-person" },
+    "insufficientEvidence": {
+      "type": "boolean",
+      "description": "True when the model cannot support a determination. Produces an UNVERIFIED outcome, never a negative one."
+    },
+    "persons": {
+      "type": "array",
+      "maxItems": 32,
+      "items": { "$ref": "#/$defs/person" }
+    },
+    "accessState": { "enum": ["unknown", "authorized", "unauthorized", "forced", "tailgated"] },
+    "restrictedZoneBreach": { "type": "boolean" },
+    "afterHours": { "type": "boolean" },
+    "summary": { "type": "string", "maxLength": 1000, "description": "Human-facing only. Never evaluated by a rule." },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+  },
+  "$defs": {
+    "person": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["present", "region"],
+      "properties": {
+        "present": { "type": "boolean" },
+        "region": { "type": "string", "pattern": "^[A-Za-z0-9_.-]{1,64}$", "description": "Frame region label emitted by the runtime, e.g. door_roi." },
+        "obstructed": { "type": "boolean" },
+        "carryingObject": { "type": "boolean" },
+        "uniformed": { "type": "boolean" },
+        "direction": { "enum": ["unknown", "inbound", "outbound", "lateral"] }
+      }
+    }
+  }
+}

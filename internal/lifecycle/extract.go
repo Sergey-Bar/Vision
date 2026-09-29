@@ -28,12 +28,34 @@ type Extracted struct {
 	Dir   string
 }
 
+// entryKind names a tar typeflag for a message an operator can act on. The
+// numeric byte is what the format defines; "a symlink" is what the installer has
+// to do about it.
+func entryKind(flag byte) string {
+	switch flag {
+	case tar.TypeSymlink:
+		return "a symlink"
+	case tar.TypeLink:
+		return "a hard link"
+	case tar.TypeChar:
+		return "a character device"
+	case tar.TypeBlock:
+		return "a block device"
+	case tar.TypeFifo:
+		return "a fifo"
+	default:
+		return fmt.Sprintf("of type 0x%02x", flag)
+	}
+}
+
 // Extract unpacks a verified archive into a directory.
 //
 // Every entry's path is re-validated here rather than trusted from the manifest,
 // because the manifest and the tar are two separate claims and the tar is the
 // one that names where bytes land. A verified manifest with a traversing tar is
-// exactly the case where only the second check saves the machine.
+// exactly the case where only the second check saves the machine. The same holds
+// for the entry's type: the manifest describes files, and an entry that is not
+// one is not a claim this function is willing to act on.
 func Extract(archivePath, dest string, files []release.FileEntry) (Extracted, error) {
 	var out Extracted
 	if err := os.MkdirAll(dest, 0o750); err != nil {
@@ -73,8 +95,24 @@ func Extract(archivePath, dest string, files []release.FileEntry) (Extracted, er
 		if err != nil {
 			return out, fmt.Errorf("lifecycle: read archive: %w", err)
 		}
-		if header.Typeflag == tar.TypeDir {
+		// Only a regular file or a directory. A symlink, a hard link or a device
+		// node is an instruction rather than content: it says "when this archive is
+		// unpacked, put something else here". Whoever can write the archive chooses
+		// what it points at, so the entry is not a thing to materialise — it is a
+		// thing to refuse. This is the code that lands bytes on disk during an
+		// install, which is the moment a hostile entry would matter most.
+		//
+		// The empty bodies on a link entry meant the hash check below would usually
+		// catch it, and "usually" is not a control: a link whose target happens to
+		// be a listed, correct file passes every check and then writes outside dest.
+		switch header.Typeflag {
+		case tar.TypeDir:
 			continue
+		case tar.TypeReg:
+		default:
+			return out, Refuse("archive entry %q is %s. An install unpacks regular files; "+
+				"anything that points somewhere else is refused rather than written",
+				cleanSlash(header.Name), entryKind(header.Typeflag))
 		}
 		name := cleanSlash(header.Name)
 		if err := release.ValidateFilePath(name); err != nil {

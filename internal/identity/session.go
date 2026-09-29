@@ -95,12 +95,18 @@ func (s *Service) lockoutBase() time.Duration {
 // Exactly one of Session or Challenge is set. A password step never returns a
 // session on its own: that is the whole reason MFA is mandatory rather than
 // optional.
+//
+// Principal is always populated. When MFA is required there is no session, and
+// a caller that needs to say who is being asked for a second factor — the login
+// response, the audit line, the console — has to be able to name them. It used
+// to read Principal off a nil Session, which meant every MFA login panicked.
 type LoginResult struct {
 	ChallengeID string    `json:"challengeId"`
 	MFARequired bool      `json:"mfaRequired"`
 	ExpiresAt   time.Time `json:"expiresAt"`
 	// Session is nil when MFA is required.
-	Session *Session `json:"session,omitempty"`
+	Session   *Session  `json:"session,omitempty"`
+	Principal Principal `json:"-"`
 }
 
 // Session is an authenticated session.
@@ -211,16 +217,23 @@ func (s *Service) PasswordStep(ctx context.Context, tenant, username, password, 
 		// from a password alone, and it exists only because a bootstrap admin has
 		// nobody to enrol against. It is audited at the highest volume precisely
 		// so a site that leaves it open is visible.
-		sess, err := s.createSession(ctx, tenant, user, sourceIP, "bootstrap", true)
+		sess, err := s.createSession(ctx, tenant, user, sourceIP, "bootstrap", true, nil)
 		if err != nil {
 			return result, err
 		}
 		s.recordAuth(ctx, tenant, username, user.UserID, audit.ActionLoginSuccess, sourceIP,
 			"session issued with no enrolled factor (bootstrap account)")
-		return LoginResult{MFARequired: false, Session: &sess}, nil
+		return LoginResult{MFARequired: false, Session: &sess, Principal: sess.Principal}, nil
 	}
 
 	challengeID, err := s.issueChallenge(ctx, tenant, user, method)
+	if err != nil {
+		return result, err
+	}
+	// Read the scope on this path too. The principal is not authenticated yet —
+	// a second factor is still owed — but it is identified, and the response has
+	// to name who is being asked.
+	roles, scope, err := s.principalScope(ctx, tenant, user.UserID)
 	if err != nil {
 		return result, err
 	}
@@ -228,6 +241,10 @@ func (s *Service) PasswordStep(ctx context.Context, tenant, username, password, 
 		ChallengeID: challengeID,
 		MFARequired: true,
 		ExpiresAt:   now.Add(s.challengeTTL()),
+		Principal: Principal{
+			UserID: user.UserID, TenantID: tenant, Username: user.Username,
+			Roles: roles, SiteScope: scope, MFAVerified: false, BreakGlass: user.BreakGlass,
+		},
 	}
 	s.recordAuth(ctx, tenant, username, user.UserID, audit.ActionLoginSuccess, sourceIP,
 		"password accepted, second factor required")
@@ -272,14 +289,15 @@ func (s *Service) CompleteChallenge(ctx context.Context, tenant, challengeID, me
 	var userID, tokenHash, ip, agent string
 	var mfaVerified bool
 	_ = mfaVerified
+	var attempts int
 	err := s.Pool.InTenant(ctx, dbx.TenantContext{TenantID: tenant, ActorID: "auth"},
 		func(tx pgx.Tx) error {
 			return tx.QueryRow(ctx, `
-				SELECT user_id, token_hash, mfa_verified, absolute_expiry, ip, user_agent
+				SELECT user_id, token_hash, mfa_verified, absolute_expiry, ip, user_agent, mfa_attempts
 				  FROM sessions
 				 WHERE tenant_id = $1 AND session_id = $2 AND revoked_at IS NULL
 				 FOR UPDATE`, tenant, "chal_"+challengeID).Scan(
-				&userID, &tokenHash, &mfaVerified, &sess.ExpiresAt, &ip, &agent)
+				&userID, &tokenHash, &mfaVerified, &sess.ExpiresAt, &ip, &agent, &attempts)
 		})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -290,12 +308,30 @@ func (s *Service) CompleteChallenge(ctx context.Context, tenant, challengeID, me
 	if now.After(sess.ExpiresAt) {
 		return sess, errors.New("identity: the challenge has expired; start again with the password")
 	}
+	// A six-digit code inside a plus-or-minus-thirty-second window is guessable
+	// in a couple of minutes of wall clock, and the challenge lives for two of
+	// them. Without this a held challenge id is a password equivalent, which is
+	// why the password step's lockout does not protect this one: the password
+	// already succeeded, so nothing about the account is being counted.
+	//
+	// The bound is the same MaxFailedAttempts the password step uses, and it is
+	// counted per challenge rather than per account, so a legitimate operator
+	// who mistypes twice and a caller guessing both still get five tries in
+	// total. The counter is checked before verification, not after, so a locked
+	// challenge never reaches the factor check at all.
+	if attempts >= s.maxFailed() {
+		s.recordAuth(ctx, tenant, userID, userID, audit.ActionLoginFailed, sourceIP,
+			fmt.Sprintf("second factor refused: %d attempts already failed on this challenge", attempts))
+		return sess, fmt.Errorf("%w: too many failed second-factor attempts on this challenge; "+
+			"start again with the password", ErrLocked)
+	}
 
 	factorID, _, ok, err := s.VerifyFactor(ctx, tenant, userID, method, code)
 	if err != nil {
 		return sess, err
 	}
 	if !ok {
+		s.registerChallengeFailure(ctx, tenant, challengeID)
 		s.recordAuth(ctx, tenant, userID, userID, audit.ActionLoginFailed, sourceIP,
 			"second factor rejected")
 		return sess, ErrInvalidCredentials
@@ -305,10 +341,28 @@ func (s *Service) CompleteChallenge(ctx context.Context, tenant, challengeID, me
 	if err != nil {
 		return sess, err
 	}
-	// The challenge row is consumed and becomes the session row, in one
-	// transaction. A challenge that could be used twice would be a password
-	// equivalent.
-	sess, err = s.createSession(ctx, tenant, user, sourceIP, method, true)
+	// The challenge row is deleted in the same transaction that inserts the
+	// session. A challenge that could be used twice is a password equivalent: it
+	// is a two-minute bearer of "the password was right", so consuming it is the
+	// whole control. This used to only insert a new sess_ row and leave the
+	// chal_ row in place until PurgeExpired, which meant one intercepted
+	// challenge id minted unlimited sessions and two concurrent requests both
+	// succeeded — the FOR UPDATE lock committed before verification ran.
+	sess, err = s.createSession(ctx, tenant, user, sourceIP, method, true, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx,
+			`DELETE FROM sessions WHERE tenant_id = $1 AND session_id = $2 AND mfa_verified = FALSE`,
+			tenant, "chal_"+challengeID)
+		if err != nil {
+			return fmt.Errorf("identity: consume challenge: %w", err)
+		}
+		if tag.RowsAffected() != 1 {
+			// Another request consumed it between the read and this write. The
+			// whole transaction rolls back, so the second request gets a session
+			// neither of them keeps.
+			return fmt.Errorf("%w: the challenge was already used", ErrInvalidCredentials)
+		}
+		return nil
+	})
 	if err != nil {
 		return sess, err
 	}
@@ -597,7 +651,13 @@ func (s *Service) revoke(ctx context.Context, tenant, sessionID, reason string) 
 	return nil
 }
 
-func (s *Service) createSession(ctx context.Context, tenant string, user userRow, sourceIP, method string, mfa bool) (Session, error) {
+// createSession inserts a session row.
+//
+// withTx, when non-nil, runs inside the same transaction as the insert and
+// before it. That is how a caller makes the insert conditional on something —
+// the MFA challenge it is redeeming, for instance. One transaction, so either
+// both happen or neither does.
+func (s *Service) createSession(ctx context.Context, tenant string, user userRow, sourceIP, method string, mfa bool, withTx func(pgx.Tx) error) (Session, error) {
 	var sess Session
 	token, tokenHash, err := NewToken()
 	if err != nil {
@@ -627,6 +687,11 @@ func (s *Service) createSession(ctx context.Context, tenant string, user userRow
 
 	if err := s.Pool.InTenant(ctx, dbx.TenantContext{TenantID: tenant, ActorID: "auth"},
 		func(tx pgx.Tx) error {
+			if withTx != nil {
+				if err := withTx(tx); err != nil {
+					return err
+				}
+			}
 			_, err := tx.Exec(ctx, `
 			INSERT INTO sessions (session_id, tenant_id, user_id, token_hash, csrf_hash, roles,
 			                      site_scope, mfa_verified, break_glass, ip, user_agent,
@@ -743,6 +808,24 @@ func (s *Service) registerFailure(ctx context.Context, tenant string, user userR
 		return err
 	})
 	return attempts, until
+}
+
+// registerChallengeFailure counts a rejected second factor against the
+// challenge it was offered for.
+//
+// It is deliberately separate from registerFailure, which counts against the
+// account: the password already succeeded on this path, so folding the second
+// factor into the account counter would lock an operator out for mistyping a
+// six-digit code, and the account counter is cleared on the next successful
+// password anyway.
+func (s *Service) registerChallengeFailure(ctx context.Context, tenant, challengeID string) {
+	_ = s.Pool.InTx(ctx, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `
+			UPDATE sessions SET mfa_attempts = mfa_attempts + 1
+			 WHERE tenant_id = $1 AND session_id = $2 AND mfa_verified = FALSE`,
+			tenant, "chal_"+challengeID)
+		return err
+	})
 }
 
 func (s *Service) clearFailures(ctx context.Context, tenant, userID string) error {

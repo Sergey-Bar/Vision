@@ -578,23 +578,23 @@ func runAuditVerifySeals(ctx context.Context, env *command.Env, args []string) e
 		return command.Refuse("no seals found in %s", *sinkDir)
 	}
 
-	var trusted []byte
-	if *trustedHex != "" {
-		trusted, err = decodePublicKey(*trustedHex)
-		if err != nil {
-			return err
-		}
-	} else {
-		fmt.Fprintln(env.Stderr,
-			"warning: no --trusted-key. Each seal is checked against the key it carries, "+
-				"which proves only that whoever wrote the seal signed it.")
+	// The trusted key is required. This command's entire purpose is to answer
+	// "can I trust these seals to be a contiguous, unattacked history of the
+	// ledger", and a seal verified against the key it carries answers a different
+	// question: "did whoever wrote this seal sign their own seal". The warning
+	// this replaces was the only thing between an operator and that answer.
+	if *trustedHex == "" {
+		return command.Refuse(
+			"--trusted-key is required. Each seal is otherwise checked against the key it " +
+				"carries, which proves only that whoever wrote the seal signed it. Get the " +
+				"sealing key out of band; the fingerprint is in the release notes.")
+	}
+	trusted, err := decodePublicKey(*trustedHex)
+	if err != nil {
+		return err
 	}
 
-	var pub ed25519PublicKey
-	if trusted != nil {
-		pub = trusted
-	}
-	next, err := checkpoint.VerifyAgainstSeals(seals, *latest, pub)
+	next, err := checkpoint.VerifyAgainstSeals(seals, *latest, ed25519PublicKey(trusted))
 	if err != nil {
 		return command.Refuse("%v", err)
 	}

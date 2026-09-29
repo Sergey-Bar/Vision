@@ -29,6 +29,16 @@ type contractBaseline struct {
 			Name   string `json:"name"`
 		} `json:"values"`
 	} `json:"enums"`
+	Schemas map[string]struct {
+		Properties map[string]struct {
+			Type     string   `json:"type"`
+			Required bool     `json:"required"`
+			Enum     []string `json:"enum"`
+		} `json:"properties"`
+	} `json:"schemas"`
+	OpenAPI map[string]struct {
+		Paths map[string][]string `json:"paths"`
+	} `json:"openapi"`
 }
 
 func repoRoot(t *testing.T) string {
@@ -62,6 +72,59 @@ func TestContractBaselineIsPresentAndNonEmpty(t *testing.T) {
 	}
 	if len(b.Enums) == 0 {
 		t.Fatal("the contract baseline records no enums; the gate would pass vacuously")
+	}
+	if len(b.Schemas) == 0 {
+		t.Fatal("the contract baseline records no JSON Schemas; the gate would pass vacuously")
+	}
+	if len(b.OpenAPI) == 0 {
+		t.Fatal("the contract baseline records no OpenAPI paths; the gate would pass vacuously")
+	}
+}
+
+// A schema added to contracts/json-schema but not recorded in the baseline is a
+// contract no future run of contractcheck can protect. The tool reads the tree
+// and the baseline from the same place, so nothing notices a file that exists
+// in one and not the other unless something compares the two.
+func TestBaselineRecordsEveryPublishedSchema(t *testing.T) {
+	root := repoRoot(t)
+	raw, err := os.ReadFile(filepath.Join(root, "contracts", "compat", "baseline.json"))
+	if err != nil {
+		t.Fatalf("read contract baseline: %v", err)
+	}
+	var b contractBaseline
+	if err := json.Unmarshal(raw, &b); err != nil {
+		t.Fatalf("parse contract baseline: %v", err)
+	}
+	schemaRoot := filepath.Join(root, "contracts", "json-schema")
+	found := 0
+	err = filepath.WalkDir(schemaRoot, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || filepath.Ext(path) != ".json" {
+			return nil
+		}
+		rel, err := filepath.Rel(schemaRoot, path)
+		if err != nil {
+			return err
+		}
+		found++
+		key := filepath.ToSlash(rel)
+		entry, ok := b.Schemas[key]
+		if !ok {
+			t.Errorf("%s is not in the baseline; run contractcheck -mode write -root contracts/json-schema", key)
+			return nil
+		}
+		if len(entry.Properties) == 0 {
+			t.Errorf("the baseline records %s with no properties, which cannot detect a removed field", key)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", schemaRoot, err)
+	}
+	if found == 0 {
+		t.Fatal("no schemas were found on disk; the walk found nothing to compare")
 	}
 }
 

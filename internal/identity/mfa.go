@@ -23,20 +23,35 @@ import (
 	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
 )
 
-// VerifyFactor checks a second factor.
+// VerifyFactor checks a second factor and returns the credential that satisfied
+// it.
 //
 // WebAuthn is verified by signature against the stored public key; TOTP by
 // comparing a counter-derived code. Both are constant-time comparisons, and
 // neither is a comparison against a value the client chose earlier in the
 // request.
-// VerifyFactor checks a second factor and returns the credential that satisfied
-// it.
+//
+// This is the authenticating path, so a TOTP step it consumes is recorded and
+// refused on a second presentation. See verifyFactor and consumeTOTPStep.
 //
 // Exported because it is a service boundary rather than an internal helper: the
 // login path and the step-up path both need it, and a test that could only reach a
 // private function could not have caught the signed-assertion path failing to
 // check a signature.
 func (s *Service) VerifyFactor(ctx context.Context, tenant, userID, method, code string) (factorID, methodUsed string, ok bool, err error) {
+	return s.verifyFactor(ctx, tenant, userID, method, code, true)
+}
+
+// verifyFactor is VerifyFactor with the decision about whether a TOTP step is
+// consumed as a parameter.
+//
+// consume is false for enrolment confirmation and true for everything that
+// authenticates. Enrolment is not an authentication: it issues no session and no
+// step-up proof, and the operator who confirms enrolment and then logs in a
+// second later is inside one 30-second step. Consuming the step there would make
+// the two operations collide and refuse a correct operator for following the
+// documented procedure.
+func (s *Service) verifyFactor(ctx context.Context, tenant, userID, method, code string, consume bool) (factorID, methodUsed string, ok bool, err error) {
 	if strings.TrimSpace(code) == "" {
 		return "", "", false, errors.New("identity: a second factor code is required")
 	}
@@ -67,9 +82,18 @@ func (s *Service) VerifyFactor(ctx context.Context, tenant, userID, method, code
 
 	switch storedMethod {
 	case "totp":
-		// A TOTP code is 6 digits at a 30-second step. The previous and next
-		// steps are accepted because a client whose clock is a second fast
-		// otherwise fails in a way that looks like a credential problem.
+		// A TOTP code is 6 digits at a 30-second step, and this verifier accepts
+		// the previous, current and next step — a ±one-step window, so a code
+		// stays acceptable for roughly ninety seconds. The window exists because
+		// an operator whose device clock is a little fast otherwise fails in a way
+		// that looks like a credential problem.
+		//
+		// Ninety seconds is also the exposure this branch exists to close. Without
+		// a record of which codes have been used, an attacker who shoulder-surfs a
+		// code off a screen, photographs it, or replays the request that carried
+		// it gets the whole window to present the same six digits a second time.
+		// RFC 6238 §5.2 forbids exactly that — the verifier must not accept the
+		// same code twice — and consumeTOTPStep below is where it is enforced.
 		secret, unwrapErr := s.unwrapTOTP(wrapped)
 		if unwrapErr != nil {
 			return "", "", false, unwrapErr
@@ -83,6 +107,7 @@ func (s *Service) VerifyFactor(ctx context.Context, tenant, userID, method, code
 			return "", "", false, fmt.Errorf("identity: stored TOTP secret is not base32: %w", decodeErr)
 		}
 		for _, skew := range []time.Duration{0, -30 * time.Second, 30 * time.Second} {
+			at := s.now().Add(skew)
 			// SHA-256 first, because that is the algorithm our own enrolment URI
 			// declares. SHA-1 is the RFC 6238 default that an authenticator which
 			// ignores the `algorithm` parameter will use, so a client that read the
@@ -90,10 +115,26 @@ func (s *Service) VerifyFactor(ctx context.Context, tenant, userID, method, code
 			// 160-bit secret with the same counter, so accepting the second does not
 			// widen what an attacker with a guess has to search in any way that
 			// matters, and it removes a support call at 3am.
-			if ConstantTimeEqual(totpCode(raw, sha256.New, s.now().Add(skew)), code) {
-				return id, storedMethod, true, nil
-			}
-			if ConstantTimeEqual(totpCode(raw, sha1.New, s.now().Add(skew)), code) {
+			//
+			// The step is recorded once, for whichever of the two algorithms matched
+			// first: it is the same 30-second counter either way, so a code consumed
+			// as SHA-256 is not re-presentable as SHA-1.
+			if ConstantTimeEqual(totpCode(raw, sha256.New, at), code) ||
+				ConstantTimeEqual(totpCode(raw, sha1.New, at), code) {
+				if !consume {
+					return id, storedMethod, true, nil
+				}
+				first, recErr := s.consumeTOTPStep(ctx, tenant, userID, id, code, at.Unix()/30)
+				if recErr != nil {
+					return "", "", false, recErr
+				}
+				if !first {
+					// Refused, and refused as a plain "no": the caller cannot tell a
+					// replay from a wrong code, which is the point — a caller that could
+					// tell them apart could tell an attacker whether a guessed code was
+					// right.
+					return id, storedMethod, false, nil
+				}
 				return id, storedMethod, true, nil
 			}
 		}
@@ -133,6 +174,64 @@ func (s *Service) VerifyFactor(ctx context.Context, tenant, userID, method, code
 		return id, storedMethod, true, nil
 	}
 	return "", "", false, fmt.Errorf("identity: unsupported factor method %q", storedMethod)
+}
+
+// consumeTOTPStep records that this code at this 30-second step has been spent on
+// this factor, and reports whether this call was the one that spent it.
+//
+// The database is the arbiter, not the process. A read-then-write — SELECT the
+// last used step, then INSERT if it is unspent — is a race: two concurrent
+// requests carrying the same code both read the same prior state, both decide they
+// are first, and both authenticate. INSERT ... ON CONFLICT DO NOTHING against the
+// (tenant, factor, step, digest) primary key cannot do that, because exactly one
+// of two conflicting inserts can insert. The rows-affected count is the verdict:
+// one row means this call spent the code, zero means somebody already had.
+//
+// Refusal semantics, which is the non-obvious part:
+//
+//	A code is refused only when that exact code at that exact step has already
+//	been spent. An older step is still accepted, even after a newer one has
+//	been spent.
+//
+//	Refusing every step at or below the highest spent one would look stricter and
+//	would refuse a correct operator. Operators type codes from a device whose clock
+//	runs slightly behind the server's, so the code in their hand is routinely
+//	from the previous step. RFC 6238 asks no monotonicity of the verifier, and
+//	demanding it refuses a real person in order to defend against an attacker who
+//	already holds a code they can present exactly once. An unspent older code is
+//	not a replay of anything.
+//
+//	Step alone is also too coarse, and for a reason specific to this package:
+//	VerifyFactor accepts both SHA-256 and SHA-1 for one factor, because an
+//	authenticator that ignores the `algorithm` parameter in the enrolment URI
+//	falls back to SHA-1. One step therefore legitimately carries two different
+//	six-digit codes, and a one-use-per-step rule breaks MFA for whichever client
+//	the operator happens to have. RFC 6238 §5.2 says "the same code", and that is
+//	what the key says.
+//
+// The cache lives in the database rather than in memory. A process restart is
+// something an attacker with partial access to a site can cause, and an
+// in-process map is not a shared cache the moment there is more than one process.
+func (s *Service) consumeTOTPStep(ctx context.Context, tenant, userID, factorID, code string, step int64) (bool, error) {
+	digest := sha256.Sum256([]byte(code))
+	var first bool
+	err := s.Pool.InTenant(ctx, dbx.TenantContext{TenantID: tenant, ActorID: "identity"},
+		func(tx pgx.Tx) error {
+			tag, execErr := tx.Exec(ctx, `
+				INSERT INTO mfa_used_codes (tenant_id, credential_id, user_id, step_counter, code_digest)
+				VALUES ($1, $2, $3, $4, $5)
+				ON CONFLICT (tenant_id, credential_id, step_counter, code_digest) DO NOTHING`,
+				tenant, factorID, userID, step, hex.EncodeToString(digest[:]))
+			if execErr != nil {
+				return execErr
+			}
+			first = tag.RowsAffected() == 1
+			return nil
+		})
+	if err != nil {
+		return false, fmt.Errorf("identity: record the consumed TOTP step: %w", err)
+	}
+	return first, nil
 }
 
 func (s *Service) touchFactor(ctx context.Context, tenant, factorID string) error {
@@ -189,8 +288,13 @@ func (s *Service) EnrollTOTP(ctx context.Context, tenant, userID, label string) 
 //
 // A credential that is stored but never confirmed is a credential that will fail
 // at 3am, so the schema's `verified_at` is not left null by this path.
+//
+// It deliberately does not spend the step. Enrolment issues no session and no
+// step-up proof, and the documented procedure is confirm-then-login, which for a
+// fast operator lands inside one 30-second step. Spending it here would refuse
+// them for following the instructions.
 func (s *Service) VerifyTOTPEnrollment(ctx context.Context, tenant, userID, code string) error {
-	_, _, ok, err := s.VerifyFactor(ctx, tenant, userID, "totp", code)
+	_, _, ok, err := s.verifyFactor(ctx, tenant, userID, "totp", code, false)
 	if err != nil {
 		return err
 	}
@@ -331,7 +435,13 @@ func (s *Service) BootstrapAdmin(ctx context.Context, tenant, username, passphra
 	if err != nil {
 		return "", err
 	}
-	userID := "admin-" + hex.EncodeToString(sha256.New().Sum([]byte(tenant + username)))[:8]
+	// sha256.Sum256 of the inputs, not `sha256.New().Sum(...)`. The latter
+	// appends the digest of zero bytes to whatever you hand it, so every
+	// bootstrap administrator in every tenant was called "admin-e3b0c442" —
+	// e3b0c442 is the first eight hex characters of the SHA-256 of nothing. The
+	// NUL separator matters too: without it ("t"+"a" and "ta"+"") hash the same.
+	sum := sha256.Sum256([]byte(tenant + "\x00" + username))
+	userID := "admin-" + hex.EncodeToString(sum[:])[:8]
 
 	// The write runs as a system worker, and that is the correct context rather
 	// than a workaround: this is the installer creating a tenant's first
@@ -373,28 +483,47 @@ func (s *Service) BootstrapAdmin(ctx context.Context, tenant, username, passphra
 	return userID, nil
 }
 
-// SetPassword changes a password, requiring the current one unless an audited
-// recovery is in force.
+// SetPassword changes a password, requiring the current one.
+//
+// There is no recovery bypass. The old version read the account's
+// `recovery_required` flag and, when it was set, skipped verifying `current`
+// entirely — and `EnsureUser` inserts every new user with that flag TRUE, so the
+// bypass was not an edge case, it was the normal state of every account an
+// administrator ever provisioned. Anybody holding `identity.manage` could
+// therefore re-key an account whose password had been forgotten, and could do it
+// against an account that was compromised, which is precisely the account a
+// security operator is most likely to be trying to lock down.
+//
+// The flag now means what its name says: this account has never had a password
+// chosen by its owner. It selects whether a *new* user may be bootstrapped, not
+// whether an existing password may be replaced. An account with no password set
+// at all has nothing to verify, and that is the only case where `current` is not
+// checked — and the caller setting that first password is the provisioning path,
+// not this one.
+//
+// The audit action distinguishes the two paths. It used to write
+// "identity.recovery.performed" whichever ran, so an ordinary self-service
+// password change and an administrator's override were the same row in a
+// hash-chained ledger, which is the one thing an append-only ledger exists to
+// keep apart.
 func (s *Service) SetPassword(ctx context.Context, tenant, userID, current, newPassphrase, actor string) error {
 	user, err := s.loadUser(ctx, tenant, userID)
 	if err != nil {
 		return err
 	}
-	recovery := false
-	if err := s.Pool.For(tenant, "identity").QueryRow(ctx, `SELECT recovery_required FROM users WHERE tenant_id = $1 AND user_id = $2`,
-		tenant, userID).Scan(&recovery); err != nil {
-		return fmt.Errorf("identity: read recovery flag: %w", err)
-	}
-	if !recovery {
-		if user.PasswordHash == nil {
-			return errors.New("identity: no password is set on this account")
-		}
+	action := "identity.password.changed"
+	if user.PasswordHash == nil {
+		// Nothing was ever set, so there is nothing to verify. This is the
+		// legitimate form of the case the recovery flag used to cover.
+		action = "identity.recovery.performed"
+	} else {
 		ok, err := VerifyPassword(*user.PasswordHash, current)
 		if err != nil {
 			return err
 		}
 		if !ok {
-			s.recordAuth(ctx, tenant, actor, userID, audit.ActionLoginFailed, "", "password change with a wrong current password")
+			s.recordAuth(ctx, tenant, actor, userID, audit.ActionLoginFailed, "",
+				"password change with a wrong current password")
 			return ErrInvalidCredentials
 		}
 	}
@@ -418,8 +547,7 @@ func (s *Service) SetPassword(ctx context.Context, tenant, userID, current, newP
 			return fmt.Errorf("identity: revoke on password change: %w", err)
 		}
 		if s.Audit != nil {
-			if _, err := s.Audit.Append(ctx, tx, auditEntryFor(tenant, actor,
-				"identity.recovery.performed", userID)); err != nil {
+			if _, err := s.Audit.Append(ctx, tx, auditEntryFor(tenant, actor, action, userID)); err != nil {
 				return err
 			}
 		}
@@ -432,18 +560,27 @@ func (s *Service) SetPassword(ctx context.Context, tenant, userID, current, newP
 
 // EnsureUser creates a user with a role and site assignments, for an
 // administrator provisioning somebody.
+//
+// The account is created with **no password hash at all**, not with a random
+// placeholder. It used to be a random passphrase that is computed, stored and
+// thrown away, on the reasoning that nobody can log in with it. That reasoning
+// is right and the shape is wrong: the row then looks exactly like an account
+// with a password, so nothing downstream can tell "has never had one" from "has
+// one nobody remembers", and the only way to express the difference was a
+// boolean — which then became the thing that skipped the current-password check
+// on a *changed* password.
+//
+// A NULL hash says the thing directly. It is a claim the code can act on rather
+// than a flag it has to remember the meaning of, and it makes the recovery path
+// in SetPassword the only path that can reach an account with no password.
 func (s *Service) EnsureUser(ctx context.Context, tenant, userID, username, displayName, role string, sites []string, actor string) error {
-	hash, err := HashPassword(randomPassphrase())
-	if err != nil {
-		return err
-	}
 	return s.Pool.InTx(ctx, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO users (user_id, tenant_id, username, display_name, password_hash,
 			                   password_algo, enabled, recovery_required)
-			VALUES ($1,$2,$3,$4,$5,'argon2id',TRUE,TRUE)
+			VALUES ($1,$2,$3,$4,NULL,NULL,TRUE,TRUE)
 			ON CONFLICT (tenant_id, user_id) DO UPDATE SET display_name = EXCLUDED.display_name`,
-			userID, tenant, username, displayName, hash); err != nil {
+			userID, tenant, username, displayName); err != nil {
 			return fmt.Errorf("identity: create user: %w", err)
 		}
 		if _, err := tx.Exec(ctx,

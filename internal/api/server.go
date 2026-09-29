@@ -14,8 +14,10 @@ package api
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/subtle"
 	"crypto/tls"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -23,6 +25,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Sergey-Bar/Ai-Captain/internal/audit"
@@ -51,13 +54,75 @@ type Server struct {
 	// BehindProxy says the listener is behind a TLS-terminating proxy, which
 	// changes only how the request scheme is read.
 	BehindProxy bool
+	// TrustedProxies are the proxy networks whose X-Forwarded-For this server
+	// will believe. It is empty unless the install is behind a proxy, and a
+	// non-empty list with BehindProxy=false is inert: without a proxy in front
+	// there is nothing to forward anything.
+	//
+	// It is the same list the rate limiter keys on, so it is not a
+	// convenience: a client address the caller can choose is a limiter key the
+	// caller can rotate.
+	TrustedProxies []*net.IPNet
 	// Pool is used for the audit writes a denial produces. A refusal nobody can
 	// see is a refusal nobody can investigate.
 	Pool *dbx.Pool
 	// HealthCheck is the readiness set. A check named "aiRuntime" is informational
 	// and never makes the core unready.
 	HealthCheck map[string]func(context.Context) error
-	start       time.Time
+
+	mu sync.Mutex
+	// httpServer is the running listener, retained so Shutdown can reach it.
+	// ListenAndServe used ctx only as BaseContext and never called Shutdown, so
+	// a signal stopped nothing: in-flight requests ran to completion against a
+	// pool the process was about to close.
+	httpServer *http.Server
+	start      time.Time
+	now        func() time.Time
+}
+
+// SetStartTime records when the process began serving.
+//
+// /v1/health reports uptime from it. Without this the field is derived from a
+// zero time and every install reports an uptime of about one second for ever,
+// which is the sort of wrong number that stops being noticed.
+func (s *Server) SetStartTime(t time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.start = t
+}
+
+// StartedAt reports the recorded start time.
+func (s *Server) StartedAt() time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.start
+}
+
+// SetClock replaces the server's time source. It exists so uptime is testable
+// without a sleep; production never calls it and gets time.Now.
+func (s *Server) SetClock(now func() time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.now = now
+}
+
+// Shutdown stops accepting connections and waits for in-flight requests, bounded
+// by ctx.
+//
+// The order matters and is the daemon's to enforce, not this method's: stop
+// accepting, then drain the loops, then drain the outbox, then close the pool.
+// This is the first step.
+func (s *Server) Shutdown(ctx context.Context) error {
+	s.mu.Lock()
+	srv := s.httpServer
+	s.mu.Unlock()
+	if srv == nil {
+		return nil
+	}
+	if err := srv.Shutdown(ctx); err != nil {
+		return fmt.Errorf("api: shutdown: %w", err)
+	}
+	return nil
 }
 
 // Handler builds the HTTP handler with every security layer applied.
@@ -67,6 +132,15 @@ type Server struct {
 // benchmark, or a future embedder silently does without. The CSRF check in
 // particular was on the listener only, which meant Handler served every
 // state-changing route with no token at all.
+//
+// The wrapping order is load-bearing. Middleware runs outermost-first, so
+// requireCSRF is applied *after* the layers that decorate a response: a CSRF
+// rejection is an error response like any other and must carry the same
+// security headers and the same X-Request-Id as a success, and must appear in
+// the access log. With requireCSRF outermost it was none of those — four
+// WriteError calls emitting bare 401/403 with no CSP, no nosniff, no
+// frame-deny, no HSTS, no request id, and nothing in the log. A rejected
+// forgery was the one response an attacker could read the shape of for free.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	if s.Routes != nil {
@@ -76,12 +150,45 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/health/ready", s.ready)
 
 	var h http.Handler = mux
+	h = s.requireCSRF(h)
 	h = s.contentSecurityPolicy(h)
 	h = s.securityHeaders(h)
 	h = s.recoverPanics(h)
 	h = s.logRequests(h)
-	h = s.requireCSRF(h)
+	h = s.assignRequestID(h)
 	return h
+}
+
+// assignRequestID resolves the correlation id once, at the outermost layer, and
+// makes it available to everything inside.
+//
+// An inbound X-Request-Id is honoured so a proxy's id and ours are the same id;
+// otherwise one is generated. Either way exactly one id exists per request, and
+// it is echoed to the client, because an operator reading an audit row and a log
+// line has to be able to join them.
+func (s *Server) assignRequestID(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := strings.TrimSpace(r.Header.Get("X-Request-Id"))
+		if id == "" || len(id) > 128 {
+			// An unbounded or absurd inbound id is echoed straight into every log
+			// line and every audit row, so it is replaced rather than trusted.
+			id = newRequestID()
+		}
+		w.Header().Set("X-Request-Id", id)
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), requestIDKey{}, id)))
+	})
+}
+
+type requestIDKey struct{}
+
+// RequestIDFromContext returns the correlation id assigned to this request, or
+// the inbound header when the context was never populated — which is the case
+// for a handler mounted outside the server's own middleware stack.
+func RequestIDFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(requestIDKey{}).(string); ok && v != "" {
+		return v
+	}
+	return ""
 }
 
 // contentSecurityPolicy sets a policy with no inline script and no framing.
@@ -129,24 +236,58 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 	})
 }
 
+// logRequests emits one line per request.
+//
+// AGENTS.md requires tenant_id, site_id and request_id on every line. They were
+// absent, which makes the log useless for exactly the question it exists to
+// answer: whose request was refused, and what was the correlation id on the
+// audit row it produced.
 func (s *Server) logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
+		start := s.clock()
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rec, r)
 		if s.Log == nil {
 			return
 		}
+		reqID := RequestIDFromContext(r.Context())
 		// No query string: the API takes nothing secret there, but a habit is a
 		// habit and a future endpoint that does would leak into every log line.
 		s.Log.Info("http",
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", rec.status,
-			"duration_ms", time.Since(start).Milliseconds(),
+			"duration_ms", s.clock().Sub(start).Milliseconds(),
 			"remote", s.clientIP(r),
+			"tenant_id", s.requestTenant(r),
+			"site_id", r.Header.Get("X-Site-Id"),
+			"request_id", reqID,
 		)
 	})
+}
+
+// requestTenant is the tenant this request is running as.
+//
+// The server is single-tenant, so the configured tenant is the honest answer
+// and the header is only reported. A header is never *promoted* to the tenant:
+// requireTenant refuses a mismatch, and a log line that echoed an unvalidated
+// header would be a line that can be made to say anything.
+func (s *Server) requestTenant(r *http.Request) string {
+	if s.Tenant != "" {
+		return s.Tenant
+	}
+	return r.Header.Get("X-Tenant-Id")
+}
+
+// newRequestID is the correlation id for a request that arrived without one.
+// Cryptographic randomness, hex, no dashes: it goes in a log line and in an
+// audit row and is never parsed back.
+func newRequestID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "unidentified"
+	}
+	return hex.EncodeToString(b[:])
 }
 
 // recoverPanics keeps one bad request from taking the console down. The stack
@@ -161,11 +302,12 @@ func (s *Server) recoverPanics(next http.Handler) http.Handler {
 						"recovered", rec,
 						"path", r.URL.Path,
 						"method", r.Method,
-						"request_id", r.Header.Get("X-Request-Id"),
+						"tenant_id", s.requestTenant(r),
+						"request_id", RequestIDFromContext(r.Context()),
 					)
 				}
 				WriteError(w, http.StatusInternalServerError, "internal_error",
-					"The request could not be completed.", requestID(r))
+					"The request could not be completed.", RequestIDFromContext(r.Context()))
 			}
 		}()
 		next.ServeHTTP(w, r)
@@ -233,9 +375,16 @@ func (s *Server) requireCapability(needed identity.Capability, h func(http.Respo
 //
 // Login and its second step are exempt because a caller has no session yet, and
 // therefore no token to present — requiring one would make authentication
-// impossible. They are not left unprotected by accident: a forged login request
-// can only log the attacker in as themselves, which costs them nothing, and the
-// routes are rate limited and audited.
+// impossible. A forged login request can only log the attacker in as themselves,
+// which costs them nothing.
+//
+// What protects these two routes is the per-account exponential lockout on the
+// password step and the per-challenge attempt counter on the second factor, both
+// in internal/identity. Per-source rate limiting is a separate control, keyed on
+// the client address, and is documented separately: this comment used to claim
+// the routes were "rate limited" when no source-keyed limiter existed anywhere in
+// the tree, and the only thing bounding guessing was the six digits in a TOTP
+// code.
 //
 // Everything that acts on an existing session is covered, logout included.
 var csrfExempt = map[string]bool{
@@ -415,6 +564,14 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string, certFile, keyF
 	if err != nil {
 		return fmt.Errorf("api: listen on %s: %w", addr, err)
 	}
+
+	s.mu.Lock()
+	if s.start.IsZero() {
+		s.start = time.Now()
+	}
+	s.httpServer = srv
+	s.mu.Unlock()
+
 	if s.Log != nil {
 		s.Log.Info("api listening", "addr", addr, "tls", certFile != "")
 	}
@@ -430,7 +587,7 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	// somebody about a security system that is working.
 	WriteJSON(w, http.StatusOK, map[string]any{
 		"status":        "ok",
-		"uptimeSeconds": time.Since(s.startedAt()).Seconds(),
+		"uptimeSeconds": s.clock().Sub(s.startedAt()).Seconds(),
 		"aiPlane": map[string]any{
 			"note": "AI availability is not an SLO and never affects this status.",
 		},
@@ -463,32 +620,119 @@ func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) startedAt() time.Time {
-	if s.start.IsZero() {
-		return time.Now().Add(-time.Second)
+	now := s.clock()
+	s.mu.Lock()
+	start := s.start
+	s.mu.Unlock()
+	if start.IsZero() {
+		return now.Add(-time.Second)
 	}
-	return s.start
+	return start
 }
 
-// clientIP reads the client address. Behind a proxy the forwarded header is
-// authoritative, because the listener's own address is the proxy.
-func (s *Server) clientIP(r *http.Request) string {
-	if s.BehindProxy {
-		if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
-			return strings.TrimSpace(strings.SplitN(fwd, ",", 2)[0])
-		}
+// clock is the Server's time source, so uptime is testable without a sleep.
+func (s *Server) clock() time.Time {
+	s.mu.Lock()
+	now := s.now
+	s.mu.Unlock()
+	if now == nil {
+		return time.Now()
 	}
+	return now()
+}
+
+// clientIP reads the client address.
+//
+// The rule is two-branch and there is no fallback between them:
+//
+//   - The direct peer (r.RemoteAddr) is inside a trusted proxy CIDR: walk
+//     X-Forwarded-For from the right and take the first entry that is *not* a
+//     trusted proxy. That is the last hop that was not somebody we already
+//     trust to have appended honestly.
+//   - The direct peer is not trusted: X-Forwarded-For is ignored outright and
+//     the peer address is the client address.
+//
+// Why rightmost-untrusted and not leftmost. X-Forwarded-For is an
+// append-and-forward list, so the leftmost entry is the one the *original
+// client* (or whoever forged it) wrote, and every proxy after it appends to
+// the right. Reading leftmost means the value is asserted by the party we are
+// trying to constrain. Reading rightmost-untrusted means we trust only the
+// suffixes appended by hops we have explicitly named, and stop at the first
+// entry we did not — which is exactly the boundary between what the trusted
+// chain can vouch for and what the client chose.
+//
+// The second branch is what makes the first one safe: without it, any client
+// that can reach the listener directly, bypassing the proxy, would have its
+// own header believed. It is also why TrustedProxies must be a list of real
+// proxy addresses and not a boolean: "behind a proxy" says who is in front of
+// us, not who may speak for the client.
+func (s *Server) clientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		host = r.RemoteAddr
+	}
+	peer := net.ParseIP(host)
+
+	if s.BehindProxy && peer != nil && s.isTrustedProxy(peer) {
+		if client := s.rightmostUntrusted(r.Header.Get("X-Forwarded-For")); client != "" {
+			return client
+		}
 	}
 	return host
 }
 
-func requestID(r *http.Request) string {
-	if id := r.Header.Get("X-Request-Id"); id != "" {
-		return id
+// isTrustedProxy reports whether ip is inside one of the configured proxy
+// networks. An unparsable address is not trusted, which is the safe direction:
+// the only way to be believed is to be named.
+func (s *Server) isTrustedProxy(ip net.IP) bool {
+	for _, n := range s.TrustedProxies {
+		if n != nil && n.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// rightmostUntrusted returns the last X-Forwarded-For entry that is not a
+// trusted proxy.
+//
+// If every entry is trusted — a header that is entirely made of our own proxy
+// addresses, which is what a client sends when it wants to be unidentifiable
+// and has to guess addresses — there is no untrusted entry and the answer is
+// empty, which the caller treats as "use the peer". Guessing there would put
+// an attacker-chosen value into an audit row.
+func (s *Server) rightmostUntrusted(fwd string) string {
+	if strings.TrimSpace(fwd) == "" {
+		return ""
+	}
+	parts := strings.Split(fwd, ",")
+	for i := len(parts) - 1; i >= 0; i-- {
+		entry := strings.TrimSpace(parts[i])
+		if entry == "" {
+			continue
+		}
+		ip := net.ParseIP(entry)
+		if ip == nil {
+			// Not an address at all. Keep walking left: a malformed entry tells
+			// us nothing, and the entries to its right are still the ones a
+			// trusted proxy wrote.
+			continue
+		}
+		if !s.isTrustedProxy(ip) {
+			return entry
+		}
 	}
 	return ""
+}
+
+// requestID is the correlation id for a request. The context wins, because
+// assignRequestID has already normalised the header; the header is the fallback
+// for a handler mounted without that middleware.
+func requestID(r *http.Request) string {
+	if id := RequestIDFromContext(r.Context()); id != "" {
+		return id
+	}
+	return strings.TrimSpace(r.Header.Get("X-Request-Id"))
 }
 
 // WriteJSON writes a JSON response with the headers the API contract states.

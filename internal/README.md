@@ -49,14 +49,17 @@ Only five do. Everything else reaches the ledger through its caller.
 
 | Package | Responsibility (one line) | Role | Writes audit ledger | Key exported type / entry point |
 |---|---|---|---|---|
+| 
+| `airuntime` | The Go client for `runtime.py` and the `QueueVLM` worker. Imports nothing from the deterministic core | observe | no (the caller audits `ai.observation.*`) | `airuntime.Client`, `Client.Do`, `airuntime.Result`, `VLMWorker` |
 | `api` | Strict-JSON API and the server-rendered console, with CSRF, CSP and per-route capabilities | present | yes (denials and refusals) | `api.Server`, `Server.RegisterRoutes(Deps)`, `api.Deps` |
 | `audit` | Append-only, hash-chained ledger; owns the `Entry` shape, validation, verification and sealing | store | yes — it *is* the writer | `audit.Writer`, `Writer.Append`, `Writer.Verify`, `audit.Entry` |
 | `bundles` | Stores, activates and rolls back immutable rule bundles; activation is a pointer move | evaluate | yes (`rules.bundle.*`) | `bundles.Service`, `Service.Store`, `bundles.Meta` |
 | `checkpoint` | Signs the ledger to a sink outside the database, so tamper is provable after the fact | store | no (the caller audits `audit.checkpoint.sealed`) | `checkpoint.Seal`, `checkpoint.Sealer`, `Sink`, `Signer`, `VerifySeal` |
 | `clock` | The time subsystem: sources, drift bands, per-site policy, normalized time, skew, lag. Pure, no DB | support | no | `clock.Policy`, `clock.Band`, `clock.Normalized`, `clock.Lag` |
-| `clocksub` | Measures and stores per-device clock drift against the site reference | store | no | `clocksub.Service`, `Service.Measure`, `Service.State` |
 | `command` | A ~270-line subcommand tree for the CLIs. Deliberately not a dependency | present | no | `command.Command`, `Execute`, `command.ExitCode` |
+| `config` | Reads and validates the daemon's environment once. No field is a secret, and nothing whose absence would change behaviour gets a silent default | support | no | `config.Config`, `config.Load`, `config.LoadFrom` |
 | `contracts` | Generated protobuf (`securityv1`) plus a compatibility test. **No hand-written source** | support | no | `securityv1.Event`, `securityv1.Incident`, `securityv1.Observation` |
+| `correlator` | Assembles a rule's signals from stored canonical events, device clocks and stored observations. Imports rules but not the rule engine's inputs, so evaluation cannot acquire a database handle | evaluate | no | `correlator.Correlator`, `SignalsFor`, `correlator.Result` |
 | `dbx` | The Postgres pool, the tenant-context discipline, and the password-free DSN policy | support | no | `dbx.Pool`, `Pool.InTenant`, `Pool.InSystemTenant`, `dbx.Config` |
 | `dr` | The whole-recovery drill as a test: database gone, checkpoint material gone, decision still replayable | support | test only | `dr` (DoD item 9) |
 | `durability` | The durability test suite: dedupe across partitions, lease reclaim, normalize atomicity, outbox poison isolation | support | test only | `durability` (threat-model controls C23–C28) |
@@ -67,15 +70,18 @@ Only five do. Everything else reaches the ledger through its caller.
 | `identity` | Authentication, sessions, MFA (TOTP + WebAuthn), roles, capabilities, step-up | present | yes (every auth event) | `identity.Service`, `identity.Principal`, `identity.Capability` |
 | `inbox` | Intake: scoped dedupe key taken before the row, lease with expiry, terminal states, dead letters | store | no | `inbox.Writer`, `WriteOptions`, `inbox.Lease`, `inbox.Key` |
 | `incidents` | The case lifecycle, dispositions, and the decision-replay path | present | yes (`incident.created`, `incident.disposition.recorded`) | `incidents.Service`, `incidents.Create`, `incidents.Explanation`, `ReplayInputs` |
-| `jobs` | The Postgres work queue that replaces Kafka and Redis: `SKIP LOCKED` claims, per-queue idempotency keys, leases, dead letters | support | no | `jobs.Enqueuer`, `jobs.Queue` (`QueueVLM`, `QueueRuleBulk`, …), `jobs.Job` |
-| `lifecycle` | install / upgrade / rollback / backup / restore, plus archive extraction that re-validates every path | support | no | `lifecycle.State`, `lifecycle.Extract`, `lifecycle.Refuse` |
+| `jobs` | The Postgres work queue that replaces Kafka and Redis: `SKIP LOCKED` claims, per-queue idempotency keys, leases, dead letters | support | no | `jobs.Enqueuer`, `jobs.Queue` (`QueueVLM`, `QueueRuleBulk`, …), `jobs.Job`, `jobs.Worker` |
+| `lifecycle` | install / upgrade / rollback / backup / restore, plus archive extraction that re-validates every path, plus the systemd unit writer | support | no | `lifecycle.State`, `lifecycle.Extract`, `lifecycle.Refuse`, `lifecycle.WriteUnits` |
 | `migrate` | The forward-only migration runner: ordered SQL, checksums, phase window, advisory lock | store | no | `migrate.Runner`, `Runner.Up`, `Runner.Verify`, `Runner.CurrentVersion` |
 | `milestone` | The XProtect protocol adapter. The *only* place vendor concepts may exist | ingest | no | `milestone.Adapter`, `milestone.Transport`, `RawRecord`, `Routes`, `ReplayTransport` |
 | `normalize` | Inbox row → canonical event, committing with the inbox transition in one transaction | normalize | no | `normalize.Normalizer`, `Input`, `Result`, `DeriveEventID`, `ToProto` |
 | `observability` | The metric registry (closed name set) and SLO evaluation | support | no | `observability.Registry`, `observability.Breaches`, `observability.SLO` |
 | `observations` | Persists and validates AI observations: mandatory attribution, append-only, supersession, profiles | observe | no (the caller audits `ai.observation.*`) | `observations.Writer`, `Observation`, `M1Profiles`, `Degradation` |
 | `outbox` | Transactional publish without a broker: the state change and its outbound effect commit together | store | no | `outbox.Enqueue`, `outbox.Message`, `outbox.Relay` |
-| `release` | Builds and verifies signed offline release archives. Verification is deliberately stricter than construction | support | no | `release.Build`, `release.Verify`, `release.Manifest`, `ScanForSecrets` |
+| `pipeline` | The loops: ingest, consume, outbox and gauge sampling, plus the shutdown order. Nothing else owns a lifecycle | present | no | `pipeline.Start`, `pipeline.New`, `Loops.Stop`, `pipeline.Deps` |
+| clocksub | Measures and stores per-device clock drift against the site reference | store | no | `clocksub.Service`, `Service.Measure`, `Service.State` |
+| dr | The whole-recovery drill as a test: database gone, checkpoint material gone, decision still replayable | support | test only | `dr` (DoD item 9) |
+elease | Builds and verifies signed offline release archives. Verification is deliberately stricter than construction | support | no | `release.Build`, `release.Verify`, `release.Manifest`, `ScanForSecrets` |
 | `rules` | The rule DSL: bundle, JSON Schema, semantic validation, compiled AST, deterministic engine. Imports nothing internal | evaluate | no | `rules.Compiler`, `Compile`, `CompiledBundle`, `Engine`, `Decision`, `Tier`, `DegradeTo` |
 | `schemalaws` | The schema-level invariant suite: RLS isolation, append-only, provenance, `storage_ref` CHECKs, no person model | support | test only | `schemalaws` (threat-model controls C1–C6, C11–C12, C18–C19, C32–C33, C35) |
 | `simulate` | Runs a bundle over the fixture set and diffs the outcome; the diff *digest* is the activation gate | evaluate | no | `simulate.Runner.Run`, `simulate.Diff`, `simulate.DigestFor` |
@@ -438,18 +444,20 @@ this section rather than trusting it.
    negative test on every evidence path; on a Windows dev machine one of the
    four traversal negatives is not running.
 
-8. **The HTTP access log does not carry the fields the conventions require.**
-   `internal/api/server.go:135-141` logs method, path, status, duration and
-   remote IP, but not `tenant_id`, `site_id` or `request_id`, which `AGENTS.md`
-   requires on every log line. The audit ledger is separate and authoritative,
-   so this is a convention gap, not an invariant breach — but do not write a new
-   log line by copying that shape.
+8. **The HTTP access log now carries the fields the conventions require.**
+   `internal/api/server.go` logs `tenant_id`, `site_id` and `request_id` on every
+   line, with the request id assigned once at the outermost middleware so the log
+   line, the panic path and the audit row all carry the same one. The audit ledger
+   is separate and authoritative; the access log is for operators, and an
+   operator reading it now has the correlation id the audit row was written with.
 
-9. **`internal/observability` has no production caller.** A grep for
-   `internal/observability` across the tree returns exactly one file: its own
-   test. Every metric name in `metrics.go` is currently named and never
-   emitted, and `slo.go`'s `Breaches` has no caller. The SLOs exist as code and
-   as targets; nothing measures them yet.
+9. **`internal/observability` has a production caller**, and `slo.go`'s
+   `Breaches` still does not. The pipeline's gauge loop samples every gauge it
+   can observe on its own timer — deliberately not at the end of a pass, because
+   a gauge that only updates when work arrives reports zero on a healthy idle site
+   by never having been written — and `/v1/metrics` renders the registry under
+   `audit.read`. The SLO thresholds are still evaluated by nothing in-process, so
+   gate 3 is closer but not closed.
 
 10. **`internal/contracts` has no hand-written Go file.** If you are looking for
     the `Event` type, it is `internal/contracts/securityv1/event.pb.go`, which

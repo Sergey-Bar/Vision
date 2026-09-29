@@ -234,19 +234,33 @@ const DefaultLeaseDuration = 60 * time.Second
 // can run without coordinating and none of them blocks on another. The lease
 // expiry is written in the same statement as the status change, so a claimed row
 // can never be status=leased with no deadline.
+//
+// A row that has already used its whole retry budget is not claimable. That
+// guard is the second half of the terminal-state guarantee: Fail reaches
+// dead_letter on the ordinary path, but a worker that is killed mid-handle never
+// calls Fail, and without the guard such a row is reclaimed every lease period
+// for the life of the process with no backoff and no terminal state. The
+// preceding expireExhausted statement turns those into dead letters so they stop
+// being claimable work rather than sitting in 'processing' for ever.
 const claimSQL = `
 WITH candidate AS (
     SELECT tenant_id, integration_id, source_event_id
       FROM inbox_events
      WHERE ($4 = '' OR tenant_id = $4)
+       AND attempt_count < $5
        AND (
-             status IN ('received', 'failed')
-             -- A row whose worker died is still status=processing. Without this
-             -- clause the lease expiry would be decorative: the row would never
-             -- become claimable again and a killed worker's event would sit
-             -- until a human intervened, which is exactly the loss the lease
-             -- exists to prevent.
-          OR (status = 'processing' AND lease_expires_at IS NOT NULL AND lease_expires_at < now())
+             -- A row that failed keeps lease_expires_at as its not-before time.
+             -- The backoff is why a poisoned event costs a bounded number of
+             -- attempts rather than a busy retry forever: 5, 10, 20 … 320
+             -- seconds, then a dead letter.
+             (status IN ('received', 'failed')
+              AND (status = 'received' OR lease_expires_at IS NULL OR lease_expires_at <= now()))
+              -- A row whose worker died is still status=processing. Without this
+              -- clause the lease expiry would be decorative: the row would never
+              -- become claimable again and a killed worker's event would sit
+              -- until a human intervened, which is exactly the loss the lease
+              -- exists to prevent.
+           OR (status = 'processing' AND lease_expires_at IS NOT NULL AND lease_expires_at < now())
            )
      ORDER BY received_at
      FOR UPDATE SKIP LOCKED
@@ -263,6 +277,36 @@ UPDATE inbox_events e
    AND e.source_event_id = c.source_event_id
 RETURNING e.tenant_id, e.integration_id, e.source_event_id, e.site_id,
           e.payload, e.attempt_count, e.received_at, e.lease_expires_at, e.lease_owner`
+
+// expireExhaustedSQL turns rows that have burned their whole retry budget into
+// dead letters. It runs inside the claim transaction, before the claim, so a
+// worker that was killed mid-handle reaches a terminal state without any
+// cooperating code ever calling Fail.
+//
+// A row that is currently being processed by a live worker is excluded: its
+// lease has not expired, and dead-lettering under a live worker would duplicate
+// or drop work that is in progress.
+//
+// The tenant predicate is not an optimisation, it is a requirement. This runs on
+// every claim, and the consume loop claims on a timer, so an unfiltered version
+// is a statement over every tenant's inbox on every tick. The status IN is
+// carried by inbox_events_pending_idx, which is partial on exactly these three
+// statuses, so the scan is bounded to unclaimed work and nothing else — but only
+// once the tenant is pinned, because a site's consume loop has no business
+// touching another site's rows and no business paying for their scan either.
+const expireExhaustedSQL = `
+UPDATE inbox_events
+   SET status = 'dead_letter',
+       last_error = COALESCE(last_error, 'retries exhausted'),
+       dead_letter_reason = COALESCE(dead_letter_reason, last_error,
+                                     'retries exhausted without a recorded error'),
+       lease_owner = NULL,
+       lease_expires_at = NULL,
+       completed_at = now()
+ WHERE status IN ('received', 'failed', 'processing')
+   AND attempt_count >= $1
+   AND ($2 = '' OR tenant_id = $2)
+   AND (status <> 'processing' OR lease_expires_at IS NULL OR lease_expires_at < now())`
 
 // ClaimFor takes up to limit leases for a single tenant.
 func (w *Writer) ClaimFor(ctx context.Context, tenantID, owner string, limit int, lease time.Duration) ([]Lease, error) {
@@ -291,10 +335,17 @@ func (w *Writer) claim(ctx context.Context, tenantID, owner string, limit int, l
 	if seconds < 1 {
 		seconds = 1
 	}
+	maxAttempts := w.MaxAttempts
+	if maxAttempts <= 0 {
+		maxAttempts = 5
+	}
 
 	var out []Lease
 	err := w.Pool.InSystemTenant(ctx, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, claimSQL, limit, owner, seconds, tenantID)
+		if _, err := tx.Exec(ctx, expireExhaustedSQL, maxAttempts, tenantID); err != nil {
+			return fmt.Errorf("inbox: expire exhausted events: %w", err)
+		}
+		rows, err := tx.Query(ctx, claimSQL, limit, owner, seconds, tenantID, maxAttempts)
 		if err != nil {
 			return fmt.Errorf("inbox: claim: %w", err)
 		}
@@ -362,6 +413,15 @@ func (w *Writer) Complete(ctx context.Context, key Key, canonicalEventID string)
 // Fail records a failed attempt. Past the retry bound the event becomes a dead
 // letter, which is a first-class state: surfaced in the console, audited, and
 // never silently dropped.
+//
+// Below the bound it becomes 'failed' with a backoff. The backoff lives in
+// lease_expires_at, which the claim reads as a not-before time for a failed row
+// and as a lease deadline for a processing one — the column already means "when
+// this row becomes claimable again", and the two readings do not conflict
+// because a row is only ever in one status. The exponent is capped before the
+// cast, so the expression cannot overflow at a large attempt_count; a raising
+// backoff on the failure path is the one thing that turns a dead letter into a
+// permanently leased row.
 func (w *Writer) Fail(ctx context.Context, key Key, cause error, maxAttempts int) (Status, error) {
 	if maxAttempts <= 0 {
 		maxAttempts = 5
@@ -377,7 +437,10 @@ func (w *Writer) Fail(ctx context.Context, key Key, cause error, maxAttempts int
 			       last_error = $5,
 			       dead_letter_reason = CASE WHEN attempt_count >= $4 THEN $5 ELSE NULL END,
 			       lease_owner = NULL,
-			       lease_expires_at = NULL
+			       lease_expires_at = CASE
+			           WHEN attempt_count >= $4 THEN NULL
+			           ELSE now() + make_interval(secs => (5 * power(2, least(attempt_count, 6)))::int)
+			       END
 			 WHERE tenant_id = $1 AND integration_id = $2 AND source_event_id = $3
 			RETURNING status`,
 			key.TenantID, key.IntegrationID, key.SourceEventID, maxAttempts, cause.Error(),

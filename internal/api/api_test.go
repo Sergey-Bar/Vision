@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -19,6 +21,7 @@ import (
 	"github.com/Sergey-Bar/Ai-Captain/internal/identity"
 	"github.com/Sergey-Bar/Ai-Captain/internal/incidents"
 	"github.com/Sergey-Bar/Ai-Captain/internal/migrate"
+	"github.com/Sergey-Bar/Ai-Captain/internal/observability"
 	"github.com/Sergey-Bar/Ai-Captain/internal/rules"
 	"github.com/Sergey-Bar/Ai-Captain/internal/testutil"
 )
@@ -42,6 +45,15 @@ type errEOF struct{}
 func (errEOF) Error() string { return "unexpected end of key material" }
 
 func server(t *testing.T) (*api.Server, string, string) {
+	t.Helper()
+	s, tenant, site, _ := serverWithRegistry(t, nil)
+	return s, tenant, site
+}
+
+// serverWithRegistry is `server` plus the observability registry, so a test can
+// drive the metrics route against the same wiring the daemon uses rather than
+// against a route registered by a different call site.
+func serverWithRegistry(t *testing.T, registry *observability.Registry) (*api.Server, string, string, *observability.Registry) {
 	t.Helper()
 	raw := testutil.Pool(t)
 	if _, err := (&migrate.Runner{Pool: raw}).Up(context.Background()); err != nil {
@@ -70,6 +82,7 @@ func server(t *testing.T) (*api.Server, string, string) {
 	s.Pool = pool
 	s.Tenant = tenant
 	s.Secure = true
+	s.SetStartTime(clock)
 
 	// A template failure is a silent 500 without this. An operator seeing one has
 	// no way to tell which page broke, and a console that renders nothing looks
@@ -89,6 +102,7 @@ func server(t *testing.T) (*api.Server, string, string) {
 		Identity:  ident,
 		Incidents: &incidents.Service{Pool: pool, Audit: writer},
 		Bundles:   &bundles.Service{Pool: pool, Compiler: rules.NewCompiler(), Audit: writer},
+		Metrics:   registry,
 	}
 	// The routes closure captures s, so it is assigned after construction rather
 	// than inside the literal.
@@ -102,7 +116,7 @@ func server(t *testing.T) (*api.Server, string, string) {
 		"a-long-bootstrap-passphrase", site); err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
-	return s, tenant, site
+	return s, tenant, site, registry
 }
 
 // The security headers are the whole reason the console has no inline script, so
@@ -303,6 +317,151 @@ func TestJSONIsNeverNegotiatedIntoHTML(t *testing.T) {
 
 	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
 		t.Errorf("the API returned %q for a request that asked for HTML; the API is JSON only", ct)
+	}
+}
+
+// Uptime used to be derived from a `start` field nothing ever assigned, so every
+// install reported an uptime of about one second for the life of the process.
+// The daemon now sets it; this is what proves the value is real and moves.
+func TestHealthUptimeIsRealAndMonotonic(t *testing.T) {
+	s, _, _ := server(t)
+
+	base := clock
+	// Five seconds of uptime at the first call. Zero would be indistinguishable
+	// from a server that has not started, which is not what this asserts.
+	at := base.Add(5 * time.Second)
+	s.SetStartTime(base)
+	// The server's clock is injectable so monotonicity is asserted by advancing
+	// it, not by sleeping. A sleep-based test is a slow test that is still only
+	// asserting the wall clock agrees with itself.
+	s.SetClock(func() time.Time { return at })
+
+	first := healthUptime(t, s)
+	if first <= 0 {
+		t.Fatalf("uptime is %v; the recorded start time is not being read", first)
+	}
+
+	at = base.Add(95 * time.Second)
+	second := healthUptime(t, s)
+	if second <= first {
+		t.Errorf("uptime did not advance: %v then %v after 90s", first, second)
+	}
+	if second-first < 89 {
+		t.Errorf("uptime advanced by %v over an injected 90s, which is not the clock the "+
+			"handler is reading", second-first)
+	}
+
+	// A server that was never told when it started reports ~1s, not a growing
+	// number. That fallback is asserted too, because it is the number that made
+	// this defect invisible: a wrong constant reads like a plausible one.
+	unset := &api.Server{}
+	rec := httptest.NewRecorder()
+	unset.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/health", nil))
+	var body struct {
+		Uptime float64 `json:"uptimeSeconds"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode health: %v", err)
+	}
+	if body.Uptime > 2 {
+		t.Errorf("a server with no recorded start time reports %vs uptime", body.Uptime)
+	}
+}
+
+func TestHealthStartTimeIsRecordedByListenAndServe(t *testing.T) {
+	s := &api.Server{Secure: true, Tenant: "t-1"}
+	// A listener that is immediately shut down still has to leave a start time,
+	// because the start time is what makes uptime mean anything.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- s.ListenAndServe(ctx, addr, "", "") }()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for s.StartedAt().IsZero() && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if s.StartedAt().IsZero() {
+		t.Fatal("ListenAndServe returned a server whose start time was never recorded")
+	}
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
+	if err := s.Shutdown(shutdownCtx); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+	select {
+	case err := <-done:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			t.Fatalf("serve returned %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Shutdown returned but the listener is still serving")
+	}
+}
+
+// Shutdown before ListenAndServe is a no-op rather than a nil dereference: the
+// daemon calls it on a signal that can arrive before the listener is up.
+func TestShutdownWithoutAListenerIsANoOp(t *testing.T) {
+	s := &api.Server{}
+	if err := s.Shutdown(context.Background()); err != nil {
+		t.Fatalf("shutdown with no listener: %v", err)
+	}
+}
+
+func healthUptime(t *testing.T, s *api.Server) float64 {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/health", nil))
+	var body struct {
+		Uptime float64 `json:"uptimeSeconds"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode health: %v", err)
+	}
+	return body.Uptime
+}
+
+// The request log must carry tenant_id, site_id and request_id on every line, per
+// AGENTS.md. Without them the log cannot answer the question it exists for:
+// whose request, and what id joins it to the audit row it produced.
+func TestRequestLogCarriesTenantAndRequestID(t *testing.T) {
+	s, tenant, _ := server(t)
+
+	var buf bytes.Buffer
+	s.Log = slog.New(slog.NewTextHandler(&buf, nil))
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/health", nil)
+	req.Header.Set("X-Request-Id", "req-from-the-proxy")
+	s.Handler().ServeHTTP(httptest.NewRecorder(), req)
+
+	line := buf.String()
+	if line == "" {
+		t.Fatal("the request produced no log line")
+	}
+	for _, key := range []string{"tenant_id=" + tenant, "request_id=req-from-the-proxy", "site_id="} {
+		if !strings.Contains(line, key) {
+			t.Errorf("the log line is missing %q:\n%s", key, line)
+		}
+	}
+
+	// A request with no inbound id still gets one, generated once and echoed.
+	buf.Reset()
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/health", nil))
+	generated := rec.Header().Get("X-Request-Id")
+	if generated == "" {
+		t.Fatal("no request id was generated for a request that arrived without one")
+	}
+	if !strings.Contains(buf.String(), "request_id="+generated) {
+		t.Errorf("the generated id %q does not appear in the log line:\n%s", generated, buf.String())
 	}
 }
 

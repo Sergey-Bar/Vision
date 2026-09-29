@@ -1,6 +1,7 @@
 package lifecycle_test
 
 import (
+	"archive/tar"
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
@@ -311,6 +312,59 @@ func TestExtractionRefusesATraversingEntry(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "travers") && !strings.Contains(err.Error(), "absolute") {
 		t.Errorf("the failure should name the traversal, got %q", err)
+	}
+}
+
+// A symlink is an instruction, not content: it says "when this archive is
+// unpacked, put something else here", and whoever can write the archive chooses
+// what it points at. This is the code that lands bytes on disk during an
+// install, which is the moment a hostile entry would matter most.
+//
+// The empty body on a link entry meant the hash check would usually catch it, and
+// "usually" is not a control — which is why the type is refused by name rather
+// than left to the hash.
+func TestExtractionRefusesANonRegularEntry(t *testing.T) {
+	key := newKey(t)
+	archivePath, manifest, pub := buildArchive(t, map[string]string{"bin/x": "b"}, nil, key)
+	plan, err := lifecycle.Verify(archivePath, t.TempDir(), manifest, pub, buildCompat)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	files := append([]release.FileEntry{}, plan.Files...)
+	files = append(files, release.FileEntry{
+		Path: "bin/link", SHA256: emptySHA256, SizeBytes: 0, Mode: "0755",
+	})
+
+	for _, tc := range []struct {
+		name string
+		flag byte
+		want string
+	}{
+		{"symlink", tar.TypeSymlink, "symlink"},
+		{"hard link", tar.TypeLink, "hard link"},
+		{"character device", tar.TypeChar, "character device"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			evil := filepath.Join(t.TempDir(), "evil.tar.gz")
+			packTarEntries(t, evil, []tarEntry{
+				{Name: "bin/x", Flag: tar.TypeReg, Body: "b"},
+				{Name: "sbom.spdx.json", Flag: tar.TypeReg, Body: `{"spdxVersion":"SPDX-2.3"}`},
+				{Name: "bin/link", Flag: tc.flag, Link: "C:/Windows/System32/drivers/etc/hosts"},
+			})
+
+			dest := t.TempDir()
+			_, err := lifecycle.Extract(evil, dest, files)
+			if err == nil {
+				t.Fatalf("an archive containing a %s was extracted", tc.name)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("the failure should name the %s, got %q", tc.want, err)
+			}
+			// And nothing landed outside the destination.
+			if _, statErr := os.Stat(filepath.Join(dest, "..", "link")); statErr == nil {
+				t.Error("a link was materialised during extraction")
+			}
+		})
 	}
 }
 

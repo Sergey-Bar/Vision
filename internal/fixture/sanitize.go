@@ -15,12 +15,19 @@ import (
 // names. A scrub misses the header nobody thought of, and a vendor adds headers;
 // an allow-list means a new header is absent until somebody decides it matters,
 // and its absence shows up as a fixture that no longer replays.
+//
+// `x-milestone-session` was on this list and is now off it. The name is a
+// session: it is the vendor's handle on an authenticated session, and a captured
+// value is a bearer of that session, committed to a repository, in a list whose
+// entire justification is deny-by-default. Nothing replays on it — the adapter
+// authenticates with its own bearer token — so it was not carrying its weight
+// either. If a fixture genuinely needs it, the answer is to re-capture without a
+// live session, not to widen this list.
 var allowedHeaders = map[string]bool{
-	"content-type":        true,
-	"x-xprotect-version":  true,
-	"x-request-id":        true,
-	"x-milestone-session": true,
-	"retry-after":         true,
+	"content-type":       true,
+	"x-xprotect-version": true,
+	"x-request-id":       true,
+	"retry-after":        true,
 }
 
 func allowedHeader(k string) bool {
@@ -99,6 +106,63 @@ var identifyingKeyNames = map[string]bool{
 	"personname": true, "person_name": true, "firstname": true, "lastname": true,
 	"fullname": true, "full_name": true, "username": true, "user_name": true,
 	"homeaddress": true, "address": true,
+
+	// Names, images and places. These are not secrets and a reviewer would not
+	// flag them looking for a leaked password, which is why they were missed:
+	// the list above is a list of things that look like credentials.
+	//
+	// A face in a photograph is a biometric, and a photograph committed next to
+	// a person's name is the strongest identifier a security system can hold.
+	// A display name and a precise location turn an image reference into an
+	// identified individual. None of them can be un-leaked once the file is in a
+	// repository, and a capture run against a live site produces them by
+	// default.
+	"displayname": true, "display_name": true, "nickname": true, "loginname": true,
+	"givenname": true, "surname": true, "middlename": true,
+	"employeename": true, "employeeno": true, "employeeid": true, "staffid": true,
+	"imageurl": true, "image_url": true, "imagepath": true, "image_path": true,
+	"thumbnailurl": true, "thumbnail_url": true, "snapshoturl": true, "snapshot_url": true,
+	"photourl": true, "photo_url": true, "faceurl": true, "face_url": true,
+	"image": true, "photo": true, "photograph": true, "face": true, "faces": true,
+	"facedetections": false,
+
+	// A list of detections is walked rather than replaced wholesale, so a
+	// fixture still exercises "the source returns N faces in a box" and only the
+	// identifiers inside go. face, faces, photograph and image are single values
+	// and are replaced outright.
+	"latitude": true, "lat": true, "longitude": true, "lon": true, "lng": true,
+	"coordinates": true, "coord": true, "geolocation": true, "geo": true,
+	"gps": true, "gpscoordinates": true, "location": true, "locationname": true,
+	"personid": true, "person_id": true, "subjectid": true, "subject_id": true,
+	"faceid": true, "face_id": true, "trackid": true, "track_id": true,
+	"fingerprint": true, "biometric": true, "templateid": true, "template_id": true,
+	"dob": true, "dateofbirth": true, "birthdate": true,
+	// A bare `name` is redacted. It is the most ambiguous key in a vendor payload
+	// — a person's name, a site name, a rule name, a device name — and the
+	// fixture set's own scenarios are identified by name elsewhere, so redacting
+	// it costs a captured value and buys not committing a person to a repository.
+	// It was the one field in the plan's list with no entry here.
+	"name": true,
+}
+
+// numericIdentifierKeyNames are keys that identify a machine or a person by
+// number rather than by name. They are handled separately because the value is
+// an integer, not a string, and the generic value-level rules never see one:
+// RedactValue's number branch passes a float64 straight through.
+//
+// These are the keys that made a captured fixture identify a specific door, a
+// specific badge and a specific camera, which is enough to reconstruct a site's
+// layout from a public file.
+var numericIdentifierKeyNames = map[string]bool{
+	"siteid": true, "site_id": true,
+	"deviceno": true, "device_no": true, "deviceid": true, "device_id": true,
+	"doorid": true, "door_id": true, "door": true,
+	"cameraid": true, "camera_id": true, "zoneid": true, "zone_id": true,
+	"readerid": true, "reader_id": true, "reader": true,
+	"partitionid": true, "partition_id": true, "partitionno": true, "partition_no": true,
+	"channelid": true, "channel_id": true, "channelno": true, "channel_no": true,
+	"accountid": true, "account_id": true, "accountno": true, "account_no": true,
+	"operatorid": true, "operator_id": true,
 }
 
 // RedactValue walks a decoded JSON document and removes secrets and identifiers.
@@ -111,11 +175,11 @@ func RedactValue(path string, v any) (any, error) {
 	case map[string]any:
 		out := make(map[string]any, len(node))
 		for k, child := range node {
-			lower := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(k, "-", ""), "_", ""))
+			lower := normalizeKey(k)
 			switch {
 			case secretKeyNames[lower]:
 				out[k] = RedactionMarker
-			case identifyingKeyNames[lower]:
+			case identifyingKeyNames[lower], numericIdentifierKeyNames[lower]:
 				out[k] = RedactionMarker
 			default:
 				redacted, err := RedactValue(joinPath(path, k), child)
@@ -141,9 +205,41 @@ func RedactValue(path string, v any) (any, error) {
 	case string:
 		return redactEmbeddedString(path, node), nil
 
+	case float64:
+		// A number under an identifying key is still an identifier. The key was
+		// already matched above, so this branch is the belt to that braces: a
+		// vendor key the lists do not carry, with a numeric value that still
+		// names one device, is redacted by position rather than by name.
+		if numericIdentifierPath(path) {
+			return RedactionMarker, nil
+		}
+		return v, nil
+
 	default:
 		return v, nil
 	}
+}
+
+// normalizeKey folds a key to the form the name lists use: lowercase with
+// separators removed, so `Display_Name`, `displayName` and `display-name` are
+// one lookup and not three that a list has to repeat.
+func normalizeKey(k string) string {
+	return strings.ToLower(strings.NewReplacer("_", "", "-", "", " ", "").Replace(k))
+}
+
+// numericIdentifierPath reports whether the last path segment names a machine
+// or a person by number.
+func numericIdentifierPath(path string) bool {
+	key := path
+	if i := strings.LastIndexByte(path, '.'); i >= 0 {
+		key = path[i+1:]
+	}
+	// An array index leaves `field[3]` as the last segment; the name is the part
+	// before the bracket.
+	if i := strings.IndexByte(key, '['); i >= 0 {
+		key = key[:i]
+	}
+	return numericIdentifierKeyNames[normalizeKey(key)]
 }
 
 func joinPath(path, key string) string {
@@ -158,6 +254,9 @@ func joinPath(path, key string) string {
 var urlLikeKeys = map[string]bool{
 	"url": true, "uri": true, "endpoint": true, "baseurl": true, "host": true,
 	"hostname": true, "server": true, "callback": true, "webhookurl": true,
+	"imageurl": true, "image_url": true, "thumbnailurl": true, "thumbnail_url": true,
+	"snapshoturl": true, "snapshot_url": true, "photourl": true, "photo_url": true,
+	"faceurl": true, "face_url": true, "streamurl": true, "stream_url": true,
 }
 
 // redactEmbeddedString handles values whose key is innocuous but whose content
@@ -168,7 +267,10 @@ func redactEmbeddedString(path, s string) string {
 	if i := strings.LastIndex(path, "."); i >= 0 {
 		key = path[i+1:]
 	}
-	lower := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(key, "-", ""), "_", ""))
+	if i := strings.IndexByte(key, '['); i >= 0 {
+		key = key[:i]
+	}
+	lower := normalizeKey(key)
 
 	if urlLikeKeys[lower] {
 		return RedactURL(s)

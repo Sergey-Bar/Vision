@@ -64,11 +64,27 @@ type Options struct {
 	// snapshot and far below a disk.
 	MaxBytes int64
 	// Fsync makes writes durable before acknowledgement. Default true.
-	Fsync bool
-	// VerifyHashOnRead is default true. Turning it off is a debugging aid and
-	// the only reason it exists.
-	VerifyHashOnRead bool
+	//
+	// A pointer, because a plain bool cannot say "unset": the zero value of a
+	// bool is false, and false here is the wrong answer. As a plain field, every
+	// caller that wrote Options{Root: dir} — which is every caller — silently
+	// got a store that acknowledges evidence it has not fsynced, on a store
+	// whose own comment says the fsync is not decoration. Default-on fields need
+	// three states, so they take a pointer.
+	Fsync *bool
+	// VerifyHashOnRead verifies bytes against the row on every read. Default
+	// true. Turning it off is a debugging aid and the only reason it exists.
+	VerifyHashOnRead *bool
 }
+
+// Bool returns a pointer to b, for the optional-boolean fields above.
+func Bool(b bool) *bool { return &b }
+
+// DefaultFsync is the value New applies when Fsync is nil.
+const DefaultFsync = true
+
+// DefaultVerifyHashOnRead is the value New applies when VerifyHashOnRead is nil.
+const DefaultVerifyHashOnRead = true
 
 // DefaultMaxBytes bounds a single stored object.
 const DefaultMaxBytes int64 = 512 << 20
@@ -93,16 +109,54 @@ func New(opts Options) (*Store, error) {
 	if opts.MaxBytes <= 0 {
 		opts.MaxBytes = DefaultMaxBytes
 	}
+	fsync := DefaultFsync
+	if opts.Fsync != nil {
+		fsync = *opts.Fsync
+	}
+	verify := DefaultVerifyHashOnRead
+	if opts.VerifyHashOnRead != nil {
+		verify = *opts.VerifyHashOnRead
+	}
 	return &Store{
 		root:       abs,
-		fsync:      opts.Fsync,
+		fsync:      fsync,
 		maxBytes:   opts.MaxBytes,
-		hashOnRead: true,
+		hashOnRead: verify,
 	}, nil
 }
 
 // Root returns the resolved evidence root.
 func (s *Store) Root() string { return s.root }
+
+// containedIn reports whether path is inside root, or is root itself.
+//
+// The root was resolved once in New, so this compares real paths rather than
+// names that could be repointed afterwards. The separator on the prefix is what
+// makes it a containment test rather than a string test: "/var/evidence-other"
+// does not start with "/var/evidence" as a path.
+func containedIn(root, path string) error {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return fmt.Errorf("not under the evidence root: %w", err)
+	}
+	if rel == "." {
+		return nil
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("resolves to %q, which is outside %q", path, root)
+	}
+	if filepath.IsAbs(rel) {
+		return fmt.Errorf("resolves to the absolute path %q", rel)
+	}
+	return nil
+}
+
+// Fsync reports whether writes are durable before acknowledgement, and
+// VerifyHashOnRead reports whether a read re-hashes the bytes. Exported so a
+// caller — or a test — can assert that the defaults it claims to apply were the
+// ones that got applied.
+func (s *Store) Fsync() bool            { return s.fsync }
+func (s *Store) VerifyHashOnRead() bool { return s.hashOnRead }
 
 // unsafeSegment matches a path segment that is a traversal, a drive, a UNC
 // prefix, or anything with a NUL in it.
@@ -385,7 +439,27 @@ type RetentionPolicy struct {
 func (s *Store) Sweep(tenant string, policy RetentionPolicy, dryRun bool) (SweepResult, error) {
 	var result SweepResult
 
+	// The tenant argument is a path segment, and it is treated exactly as Put
+	// treats it. Sweep used to join it straight onto the root and walk whatever
+	// that produced, so a tenant of "../../etc" walked outside the evidence root
+	// and `os.Remove` at the end of the walk deleted it. Put validates and Sweep
+	// did not, in the one package whose entire contract is that it is the only
+	// code touching that root.
+	//
+	// Two checks, not one. ValidateRef rejects the shapes a path can take; the
+	// containment check rejects anything that survived them, because a check
+	// that names every bad shape is a check that will be extended by the next
+	// one somebody finds and not remembered here.
+	if strings.TrimSpace(tenant) == "" {
+		return result, errors.New("evidence: tenant is required and is never read from a request body")
+	}
+	if err := ValidateRef(tenant); err != nil {
+		return result, fmt.Errorf("evidence: tenant is not a usable path segment: %w", err)
+	}
 	tenantRoot := filepath.Join(s.root, tenant)
+	if err := containedIn(s.root, tenantRoot); err != nil {
+		return result, fmt.Errorf("evidence: refusing to sweep %q: %w", tenant, err)
+	}
 	err := filepath.WalkDir(tenantRoot, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err

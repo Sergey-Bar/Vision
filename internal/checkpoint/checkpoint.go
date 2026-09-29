@@ -155,7 +155,20 @@ func VerifySeal(seal Seal, trustedPublic ed25519.PublicKey) error {
 	if err != nil || len(embedded) != ed25519.PublicKeySize {
 		return fmt.Errorf("%w: embedded public key is malformed", ErrVerify)
 	}
-	if trustedPublic != nil && !equalBytes(trustedPublic, embedded) {
+	// A nil trusted key is a refusal.
+	//
+	// The comparison below is the whole control: a seal verified against the key
+	// it carries is a seal that proves whoever wrote it signed their own forgery.
+	// Skipping the comparison when no key was supplied made the offline verifier
+	// — the command whose entire job is to detect a forged or re-signed seal —
+	// pass on exactly the input it exists to reject. The caller now refuses
+	// before it gets here; this is the backstop for any other caller.
+	if trustedPublic == nil {
+		return fmt.Errorf("%w: no trusted public key was supplied, so this can only confirm "+
+			"that whoever wrote the seal signed it. Supply the sealing key you trust; refusing "+
+			"here is the point of the check", ErrVerify)
+	}
+	if !equalBytes(trustedPublic, embedded) {
 		return fmt.Errorf("%w: seal was signed by key %q, not the trusted key", ErrVerify, seal.KeyID)
 	}
 	sig, err := hex.DecodeString(seal.Signature)
@@ -184,6 +197,13 @@ func signingPayload(s Seal) string {
 		fmt.Sprintf("%d", s.EntryCount),
 		s.ChainDigest,
 		s.KeyID,
+		// The public key is bound into the payload. It was not, which meant a seal
+		// could be re-pointed at a different key and re-signed by whoever holds
+		// that key without invalidating anything: the signature covered the
+		// KeyID, which is a label, and not the key it names. The only thing that
+		// caught a swapped key was the trusted-key comparison, which the
+		// verifier skipped when no key was supplied.
+		s.PublicKey,
 		fmt.Sprintf("%d", len(rows)),
 		strings.Join(rows, ","),
 	}

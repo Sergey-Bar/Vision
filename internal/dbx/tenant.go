@@ -113,10 +113,7 @@ func (r *tenantRow) Scan(dest ...any) error {
 		return fmt.Errorf("dbx: this row has already been scanned; a pgx.Row yields its result once")
 	}
 	r.scanned = true
-	defer func() {
-		clearTenantOnConn(r.ctx, r.conn)
-		r.conn.Release()
-	}()
+	defer clearTenantOnConn(r.ctx, r.conn)
 
 	row := r.conn.QueryRow(r.ctx, r.sql, r.args...)
 	if err := row.Scan(dest...); err != nil {
@@ -187,17 +184,45 @@ func setTenantOnConn(ctx context.Context, conn *pgxpool.Conn, tc TenantContext) 
 	return nil
 }
 
-// clearTenantOnConn wipes the context before the connection goes back.
+// clearTenantOnConn wipes the context before the connection goes back, and
+// destroys the connection if it cannot.
 //
 // This is the line between "tenants are isolated" and "tenants are isolated
 // until the next statement". A connection returned to the pool with
-// app.tenant_id still set would run the next caller's statement as the previous
-// tenant.
+// app.tenant_id still set runs the next caller's statement as the previous
+// tenant, and the caller has no way to know: every query succeeds and every one
+// of them is wrong. This is invariant 5.
+//
+// The previous version discarded the error and released unconditionally, which
+// made a failed clear indistinguishable from a successful one. The setting is
+// session-level (set_config(..., false)), not SET LOCAL, precisely so it
+// survives the statement and applies to statements issued outside a
+// transaction; that is what makes this clear load-bearing rather than tidiness.
 func clearTenantOnConn(ctx context.Context, conn *pgxpool.Conn) {
-	_, _ = conn.Exec(context.WithoutCancel(ctx),
+	_, err := conn.Exec(context.WithoutCancel(ctx),
 		`SELECT set_config('app.tenant_id', '', false),
 		        set_config('app.actor_id', '', false),
 		        set_config('app.site_ids', '', false)`)
+	releaseConn(ctx, conn, err)
+}
+
+// releaseConn returns the connection to the pool, or destroys it first when the
+// tenant clear failed.
+//
+// Destroying is the right failure. A connection that may carry a tenant we can
+// no longer prove it has dropped is not a connection worth reusing, and the pool
+// opens another one. The cost is one connection; the cost of getting it wrong is
+// a tenant reading another tenant's data with no error anywhere.
+//
+// Release happens in both cases because pgxpool requires it: a Conn that is
+// never released keeps the pool open for ever. The pool is what actually
+// discards it — by the time it looks, the connection is closed, so it is
+// replaced rather than reissued.
+func releaseConn(ctx context.Context, conn *pgxpool.Conn, clearErr error) {
+	if clearErr != nil {
+		_ = conn.Conn().Close(context.WithoutCancel(ctx))
+	}
+	conn.Release()
 }
 
 type tenantRows struct {
@@ -211,6 +236,5 @@ func (r *tenantRows) Close() {
 	if !r.cleared {
 		r.cleared = true
 		clearTenantOnConn(context.Background(), r.conn)
-		r.conn.Release()
 	}
 }

@@ -275,61 +275,61 @@ func detailRuleID(d Detail) string {
 // This is the boundary the plan cares about: a stored AIObservation becomes a
 // rule input, and nothing else does. There is no path here that could produce an
 // observation.
+//
+// The observation attached to the trigger is picked by the same function the
+// explanation uses. It used to be `&d.Observations[0]` here and
+// `pickObservation` in the caller, which preferred supporting[0] and otherwise
+// the most recent — so the per-event signals the rule engine evaluated and the
+// observation the answer cited could be different records. Two readers of the
+// same replay disagreed, and which one you got depended on which field you read.
 func signalsFrom(d Detail) (rules.Signal, []rules.Signal) {
-	obsByEvent := map[string]*rules.AIObservation{}
-	var triggerObs *rules.AIObservation
-	for _, o := range d.Observations {
-		obs := &rules.AIObservation{
-			ObservationID:        o.ObservationID,
-			ProfileID:            o.ProfileID,
-			Structured:           asMap(o.StructuredOutput),
-			InsufficientEvidence: o.InsufficientEvidence,
-			Degraded:             o.DegradedReason != "" && o.DegradedReason != "none",
-			DegradedReason:       o.DegradedReason,
-		}
-		obsByEvent[o.ObservationID] = obs
-		_ = triggerObs
-	}
-	// An observation is attached to the trigger, since a stored observation is
-	// recorded against an incident and an event, and the first event is the
-	// trigger.
-	var first *ObservationView
+	byID := map[string]*rules.AIObservation{}
 	for i := range d.Observations {
-		first = &d.Observations[i]
-		break
+		byID[d.Observations[i].ObservationID] = asObservation(&d.Observations[i])
 	}
+	chosen := pickObservation(d.Observations, d.Verification.SupportingObservations)
+	var triggerObs *rules.AIObservation
+	if chosen != nil {
+		triggerObs = byID[chosen.ObservationID]
+	}
+
+	excluded := excludedDevices(d)
+
 	var trigger rules.Signal
 	var others []rules.Signal
 
 	for i, ev := range d.Events {
 		sig := rules.Signal{
-			EventID:         ev.EventID,
-			SourceEventID:   ev.SourceEventID,
-			EventType:       ev.EventType,
-			NormalizedAt:    ev.NormalizedAt,
-			ObservedAt:      ev.ObservedAt,
-			DeviceID:        ev.DeviceID,
-			ZoneID:          ev.ZoneID,
-			ClockDriftMS:    ev.ClockDriftMS,
-			Tier:            tierFor(ev.ClockSource),
-			Payload:         asMap(ev.Payload),
-			DriftedExcluded: ev.ClockDriftMS >= inSevereBand(d),
+			EventID:       ev.EventID,
+			SourceEventID: ev.SourceEventID,
+			EventType:     ev.EventType,
+			NormalizedAt:  ev.NormalizedAt,
+			ObservedAt:    ev.ObservedAt,
+			DeviceID:      ev.DeviceID,
+			ZoneID:        ev.ZoneID,
+			ClockDriftMS:  ev.ClockDriftMS,
+			Tier:          tierFor(ev.ClockSource),
+			Payload:       asMap(ev.Payload),
+			// Whether THIS event's own device was excluded for clock drift.
+			//
+			// It used to be `ev.ClockDriftMS >= inSevereBand(d)`, where the band
+			// was the measured drift of the *first* recorded exclusion applied as a
+			// threshold to *every* event. One incident with one 200ms-excluded
+			// camera therefore marked every unrelated event with 200ms of drift as
+			// excluded too. A drift exclusion is a fact about a device, not a
+			// number to be compared against, and the stored verification already
+			// records which devices they were.
+			DriftedExcluded: excluded[ev.DeviceID],
 		}
-		if i == 0 && first != nil {
-			obs := &rules.AIObservation{
-				ObservationID:        first.ObservationID,
-				ProfileID:            first.ProfileID,
-				Structured:           asMap(first.StructuredOutput),
-				InsufficientEvidence: first.InsufficientEvidence,
-				Degraded:             first.DegradedReason != "" && first.DegradedReason != "none",
-				DegradedReason:       first.DegradedReason,
-			}
-			sig.AIObservation = obs
-			obsByEvent[first.ObservationID] = obs
+		if i == 0 {
+			sig.AIObservation = triggerObs
 		}
-		for _, id := range d.Verification.SupportingObservations {
-			if obs, ok := obsByEvent[id]; ok && sig.AIObservation == nil {
-				sig.AIObservation = obs
+		if sig.AIObservation == nil {
+			for _, id := range d.Verification.SupportingObservations {
+				if obs, ok := byID[id]; ok {
+					sig.AIObservation = obs
+					break
+				}
 			}
 		}
 		if i == 0 {
@@ -341,16 +341,33 @@ func signalsFrom(d Detail) (rules.Signal, []rules.Signal) {
 	return trigger, others
 }
 
-// inSevereBand guesses the band from the policy the verification recorded. The
-// stored verification already carries the exclusions, so this only needs to be
-// consistent with them, not authoritative.
-func inSevereBand(d Detail) int32 {
+// excludedDevices is the set of device ids the stored verification recorded as
+// drift-excluded.
+//
+// With no exclusions recorded the set is empty, and every event's
+// DriftedExcluded is false. That is a different statement from "no device was
+// excluded" and the old code blurred them by returning a sentinel threshold of
+// 1<<30: a sentinel makes the absence of data look like a measurement, and an
+// event can never clear a billion milliseconds.
+func excludedDevices(d Detail) map[string]bool {
+	out := map[string]bool{}
 	for _, exc := range d.Verification.DriftExclusions {
 		if exc.DeviceID != "" {
-			return exc.DriftMS
+			out[exc.DeviceID] = true
 		}
 	}
-	return 1 << 30
+	return out
+}
+
+func asObservation(o *ObservationView) *rules.AIObservation {
+	return &rules.AIObservation{
+		ObservationID:        o.ObservationID,
+		ProfileID:            o.ProfileID,
+		Structured:           asMap(o.StructuredOutput),
+		InsufficientEvidence: o.InsufficientEvidence,
+		Degraded:             o.DegradedReason != "" && o.DegradedReason != "none",
+		DegradedReason:       o.DegradedReason,
+	}
 }
 
 // tierFor classifies a stored event. A device reporting its own state is Tier A
@@ -380,10 +397,19 @@ func asMap(v any) map[string]any {
 	return out
 }
 
+// pickObservation is the one place that decides which stored observation a replay
+// cites. The rule is: the first recorded supporting observation, and otherwise
+// the oldest, with observation_id as the tiebreak on created_at so "oldest" is
+// defined rather than dependent on the planner.
+//
+// It used to fall back to the most recent, while the per-event signals used the
+// oldest, so the explanation and the evaluation could name different records for
+// the same decision. The caller in Replay and the one in signalsFrom now share
+// this function.
 func pickObservation(all []ObservationView, supporting []string) *ObservationView {
-	if len(supporting) > 0 {
+	for _, want := range supporting {
 		for i := range all {
-			if all[i].ObservationID == supporting[0] {
+			if all[i].ObservationID == want {
 				return &all[i]
 			}
 		}
@@ -391,9 +417,10 @@ func pickObservation(all []ObservationView, supporting []string) *ObservationVie
 	if len(all) == 0 {
 		return nil
 	}
-	// The most recent, which is the one the decision cited when nothing else was
-	// recorded.
-	return &all[len(all)-1]
+	// all is ordered by (created_at, observation_id), so index 0 is the oldest by
+	// a total order. Choosing the newest instead would re-attribute a decision to
+	// a re-evaluation that did not make it.
+	return &all[0]
 }
 
 func durationMS(ms int32) time.Duration { return time.Duration(ms) * time.Millisecond }

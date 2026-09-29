@@ -22,6 +22,7 @@ stops honouring the contract.
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import json
 import os
@@ -217,6 +218,147 @@ def degraded_response(observation_id: str, profile_id: str, reason: str, detail:
 RUNTIME_VERSION = "ai-runtime/1"
 
 
+# --- Ed25519 verification (RFC 8032), verify only -----------------------
+#
+# This is a signature verifier, not a digest comparison wearing the word
+# "signature": a digest of the manifest next to the manifest proves only that
+# the two files agree with each other, and anyone who can edit the bundle can
+# regenerate that. The control here has to be one the vendor's private key can
+# produce and nobody else's can, so it is real Ed25519 over the manifest bytes.
+#
+# Verify-only, and pure Python, on purpose. This service is air-gapped and
+# stdlib-only by decision: a wheel in the release archive is a wheel to vet,
+# sign and ship. Signing needs a private key and therefore does not belong in
+# the plane at all — the vendor signs on their own side and we only check.
+#
+# The arithmetic follows RFC 8032 §5.1.4 (extended homogeneous coordinates,
+# complete formulas) and §5.1.3 (point decoding). It is rounded against the
+# RFC's own vectors in test_runtime.py, including the non-canonical encodings a
+# malleable verifier would accept. If this ever needs changing, change it with
+# those vectors still green; a verifier that rejects everything is a safe
+# failure and one that accepts everything is not, so the reject tests matter
+# more than the accept ones.
+_ED_P = 2**255 - 19
+_ED_L = 2**252 + 27742317777372353535851937790883648493
+_ED_D = (-121665 * pow(121666, _ED_P - 2, _ED_P)) % _ED_P
+_ED_SQRT_M1 = pow(2, (_ED_P - 1) // 4, _ED_P)
+
+
+def _ed_recover_x(y: int, sign: int) -> int | None:
+    """Recover the x-coordinate from y and the sign bit, or None if not a point.
+
+    ``y >= p`` is rejected here and that rejection is load-bearing, not an
+    edge case: a non-canonical y is a second encoding of a real point, and a
+    verifier that accepts one accepts a signature nobody signed.
+    """
+    if y >= _ED_P:
+        return None
+    x2 = (y * y - 1) * pow(_ED_D * y * y + 1, _ED_P - 2, _ED_P) % _ED_P
+    if x2 == 0:
+        # x == 0, so the sign bit is the only thing distinguishing two encodings
+        # of the same point, and a sign bit of 1 names a point that is not there.
+        return None if sign else 0
+    x = pow(x2, (_ED_P + 3) // 8, _ED_P)
+    if (x * x - x2) % _ED_P != 0:
+        x = x * _ED_SQRT_M1 % _ED_P
+    if (x * x - x2) % _ED_P != 0:
+        return None
+    if (x & 1) != sign:
+        x = _ED_P - x
+    return x
+
+
+def _ed_decode_point(encoded: bytes) -> tuple[int, int, int, int] | None:
+    if len(encoded) != 32:
+        return None
+    y = int.from_bytes(encoded, "little")
+    sign = y >> 255
+    y &= (1 << 255) - 1
+    x = _ed_recover_x(y, sign)
+    if x is None:
+        return None
+    return (x, y, 1, x * y % _ED_P)
+
+
+def _ed_add(p: tuple[int, int, int, int], q: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+    x1, y1, z1, t1 = p
+    x2, y2, z2, t2 = q
+    a = (y1 - x1) * (y2 - x2) % _ED_P
+    b = (y1 + x1) * (y2 + x2) % _ED_P
+    c = 2 * t1 * t2 * _ED_D % _ED_P
+    d = 2 * z1 * z2 % _ED_P
+    e, f, g, h = b - a, d - c, d + c, b + a
+    return (e * f % _ED_P, g * h % _ED_P, f * g % _ED_P, e * h % _ED_P)
+
+
+def _ed_mul(scalar: int, point: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+    result = (0, 1, 1, 0)
+    while scalar > 0:
+        if scalar & 1:
+            result = _ed_add(result, point)
+        point = _ed_add(point, point)
+        scalar >>= 1
+    return result
+
+
+def _ed_equal(p: tuple[int, int, int, int], q: tuple[int, int, int, int]) -> bool:
+    if (p[0] * q[2] - q[0] * p[2]) % _ED_P != 0:
+        return False
+    return (p[1] * q[2] - q[1] * p[2]) % _ED_P == 0
+
+
+_ED_G = _ed_decode_point(bytes.fromhex(
+    "5866666666666666666666666666666666666666666666666666666666666666"
+))
+
+
+def ed25519_verify(public_key: bytes, message: bytes, signature: bytes) -> bool:
+    """True when ``signature`` is a valid Ed25519 signature over ``message``.
+
+    Never raises: every malformed input is a False, because this runs on
+    whatever bytes arrived in an untrusted bundle and a verifier that throws
+    on bad input is a verifier whose failure mode depends on its caller.
+    """
+    if len(public_key) != 32 or len(signature) != 64:
+        return False
+    a = _ed_decode_point(public_key)
+    if a is None:
+        return False
+    r_enc = signature[:32]
+    r = _ed_decode_point(r_enc)
+    if r is None:
+        return False
+    s = int.from_bytes(signature[32:], "little")
+    if s >= _ED_L:
+        # A scalar at or above the group order is a non-canonical encoding, and
+        # accepting it is what makes a signature malleable: two byte strings, one
+        # key, two "valid" bundles. RFC 8032 §5.1.7 step 1 rejects it.
+        return False
+    k = int.from_bytes(hashlib.sha512(r_enc + public_key + message).digest(), "little") % _ED_L
+    # RFC 8032 §5.1.7 step 3. Checking [S]B == R + [k]A without the cofactor
+    # multiplication is the form the RFC's own reference verifier uses.
+    return _ed_equal(_ed_mul(s, _ED_G), _ed_add(r, _ed_mul(k, a)))
+
+
+def _decode_key_material(text: str, what: str, expected: int) -> bytes:
+    """Decode hex or base64 key material to exactly ``expected`` bytes."""
+    cleaned = "".join(text.split())
+    raw: bytes | None = None
+    if len(cleaned) == expected * 2:
+        try:
+            raw = bytes.fromhex(cleaned)
+        except ValueError:
+            raw = None
+    if raw is None:
+        try:
+            raw = base64.b64decode(cleaned, validate=True)
+        except (ValueError, base64.binascii.Error) as exc:
+            raise ValueError(f"{what} is neither hex nor base64: {exc}") from exc
+    if len(raw) != expected:
+        raise ValueError(f"{what} is {len(raw)} bytes, expected {expected}")
+    return raw
+
+
 class ModelBundle:
     """A signed model bundle on disk.
 
@@ -236,11 +378,18 @@ class ModelBundle:
         self._loaded = False
 
     def verify(self) -> None:
-        """Check the bundle's signature against the configured public key.
+        """Check the bundle's Ed25519 signature over the manifest bytes.
 
-        Without this, a model file edited on the host is indistinguishable from
-        one the vendor signed, and every observation it produces inherits that
-        ambiguity.
+        The key comes from the deployment, the signature from the bundle, and
+        the two meet here. Nothing else about the bundle is trusted, and
+        nothing is loaded from it until this returns: a model file edited on
+        the host is a tampered program, and every observation that model
+        produces inherits that ambiguity.
+
+        Every way this can fail is a refusal. A missing key, a key that is not
+        a point on the curve, an unreadable signature, and a signature that does
+        not check are the same answer to the operator — the bundle cannot be
+        trusted — because a check that can be skipped is not a check.
         """
         manifest = self.root / "manifest.json"
         if not manifest.is_file():
@@ -256,16 +405,40 @@ class ModelBundle:
         raw = manifest.read_bytes()
         if not raw:
             raise InferenceUnavailable(DEGRADED_MODEL_UNAVAILABLE, "the manifest is empty")
-        # The signature check itself is a deployment concern: a real site verifies
-        # with the vendor's public key. This refuses rather than assuming, because
-        # a verification that cannot fail is not a verification.
-        actual = hashlib.sha256(raw).hexdigest()
-        declared = signature_file.read_text(encoding="utf-8").strip()
-        if declared != actual:
+
+        try:
+            public_key = _decode_key_material(self.public_key, "the configured public key", 32)
+        except ValueError as exc:
             raise InferenceUnavailable(
                 DEGRADED_MODEL_UNAVAILABLE,
-                "the bundle signature does not match its manifest; the bundle was modified "
-                "after signing or the manifest is not what was signed",
+                f"the configured public key is not a usable Ed25519 key ({exc}); refusing rather "
+                "than skipping the check",
+            ) from exc
+        if _ed_decode_point(public_key) is None:
+            raise InferenceUnavailable(
+                DEGRADED_MODEL_UNAVAILABLE,
+                "the configured public key is not a point on the edwards25519 curve; it cannot "
+                "verify anything, so the bundle is refused rather than assumed good",
+            )
+
+        try:
+            declared = _decode_key_material(
+                signature_file.read_text(encoding="utf-8").strip(),
+                "the bundle signature",
+                64,
+            )
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise InferenceUnavailable(
+                DEGRADED_MODEL_UNAVAILABLE,
+                f"the bundle signature is not a readable 64-byte Ed25519 signature ({exc})",
+            ) from exc
+
+        if not ed25519_verify(public_key, raw, declared):
+            raise InferenceUnavailable(
+                DEGRADED_MODEL_UNAVAILABLE,
+                "the Ed25519 signature does not verify against the manifest under the configured "
+                "public key; the bundle was modified after signing, or it was signed by a key "
+                "this site does not trust",
             )
 
         body = json.loads(raw)

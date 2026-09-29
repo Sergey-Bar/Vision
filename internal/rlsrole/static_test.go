@@ -191,6 +191,21 @@ func literalOf(expr ast.Expr) string {
 	return ""
 }
 
+// mentionsTenantTable reports the tenant-scoped table a SQL string names, or "".
+//
+// A match has to be a whole word, so `auditor_log` is not a mention of `audit`.
+// It does NOT have to be the whole identifier: `edges_active` is a view over
+// `edges` and inherits its isolation, `inbox_events_2026_01` is a partition of
+// `inbox_events`, and `user_roles` is `user` continued by an underscore. The
+// matcher reaches all of those because the entries come in singular and plural
+// pairs and the loop takes the first that ends on an identifier boundary.
+//
+// This was believed not to work. The claim was that `edges_active` escaped the
+// guard because the list says `edges` and not `edges_active` — but the singular
+// `edge` entry matches first, and the same holds for every singular/plural pair
+// in the list. The guard was covering the view. It is asserted here anyway,
+// because a guard nobody has tested is a guard nobody has checked, and the
+// reason it was believed broken is worth recording.
 func mentionsTenantTable(sql string) string {
 	lower := strings.ToLower(sql)
 	for _, table := range tenantScopedTables {
@@ -222,6 +237,41 @@ func mentionsTenantTable(sql string) string {
 
 func isWordByte(b byte) bool {
 	return b == '_' || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
+}
+
+// A guard that nobody has tested is a guard nobody has checked. This one was
+// believed not to cover `edges_active` — the list says `edges`, the SQL says
+// `edges_active` — which would have explained how graph.Walk shipped reading the
+// raw pool. It was false: the singular `edge` entry matches first. The cases
+// below are the ones that decide whether the guard fires, and they are asserted
+// rather than assumed.
+func TestMentionsTenantTableCoversViewsAndIndexes(t *testing.T) {
+	cases := []struct {
+		sql  string
+		want string // "" means no match is expected
+	}{
+		// "tenant" is the first entry and it is a substring of tenant_id, so it
+		// wins wherever the word appears. That is fine: a match is a match, and
+		// which entry it reports is only a label in the failure message.
+		{"SELECT node_type FROM edges_active WHERE tenant_id = $1", "tenant"},
+		{"SELECT * FROM edges_active", "edge"},
+		{"SELECT count(*) FROM edge_revocations", "edge"},
+		{"INSERT INTO inbox_events_2026_01 VALUES (1)", "inbox_event"},
+		{"SELECT * FROM canonical_events_default", "canonical_event"},
+		{"SELECT * FROM user_roles", "user"},
+		{"SELECT * FROM users", "user"},
+		// A longer word that merely starts the same is not a mention: without
+		// this, the plural entries would flag every unrelated identifier.
+		{"SELECT * FROM sites_of_users", "site"},
+		{"SELECT * FROM auditor_log", ""},
+		{"SELECT 1", ""},
+		{"SELECT * FROM integrations", "integration"},
+	}
+	for _, tc := range cases {
+		if got := mentionsTenantTable(tc.sql); got != tc.want {
+			t.Errorf("mentionsTenantTable(%q) = %q, want %q", tc.sql, got, tc.want)
+		}
+	}
 }
 
 func repoRoot(t *testing.T) string {

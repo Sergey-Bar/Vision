@@ -11,7 +11,7 @@ import (
 // The metric names are the plan's contract. A dashboard somebody hand-wrote
 // against a name this package invents is a dashboard that quietly stops updating.
 func TestEveryPlannedMetricExists(t *testing.T) {
-	planned := []string{
+	counters := []string{
 		observability.CounterInboxAccepted,
 		observability.CounterInboxDeadLettered,
 		observability.CounterCanonicalEvents,
@@ -22,11 +22,13 @@ func TestEveryPlannedMetricExists(t *testing.T) {
 		observability.CounterVLMErrors,
 		observability.CounterEvidenceFetched,
 		observability.CounterEvidenceFailed,
-		observability.CounterActionsDispatched,
+		observability.CounterOutboxDelivered,
 		observability.CounterDeadLettersVisible,
 		observability.CounterRuleBundleActivated,
 		observability.CounterCheckpointsSealed,
 		observability.CounterAuditAppends,
+	}
+	gauges := []string{
 		observability.GaugeBacklogDepth,
 		observability.GaugeIngestLagSeconds,
 		observability.GaugeOutboxPending,
@@ -40,17 +42,84 @@ func TestEveryPlannedMetricExists(t *testing.T) {
 		observability.GaugeClockSevereDevices,
 		observability.GaugePostgresConns,
 	}
+	planned := append(append([]string{}, counters...), gauges...)
 	for _, name := range planned {
 		if name == "" {
 			t.Error("a planned metric name is empty")
 		}
 	}
-	// All of them must be seedable, which is the closed-set check.
-	c := observability.NewCounters()
-	snapshot := c.Snapshot()
+
+	// A metric name is a claim about what is being measured, published to a
+	// scraper. "actions_dispatched_total" named a class of thing that does not
+	// exist in M1 — the counter is the relay acknowledging an outbox message it
+	// then logged and discarded — and a dashboard built on it would report a site
+	// taking physical action when it was counting its own log writes. The name
+	// has to survive being read by somebody who is not looking at the code.
 	for _, name := range planned {
+		if name == "actions_dispatched_total" {
+			t.Error("actions_dispatched_total is back. It is the name this counter " +
+				"used to have and it describes physical dispatch, which M1 does not do")
+		}
+	}
+	if observability.CounterOutboxDelivered != "outbox_messages_delivered_total" {
+		t.Errorf("the outbox counter is %q; the name must say what is counted, which is "+
+			"outbox messages delivered, not actions dispatched",
+			observability.CounterOutboxDelivered)
+	}
+
+	// Counters must be seeded, which is the closed-set check: an unknown name is
+	// silently dropped, and a dropped metric is a dashboard that quietly stops
+	// updating.
+	snapshot := observability.NewCounters().Snapshot()
+	for _, name := range counters {
 		if _, ok := snapshot[name]; !ok {
-			t.Errorf("metric %q is not in the registry", name)
+			t.Errorf("counter %q is not in the registry", name)
+		}
+	}
+
+	// A gauge must NOT be in the counter set. It used to be, because the closed
+	// set was one map and NewCounters seeded every name into it — so Render
+	// emitted each gauge twice, once with `# TYPE x gauge` and once with
+	// `# TYPE x counter`, and a metric name carrying two type declarations is a
+	// scrape the parser rejects. The collector reports that as a broken core.
+	for _, name := range gauges {
+		if _, ok := snapshot[name]; ok {
+			t.Errorf("gauge %q is present in the counter set; it would be emitted with two "+
+				"conflicting type declarations and the whole scrape would fail to parse", name)
+		}
+		if !observability.IsGauge(name) {
+			t.Errorf("%q is planned as a gauge but IsGauge says otherwise", name)
+		}
+		if _, ok := observability.NewCounters().Snapshot()[name]; ok {
+			t.Errorf("gauge %q survived into the counter snapshot", name)
+		}
+	}
+
+	// And the render itself must declare each name exactly once.
+	r := observability.NewRegistry()
+	for _, name := range gauges {
+		r.Gauges.Set(name, 1)
+	}
+	body := r.Render()
+	declarations := map[string]int{}
+	for _, line := range strings.Split(body, "\n") {
+		if !strings.HasPrefix(line, "# TYPE ") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 4 {
+			continue
+		}
+		declarations[fields[2]]++
+	}
+	for name, n := range declarations {
+		if n > 1 {
+			t.Errorf("the exposition declares %q %d times:\n%s", name, n, body)
+		}
+	}
+	for _, name := range planned {
+		if declarations[name] == 0 {
+			t.Errorf("metric %q is absent from the exposition:\n%s", name, body)
 		}
 	}
 }

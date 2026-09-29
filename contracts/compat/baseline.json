@@ -391,6 +391,12 @@
           "type": "bool"
         },
         {
+          "number": 10,
+          "name": "attributes",
+          "type": "map\u003cstring,string\u003e",
+          "repeated": true
+        },
+        {
           "number": 11,
           "name": "registered_at",
           "type": "google.protobuf.Timestamp"
@@ -1883,6 +1889,1057 @@
           "name": "VERIFICATION_STATE_SUPPRESSED"
         }
       ]
+    }
+  },
+  "schemas": {
+    "ai-observations/door-forced.schema.json": {
+      "properties": {
+        "confidence": {
+          "type": "number"
+        },
+        "doorState": {
+          "type": "enum",
+          "required": true,
+          "enum": [
+            "ajar",
+            "closed",
+            "forced",
+            "open",
+            "unknown"
+          ]
+        },
+        "insufficientEvidence": {
+          "type": "boolean",
+          "required": true
+        },
+        "obstruction": {
+          "type": "enum",
+          "enum": [
+            "body",
+            "none",
+            "object",
+            "unknown"
+          ]
+        },
+        "openDurationSeconds": {
+          "type": "integer"
+        },
+        "personPresent": {
+          "type": "boolean"
+        },
+        "profileId": {
+          "type": "const:\"door-forced\""
+        },
+        "schemaVersion": {
+          "type": "const:1",
+          "required": true
+        },
+        "summary": {
+          "type": "string",
+          "required": true
+        }
+      }
+    },
+    "ai-observations/restricted-person.schema.json": {
+      "properties": {
+        "accessState": {
+          "type": "enum",
+          "enum": [
+            "authorized",
+            "forced",
+            "tailgated",
+            "unauthorized",
+            "unknown"
+          ]
+        },
+        "afterHours": {
+          "type": "boolean"
+        },
+        "confidence": {
+          "type": "number"
+        },
+        "insufficientEvidence": {
+          "type": "boolean",
+          "required": true
+        },
+        "persons": {
+          "type": "array",
+          "required": true
+        },
+        "persons[]": {
+          "type": "object"
+        },
+        "persons[].carryingObject": {
+          "type": "boolean"
+        },
+        "persons[].direction": {
+          "type": "enum",
+          "enum": [
+            "inbound",
+            "lateral",
+            "outbound",
+            "unknown"
+          ]
+        },
+        "persons[].obstructed": {
+          "type": "boolean"
+        },
+        "persons[].present": {
+          "type": "boolean",
+          "required": true
+        },
+        "persons[].region": {
+          "type": "string",
+          "required": true
+        },
+        "persons[].uniformed": {
+          "type": "boolean"
+        },
+        "profileId": {
+          "type": "const:\"restricted-person\""
+        },
+        "restrictedZoneBreach": {
+          "type": "boolean"
+        },
+        "schemaVersion": {
+          "type": "const:1",
+          "required": true
+        },
+        "summary": {
+          "type": "string",
+          "required": true
+        }
+      }
+    },
+    "ai-observations/vehicle-at-gate.schema.json": {
+      "properties": {
+        "confidence": {
+          "type": "number"
+        },
+        "gateState": {
+          "type": "enum",
+          "enum": [
+            "closed",
+            "closing",
+            "open",
+            "opening",
+            "unknown"
+          ]
+        },
+        "insufficientEvidence": {
+          "type": "boolean",
+          "required": true
+        },
+        "plateLegible": {
+          "type": "boolean"
+        },
+        "plateText": {
+          "type": ""
+        },
+        "profileId": {
+          "type": "const:\"vehicle-at-gate\""
+        },
+        "schemaVersion": {
+          "type": "const:1",
+          "required": true
+        },
+        "summary": {
+          "type": "string",
+          "required": true
+        },
+        "vehicleCount": {
+          "type": "integer"
+        },
+        "vehicleState": {
+          "type": "enum",
+          "required": true,
+          "enum": [
+            "absent",
+            "approaching",
+            "at_gate",
+            "departing",
+            "unknown"
+          ]
+        }
+      }
+    },
+    "bundle-manifest.schema.json": {
+      "properties": {
+        "compatibility": {
+          "type": "object",
+          "required": true
+        },
+        "compatibility.contractsVersion": {
+          "type": "string",
+          "required": true
+        },
+        "compatibility.maxCoreVersion": {
+          "type": "string",
+          "required": true
+        },
+        "compatibility.minCoreVersion": {
+          "type": "string",
+          "required": true
+        },
+        "createdAt": {
+          "type": "string",
+          "required": true
+        },
+        "files": {
+          "type": "array",
+          "required": true
+        },
+        "files[]": {
+          "type": "object"
+        },
+        "files[].mode": {
+          "type": "string"
+        },
+        "files[].path": {
+          "type": "string",
+          "required": true
+        },
+        "files[].required": {
+          "type": "boolean"
+        },
+        "files[].sha256": {
+          "type": "string",
+          "required": true
+        },
+        "files[].sizeBytes": {
+          "type": "integer",
+          "required": true
+        },
+        "gitCommit": {
+          "type": "string"
+        },
+        "migrations": {
+          "type": "object",
+          "required": true
+        },
+        "migrations.maxSchemaVersion": {
+          "type": "integer",
+          "required": true
+        },
+        "migrations.migrations": {
+          "type": "array",
+          "required": true
+        },
+        "migrations.migrations[]": {
+          "type": "object"
+        },
+        "migrations.migrations[].name": {
+          "type": "string"
+        },
+        "migrations.migrations[].phase": {
+          "type": "enum",
+          "required": true,
+          "enum": [
+            "backfill",
+            "contract",
+            "expand"
+          ]
+        },
+        "migrations.migrations[].version": {
+          "type": "integer",
+          "required": true
+        },
+        "migrations.minSchemaVersion": {
+          "type": "integer",
+          "required": true
+        },
+        "platform": {
+          "type": "string",
+          "required": true
+        },
+        "product": {
+          "type": "const:\"security-platform\"",
+          "required": true
+        },
+        "provenance": {
+          "type": "object"
+        },
+        "provenance.attestations": {
+          "type": "array"
+        },
+        "provenance.attestations[]": {
+          "type": "string"
+        },
+        "provenance.buildFinishedAt": {
+          "type": "string"
+        },
+        "provenance.buildStartedAt": {
+          "type": "string"
+        },
+        "provenance.builder": {
+          "type": "string"
+        },
+        "provenance.sourceDigest": {
+          "type": "string"
+        },
+        "sbom": {
+          "type": "object",
+          "required": true
+        },
+        "sbom.format": {
+          "type": "enum",
+          "required": true,
+          "enum": [
+            "cyclonedx-json",
+            "spdx-json",
+            "spdx-tag-value"
+          ]
+        },
+        "sbom.path": {
+          "type": "string",
+          "required": true
+        },
+        "sbom.sha256": {
+          "type": "string",
+          "required": true
+        },
+        "schemaVersion": {
+          "type": "const:1",
+          "required": true
+        },
+        "signature": {
+          "type": "object",
+          "required": true
+        },
+        "signature.algorithm": {
+          "type": "enum",
+          "required": true,
+          "enum": [
+            "ecdsa-p256-sha256",
+            "ed25519",
+            "rsa-pss-sha256"
+          ]
+        },
+        "signature.keyId": {
+          "type": "string",
+          "required": true
+        },
+        "signature.publicKey": {
+          "type": "string",
+          "required": true
+        },
+        "signature.signedAt": {
+          "type": "string"
+        },
+        "signature.value": {
+          "type": "string",
+          "required": true
+        },
+        "version": {
+          "type": "string",
+          "required": true
+        }
+      }
+    },
+    "rule-bundle.schema.json": {
+      "properties": {
+        "apiVersion": {
+          "type": "const:\"security.io/v1\"",
+          "required": true
+        },
+        "description": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "const:\"RuleBundle\"",
+          "required": true
+        },
+        "rules": {
+          "type": "array",
+          "required": true
+        },
+        "rules[]": {
+          "type": "object"
+        },
+        "rules[].description": {
+          "type": "string"
+        },
+        "rules[].enabled": {
+          "type": "boolean",
+          "required": true
+        },
+        "rules[].id": {
+          "type": "string",
+          "required": true
+        },
+        "rules[].priority": {
+          "type": "integer",
+          "required": true
+        },
+        "rules[].tags": {
+          "type": "array"
+        },
+        "rules[].tags[]": {
+          "type": "string"
+        },
+        "rules[].then": {
+          "type": "object",
+          "required": true
+        },
+        "rules[].then.createIncident": {
+          "type": "boolean",
+          "required": true
+        },
+        "rules[].then.dispatch": {
+          "type": "array"
+        },
+        "rules[].then.dispatch[]": {
+          "type": "object"
+        },
+        "rules[].then.dispatch[].target": {
+          "type": "string",
+          "required": true
+        },
+        "rules[].then.dispatch[].type": {
+          "type": "enum",
+          "required": true,
+          "enum": [
+            "fetch_evidence",
+            "notify_operator",
+            "notify_supervisor",
+            "request_vlm"
+          ]
+        },
+        "rules[].then.escalate": {
+          "type": "boolean"
+        },
+        "rules[].then.markDuplicate": {
+          "type": "boolean"
+        },
+        "rules[].then.requireAIObservation": {
+          "type": "boolean"
+        },
+        "rules[].then.severity": {
+          "type": "enum",
+          "enum": [
+            "critical",
+            "high",
+            "info",
+            "low",
+            "medium"
+          ]
+        },
+        "rules[].then.suppress": {
+          "type": "boolean"
+        },
+        "rules[].then.title": {
+          "type": "string"
+        },
+        "rules[].when": {
+          "type": "object",
+          "required": true
+        },
+        "rules[].when.aiObservation": {
+          "type": "object"
+        },
+        "rules[].when.aiObservation.equals": {
+          "type": "any"
+        },
+        "rules[].when.aiObservation.field": {
+          "type": "string"
+        },
+        "rules[].when.aiObservation.profileId": {
+          "type": "string",
+          "required": true
+        },
+        "rules[].when.all": {
+          "type": "array"
+        },
+        "rules[].when.all[]": {
+          "type": "$recursive"
+        },
+        "rules[].when.any": {
+          "type": "array"
+        },
+        "rules[].when.any[]": {
+          "type": "$recursive"
+        },
+        "rules[].when.clockDrift": {
+          "type": "object"
+        },
+        "rules[].when.clockDrift.maxMs": {
+          "type": "integer"
+        },
+        "rules[].when.corroborate": {
+          "type": "object"
+        },
+        "rules[].when.corroborate.eventTypes": {
+          "type": "array",
+          "required": true
+        },
+        "rules[].when.corroborate.eventTypes[]": {
+          "type": "string"
+        },
+        "rules[].when.corroborate.ifAIAvailable": {
+          "type": "object"
+        },
+        "rules[].when.corroborate.ifAIAvailable.degradeTo": {
+          "type": "enum",
+          "required": true,
+          "enum": [
+            "UNVERIFIED",
+            "proceed_without"
+          ]
+        },
+        "rules[].when.corroborate.minEvidenceTier": {
+          "type": "enum",
+          "enum": [
+            "A",
+            "B",
+            "C"
+          ]
+        },
+        "rules[].when.corroborate.minSignals": {
+          "type": "integer",
+          "required": true
+        },
+        "rules[].when.corroborate.requiresAIObservation": {
+          "type": "boolean"
+        },
+        "rules[].when.device": {
+          "type": "object"
+        },
+        "rules[].when.device.id": {
+          "type": "string"
+        },
+        "rules[].when.device.kind": {
+          "type": "enum",
+          "enum": [
+            "access_reader",
+            "alarm_panel",
+            "camera",
+            "door",
+            "gate",
+            "other",
+            "sensor"
+          ]
+        },
+        "rules[].when.device.tags": {
+          "type": "array"
+        },
+        "rules[].when.device.tags[]": {
+          "type": "string"
+        },
+        "rules[].when.eventType": {
+          "type": "array",
+          "enum": [
+            "access.denied",
+            "access.granted",
+            "alarm.acknowledged",
+            "alarm.closed",
+            "alarm.created",
+            "analytics",
+            "bookmark",
+            "device.camera_offline",
+            "device.camera_online",
+            "device_state",
+            "gate",
+            "metadata",
+            "motion",
+            "recording.started",
+            "recording.stopped"
+          ]
+        },
+        "rules[].when.eventType[]": {
+          "type": "enum",
+          "enum": [
+            "access.denied",
+            "access.granted",
+            "alarm.acknowledged",
+            "alarm.closed",
+            "alarm.created",
+            "analytics",
+            "bookmark",
+            "device.camera_offline",
+            "device.camera_online",
+            "device_state",
+            "gate",
+            "metadata",
+            "motion",
+            "recording.started",
+            "recording.stopped"
+          ]
+        },
+        "rules[].when.field": {
+          "type": "object"
+        },
+        "rules[].when.field.op": {
+          "type": "enum",
+          "required": true,
+          "enum": [
+            "contains_prefix",
+            "eq",
+            "exists",
+            "gt",
+            "gte",
+            "in",
+            "lt",
+            "lte",
+            "ne",
+            "not_in"
+          ]
+        },
+        "rules[].when.field.path": {
+          "type": "string",
+          "required": true
+        },
+        "rules[].when.field.value": {
+          "type": "any",
+          "required": true
+        },
+        "rules[].when.not": {
+          "type": "$recursive"
+        },
+        "rules[].when.schedule": {
+          "type": "object"
+        },
+        "rules[].when.schedule.id": {
+          "type": "string",
+          "required": true
+        },
+        "rules[].when.schedule.invert": {
+          "type": "boolean"
+        },
+        "rules[].when.timeWindow": {
+          "type": "object"
+        },
+        "rules[].when.timeWindow.direction": {
+          "type": "enum",
+          "enum": [
+            "after",
+            "before",
+            "either"
+          ]
+        },
+        "rules[].when.timeWindow.durationSeconds": {
+          "type": "integer"
+        },
+        "rules[].when.timeWindow.field": {
+          "type": "const:\"normalized_at\"",
+          "required": true
+        },
+        "rules[].when.zone": {
+          "type": "object"
+        },
+        "rules[].when.zone.ancestorOf": {
+          "type": "string"
+        },
+        "rules[].when.zone.id": {
+          "type": "string"
+        },
+        "rules[].when.zone.pathPrefix": {
+          "type": "string"
+        },
+        "settings": {
+          "type": "object",
+          "required": true
+        },
+        "settings.burstMerge": {
+          "type": "object"
+        },
+        "settings.burstMerge.maxEvents": {
+          "type": "integer"
+        },
+        "settings.burstMerge.windowSeconds": {
+          "type": "integer"
+        },
+        "settings.clock": {
+          "type": "object",
+          "required": true
+        },
+        "settings.clock.driftSevereMs": {
+          "type": "integer",
+          "required": true
+        },
+        "settings.clock.driftWarnMs": {
+          "type": "integer",
+          "required": true
+        },
+        "settings.clock.referenceSource": {
+          "type": "enum",
+          "required": true,
+          "enum": [
+            "host",
+            "ntp",
+            "vms"
+          ]
+        },
+        "settings.clock.skewTolerance": {
+          "type": "integer",
+          "required": true
+        },
+        "settings.dedupe": {
+          "type": "object"
+        },
+        "settings.dedupe.keys": {
+          "type": "array"
+        },
+        "settings.dedupe.keys[]": {
+          "type": "string"
+        },
+        "settings.dedupe.windowSeconds": {
+          "type": "integer"
+        },
+        "site": {
+          "type": "object",
+          "required": true
+        },
+        "site.siteId": {
+          "type": "string",
+          "required": true
+        },
+        "site.timezones": {
+          "type": "array",
+          "required": true
+        },
+        "site.timezones[]": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string",
+          "required": true
+        }
+      }
+    },
+    "site-config.schema.json": {
+      "properties": {
+        "ai": {
+          "type": "object",
+          "required": true
+        },
+        "ai.enabled": {
+          "type": "boolean"
+        },
+        "ai.maxAttempts": {
+          "type": "integer"
+        },
+        "ai.requestTimeoutSeconds": {
+          "type": "integer"
+        },
+        "ai.runtimeUrl": {
+          "type": "string"
+        },
+        "ai.secretRef": {
+          "type": "string"
+        },
+        "console": {
+          "type": "object"
+        },
+        "console.listenAddress": {
+          "type": "string"
+        },
+        "console.loginRateLimitPerMinute": {
+          "type": "integer"
+        },
+        "console.sessionAbsoluteHours": {
+          "type": "integer"
+        },
+        "console.sessionIdleMinutes": {
+          "type": "integer"
+        },
+        "console.tlsCertRef": {
+          "type": "string"
+        },
+        "console.tlsKeyRef": {
+          "type": "string"
+        },
+        "database": {
+          "type": "object",
+          "required": true
+        },
+        "database.connMaxLifetimeSeconds": {
+          "type": "integer"
+        },
+        "database.database": {
+          "type": "string"
+        },
+        "database.diskCriticalFreePercent": {
+          "type": "integer"
+        },
+        "database.diskWarnFreePercent": {
+          "type": "integer"
+        },
+        "database.host": {
+          "type": "string"
+        },
+        "database.maxIdleConns": {
+          "type": "integer"
+        },
+        "database.maxOpenConns": {
+          "type": "integer"
+        },
+        "database.mode": {
+          "type": "enum",
+          "required": true,
+          "enum": [
+            "external",
+            "managed"
+          ]
+        },
+        "database.port": {
+          "type": "integer"
+        },
+        "database.sslMode": {
+          "type": "enum",
+          "enum": [
+            "disable",
+            "require",
+            "verify-full"
+          ]
+        },
+        "database.statementTimeoutMs": {
+          "type": "integer"
+        },
+        "evidence": {
+          "type": "object",
+          "required": true
+        },
+        "evidence.backend": {
+          "type": "const:\"filesystem\"",
+          "required": true
+        },
+        "evidence.defaultRetentionDays": {
+          "type": "integer"
+        },
+        "evidence.diskCriticalFreePercent": {
+          "type": "integer"
+        },
+        "evidence.diskWarnFreePercent": {
+          "type": "integer"
+        },
+        "evidence.hashAlgorithm": {
+          "type": "const:\"sha256\""
+        },
+        "evidence.root": {
+          "type": "string",
+          "required": true
+        },
+        "integrations": {
+          "type": "array"
+        },
+        "integrations[]": {
+          "type": "object"
+        },
+        "integrations[].baseUrl": {
+          "type": "string"
+        },
+        "integrations[].enabled": {
+          "type": "boolean",
+          "required": true
+        },
+        "integrations[].fixturePath": {
+          "type": "string"
+        },
+        "integrations[].integrationId": {
+          "type": "string",
+          "required": true
+        },
+        "integrations[].pollIntervalSeconds": {
+          "type": "integer"
+        },
+        "integrations[].replayRateMultiplier": {
+          "type": "number"
+        },
+        "integrations[].secretRef": {
+          "type": "string"
+        },
+        "integrations[].type": {
+          "type": "enum",
+          "required": true,
+          "enum": [
+            "replay_fixture",
+            "xprotect_milestone",
+            "xprotect_mip"
+          ]
+        },
+        "observability": {
+          "type": "object",
+          "required": true
+        },
+        "observability.checkpointIntervalMinutes": {
+          "type": "integer"
+        },
+        "observability.logFileEnabled": {
+          "type": "boolean"
+        },
+        "observability.logFormat": {
+          "type": "enum",
+          "enum": [
+            "console",
+            "json"
+          ]
+        },
+        "observability.logLevel": {
+          "type": "enum",
+          "enum": [
+            "debug",
+            "error",
+            "info",
+            "warn"
+          ]
+        },
+        "observability.logRetainDays": {
+          "type": "integer"
+        },
+        "observability.logRotateMaxMB": {
+          "type": "integer"
+        },
+        "observability.metricsListenAddress": {
+          "type": "string"
+        },
+        "paths": {
+          "type": "object",
+          "required": true
+        },
+        "paths.checkpoints": {
+          "type": "string",
+          "required": true
+        },
+        "paths.data": {
+          "type": "string",
+          "required": true
+        },
+        "paths.evidence": {
+          "type": "string",
+          "required": true
+        },
+        "paths.logs": {
+          "type": "string",
+          "required": true
+        },
+        "paths.program": {
+          "type": "string"
+        },
+        "paths.secrets": {
+          "type": "string",
+          "required": true
+        },
+        "queue": {
+          "type": "object"
+        },
+        "queue.backoffBaseSeconds": {
+          "type": "integer"
+        },
+        "queue.backoffMaxSeconds": {
+          "type": "integer"
+        },
+        "queue.backpressureHardLimit": {
+          "type": "integer"
+        },
+        "queue.backpressureSoftLimit": {
+          "type": "integer"
+        },
+        "queue.leaseSeconds": {
+          "type": "integer"
+        },
+        "site": {
+          "type": "object",
+          "required": true
+        },
+        "site.name": {
+          "type": "string",
+          "required": true
+        },
+        "site.siteId": {
+          "type": "string",
+          "required": true
+        },
+        "site.siteTags": {
+          "type": "array"
+        },
+        "site.siteTags[]": {
+          "type": "string"
+        },
+        "site.tenantId": {
+          "type": "string",
+          "required": true
+        },
+        "site.timezones": {
+          "type": "array",
+          "required": true
+        },
+        "site.timezones[]": {
+          "type": "string"
+        },
+        "version": {
+          "type": "const:1",
+          "required": true
+        }
+      }
+    }
+  },
+  "openapi": {
+    "v1/openapi.yaml": {
+      "paths": {
+        "/v1/audit/checkpoints": [
+          "get"
+        ],
+        "/v1/audit/ledger": [
+          "get"
+        ],
+        "/v1/auth/login": [
+          "post"
+        ],
+        "/v1/auth/mfa/verify": [
+          "post"
+        ],
+        "/v1/auth/session": [
+          "delete",
+          "get"
+        ],
+        "/v1/evidence/{evidenceId}/content": [
+          "get"
+        ],
+        "/v1/health": [
+          "get"
+        ],
+        "/v1/health/ready": [
+          "get"
+        ],
+        "/v1/incidents": [
+          "get"
+        ],
+        "/v1/incidents/{incidentId}": [
+          "get"
+        ],
+        "/v1/incidents/{incidentId}/dispositions": [
+          "post"
+        ],
+        "/v1/incidents/{incidentId}/evidence": [
+          "get",
+          "post"
+        ],
+        "/v1/incidents/{incidentId}/explanation": [
+          "get"
+        ],
+        "/v1/ops/clock-drift": [
+          "get"
+        ],
+        "/v1/ops/dead-letters": [
+          "get"
+        ],
+        "/v1/rules/bundles": [
+          "get",
+          "post"
+        ],
+        "/v1/rules/bundles/active/rollback": [
+          "post"
+        ],
+        "/v1/rules/bundles/{version}/activate": [
+          "post"
+        ],
+        "/v1/rules/bundles/{version}/lint": [
+          "post"
+        ],
+        "/v1/rules/bundles/{version}/simulate": [
+          "post"
+        ]
+      }
     }
   }
 }

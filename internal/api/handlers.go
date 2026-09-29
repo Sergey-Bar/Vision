@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/Sergey-Bar/Ai-Captain/internal/evidence"
 	"github.com/Sergey-Bar/Ai-Captain/internal/identity"
 	"github.com/Sergey-Bar/Ai-Captain/internal/incidents"
+	"github.com/Sergey-Bar/Ai-Captain/internal/observability"
 	"github.com/Sergey-Bar/Ai-Captain/internal/rules"
 )
 
@@ -29,6 +31,11 @@ type Deps struct {
 	ClockDrift  ClockDriftReader
 	// InboxCounts backs the SLO alert thresholds.
 	InboxCounts func() (Backlog, error)
+	// Metrics is the observability registry. Nil means the route says the
+	// endpoint is not configured rather than rendering an empty exposition: an
+	// empty scrape and a broken scrape look identical to a collector, and only
+	// one of them is a lie.
+	Metrics *observability.Registry
 }
 
 // DeadLetterReader is the dead-letter surface.
@@ -153,6 +160,20 @@ func (s *Server) RegisterRoutes(d Deps) func(*http.ServeMux) {
 				s.handleClockDrift(w, r, p, d)
 			}))
 
+		// Metrics. audit.read is the capability, not a new one.
+		//
+		// A dedicated metrics capability would be a migration and an ADR, and the
+		// principal that reads the audit ledger is already the one reading the
+		// metrics: a security director reviewing both needs the same role, and a
+		// second role to grant alongside it doubles the ways an install ends up
+		// with an operator who can see the pipeline but not the events it decided
+		// on. Revisit if a monitoring agent ever needs to scrape without reading
+		// the ledger.
+		mux.Handle("GET /v1/metrics",
+			s.requireCapability(identity.CapAuditRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleMetrics(w, r, p, d)
+			}))
+
 		// The console.
 		mux.HandleFunc("GET /{$}", s.handleConsoleRoot)
 		// The console's incident pages are gated exactly as the API's are. They
@@ -219,11 +240,15 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	// res.Principal, not res.Session.Principal. Session is nil by construction
+	// on this branch — the early return above is the non-MFA case — so reading
+	// the principal off it dereferenced nil and turned every MFA login for every
+	// enrolled operator into a 500.
 	WriteJSON(w, http.StatusOK, map[string]any{
 		"mfaRequired": true,
 		"challengeId": res.ChallengeID,
 		"expiresAt":   res.ExpiresAt,
-		"session":     s.sessionInfo(res.Session.Principal),
+		"session":     s.sessionInfo(res.Principal),
 	})
 }
 
@@ -482,6 +507,29 @@ func (s *Server) handleEvidenceContent(w http.ResponseWriter, r *http.Request, p
 	w.WriteHeader(http.StatusOK)
 	buf := make([]byte, 64*1024)
 	_, _ = copyStream(w, rc, buf)
+}
+
+// handleMetrics renders the Prometheus text exposition.
+//
+// text/plain rather than application/json, and version=0.0.4 because that is
+// the version the exposition this package emits is the 0.0.4 text format. A
+// collector that is handed the wrong content type will parse it as JSON and
+// report a parse failure that looks like a broken core.
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
+	if d.Metrics == nil {
+		WriteError(w, http.StatusServiceUnavailable, "not_wired",
+			"The metrics registry is not configured. A scrape that returns an empty "+
+				"exposition is indistinguishable from a core that has done no work, and "+
+				"only one of those is true.", requestID(r))
+		return
+	}
+	body := d.Metrics.Render()
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	// A scrape is a point-in-time read. Caching it means a collector can be
+	// showing an operator a number that is minutes old with nothing to say so.
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(w, body)
 }
 
 func (s *Server) handleDeadLetters(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {

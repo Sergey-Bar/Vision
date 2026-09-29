@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -104,11 +105,45 @@ claims and only the second one names where bytes land.
 		if plan.Existing.Version != "" {
 			fmt.Fprintf(env.Stdout, "  rollback target: %s\n", plan.Existing.Version)
 		}
+
+		// The units. Written after the binaries and the state are in place, so a
+		// unit that points at a program directory which does not exist yet is not
+		// a thing that can happen.
+		//
+		// A systemd-only install is written only when the installer is running on
+		// a system that has systemd. On a Windows host — which is where this is
+		// developed — the units are printed instead, because an operator needs to
+		// see what would have been written and writing /etc/systemd/system from a
+		// Windows process would create a directory that does nothing.
+		if unitDir := envOr("SP_UNIT_DIR", ""); unitDir != "" || isLinux() {
+			units, err := lifecycle.WriteUnits(lifecycle.UnitOptions{
+				UnitDir:      unitDir,
+				ProgramDir:   programDir,
+				EnvFile:      envOr("SP_ENV_FILE", ""),
+				AIProgramDir: envOr("SP_AI_PROGRAM_DIR", ""),
+				User:         envOr("SP_SERVICE_USER", ""),
+				Group:        envOr("SP_SERVICE_GROUP", ""),
+			})
+			if err != nil {
+				return command.Refuse("the binaries are installed but the units could not "+
+					"be written: %v", err)
+			}
+			for _, u := range units {
+				fmt.Fprintf(env.Stdout, "  wrote %s\n", u.Path)
+			}
+			fmt.Fprintln(env.Stdout, "  next: systemctl daemon-reload && systemctl enable --now security-core")
+		} else {
+			fmt.Fprintln(env.Stdout, "  this host has no systemd; the units were not written")
+			fmt.Fprintln(env.Stdout, "  run `securityctl install --unit-dir <dir>` to write them anyway")
+		}
 		fmt.Fprintln(env.Stdout, "  next: security-migrate up")
 		return nil
 	}
 	return c
 }
+
+// isLinux reports whether this process is on a system with systemd.
+func isLinux() bool { return runtime.GOOS == "linux" }
 
 func upgradeCommand() *command.Command {
 	var (

@@ -21,6 +21,11 @@
 // asserting the absence of `entity_aliases` exists to stop it becoming one by
 // accident.
 //
+// The test is `TestNoEntityAliasTableInM1` in `internal/schemalaws`, not in this
+// package. It was named here as though it were a test of this package's
+// behaviour, which is how a reader ends up looking for a test that does not
+// exist and concluding the scope decision is unguarded.
+//
 // Every edge carries provenance. An edge with no `asserted_by` is refused by the
 // schema, because an unattributed edge is exactly the one somebody would want
 // to be able to deny.
@@ -146,7 +151,7 @@ func (s *Service) AddEdge(ctx context.Context, e Edge) (bool, error) {
 		return false, err
 	}
 	var id string
-	err := s.Pool.QueryRow(ctx, insertEdgeSQL,
+	err := s.Pool.For(e.TenantID, "graph").QueryRow(ctx, insertEdgeSQL,
 		e.EdgeID, e.TenantID, e.FromType, e.FromID, e.Relation, e.ToType, e.ToID,
 		e.AssertedBy, nullString(e.SourceEventID), e.ObservedAt,
 		e.Confidence, e.Method, nullString(e.RuleOrModelID)).Scan(&id)
@@ -168,28 +173,48 @@ func (s *Service) AddEdges(ctx context.Context, edges []Edge) (int, error) {
 	if len(edges) == 0 {
 		return 0, nil
 	}
-	added := 0
-	err := s.Pool.InTx(ctx, func(tx pgx.Tx) error {
-		for _, e := range edges {
-			if err := e.Validate(); err != nil {
-				return err
-			}
-			var id string
-			err := tx.QueryRow(ctx, insertEdgeSQL,
-				e.EdgeID, e.TenantID, e.FromType, e.FromID, e.Relation, e.ToType, e.ToID,
-				e.AssertedBy, nullString(e.SourceEventID), e.ObservedAt,
-				e.Confidence, e.Method, nullString(e.RuleOrModelID)).Scan(&id)
-			if err != nil {
-				if errors.Is(err, pgx.ErrNoRows) {
-					continue
-				}
-				return fmt.Errorf("graph: add edge: %w", err)
-			}
-			added++
+	for _, e := range edges {
+		if err := e.Validate(); err != nil {
+			return 0, err
 		}
-		return nil
-	})
-	return added, err
+	}
+	// One transaction per tenant. A tenant context is a transaction-local setting
+	// and a batch may legitimately span tenants, and running one tenant's edges
+	// under another tenant's context is the failure this whole path exists to
+	// prevent.
+	byTenant := map[string][]Edge{}
+	order := make([]string, 0, len(edges))
+	for _, e := range edges {
+		if _, seen := byTenant[e.TenantID]; !seen {
+			order = append(order, e.TenantID)
+		}
+		byTenant[e.TenantID] = append(byTenant[e.TenantID], e)
+	}
+	added := 0
+	for _, tenant := range order {
+		batch := byTenant[tenant]
+		err := s.Pool.InTenant(ctx, dbx.TenantContext{TenantID: tenant, ActorID: "graph"}, func(tx pgx.Tx) error {
+			for _, e := range batch {
+				var id string
+				err := tx.QueryRow(ctx, insertEdgeSQL,
+					e.EdgeID, e.TenantID, e.FromType, e.FromID, e.Relation, e.ToType, e.ToID,
+					e.AssertedBy, nullString(e.SourceEventID), e.ObservedAt,
+					e.Confidence, e.Method, nullString(e.RuleOrModelID)).Scan(&id)
+				if err != nil {
+					if errors.Is(err, pgx.ErrNoRows) {
+						continue
+					}
+					return fmt.Errorf("graph: add edge: %w", err)
+				}
+				added++
+			}
+			return nil
+		})
+		if err != nil {
+			return added, err
+		}
+	}
+	return added, nil
 }
 
 // Revoke retires an edge without deleting it.
@@ -275,7 +300,19 @@ func (s *Service) Walk(ctx context.Context, tenant, nodeType, nodeID string, t T
 		followed = t.FollowedRelations
 	}
 
-	rows, err := s.Pool.Query(ctx, walkSQL, tenant, nodeType, nodeID, t.MaxDepth, followed, t.MaxNodes+1)
+	// Through the tenant-scoped pool, like every other read in this file.
+	//
+	// This one query used the raw pool, and under the role the product runs as
+	// that returns zero rows with no error: edges_active is security_invoker
+	// (migration 0014), edges has FORCE ROW LEVEL SECURITY, and the policy is
+	// tenant_id = app_current_tenant() OR app_is_system_worker(). With no
+	// app.tenant_id set, app_current_tenant() is nullif(current_setting(...),'')
+	// — NULL, not false — so the predicate is NULL, every row is filtered, and
+	// the traversal reports an empty graph. Not an error, not a log line, just
+	// nothing. Snapshot and CheckRebuild were already scoped; this was the one
+	// that was not, which is why the tests passed: they connect as a superuser,
+	// which bypasses RLS entirely.
+	rows, err := s.Pool.For(tenant, "graph").Query(ctx, walkSQL, tenant, nodeType, nodeID, t.MaxDepth, followed, t.MaxNodes+1)
 	if err != nil {
 		return out, fmt.Errorf("graph: walk: %w", err)
 	}

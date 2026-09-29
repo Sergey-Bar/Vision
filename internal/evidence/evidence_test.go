@@ -24,6 +24,42 @@ func newStore(t *testing.T) *evidence.Store {
 	return s
 }
 
+// The defaults are load-bearing and both were once wrong: Fsync took a plain
+// bool, so Options{Root: dir} — which is every caller — got a store that
+// acknowledged evidence it had not fsynced, and VerifyHashOnRead was read by
+// nobody at all. A default that is silently the wrong value is worse than no
+// default, because the comment says otherwise and the comment is what people
+// trust.
+func TestNewAppliesTheDefaultsItDocuments(t *testing.T) {
+	s, err := evidence.New(evidence.Options{Root: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if !s.Fsync() {
+		t.Error("a store built with no Fsync option came up with fsync off; the field " +
+			"comment says the default is true")
+	}
+	if !s.VerifyHashOnRead() {
+		t.Error("a store built with no VerifyHashOnRead option came up with read " +
+			"verification off")
+	}
+
+	// And an explicit false is honoured, which is the point of the pointer.
+	off, err := evidence.New(evidence.Options{
+		Root: t.TempDir(), Fsync: evidence.Bool(false),
+		VerifyHashOnRead: evidence.Bool(false),
+	})
+	if err != nil {
+		t.Fatalf("New with explicit off: %v", err)
+	}
+	if off.Fsync() {
+		t.Error("an explicit Fsync: false was overridden by the default")
+	}
+	if off.VerifyHashOnRead() {
+		t.Error("an explicit VerifyHashOnRead: false was overridden by the default")
+	}
+}
+
 // Every one of these must be refused. The list is the plan's: `../`, absolute
 // paths, null bytes, symlink escapes, plus drive letters, UNC prefixes and
 // empty segments, which are the same attack on a different platform.
@@ -182,6 +218,97 @@ func TestAlteredFileIsReportedNotServed(t *testing.T) {
 	}
 	if !errors.Is(err, evidence.ErrHashMismatch) {
 		t.Errorf("expected a hash mismatch, got %v", err)
+	}
+}
+
+// Sweep deletes files. Its tenant argument builds the directory it walks and the
+// directory it deletes inside, and it used to join that argument onto the root
+// with no validation at all — so a tenant of "../../etc" walked out of the
+// evidence root and os.Remove took whatever the policy said was expired with it.
+// Put validates the same argument; Sweep did not, in the one package whose
+// contract is that it is the only code touching that root.
+func TestSweepRefusesATenantThatEscapesTheRoot(t *testing.T) {
+	s := newStore(t)
+
+	// A real file outside the root, standing in for anything a traversal could
+	// reach. It has to still be there afterwards.
+	outside := filepath.Join(t.TempDir(), "not-evidence.txt")
+	if err := os.WriteFile(outside, []byte("irreplaceable"), 0o600); err != nil {
+		t.Fatalf("write the outside file: %v", err)
+	}
+	old := time.Now().Add(-365 * 24 * time.Hour)
+	if err := os.Chtimes(outside, old, old); err != nil {
+		t.Fatalf("age the outside file: %v", err)
+	}
+
+	for _, tenant := range []string{
+		"..",
+		"../..",
+		"tenant-a/../../..",
+		filepath.ToSlash(outside),
+		"/etc",
+		"C:\\Windows",
+	} {
+		t.Run(tenant, func(t *testing.T) {
+			if _, err := s.Sweep(tenant, evidence.RetentionPolicy{Before: time.Now()}, false); err == nil {
+				t.Fatalf("Sweep(%q) was accepted; it walks and deletes outside the evidence root",
+					tenant)
+			}
+			if _, statErr := os.Stat(outside); statErr != nil {
+				t.Fatalf("the file outside the evidence root is gone: %v", statErr)
+			}
+		})
+	}
+}
+
+// The happy path still works, and it still only touches the tenant's own tree.
+func TestSweepDeletesOnlyExpiredObjectsInTheNamedTenant(t *testing.T) {
+	s := newStore(t)
+	keep, err := s.Put("tenant-a", strings.NewReader("keep"))
+	if err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	drop, err := s.Put("tenant-a", strings.NewReader("drop"))
+	if err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	other, err := s.Put("tenant-b", strings.NewReader("other tenant"))
+	if err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+
+	age := func(obj evidence.Object) {
+		t.Helper()
+		p := filepath.Join(s.Root(), filepath.FromSlash(obj.Ref))
+		old := time.Now().Add(-90 * 24 * time.Hour)
+		if err := os.Chtimes(p, old, old); err != nil {
+			t.Fatalf("age %s: %v", obj.Ref, err)
+		}
+	}
+	age(drop)
+	age(other)
+
+	res, err := s.Sweep("tenant-a", evidence.RetentionPolicy{Before: time.Now().Add(-30 * 24 * time.Hour)}, false)
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if res.Removed != 1 {
+		t.Errorf("swept %d object(s), want 1: %+v", res.Removed, res.Errors)
+	}
+	if _, _, err := s.Open(drop.Ref, drop.SHA256); !errors.Is(err, evidence.ErrNotFound) {
+		t.Errorf("the expired object survived: %v", err)
+	}
+	for _, tc := range []struct {
+		obj evidence.Object
+		why string
+	}{{keep, "an unexpired object was swept"}, {other, "another tenant's object was swept"}} {
+		r, _, err := s.Open(tc.obj.Ref, tc.obj.SHA256)
+		if err != nil {
+			t.Errorf("%s: %v", tc.why, err)
+		}
+		if r != nil {
+			_ = r.Close()
+		}
 	}
 }
 

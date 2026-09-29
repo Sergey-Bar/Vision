@@ -181,8 +181,123 @@ func TestOneUnreadableItemDoesNotLoseThePage(t *testing.T) {
 	}
 }
 
-// An unrecognised type is carried, not dropped: a vendor adding an event type is
-// information the operator should see, not a reason to lose the event.
+// vendorSpellings is one example of every vendor type the normalisation
+// functions recognise, with the normalized name each must produce.
+//
+// This is the fixture that pins the contract between the normalizer and the
+// KnownMilestoneEventTypes table. It is written out rather than generated from
+// the implementation, because a table generated from the implementation cannot
+// detect the implementation changing.
+var vendorSpellings = []struct {
+	rawType string
+	item    map[string]any
+	want    string
+}{
+	{rawType: "Motion", want: "motion"},
+	{rawType: "MotionDetected", want: "motion"},
+	{rawType: "motion", want: "motion"},
+	{rawType: "Analytics", want: "analytics"},
+	{rawType: "ObjectDetected", want: "analytics"},
+	{rawType: "LineCrossed", want: "analytics"},
+	{rawType: "Loitering", want: "analytics"},
+	{rawType: "Alarm", item: map[string]any{"State": "Created"}, want: "alarm.created"},
+	{rawType: "Alarm", item: map[string]any{"State": "Acknowledged"}, want: "alarm.acknowledged"},
+	{rawType: "Alarm", item: map[string]any{"State": "Closed"}, want: "alarm.closed"},
+	{rawType: "AlarmCreated", want: "alarm.created"},
+	{rawType: "AlarmAcknowledged", want: "alarm.acknowledged"},
+	{rawType: "AlarmClosed", want: "alarm.closed"},
+	{rawType: "Servlets.State", item: map[string]any{"State": "Offline"}, want: "device.camera_offline"},
+	{rawType: "Servlets.State", item: map[string]any{"State": "Online"}, want: "device.camera_online"},
+	{rawType: "Servlets.State", item: map[string]any{"State": "Rebooting"}, want: "device_state"},
+	{rawType: "DeviceState", want: "device_state"},
+	{rawType: "CameraOffline", want: "device.camera_offline"},
+	{rawType: "CameraOnline", want: "device.camera_online"},
+	{rawType: "RecordingStarted", want: "recording.started"},
+	{rawType: "RecordingStopped", want: "recording.stopped"},
+	{rawType: "Bookmark", want: "bookmark"},
+	{rawType: "Metadata", want: "metadata"},
+	{rawType: "AccessGranted", want: "access.granted"},
+	{rawType: "AccessDenied", want: "access.denied"},
+	{rawType: "GateEvent", want: "gate"},
+	{rawType: "GateOpen", want: "gate"},
+	{rawType: "GateClose", want: "gate"},
+}
+
+// TestEveryTypeTheAdapterProducesIsKnown is the C3 test.
+//
+// KnownMilestoneEventTypes used to be keyed on the vendor's PascalCase
+// spellings while the check ran against the *normalized* type. Twelve of its
+// eighteen keys were unreachable and five types the adapter really does produce
+// were missing, so every motion, analytics and access event on a live site
+// arrived flagged "unrecognised source event type".
+//
+// Both directions are asserted. A missing key means real events are marked
+// malformed; an unreachable key means the table is claiming to recognise
+// something the adapter can never emit, which is the same drift wearing the
+// opposite sign.
+func TestEveryTypeTheAdapterProducesIsKnown(t *testing.T) {
+	reachable := map[string]bool{}
+
+	for _, tc := range vendorSpellings {
+		t.Run(tc.rawType+"/"+tc.want, func(t *testing.T) {
+			a, stub := newAdapter()
+			item := map[string]any{
+				"Id": "e1", "Type": tc.rawType,
+				"Timestamp": "2026-03-01T09:00:00Z",
+			}
+			for k, v := range tc.item {
+				item[k] = v
+			}
+			body, err := json.Marshal([]map[string]any{item})
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			stub.bodies[eventsRoute] = body
+
+			recs := poll(t, a)
+			var found bool
+			for _, r := range recs {
+				if r.SourceEventID != "e1" {
+					continue
+				}
+				found = true
+				if r.EventType != tc.want {
+					t.Errorf("%q normalized to %q, want %q", tc.rawType, r.EventType, tc.want)
+				}
+				if r.Malformed {
+					t.Errorf("%q produced %q and was flagged malformed as %q; a type the "+
+						"platform understands must never be reported as unrecognised",
+						tc.rawType, r.EventType, r.MalformedReason)
+				}
+				if milestone.KnownMilestoneEventTypes[r.EventType] {
+					reachable[r.EventType] = true
+				}
+			}
+			if !found {
+				t.Fatalf("%q produced no record", tc.rawType)
+			}
+		})
+	}
+
+	for key := range milestone.KnownMilestoneEventTypes {
+		if reachable[key] {
+			continue
+		}
+		// The two synthetic adapter types have no vendor spelling — they are
+		// produced by the feed-error and unparsed-item paths, not by
+		// normalisation — so they are covered by their own tests.
+		if key == "adapter_feed_error" || key == "adapter_unparsed_item" {
+			continue
+		}
+		t.Errorf("KnownMilestoneEventTypes has key %q, which no vendor spelling in this "+
+			"fixture produces; the table and the normalizer have drifted apart", key)
+	}
+}
+
+// A type nobody recognises is still carried, with its name intact, and still
+// flagged. This is the one case where Malformed is the correct answer: a vendor
+// adding an event type is information the operator should see, not a reason to
+// lose the event.
 func TestUnknownEventTypeIsCarriedNotDropped(t *testing.T) {
 	a, stub := newAdapter()
 	stub.bodies[eventsRoute] = json.RawMessage(`[
@@ -196,6 +311,9 @@ func TestUnknownEventTypeIsCarriedNotDropped(t *testing.T) {
 	}
 	if !rec.Malformed {
 		t.Error("an unrecognised type was not flagged")
+	}
+	if milestone.KnownMilestoneEventTypes[rec.EventType] {
+		t.Errorf("%q is a key in KnownMilestoneEventTypes, so it was treated as known", rec.EventType)
 	}
 	if !strings.Contains(rec.EventType, "quantumflux") {
 		t.Errorf("unrecognised type normalized to %q and lost its name", rec.EventType)

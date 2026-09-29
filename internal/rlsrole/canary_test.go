@@ -20,6 +20,7 @@ import (
 
 	"github.com/Sergey-Bar/Ai-Captain/internal/audit"
 	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
+	"github.com/Sergey-Bar/Ai-Captain/internal/graph"
 	"github.com/Sergey-Bar/Ai-Captain/internal/identity"
 	"github.com/Sergey-Bar/Ai-Captain/internal/inbox"
 	"github.com/Sergey-Bar/Ai-Captain/internal/migrate"
@@ -170,6 +171,165 @@ func TestTenantScopedReadsSeeOnlyTheirOwnTenant(t *testing.T) {
 	if other.Received != 0 {
 		t.Errorf("tenant B sees %d of tenant A's events; the tenant context is not scoping "+
 			"the read", other.Received)
+	}
+}
+
+// TestGraphEdgeWritesCarryTheTenantContext is the fourth canary.
+//
+// AddEdge and AddEdges once issued their INSERT against the bare pool, so no
+// app.tenant_id was set. The suite is a superuser suite and could not see it;
+// under the role the product runs as, RLS's WITH CHECK refuses the write
+// outright. The graph is what the console renders and what an incident cites, so
+// this is a total loss of the feature rather than a degraded one.
+func TestGraphEdgeWritesCarryTheTenantContext(t *testing.T) {
+	raw := testutil.Pool(t)
+	ctx := context.Background()
+	if _, err := (&migrate.Runner{Pool: raw}).Up(ctx); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	tenantA, siteA, _ := testutil.NewTenant(t, raw)
+	tenantB, _, _ := testutil.NewTenant(t, raw)
+
+	pool := productionPool(t)
+	svc := &graph.Service{Pool: pool}
+
+	single := graph.Edge{
+		TenantID: tenantA, EdgeID: "edge-single-" + tenantA,
+		FromType: "SITE", FromID: siteA, Relation: "contains",
+		ToType: "ZONE", ToID: "zone-a",
+		Provenance: graph.Provenance{
+			AssertedBy: "adapter:milestone", Method: "asserted", Confidence: 1.0,
+		},
+	}
+	added, err := svc.AddEdge(ctx, single)
+	if err != nil {
+		t.Fatalf("AddEdge as security_core: %v", err)
+	}
+	if !added {
+		t.Error("the first edge write was reported as a duplicate")
+	}
+
+	// The batch path is a transaction and had the same defect.
+	batch := []graph.Edge{
+		{
+			TenantID: tenantA, EdgeID: "edge-batch-a-" + tenantA,
+			FromType: "ZONE", FromID: "zone-a", Relation: "contains",
+			ToType: "DEVICE", ToID: "dev-a",
+			Provenance: graph.Provenance{
+				AssertedBy: "adapter:milestone", Method: "observed", Confidence: 1.0,
+			},
+		},
+		{
+			TenantID: tenantB, EdgeID: "edge-batch-b-" + tenantB,
+			FromType: "ZONE", FromID: "zone-b", Relation: "contains",
+			ToType: "DEVICE", ToID: "dev-b",
+			Provenance: graph.Provenance{
+				AssertedBy: "adapter:milestone", Method: "observed", Confidence: 1.0,
+			},
+		},
+	}
+	n, err := svc.AddEdges(ctx, batch)
+	if err != nil {
+		t.Fatalf("AddEdges as security_core: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("AddEdges reported %d new edge(s), want 2", n)
+	}
+
+	// And the write is invisible to a tenant that did not make it.
+	tenantASnap, err := svc.Snapshot(ctx, tenantA)
+	if err != nil {
+		t.Fatalf("snapshot tenant A: %v", err)
+	}
+	if tenantASnap.Count != 2 {
+		t.Errorf("tenant A sees %d of its own edges, want 2", tenantASnap.Count)
+	}
+	tenantBSnap, err := svc.Snapshot(ctx, tenantB)
+	if err != nil {
+		t.Fatalf("snapshot tenant B: %v", err)
+	}
+	if tenantBSnap.Count != 1 {
+		t.Errorf("tenant B sees %d edges, want only its own 1", tenantBSnap.Count)
+	}
+	for _, e := range tenantBSnap.Edges {
+		if e.TenantID != tenantB {
+			t.Errorf("tenant B's snapshot contains an edge owned by %q", e.TenantID)
+		}
+	}
+
+	// A bare count, with no tenant predicate in the SQL at all. Snapshot and Walk
+	// both filter by tenant in the query, so they cannot detect a view that hands
+	// back every row; only an unfiltered read can. edges_active is
+	// security_invoker for exactly this reason, and this is the assertion that
+	// keeps it that way.
+	var leaked int
+	if err := pool.For("some-other-tenant", "canary").QueryRow(ctx,
+		`SELECT count(*) FROM edges_active`).Scan(&leaked); err != nil {
+		t.Fatalf("unfiltered read of edges_active: %v", err)
+	}
+	if leaked != 0 {
+		t.Errorf("a tenant owning no edges read %d row(s) from edges_active. The view is "+
+			"not security_invoker, so RLS is evaluated for the view's owner and the "+
+			"tenant policies on `edges` never apply to a traversal", leaked)
+	}
+}
+
+// TestGraphTraversalReadsCarryTheTenantContext is the fifth canary.
+//
+// Walk issued its recursive traversal against the bare pool, so no app.tenant_id
+// was set on that connection. Under the role the product runs as, edges_active
+// is security_invoker (migration 0014) and edges has FORCE ROW LEVEL SECURITY,
+// so the policy tenant_id = app_current_tenant() OR app_is_system_worker()
+// evaluated NULL and every row was filtered. No error, no warning, no log line:
+// the traversal returned an empty graph for a tenant that had written edges
+// seconds earlier. Snapshot and CheckRebuild were already scoped, which is why
+// the console rendered a topology with no path through it and nothing anywhere
+// said why.
+func TestGraphTraversalReadsCarryTheTenantContext(t *testing.T) {
+	raw := testutil.Pool(t)
+	ctx := context.Background()
+	if _, err := (&migrate.Runner{Pool: raw}).Up(ctx); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	tenant, site, _ := testutil.NewTenant(t, raw)
+
+	pool := productionPool(t)
+	svc := &graph.Service{Pool: pool}
+
+	added, err := svc.AddEdges(ctx, []graph.Edge{
+		{
+			TenantID: tenant, EdgeID: "walk-site-" + tenant,
+			FromType: "SITE", FromID: site, Relation: "contains", ToType: "ZONE", ToID: "zone-walk",
+			Provenance: graph.Provenance{
+				AssertedBy: "adapter:milestone", Method: "asserted", Confidence: 1.0,
+			},
+		},
+		{
+			TenantID: tenant, EdgeID: "walk-zone-" + tenant,
+			FromType: "ZONE", FromID: "zone-walk", Relation: "contains", ToType: "DEVICE", ToID: "dev-walk",
+			Provenance: graph.Provenance{
+				AssertedBy: "adapter:milestone", Method: "observed", Confidence: 1.0,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("AddEdges as security_core: %v", err)
+	}
+	if added != 2 {
+		t.Fatalf("added %d edges, want 2", added)
+	}
+
+	res, err := svc.Walk(ctx, tenant, "SITE", site, graph.Traversal{MaxDepth: 3})
+	if err != nil {
+		t.Fatalf("Walk as security_core: %v", err)
+	}
+	if len(res.EdgeIDs) != 2 {
+		t.Errorf("the traversal found %d edges, want 2. The write landed (AddEdges "+
+			"reported it) and the read cannot see it, which is RLS emptying the "+
+			"query rather than the graph being empty: %+v", len(res.EdgeIDs), res.EdgeIDs)
+	}
+	if res.VisitedAtDepth != 2 {
+		t.Errorf("the traversal reached depth %d, want 2", res.VisitedAtDepth)
 	}
 }
 

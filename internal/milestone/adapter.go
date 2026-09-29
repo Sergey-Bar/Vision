@@ -109,17 +109,82 @@ func sourceDeviceRef(item map[string]any) string {
 	return ""
 }
 
-// KnownMilestoneEventTypes are the source event types the adapter recognises.
-// Anything else is carried through as Malformed rather than dropped: an
-// unrecognised type from a vendor we have not seen yet is information, and the
-// ingest backpressure metric is the right place for it to show up.
-var KnownMilestoneEventTypes = map[string]bool{
-	"Motion": true, "Analytics": true, "MotionDetected": true,
-	"alarm": true, "alarm.created": true, "alarm.acknowledged": true, "alarm.closed": true,
-	"device.camera_offline": true, "device.camera_online": true, "device_state": true,
-	"RecordingStarted": true, "RecordingStopped": true,
-	"Bookmark": true, "Metadata": true, "AccessGranted": true, "AccessDenied": true,
-	"GateEvent": true, "DeviceState": true,
+// KnownMilestoneEventTypes are the event types the adapter produces that the
+// platform understands. Anything else is carried through as Malformed rather
+// than dropped: an unrecognised type from a vendor we have not seen yet is
+// information, and the ingest backpressure metric is the right place for it to
+// show up.
+//
+// The table is derived from normalizeEventType and deriveEventType, not written
+// alongside them. It used to be a hand-written list keyed on the vendor's own
+// PascalCase spellings, which produced two failures at once:
+//
+//   - Twelve of its eighteen keys ("Motion", "RecordingStarted", "GateEvent",
+//     "DeviceState", …) could never be reached, because the check runs against
+//     the *normalized* type and normalization lowercases everything.
+//   - Five types the normalizer does emit — recording.started, recording.stopped,
+//     access.granted, access.denied, gate — were not keys at all.
+//
+// Every real motion, analytics and access event therefore arrived flagged
+// `Malformed` with "unrecognised source event type", which is a source change
+// the operator wants to see and is the one thing they can never stop seeing.
+//
+// The test in adapter_test.go asserts both directions: every type the
+// normalisation functions can return is a key, and every key is reachable. A
+// table that drifts from its producer again is then a failing test rather than a
+// stream of false alarms.
+var KnownMilestoneEventTypes = buildKnownEventTypes()
+
+// The two synthetic types the adapter itself produces. They are not vendor
+// vocabulary, and they are not malformed in the "unrecognised" sense — the
+// Malformed flag on them describes the feed or the item, not the type.
+const (
+	adapterFeedErrorType    = "adapter_feed_error"
+	adapterUnparsedItemType = "adapter_unparsed_item"
+)
+
+// buildKnownEventTypes assembles the closed set from the same source of truth
+// the check compares against.
+func buildKnownEventTypes() map[string]bool {
+	set := map[string]bool{
+		adapterFeedErrorType:    true,
+		adapterUnparsedItemType: true,
+	}
+	for _, t := range normalizedEventTypes {
+		set[t] = true
+	}
+	return set
+}
+
+// normalizedEventTypes is every value normalizeEventType and deriveEventType can
+// return. Keeping it next to the switch that produces them is what makes the
+// table above honest: a new arm in either switch is a new name here, and the
+// consistency test fails if it is missing.
+var normalizedEventTypes = []string{
+	"motion",
+	"analytics",
+	"alarm.created",
+	"alarm.acknowledged",
+	"alarm.closed",
+	"device.camera_offline",
+	"device.camera_online",
+	"device_state",
+	"recording.started",
+	"recording.stopped",
+	"bookmark",
+	"metadata",
+	"access.granted",
+	"access.denied",
+	"gate",
+}
+
+// NormalizedEventTypes returns the closed set of types the adapter produces.
+// Exported so the rule DSL and its documentation name the same set.
+func NormalizedEventTypes() []string {
+	out := make([]string, len(normalizedEventTypes))
+	copy(out, normalizedEventTypes)
+	sort.Strings(out)
+	return out
 }
 
 // Poll reads every feed once and returns the records in a deterministic order.
@@ -146,7 +211,7 @@ func (a *Adapter) Poll(ctx context.Context, since *time.Time) ([]RawRecord, erro
 			// partial outage into a total ingest outage, and the SLO for ingest
 			// loss counts accepted events, not whole feeds.
 			recs = []RawRecord{{
-				EventType:       "adapter_feed_error",
+				EventType:       adapterFeedErrorType,
 				Malformed:       true,
 				MalformedReason: err.Error(),
 			}}
@@ -221,7 +286,7 @@ func (a *Adapter) Parse(route Route, resp *Response) ([]RawRecord, error) {
 				IntegrationID:   a.integrationID,
 				SourceSystemID:  a.integrationID,
 				SourceEventID:   fmt.Sprintf("%s:%s:unparsed:%d", a.integrationID, route.Path, i),
-				EventType:       "adapter_unparsed_item",
+				EventType:       adapterUnparsedItemType,
 				ReceivedAt:      now,
 				Envelope:        []byte(`{"unparsed":true}`),
 				Malformed:       true,
@@ -235,6 +300,34 @@ func (a *Adapter) Parse(route Route, resp *Response) ([]RawRecord, error) {
 }
 
 func (a *Adapter) tenant() string { return "" }
+
+// RecordFromPayload re-derives a record from one stored envelope.
+//
+// This exists because the inbox stores the sanitized envelope and nothing else.
+// The consume loop claims a row weeks after the adapter handed it over, and
+// Normalize needs the derived event type, observed time, timezone, clock source
+// and device reference — none of which are columns on the inbox row. Re-deriving
+// them here rather than persisting them has one property worth having: the
+// derivation is a pure function of the stored bytes, so a claim that is retried
+// after a crash produces exactly the same canonical event, and a normalization
+// bug can be fixed and re-run against the original envelope.
+//
+// It runs the same path `Parse` does. A second implementation would be a second
+// set of answers to "what type is this", which is precisely the drift C3 was.
+func (a *Adapter) RecordFromPayload(payload json.RawMessage) (RawRecord, error) {
+	var item map[string]any
+	if err := json.Unmarshal(payload, &item); err != nil {
+		return RawRecord{}, &MalformedError{Why: "stored envelope is not a JSON object"}
+	}
+	now := a.clock()
+	rec, err := a.toRecord(item, 0, now)
+	if err != nil {
+		return RawRecord{}, &MalformedError{Why: err.Error()}
+	}
+	// The identity fields are the row's, not the envelope's re-read: the key is
+	// what the inbox claimed and what Normalize will dedupe on.
+	return rec, nil
+}
 
 func (a *Adapter) toRecord(item map[string]any, index int, now time.Time) (RawRecord, error) {
 	id := stringField(item, "Id", "id", "ID", "EventId", "eventId")
@@ -255,6 +348,17 @@ func (a *Adapter) toRecord(item map[string]any, index int, now time.Time) (RawRe
 	eventType := deriveEventType(rawType, item)
 
 	observed, tz := parseMilestoneTime(item)
+
+	// The envelope is the sanitized body. It was parsed into a map to redact it,
+	// so it is re-encoded rather than copied: the re-encoding is canonical —
+	// encoding/json sorts map keys — and therefore round-trips, which is what
+	// lets the consume loop re-derive every derived field from the stored bytes
+	// weeks later and get the same answers.
+	envelope, err := json.Marshal(item)
+	if err != nil {
+		return RawRecord{}, fmt.Errorf("event %s could not be re-encoded after sanitizing: %w", id, err)
+	}
+
 	rec := RawRecord{
 		SiteID:         a.siteID,
 		IntegrationID:  a.integrationID,
@@ -265,6 +369,10 @@ func (a *Adapter) toRecord(item map[string]any, index int, now time.Time) (RawRe
 		SourceTimezone: tz,
 		ClockSource:    "vms",
 		ReceivedAt:     now,
+		// Without this the inbox refuses every event with "payload is required",
+		// and the whole ingest path is dead while every unit test passes — which
+		// is what happened: the field was declared, documented and never assigned.
+		Envelope: envelope,
 		// The source names its device in the Source field, conventionally as
 		// "Entrance Camera 01 [CAM-001]". Resolving it here rather than leaving
 		// the raw string in the payload is what lets the graph attach the event

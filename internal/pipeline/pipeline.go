@@ -1,0 +1,952 @@
+// Package pipeline owns the loops that turn accepted events into incidents.
+//
+// It exists because nothing owned a lifecycle. Every stage of the pipeline was a
+// package with a test and a single-batch primitive with no caller: the adapter's
+// Poll, the inbox's ClaimFor, the rule engine's Evaluate, the outbox relay's
+// DrainOnce. This package is the thing that calls them in sequence and that knows
+// what to do when one of them stops.
+//
+// # The order, and why each step is where it is
+//
+//	adapter.Poll -> inbox.Write          (ingest loop)
+//	inbox.ClaimFor -> normalize -> graph -> correlate -> evaluate -> CreateIncident
+//	               -> enqueue QueueVLM   (consume loop)
+//	outbox.Relay.DrainOnce                (relay loop)
+//	jobs.Worker.Run                        (worker loop)
+//
+// The three timing facts that are load-bearing:
+//
+//   - Normalize completes the inbox row itself, inside the canonical event's
+//     transaction. The consume loop must not also call Complete, or it gets "is
+//     not in processing state" for an event that was in fact processed.
+//   - The AI observation is enqueued *after* the incident. ai_observations has
+//     NOT NULL incident_id ON DELETE CASCADE: an observation cannot precede the
+//     thing it is an opinion about.
+//   - DrainOnce returns a delivery count, not an error. A short count is the
+//     queue being partly undeliverable, which is a metric and a dead letter, not
+//     a loop condition.
+package pipeline
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"os"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+
+	"github.com/Sergey-Bar/Ai-Captain/internal/bundles"
+	"github.com/Sergey-Bar/Ai-Captain/internal/clock"
+	"github.com/Sergey-Bar/Ai-Captain/internal/correlator"
+	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
+	"github.com/Sergey-Bar/Ai-Captain/internal/graph"
+	"github.com/Sergey-Bar/Ai-Captain/internal/inbox"
+	"github.com/Sergey-Bar/Ai-Captain/internal/incidents"
+	"github.com/Sergey-Bar/Ai-Captain/internal/jobs"
+	"github.com/Sergey-Bar/Ai-Captain/internal/milestone"
+	"github.com/Sergey-Bar/Ai-Captain/internal/normalize"
+	"github.com/Sergey-Bar/Ai-Captain/internal/observability"
+	"github.com/Sergey-Bar/Ai-Captain/internal/outbox"
+	"github.com/Sergey-Bar/Ai-Captain/internal/rules"
+)
+
+// Deps is everything the loops need.
+//
+// One struct rather than a constructor per loop: the loops run concurrently in
+// one process, and the wiring is the daemon's to own. Every field is a real
+// dependency of at least one loop; there is no optional-everything struct here
+// because a loop with a nil dependency is a loop that panics at 3am.
+type Deps struct {
+	Pool    *dbx.Pool
+	Log     *slog.Logger
+	Metrics *observability.Registry
+
+	Adapter   *milestone.Adapter
+	Inbox     *inbox.Writer
+	Normal    *normalize.Normalizer
+	Graph     *graph.Service
+	Correlat  *correlator.Correlator
+	Incidents *incidents.Service
+	Bundles   *bundles.Service
+	Enqueuer  *jobs.Enqueuer
+
+	// Tenant, SiteID and IntegrationID scope everything. Single-site per
+	// install, which is what the loops are written against and what the API's
+	// single Tenant field already assumed.
+	Tenant        string
+	SiteID        string
+	IntegrationID string
+
+	// PollInterval is how often the ingest loop polls.
+	PollInterval time.Duration
+	// ClaimBatch is how many inbox rows one consume pass takes.
+	ClaimBatch int
+	// LeaseDuration is the inbox visibility timeout.
+	LeaseDuration time.Duration
+	// Relay drains the outbox. The daemon builds it because its handler closes
+	// over the logger; the pipeline owns when it runs.
+	Relay *outbox.Relay
+	// Jobs reads the queue depths for the gauges. Optional: without it the queue
+	// gauges stay absent rather than reporting a depth nobody read.
+	Jobs *jobs.Worker
+	// AIEndpoint is recorded so the AI availability gauge reflects the
+	// configuration rather than the outcome of the last call.
+	AIEndpoint string
+	// ClockPolicy is the site's clock policy, which decides the drift bands.
+	ClockPolicy clock.Policy
+}
+
+// Loops runs every loop and waits for them.
+type Loops struct {
+	Deps   Deps
+	cancel context.CancelFunc
+	ctx    context.Context
+	wg     sync.WaitGroup
+
+	// The compiled bundle cache. Guarded by its own mutex rather than the Loops
+	// one, because the consume loop reads it on every event while Start and Stop
+	// are not running.
+	bundleMu sync.Mutex
+	bundle   *activeBundle
+
+	hostname string
+}
+
+// New builds the loops without starting them.
+//
+// Exported because "build the pipeline" and "run the pipeline" are different
+// decisions, and a test needs the first without the second. Start is the only
+// thing that spawns goroutines, so a test that builds a pipeline has exactly one
+// caller driving it — which is what makes an assertion about what a pass did
+// attributable to that pass.
+func New(d Deps) *Loops {
+	return &Loops{Deps: d, hostname: hostname()}
+}
+
+// Start launches every loop under one cancellable context.
+func Start(ctx context.Context, d Deps) *Loops {
+	l := New(d)
+	l.ctx, l.cancel = context.WithCancel(ctx)
+
+	l.spawn(l.ctx, "ingest", l.runIngest)
+	l.spawn(l.ctx, "consume", l.runConsume)
+	l.spawn(l.ctx, "outbox", l.runOutbox)
+	l.spawn(l.ctx, "gauges", l.runGauges)
+
+	return l
+}
+
+// runGauges samples the backlog every few seconds.
+//
+// A separate loop rather than a sample at the end of a pass, because a gauge
+// that updates only when work happens reads zero on a healthy idle site — and a
+// backlog of zero that was never measured is indistinguishable from a backlog of
+// zero that is real. The SLO alerts are evaluated against these numbers, so an
+// alert threshold watching an unmeasured gauge is an alert that never fires.
+func (l *Loops) runGauges(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	l.SampleGauges(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			l.SampleGauges(ctx)
+		}
+	}
+}
+
+// SampleGauges takes one reading of every gauge the pipeline can observe.
+//
+// Each read is independent and each failure is silent: a gauge that cannot be
+// measured keeps its previous value rather than being set to zero. A gauge set
+// to zero because its query failed is worse than a stale one — it reads as "the
+// backlog is clear", which is the one thing an operator must never be told by a
+// broken query.
+func (l *Loops) SampleGauges(ctx context.Context) {
+	if l.Deps.Metrics == nil || l.Deps.Inbox == nil {
+		return
+	}
+	counts, err := l.Deps.Inbox.Counts(ctx, l.Deps.Tenant)
+	if err != nil {
+		if ctx.Err() == nil {
+			l.log("the inbox backlog could not be read; gauges keep their last value",
+				"error", err.Error())
+		}
+		return
+	}
+	l.set(observability.GaugeBacklogDepth, float64(counts.Received+counts.Failed))
+	l.set(observability.GaugeDeadLetterCount, float64(counts.DeadLetter))
+
+	if l.Deps.Jobs != nil {
+		jobCounts, err := l.Deps.Jobs.Counts(ctx, l.Deps.Tenant)
+		if err == nil {
+			l.set(observability.GaugeJobQueueDepth, float64(jobCounts.Pending+jobCounts.Failed))
+		}
+	}
+
+	// The lag the SLO's p95 is computed from. The reservoir is bounded, so this
+	// is a sliding window rather than a growing list.
+	//
+	// QuantileSeconds returns -1 for an empty reservoir rather than 0, which is
+	// what makes this check necessary: a site whose first poll accepted no events
+	// has measured nothing, and reporting a lag of zero seconds would be a reading
+	// nobody took.
+	if p95 := l.Deps.Metrics.IngestLag.QuantileSeconds(0.95); p95 >= 0 {
+		l.set(observability.GaugeIngestLagSeconds, p95)
+	}
+
+	// Devices in the severe drift band, and the AI plane's absence. Both are
+	// gauges rather than counters because they are states an operator watches
+	// drift, not events they accumulate.
+	var severe int
+	if err := l.Deps.Pool.For(l.Deps.Tenant, "gauges").QueryRow(ctx, `
+		SELECT count(*) FROM device_clocks WHERE tenant_id = $1 AND band = 'severe'`,
+		l.Deps.Tenant).Scan(&severe); err == nil {
+		l.set(observability.GaugeClockSevereDevices, float64(severe))
+	}
+
+	available := 0.0
+	if l.Deps.AIEndpoint != "" {
+		available = 1
+	}
+	l.set(observability.GaugeAIUnavailable, 1-available)
+}
+
+func (l *Loops) spawn(ctx context.Context, name string, run func(context.Context)) {
+	l.wg.Add(1)
+	go func() {
+		defer l.wg.Done()
+		defer func() {
+			// A panic in a loop kills the process rather than one stage of the
+			// pipeline, because a silently-stopped ingest loop is an outage that
+			// looks like a healthy core: it keeps answering /v1/health.
+			if rec := recover(); rec != nil {
+				l.log("loop panicked", "loop", name, "recovered", fmt.Sprint(rec))
+			}
+		}()
+		run(ctx)
+	}()
+}
+
+// Stop cancels every loop and waits for them to return.
+//
+// A Loops built by New has nothing to stop, and saying so is better than a nil
+// dereference: a test that forgot to call Start should find out from a clear
+// error rather than from a panic in cleanup.
+func (l *Loops) Stop() {
+	if l.cancel == nil {
+		return
+	}
+	l.cancel()
+	l.wg.Wait()
+}
+
+func (l *Loops) log(msg string, args ...any) {
+	if l.Deps.Log != nil {
+		l.Deps.Log.Info(msg, append([]any{
+			"tenant_id", l.Deps.Tenant,
+			"site_id", l.Deps.SiteID,
+		}, args...)...)
+	}
+}
+
+func (l *Loops) inc(name string) {
+	if l.Deps.Metrics != nil {
+		l.Deps.Metrics.Counters.Inc(name)
+	}
+}
+
+func (l *Loops) set(name string, v float64) {
+	if l.Deps.Metrics != nil {
+		l.Deps.Metrics.Gauges.Set(name, v)
+	}
+}
+
+func (l *Loops) observeLag(seconds float64) {
+	if l.Deps.Metrics != nil {
+		l.Deps.Metrics.IngestLag.Observe(seconds)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The ingest loop.
+// ---------------------------------------------------------------------------
+
+// runIngest polls the adapter and writes each record to the inbox.
+//
+// Three adapter semantics this loop has to respect, each of which is a place
+// where an obvious implementation loses events:
+//
+//   - A feed that errors arrives as a synthetic Malformed record, not as an
+//     error return. Poll returns nil error and a record naming the failure. If
+//     this loop treated an error return as fatal it would be wrong; if it
+//     discarded the record it would be losing the evidence that a feed is down.
+//   - ErrDuplicate is a *success*. A source re-delivering after a reconnect is
+//     the normal case, and retrying a duplicate is a loop that never advances.
+//   - A 401/403 is *UnauthenticatedError and must not be retried. The
+//     credentials need rotating, and hammering an endpoint that is refusing on
+//     purpose is how a credential rotation becomes an outage.
+func (l *Loops) runIngest(ctx context.Context) {
+	interval := l.Deps.PollInterval
+	if interval <= 0 {
+		interval = 5 * time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	// One pass immediately, so a restart does not idle for a whole interval
+	// with an event sitting in the feed.
+	l.PollOnce(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			l.PollOnce(ctx)
+		}
+	}
+}
+
+// PollOnce runs one full poll pass.
+//
+// Exported because it is a real operation rather than a test seam: the daemon
+// triggers one on SIGHUP so an operator can pull a feed without restarting the
+// service, and the end-to-end test drives the loop without a ticker.
+func (l *Loops) PollOnce(ctx context.Context) {
+	var since *time.Time
+	cursor, err := l.loadCursor(ctx)
+	if err != nil {
+		// No cursor is not fatal: it means a full re-read, which the dedupe key
+		// makes survivable and wasteful. That is the right trade on a first
+		// start, and it is why the cursor is an optimisation and not a
+		// correctness mechanism.
+		l.log("poll cursor unavailable; re-reading the full feed", "error", err.Error())
+	} else {
+		since = cursor
+	}
+
+	records, err := l.Deps.Adapter.Poll(ctx, since)
+	if err != nil {
+		var unauth *milestone.UnauthenticatedError
+		if errors.As(err, &unauth) {
+			// Not retried, and loudly. This is an operator action.
+			l.log("milestone rejected the integration credentials; not retrying",
+				"error", err.Error())
+			return
+		}
+		l.log("poll failed", "error", err.Error())
+		return
+	}
+
+	var accepted, duplicates, deadLettered int
+	var newest time.Time
+	for _, rec := range records {
+		if rec.SourceEventID == "" {
+			// A record with no identity cannot be deduplicated and would be
+			// re-ingested on every poll. The adapter names synthetic records with
+			// an identity, so reaching here means a transport produced something
+			// the adapter could not name.
+			l.log("record with no source id was not written", "event_type", rec.EventType)
+			continue
+		}
+		result, err := l.Deps.Inbox.Write(ctx, inbox.WriteOptions{
+			TenantID:      l.Deps.Tenant,
+			SiteID:        rec.SiteID,
+			IntegrationID: rec.IntegrationID,
+			SourceEventID: rec.SourceEventID,
+			Payload:       rec.Envelope,
+			ReceivedAt:    rec.ReceivedAt,
+		})
+		switch {
+		case errors.Is(err, inbox.ErrDuplicate):
+			duplicates++
+			continue
+		case err != nil:
+			l.log("inbox write failed",
+				"source_event_id", rec.SourceEventID, "error", err.Error())
+			continue
+		}
+		if result.Duplicate {
+			duplicates++
+			continue
+		}
+		accepted++
+
+		if rec.Malformed {
+			deadLettered++
+			l.inc(observability.CounterInboxDeadLettered)
+			l.log("event accepted and flagged malformed",
+				"source_event_id", rec.SourceEventID,
+				"event_type", rec.EventType,
+				"reason", rec.MalformedReason)
+		}
+		if !rec.ObservedAt.IsZero() && !rec.ReceivedAt.IsZero() {
+			if lag, ok := clock.Lag(rec.ObservedAt, rec.ReceivedAt); ok {
+				l.observeLag(lag.Seconds())
+			}
+		}
+		// The cursor advances on the newest *accepted* event, not on arrival
+		// order and not on the last item in the slice: an adapter that returns
+		// events out of order would otherwise move the cursor past events that
+		// have not been written yet.
+		if result.ReceivedAt.After(newest) {
+			newest = result.ReceivedAt
+		}
+	}
+
+	l.inc(observability.CounterInboxAccepted)
+	if accepted > 0 && !newest.IsZero() {
+		if err := l.saveCursor(ctx, newest); err != nil {
+			l.log("poll cursor could not be persisted; the next poll will re-read",
+				"error", err.Error())
+		}
+	}
+	l.log("poll complete",
+		"accepted", accepted, "duplicates", duplicates, "flagged", deadLettered)
+}
+
+// ---------------------------------------------------------------------------
+// The poll cursor.
+// ---------------------------------------------------------------------------
+
+// integrations has last_success_at; the cursor reuses it rather than adding a
+// column. It is the same fact — the last time this integration got as far as
+// being read — and a new column would be a migration to store a number the table
+// already has a home for.
+const cursorSQL = `
+UPDATE integrations SET last_success_at = $3
+ WHERE tenant_id = $1 AND integration_id = $2
+ RETURNING last_success_at`
+
+func (l *Loops) loadCursor(ctx context.Context) (*time.Time, error) {
+	var at time.Time
+	err := l.Deps.Pool.For(l.Deps.Tenant, "ingest").QueryRow(ctx, `
+		SELECT last_success_at FROM integrations
+		 WHERE tenant_id = $1 AND integration_id = $2 AND last_success_at IS NOT NULL`,
+		l.Deps.Tenant, l.Deps.IntegrationID).Scan(&at)
+	if err != nil {
+		return nil, fmt.Errorf("pipeline: read the poll cursor: %w", err)
+	}
+	return &at, nil
+}
+
+func (l *Loops) saveCursor(ctx context.Context, at time.Time) error {
+	_, err := l.Deps.Pool.For(l.Deps.Tenant, "ingest").Exec(ctx, cursorSQL,
+		l.Deps.Tenant, l.Deps.IntegrationID, at)
+	if err != nil {
+		return fmt.Errorf("pipeline: write the poll cursor: %w", err)
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// The consume loop.
+// ---------------------------------------------------------------------------
+
+func (l *Loops) runConsume(ctx context.Context) {
+	ticker := time.NewTicker(l.consumeInterval())
+	defer ticker.Stop()
+	l.ConsumeOnce(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			l.ConsumeOnce(ctx)
+		}
+	}
+}
+
+// consumeInterval is short enough that a backlog drains promptly and long enough
+// that an idle site is not issuing a claim query every few hundred milliseconds.
+func (l *Loops) consumeInterval() time.Duration {
+	if d := l.Deps.LeaseDuration / 4; d > 250*time.Millisecond {
+		return d
+	}
+	return time.Second
+}
+
+// ConsumeOnce claims a batch and processes each lease.
+//
+// The lease is the concurrency control, and everything after the claim is
+// idempotent against it: a crash mid-batch leaves rows leased, the lease expires,
+// and the next claim re-runs them onto the same derived event id.
+func (l *Loops) ConsumeOnce(ctx context.Context) {
+	limit := l.Deps.ClaimBatch
+	if limit <= 0 {
+		limit = 64
+	}
+	lease := l.Deps.LeaseDuration
+	if lease <= 0 {
+		lease = inbox.DefaultLeaseDuration
+	}
+
+	leases, err := l.Deps.Inbox.ClaimFor(ctx, l.Deps.Tenant, l.owner("consume"), limit, lease)
+	if err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+		l.log("claim failed", "error", err.Error())
+		return
+	}
+	for _, item := range leases {
+		if ctx.Err() != nil {
+			return
+		}
+		l.process(ctx, item)
+	}
+}
+
+// process runs one claimed event through the whole downstream pipeline.
+//
+// Every failure path here calls inbox.Fail, which owns the attempt counter and
+// the dead-letter decision. Letting the lease lapse instead — which is what this
+// used to do on all three paths — meant nothing ever incremented to the retry
+// bound, so an event that could never normalize was reclaimed every lease period
+// for the life of the process: no backoff, no terminal state, and an operator
+// watching a dead-letter table that stayed empty while the backlog grew. That is
+// invariant 1 broken, and the reason the dead-letter surface existed and was
+// never populated.
+func (l *Loops) process(ctx context.Context, item inbox.Lease) {
+	ctx = context.WithValue(ctx, requestIDKey{}, "consume:"+item.Key.SourceEventID)
+
+	rec, err := l.Deps.Adapter.RecordFromPayload(item.Payload)
+	if err != nil {
+		l.fail(ctx, item, "stored envelope could not be re-derived", err)
+		return
+	}
+
+	deviceID, zoneID, err := l.resolveDevice(ctx, item, rec.SourceDeviceRef)
+	if err != nil {
+		l.fail(ctx, item, "device resolution failed", err)
+		return
+	}
+
+	result, err := l.Deps.Normal.Normalize(ctx, normalize.Input{
+		Key:         item.Key,
+		SiteID:      l.Deps.SiteID,
+		EventType:   rec.EventType,
+		ObservedAt:  rec.ObservedAt,
+		SourceTZ:    rec.SourceTimezone,
+		ReceivedAt:  item.ReceivedAt,
+		ClockSource: rec.ClockSource,
+		Payload:     item.Payload,
+		DeviceID:    deviceID,
+		ZoneID:      zoneID,
+		// Normalize completes the inbox row itself and rolls back if the lease has
+		// moved on. The loop must not also call Complete.
+		LeaseOwner: item.Owner,
+	})
+	if err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+		l.fail(ctx, item, "normalize failed", err)
+		return
+	}
+	l.inc(observability.CounterCanonicalEvents)
+
+	if result.AlreadyNormalized {
+		// A retry after a crash. The canonical event already exists and the inbox
+		// row is already terminal; re-deciding on it would raise a second
+		// incident for the same fact.
+		return
+	}
+
+	l.writeEdges(ctx, item, rec, result, deviceID, zoneID)
+	l.decide(ctx, item, result)
+}
+
+// fail records a failed consume attempt and lets the inbox decide whether this
+// is the last one.
+//
+// The dead-letter transition is reported rather than assumed: a caller that
+// swallows it has no way to know the console is about to grow a row, and this is
+// the only signal in the loop that a real event will never be processed.
+func (l *Loops) fail(ctx context.Context, item inbox.Lease, what string, cause error) {
+	l.log(what, "source_event_id", item.Key.SourceEventID, "error", cause.Error())
+	if l.Deps.Inbox == nil {
+		return
+	}
+	status, err := l.Deps.Inbox.Fail(ctx, item.Key, cause, l.Deps.Inbox.MaxAttempts)
+	if err != nil {
+		// The failure to record the failure. The lease is still held and will
+		// lapse, so the event is retried rather than lost — and expireExhausted
+		// in the claim is what stops it retrying for ever.
+		l.log("could not record the failed attempt", "source_event_id",
+			item.Key.SourceEventID, "error", err.Error())
+		return
+	}
+	if status == inbox.StatusDeadLetter {
+		l.inc(observability.CounterInboxDeadLettered)
+		l.log("event dead-lettered", "source_event_id", item.Key.SourceEventID,
+			"reason", cause.Error())
+	}
+}
+
+// resolveDevice maps the source's device reference onto a registered device.
+//
+// A source naming a device this platform has never registered produces an event
+// with no device. That is recorded as "unattributable" rather than attributed to
+// something guessed: a wrong device attribution is worse than a missing one,
+// because a rule that filters on device will then match the wrong camera.
+func (l *Loops) resolveDevice(ctx context.Context, item inbox.Lease, ref string) (deviceID, zoneID string, err error) {
+	if ref == "" {
+		return "", "", nil
+	}
+	err = l.Deps.Pool.For(l.Deps.Tenant, "consume").QueryRow(ctx, `
+		SELECT device_id, COALESCE(zone_id, '') FROM devices
+		 WHERE tenant_id = $1 AND site_id = $2
+		   AND (source_device_id = $3 OR device_id = $3)`,
+		l.Deps.Tenant, l.Deps.SiteID, ref).Scan(&deviceID, &zoneID)
+	if err != nil {
+		var noRows bool = errors.Is(err, pgx.ErrNoRows)
+		if noRows {
+			// Unregistered. Not an error: the event still arrives.
+			return "", "", nil
+		}
+		return "", "", fmt.Errorf("pipeline: resolve device %q: %w", ref, err)
+	}
+	return deviceID, zoneID, nil
+}
+
+// writeEdges records the event's place in the graph.
+//
+// Both edges are attributed. An edge with no asserted_by is refused by the
+// schema, because an unattributed edge is exactly the one somebody would want to
+// be able to deny — and both here are things the core derived, so both name it.
+func (l *Loops) writeEdges(ctx context.Context, item inbox.Lease, rec milestone.RawRecord,
+	result normalize.Result, deviceID, zoneID string) {
+	edges := []graph.Edge{}
+
+	if deviceID != "" {
+		edges = append(edges, graph.Edge{
+			TenantID: item.Key.TenantID, EdgeID: "observed-by:" + result.EventID,
+			FromType: "EVENT", FromID: result.EventID, Relation: "observed_by",
+			ToType: "DEVICE", ToID: deviceID,
+			Provenance: graph.Provenance{
+				AssertedBy:    "core:normalize",
+				SourceEventID: item.Key.SourceEventID,
+				ObservedAt:    &result.NormalizedAt,
+				Confidence:    1.0,
+				Method:        "observed",
+			},
+		})
+	}
+	if zoneID != "" {
+		edges = append(edges, graph.Edge{
+			TenantID: item.Key.TenantID, EdgeID: "occurred-in:" + result.EventID,
+			FromType: "EVENT", FromID: result.EventID, Relation: "occurred_in",
+			ToType: "ZONE", ToID: zoneID,
+			Provenance: graph.Provenance{
+				AssertedBy:    "core:normalize",
+				SourceEventID: item.Key.SourceEventID,
+				ObservedAt:    &result.NormalizedAt,
+				Confidence:    1.0,
+				Method:        "observed",
+			},
+		})
+	}
+	if len(edges) == 0 {
+		return
+	}
+	if _, err := l.Deps.Graph.AddEdges(ctx, edges); err != nil {
+		// The incident is still raised; the graph is a projection and can be
+		// rebuilt. Failing the event here would trade a missing edge for a lost
+		// decision.
+		l.log("graph edges were not written", "event_id", result.EventID, "error", err.Error())
+	}
+}
+
+// decide correlates, evaluates, and raises an incident if the rules ask for one.
+func (l *Loops) decide(ctx context.Context, item inbox.Lease, result normalize.Result) {
+	bundle, err := l.activeBundle(ctx)
+	if err != nil {
+		if errors.Is(err, errNoActiveBundle) {
+			// A core with no bundle is a core that ingests and normalises and
+			// creates no incidents. That is the correct degraded state, not a
+			// crash: an operator who has not activated a bundle has not asked for
+			// decisions yet.
+			l.log("no active rule bundle; the event was normalised and no decision was made",
+				"event_id", result.EventID)
+			return
+		}
+		l.log("rule bundle could not be loaded", "error", err.Error())
+		return
+	}
+
+	correlation, err := l.Deps.Correlat.SignalsFor(ctx, item.Key.TenantID, l.Deps.SiteID,
+		result.EventID, bundle.Compiled)
+	if err != nil {
+		l.log("correlation failed", "event_id", result.EventID, "error", err.Error())
+		return
+	}
+	if correlation.Window.Clamped {
+		// Loud, because the alternative is silent under-counting: a bundle whose
+		// window exceeds the core's bound corroborates less than its author
+		// believes, and every affected incident is reported as UNVERIFIED.
+		l.log("the active bundle's time window exceeds the correlator's bound; "+
+			"corroboration will under-count",
+			"event_id", result.EventID,
+			"requested_seconds", correlation.Window.Requested.Seconds(),
+			"used_seconds", correlation.Window.Used.Seconds())
+	}
+
+	engine := rules.NewEngine(bundle.Compiled, rules.Context{
+		Now:           result.NormalizedAt,
+		SkewTolerance: time.Duration(bundle.Compiled.Settings.Clock.SkewToleranceMS) * time.Millisecond,
+		SiteTimezone:  time.UTC,
+	})
+	decision := engine.Resolve(engine.Evaluate(correlation.Trigger, correlation.Available))
+
+	switch decision.State {
+	case rules.StateCorroborated:
+		l.inc(observability.CounterCorroborated)
+	case rules.StateContradicted:
+		l.inc(observability.CounterContradicted)
+	case rules.StateUnverified:
+		l.inc(observability.CounterUnverified)
+	}
+
+	if decision.RuleID == "" {
+		// No rule fired. Not an incident, not a degradation, just an event that
+		// no rule cares about.
+		return
+	}
+	// An unverified decision still raises an incident, and that is the engine's
+	// deliberate answer rather than an accident: StateUnverified is a first-class
+	// verification state, it is indexed as one, and a matched rule whose
+	// corroboration was not met is exactly what an operator has to look at. A
+	// rule author who sets create_incident has asked for the match to be
+	// recorded; silently dropping it would leave a rule that fired with no
+	// record anywhere, which is the failure mode this product exists to avoid.
+	//
+	// What was wrong here was the log line, not the control: it said "no incident
+	// raised" and then raised one, so an operator reading the log was told the
+	// opposite of what happened. The line now names what the incident will carry.
+	if decision.State != rules.StateCorroborated && decision.Action.CreateIncident {
+		l.log("a rule matched but the outcome is not corroborated; raising the incident "+
+			"as UNVERIFIED for an operator to verify",
+			"event_id", result.EventID, "rule_id", decision.RuleID,
+			"state", string(decision.State), "reason", decision.Reason)
+	}
+
+	incidentID, err := l.Deps.Incidents.CreateIncident(ctx, incidents.Create{
+		TenantID:          item.Key.TenantID,
+		SiteID:            l.Deps.SiteID,
+		Decision:          decision,
+		RuleBundleVersion: bundle.Version,
+		BundleContentHash: bundle.ContentHash,
+		// PolicyVersion wants a reader for the policies table, which exists with
+		// no Go owner. The bundle version is recorded here rather than invented:
+		// a wrong policy version on an incident is an explanation that points an
+		// auditor at a policy that was never consulted. M3 supplies the reader.
+		PolicyVersion:      bundle.Version,
+		Title:              incidentTitle(decision),
+		SupportingEventIDs: append([]string{result.EventID}, decision.SupportingEvents...),
+	})
+	if err != nil {
+		l.log("incident could not be raised", "event_id", result.EventID, "error", err.Error())
+		return
+	}
+	l.log("incident raised", "incident_id", incidentID, "rule_id", decision.RuleID,
+		"state", string(decision.State))
+
+	l.enqueueVLM(ctx, item.Key.TenantID, l.Deps.SiteID, incidentID, result.EventID)
+}
+
+// incidentTitle names the incident after the rule that raised it. A title is
+// what an operator sees in the queue, so it names the cause rather than the
+// effect — but it is derived from stored decision fields, never from model prose.
+func incidentTitle(d rules.Decision) string {
+	title := d.RuleID
+	if d.Severity != "" {
+		title += " (" + d.Severity + ")"
+	}
+	return title
+}
+
+// enqueueVLM queues the second opinion, after the incident it is about.
+//
+// Ordering is forced by ai_observations.incident_id being NOT NULL ON DELETE
+// CASCADE. An observation cannot precede its incident, which is also the right
+// order semantically: the observation is a recorded second opinion on a decision
+// that has already been made, and it never rewrites it. That is invariant 2.
+func (l *Loops) enqueueVLM(ctx context.Context, tenant, site, incidentID, eventID string) {
+	payload, err := json.Marshal(map[string]string{
+		"incidentId": incidentID,
+		"eventId":    eventID,
+	})
+	if err != nil {
+		l.log("vlm payload could not be encoded", "error", err.Error())
+		return
+	}
+	err = l.Deps.Pool.InTenant(ctx, dbx.TenantContext{TenantID: tenant, ActorID: "consume"},
+		func(tx pgx.Tx) error {
+			_, _, err := l.Deps.Enqueuer.Enqueue(ctx, tx, jobs.Enqueue{
+				TenantID: tenant, SiteID: site,
+				Queue:          jobs.QueueVLM,
+				IdempotencyKey: "vlm:" + incidentID,
+				Payload:        payload,
+				MaxAttempts:    3,
+			})
+			return err
+		})
+	if err != nil {
+		// The incident stands. A missing second opinion is a degraded AI plane,
+		// which the decision already recorded; losing the decision over it would
+		// invert the priority.
+		l.log("vlm job could not be enqueued; the incident is unaffected",
+			"incident_id", incidentID, "error", err.Error())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The bundle cache.
+// ---------------------------------------------------------------------------
+
+// errNoActiveBundle distinguishes "this tenant has not activated a bundle" from
+// "the bundle store is unreachable". The first is a normal state and the second
+// is an outage, and they are handled differently.
+var errNoActiveBundle = errors.New("pipeline: no active rule bundle")
+
+// activeBundle returns the compiled active bundle, cached by (version, hash).
+//
+// Compilation is not free — YAML, JSON Schema, and a semantic pass — and this is
+// the hot path, once per event. Recompiling per event would make the rule engine
+// the most expensive thing in the pipeline for no benefit: the bundle changes
+// when an operator activates one, not when an event arrives.
+func (l *Loops) activeBundle(ctx context.Context) (*activeBundle, error) {
+	version, hash, content, err := l.Deps.Bundles.ActiveBundle(ctx, l.Deps.Tenant)
+	if err != nil {
+		if strings.Contains(err.Error(), "no active bundle") {
+			return nil, errNoActiveBundle
+		}
+		return nil, err
+	}
+
+	l.bundleMu.Lock()
+	defer l.bundleMu.Unlock()
+	if l.bundle != nil &&
+		l.bundle.Version == version &&
+		l.bundle.ContentHash == hash {
+		return l.bundle, nil
+	}
+
+	compiled, problems := rules.NewCompiler().Compile(content)
+	if len(problems) > 0 {
+		return nil, fmt.Errorf("pipeline: the active bundle does not compile: %s",
+			problems[0].Message)
+	}
+	compiled.Version = version
+	compiled.ContentHash = hash
+	l.bundle = &activeBundle{
+		Compiled:    compiled,
+		Version:     version,
+		ContentHash: hash,
+	}
+	l.log("compiled the active rule bundle",
+		"version", version, "content_hash", hash, "rules", len(compiled.Compiled))
+	return l.bundle, nil
+}
+
+// activeBundle is a compiled bundle plus the identity an incident has to cite.
+//
+// The bundle is held behind an explicit named field rather than embedded:
+// CompiledBundle already carries Version and ContentHash from Bundle, and
+// shadowing those with fields of the same name produces a struct where
+// `bundle.Version` and `bundle.Compiled.Version` are different reads of one
+// concept.
+//
+// The two are kept separate on purpose. Version and ContentHash here are the
+// *store's* columns; the ones inside the compiled bundle are whatever the YAML
+// body declared. An operator can store a body whose `version:` does not match the
+// version it was stored under, and an incident must cite the identity the store
+// knows — otherwise the bundle a reviewer opens is not the one the incident was
+// decided under.
+type activeBundle struct {
+	Compiled    *rules.CompiledBundle
+	Version     string
+	ContentHash string
+}
+
+// ---------------------------------------------------------------------------
+// The outbox and job loops.
+// ---------------------------------------------------------------------------
+
+// runOutbox drains the outbox.
+//
+// DrainOnce returns a delivery count rather than an error, because a message
+// that cannot be delivered is a dead letter and a metric rather than a reason to
+// stop the relay. Treating a short count as an error would make a permanently
+// undeliverable topic look like a broken relay and spin.
+func (l *Loops) runOutbox(ctx context.Context) {
+	relay := l.Deps.Relay
+	if relay == nil {
+		// Named, not silent. A core with no relay accumulates an outbox nobody
+		// reads, and the backlog gauge stays at zero because nothing is watching
+		// it.
+		l.log("no outbox relay is configured; side effects will queue and never be delivered")
+		<-ctx.Done()
+		return
+	}
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		// DrainOnce returns a delivery count, not an error. A short count is
+		// messages that became dead letters, which is a metric and a queue an
+		// operator reads; treating it as an error would make a permanently
+		// undeliverable topic look like a broken relay.
+		if _, err := relay.DrainOnce(ctx, l.Deps.Tenant, l.owner("outbox"), 100); err != nil {
+			if ctx.Err() == nil {
+				l.log("outbox drain failed", "error", err.Error())
+			}
+		}
+		if l.Deps.Metrics != nil {
+			if n, err := relay.Pending(ctx, l.Deps.Tenant); err == nil {
+				l.set(observability.GaugeOutboxPending, float64(n))
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// deliverOutbox is the default relay handler for a Deps built without one.
+//
+// It is the same acknowledgement the daemon installs: M1 dispatches no side
+// effects, so every message is acknowledged and logged rather than silently
+// disappearing.
+func (l *Loops) deliverOutbox(_ context.Context, d outbox.Delivery) error {
+	l.log("outbox message acknowledged", "topic", d.Topic, "outbox_id", d.OutboxID)
+	l.inc(observability.CounterOutboxDelivered)
+	return nil
+}
+
+// owner names this process's claim. It is stable across a boot and distinct per
+// loop, so a lease held by a killed process is attributable to that process and
+// not to whichever one came back.
+func (l *Loops) owner(loop string) string {
+	return l.hostname + "/" + loop
+}
+
+func hostname() string {
+	h, err := os.Hostname()
+	if err != nil || h == "" {
+		return "unknown-host"
+	}
+	return h
+}
+
+// requestIDKey correlates a log line with the unit of work it belongs to.
+type requestIDKey struct{}

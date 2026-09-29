@@ -485,7 +485,7 @@ func scanObservations(ctx context.Context, tx pgx.Tx, tenant, incidentID string,
 		       COALESCE(supersedes_observation_id, ''), production_profile
 		  FROM ai_observations
 		 WHERE tenant_id = $1 AND incident_id = $2
-		 ORDER BY created_at`, tenant, incidentID)
+		 ORDER BY created_at, observation_id`, tenant, incidentID)
 	if err != nil {
 		return fmt.Errorf("incidents: observations: %w", err)
 	}
@@ -536,7 +536,7 @@ func scanDispositions(ctx context.Context, tx pgx.Tx, tenant, incidentID string,
 		       COALESCE(related_observation_id, ''), created_at
 		  FROM dispositions
 		 WHERE tenant_id = $1 AND incident_id = $2
-		 ORDER BY created_at`, tenant, incidentID)
+		 ORDER BY created_at, disposition_id`, tenant, incidentID)
 	if err != nil {
 		return fmt.Errorf("incidents: dispositions: %w", err)
 	}

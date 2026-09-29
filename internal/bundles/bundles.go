@@ -177,15 +177,29 @@ func (s *Service) Content(ctx context.Context, tenant, version string) ([]byte, 
 
 // Active reads the active bundle's version and bytes.
 func (s *Service) Active(ctx context.Context, tenant string) (version string, content []byte, err error) {
-	err = s.Pool.For(tenant, "bundles").QueryRow(ctx, `SELECT version, content FROM rule_bundles WHERE tenant_id = $1 AND active`,
-		tenant).Scan(&version, &content)
+	version, _, content, err = s.ActiveBundle(ctx, tenant)
+	return version, content, err
+}
+
+// ActiveBundle reads the active bundle's version, content hash and bytes in one
+// statement.
+//
+// The content hash is not derivable from the bytes cheaply, and the incident
+// needs it: an incident recorded without the hash of the bundle that produced it
+// is an incident nobody can re-evaluate. Two statements would be two chances for
+// the active bundle to change between them, and an incident citing one bundle's
+// version with another's hash is worse than no incident.
+func (s *Service) ActiveBundle(ctx context.Context, tenant string) (version, contentHash string, content []byte, err error) {
+	err = s.Pool.For(tenant, "bundles").QueryRow(ctx,
+		`SELECT version, content_hash, content FROM rule_bundles WHERE tenant_id = $1 AND active`,
+		tenant).Scan(&version, &contentHash, &content)
 	if err != nil {
 		if isNoRows(err) {
-			return "", nil, fmt.Errorf("bundles: no active bundle for tenant %s", tenant)
+			return "", "", nil, fmt.Errorf("bundles: no active bundle for tenant %s", tenant)
 		}
-		return "", nil, fmt.Errorf("bundles: active: %w", err)
+		return "", "", nil, fmt.Errorf("bundles: active: %w", err)
 	}
-	return version, content, nil
+	return version, contentHash, content, nil
 }
 
 // List returns every stored bundle, newest first.

@@ -104,38 +104,81 @@ func (r *Runner) Applied(ctx context.Context) ([]Applied, error) {
 	return out, rows.Err()
 }
 
+// verifyIdentity compares one applied ledger row against the embedded file with
+// the same version, on the three things that together identify what a site ran.
+//
+// The checksum covers the migration body only, deliberately: changing the digest
+// format would make every already-deployed site refuse to upgrade, and nothing
+// in this repository can UPDATE schema_migrations to re-record it, because the
+// migration is the very thing being blocked. The identity the digest omits — the
+// file's own name and phase — is already recorded in the ledger, so it is
+// compared here rather than folded into the hash. A rename, a rewritten phase,
+// or a file swapped in under an existing version now fails verification with no
+// format change, no re-record, and no weakened window.
+//
+// Each failure names which of the three diverged, so a human reading the error
+// knows whether the bytes, the name, or the phase moved.
+func verifyIdentity(byVersion map[int]migrations.Migration, version int, name, phase, sum string) error {
+	have, ok := byVersion[version]
+	if !ok {
+		return fmt.Errorf("migrate: version %d (%s) is applied but absent from this build; "+
+			"this binary is older than the database", version, name)
+	}
+	if have.Checksum != sum {
+		return fmt.Errorf("migrate: checksum mismatch for %s: applied %s, build has %s. "+
+			"Applied migrations are never edited; add a new migration instead",
+			have.FileName(), sum[:16], have.Checksum[:16])
+	}
+	if have.Name != name {
+		return fmt.Errorf("migrate: name mismatch for version %d: applied %q, build has %q. "+
+			"A migration is never renamed once applied; add a new migration instead",
+			version, name, have.Name)
+	}
+	if string(have.Phase) != phase {
+		return fmt.Errorf("migrate: phase mismatch for %s: applied %q, build has %q. "+
+			"A migration's phase is never rewritten once applied; add a new migration instead",
+			have.FileName(), phase, string(have.Phase))
+	}
+	return nil
+}
+
+// verifyLedgerRows runs verifyIdentity over the whole ledger.
+func verifyLedgerRows(byVersion map[int]migrations.Migration, rows []Applied) error {
+	for _, a := range rows {
+		if err := verifyIdentity(byVersion, a.Version, a.Name, a.Phase, a.Checksum); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func embeddedByVersion() (map[int]migrations.Migration, error) {
+	all, err := migrations.All()
+	if err != nil {
+		return nil, fmt.Errorf("migrate: load embedded migrations: %w", err)
+	}
+	byVersion := make(map[int]migrations.Migration, len(all))
+	for _, m := range all {
+		byVersion[m.Version] = m
+	}
+	return byVersion, nil
+}
+
 // VerifyChecksums compares every applied migration against the embedded copy.
 //
 // A mismatch means the SQL on disk — or in the binary — no longer matches what
 // this site executed. That is a release integrity failure, and continuing would
 // mean the recorded history is a lie.
 func (r *Runner) VerifyChecksums(ctx context.Context) error {
-	all, err := migrations.All()
+	byVersion, err := embeddedByVersion()
 	if err != nil {
-		return fmt.Errorf("migrate: load embedded migrations: %w", err)
+		return err
 	}
-	byVersion := map[int]migrations.Migration{}
-	for _, m := range all {
-		byVersion[m.Version] = m
-	}
-
 	applied, err := r.Applied(ctx)
 	if err != nil {
 		return err
 	}
-	for _, a := range applied {
-		have, ok := byVersion[a.Version]
-		if !ok {
-			return fmt.Errorf("migrate: version %d (%s) is applied but absent from this build; "+
-				"this binary is older than the database", a.Version, a.Name)
-		}
-		if have.Checksum != a.Checksum {
-			return fmt.Errorf("migrate: checksum mismatch for %s: applied %s, build has %s. "+
-				"Applied migrations are never edited; add a new migration instead",
-				have.FileName(), a.Checksum[:16], have.Checksum[:16])
-		}
-	}
-	return nil
+	return verifyLedgerRows(byVersion, applied)
 }
 
 // Plan is the ordered work Up would perform.
@@ -216,10 +259,6 @@ func (r *Runner) Up(ctx context.Context) (Plan, error) {
 		return Plan{}, err
 	}
 
-	if err := r.verifyChecksumsOn(ctx, conn.Conn()); err != nil {
-		return Plan{}, err
-	}
-
 	plan, err := r.planOn(ctx, conn.Conn())
 	if err != nil {
 		return Plan{}, err
@@ -290,34 +329,23 @@ func (r *Runner) planOn(ctx context.Context, conn *pgx.Conn) (Plan, error) {
 }
 
 func (r *Runner) verifyChecksumsOn(ctx context.Context, conn *pgx.Conn) error {
-	all, err := migrations.All()
+	byVersion, err := embeddedByVersion()
 	if err != nil {
-		return fmt.Errorf("migrate: load embedded migrations: %w", err)
+		return err
 	}
-	byVersion := map[int]migrations.Migration{}
-	for _, m := range all {
-		byVersion[m.Version] = m
-	}
-	rows, err := conn.Query(ctx, `SELECT version, name, checksum FROM schema_migrations ORDER BY version`)
+	rows, err := conn.Query(ctx, `SELECT version, name, phase, checksum FROM schema_migrations ORDER BY version`)
 	if err != nil {
 		return fmt.Errorf("migrate: read ledger: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var v int
-		var name, sum string
-		if err := rows.Scan(&v, &name, &sum); err != nil {
+		var name, phase, sum string
+		if err := rows.Scan(&v, &name, &phase, &sum); err != nil {
 			return fmt.Errorf("migrate: scan ledger: %w", err)
 		}
-		have, ok := byVersion[v]
-		if !ok {
-			return fmt.Errorf("migrate: version %d (%s) is applied but absent from this build; "+
-				"this binary is older than the database", v, name)
-		}
-		if have.Checksum != sum {
-			return fmt.Errorf("migrate: checksum mismatch for %s: applied %s, build has %s. "+
-				"Applied migrations are never edited; add a new migration instead",
-				have.FileName(), sum[:16], have.Checksum[:16])
+		if err := verifyIdentity(byVersion, v, name, phase, sum); err != nil {
+			return err
 		}
 	}
 	return rows.Err()

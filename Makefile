@@ -8,12 +8,16 @@ PROTOC_GEN_GO ?= protoc-gen-go
 GOBIN         ?= $(shell go env GOPATH)/bin
 
 CONTRACTS_DIR := contracts/protobuf
+SCHEMA_DIR := contracts/json-schema
+OPENAPI_DIR := contracts/openapi
 CONTRACT_BASELINE := contracts/compat/baseline.json
 MODULE := github.com/Sergey-Bar/Ai-Captain
 MIGRATIONS_DIR := migrations
 
-.PHONY: all bootstrap generate contract-check build test test-race lint fmt vet \
-        tidy migrate-up migrate-status rules-lint ci verify clean
+.PHONY: all bootstrap generate contract-check contract-check-schema \
+        contract-check-openapi contract-check-all contract-baseline build test \
+        test-race lint fmt vet tidy migrate-up migrate-status rules-lint ci \
+        verify clean
 
 all: build test
 
@@ -30,12 +34,29 @@ generate:
 	$(GO) run ./tools/contractcheck -mode check -baseline $(CONTRACT_BASELINE) -root $(CONTRACTS_DIR)
 
 # The gate: a breaking contract change fails the build. Run with -mode write only
-# when the change is intentionally a new contract version.
+# when the change is intentionally a new contract version, and then only with
+# -allow-breaking and a human reading the diff: the write mode refuses a
+# baseline refresh that drops or retypes anything, because the first run over a
+# surface the tool has never diffed surfaces facts rather than regressions.
 contract-check:
 	$(GO) run ./tools/contractcheck -mode check -baseline $(CONTRACT_BASELINE) -root $(CONTRACTS_DIR)
 
+# The JSON Schemas and the OpenAPI document are contracts too. They were only
+# os.Stat-ed by a test until D5; these two are the same comparison over the
+# other two published surfaces, and they belong in the gate for the same reason
+# the protobuf one does.
+contract-check-schema:
+	$(GO) run ./tools/contractcheck -mode check -baseline $(CONTRACT_BASELINE) -root $(SCHEMA_DIR)
+
+contract-check-openapi:
+	$(GO) run ./tools/contractcheck -mode check -baseline $(CONTRACT_BASELINE) -root $(OPENAPI_DIR)
+
+contract-check-all: contract-check contract-check-schema contract-check-openapi
+
 contract-baseline:
 	$(GO) run ./tools/contractcheck -mode write -baseline $(CONTRACT_BASELINE) -root $(CONTRACTS_DIR)
+	$(GO) run ./tools/contractcheck -mode write -baseline $(CONTRACT_BASELINE) -root $(SCHEMA_DIR)
+	$(GO) run ./tools/contractcheck -mode write -baseline $(CONTRACT_BASELINE) -root $(OPENAPI_DIR)
 
 build:
 	$(GO) build -trimpath -o bin/ ./cmd/...
@@ -80,15 +101,19 @@ rules-lint:
 migration-phases:
 	@$(GO) test -p 1 ./migrations/... -run TestAllLoadsAndValidates -count=1
 
-# The published bundle schema and the embedded copy must be the same file. The
-# compiler enforces the embed, so a stale copy is a bundle validated against a
-# contract nobody published.
-contract-sync:
+# The published schemas and the copies embedded in the binary must be the same
+# bytes. The compiler enforces the embed, so a stale copy is a document being
+# validated against a contract nobody published. Every schema with a Go-side
+# copy is compared, not just rule-bundle (D5).
+contract-sync: contract-check-schema
 	@cmp contracts/json-schema/rule-bundle.schema.json internal/rules/schema/rule-bundle.schema.json \
 		|| (echo "internal/rules/schema is stale; copy the published contract:"; \
 		    echo "  cp contracts/json-schema/rule-bundle.schema.json internal/rules/schema/"; exit 1)
+	@$(GO) test -count=1 -run TestEmbeddedSchemas ./internal/contracts/schemasync/ \
+		|| (echo "an embedded schema copy has drifted from contracts/json-schema;"; \
+		    echo "copy the published contract over internal/contracts/schemasync/"; exit 1)
 
-ci: contract-check contract-sync vet lint test-race migration-phases rules-lint
+ci: contract-check contract-check-schema contract-check-openapi contract-sync vet lint test-race migration-phases rules-lint
 
 # The gate that actually runs, and the one to trust.
 #
@@ -104,7 +129,7 @@ ci: contract-check contract-sync vet lint test-race migration-phases rules-lint
 #
 # The database-backed suites skip rather than fail without SP_TEST_DATABASE_URL,
 # so a green run here can be a run that tested nothing. See AGENTS.md.
-verify: contract-check contract-sync vet fmt-check test-race migration-phases rules-lint
+verify: contract-check contract-check-schema contract-check-openapi contract-sync vet fmt-check test-race migration-phases rules-lint
 
 # Fails if anything is unformatted. Same intent as the CI fmt job, phrased so it
 # does not depend on a shell pipeline.

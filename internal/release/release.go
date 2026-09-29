@@ -297,6 +297,25 @@ func Verify(archivePath string, manifest Manifest, trustedKey ed25519.PublicKey)
 			"build that cannot be asked what is running")
 	} else if err := ValidateFilePath(manifest.SBOM.Path); err != nil {
 		add("SBOM path: %v", err)
+	} else {
+		// The declared hash has to be compared to the bytes, not merely present.
+		// The signature now covers the SBOM block, so a repointed SBOM needs a
+		// re-signed manifest; checking the hash is what makes the block mean
+		// something. Without it, `sbom: {path: "other.json", sha256: <hash of
+		// something else>}` verifies, and the operator is told the archive ships
+		// the components it actually ships.
+		entry, ok := actual[manifest.SBOM.Path]
+		switch {
+		case !ok:
+			add("the manifest declares an SBOM at %q, which the archive does not contain",
+				manifest.SBOM.Path)
+		case manifest.SBOM.SHA256 == "":
+			add("the manifest declares an SBOM at %q with no hash. A pointer with no hash is "+
+				"not a statement about content", manifest.SBOM.Path)
+		case !strings.EqualFold(entry.sum, manifest.SBOM.SHA256):
+			add("the SBOM at %q hashes to %s, the manifest says %s",
+				manifest.SBOM.Path, entry.sum[:16], manifest.SBOM.SHA256[:16])
+		}
 	}
 
 	if len(problems) > 0 {
@@ -310,6 +329,26 @@ func Verify(archivePath string, manifest Manifest, trustedKey ed25519.PublicKey)
 type archiveEntry struct {
 	size int64
 	sum  string
+}
+
+// entryKind names a tar typeflag for a message an operator can act on. The
+// numeric byte is what the tar format defines; "a symlink" is what the reader
+// has to do about it.
+func entryKind(flag byte) string {
+	switch flag {
+	case tar.TypeSymlink:
+		return "a symlink"
+	case tar.TypeLink:
+		return "a hard link"
+	case tar.TypeChar:
+		return "a character device"
+	case tar.TypeBlock:
+		return "a block device"
+	case tar.TypeFifo:
+		return "a fifo"
+	default:
+		return fmt.Sprintf("type 0x%02x", flag)
+	}
 }
 
 // readArchive indexes the archive, refusing every path it would refuse in the
@@ -347,7 +386,22 @@ func readArchive(archivePath string) (map[string]archiveEntry, []string) {
 		if err != nil {
 			return out, append(problems, fmt.Sprintf("cannot read archive: %v", err))
 		}
-		if header.Typeflag == tar.TypeDir {
+		switch header.Typeflag {
+		case tar.TypeDir:
+			continue
+		case tar.TypeReg:
+			// The only kind this loop knows how to describe. It reads to the end
+			// of the entry and stops.
+		case tar.TypeSymlink, tar.TypeLink:
+			add("archive entry %q is a %s. A release is a set of regular files; an entry "+
+				"that points somewhere else is an instruction, not content, and whoever can "+
+				"write the archive chooses what it points at",
+				path.Clean(header.Name), entryKind(header.Typeflag))
+			continue
+		default:
+			add("archive entry %q has type %s, which is not a regular file. A release "+
+				"archive is a set of regular files and this tool will not interpret anything else",
+				path.Clean(header.Name), entryKind(header.Typeflag))
 			continue
 		}
 		// The name is cleaned and then re-checked, because a tar entry name is
@@ -421,7 +475,22 @@ func verifySignature(m Manifest, trustedKey ed25519.PublicKey) error {
 	if err != nil || len(embedded) != ed25519.PublicKeySize {
 		return fmt.Errorf("%w: the manifest's public key is malformed", ErrVerification)
 	}
-	if trustedKey != nil && !equalBytes(trustedKey, embedded) {
+	// A nil trusted key is a refusal, not a warning.
+	//
+	// This function's entire job is to answer "did the party I trust build this",
+	// and with no trusted key the only available answer is "did whoever wrote the
+	// archive sign their own work". Anyone who can write the archive can sign it.
+	// The two offline verifiers — `securityctl release verify` and
+	// `securityctl operator seal-verify` — used to print a warning and carry on,
+	// which made the warning the only thing between an operator and accepting a
+	// self-signed forgery on the exact commands whose purpose is to detect one.
+	if trustedKey == nil {
+		return fmt.Errorf("%w: no trusted public key was supplied, so this can only confirm that "+
+			"whoever wrote the archive also signed it. Pass the key you trust out of band "+
+			"(the fingerprint is in the release notes); refusing here is the point of the check",
+			ErrVerification)
+	}
+	if !equalBytes(trustedKey, embedded) {
 		return fmt.Errorf("%w: the archive was signed by key %q, not the trusted key. An attacker "+
 			"who can write the archive can also sign it, and without this check the "+
 			"signature proves only that they signed their own forgery",
@@ -439,13 +508,25 @@ func verifySignature(m Manifest, trustedKey ed25519.PublicKey) error {
 
 // SigningPayload is the bytes a manifest signature covers.
 //
-// It excludes the signature field itself and the timestamp, so re-signing an
-// unchanged manifest produces a stable signature and a verifier can tell a
-// changed manifest from a re-signed one.
+// It excludes the signature field itself, so re-signing an unchanged manifest
+// produces a stable signature and a verifier can tell a changed manifest from a
+// re-signed one.
+//
+// It does NOT exclude the SBOM. It used to zero it, on the reasoning that the
+// SBOM is a pointer to another file in the archive rather than manifest content.
+// That is exactly the gap: the pointer is metadata, and metadata is what an
+// attacker with write access to the manifest repoints. Restating
+// `SBOM.SHA256` under a valid signature is a one-line edit, and the old payload
+// meant Verify never noticed — it only checked that the declared path was
+// syntactically safe. A signature that does not cover a field in the document it
+// signs is a signature over a smaller document than the reader thinks.
+//
+// Changing this invalidates every existing signature. That is acceptable and is
+// recorded in docs/status.md: the alternative is a signature that does not cover
+// what it appears to.
 func SigningPayload(m Manifest) string {
 	clone := m
 	clone.Signature = Signature{}
-	clone.SBOM = SBOM{}
 	body, err := json.Marshal(clone)
 	if err != nil {
 		// A fixed struct of marshalable values cannot fail, so this would be a

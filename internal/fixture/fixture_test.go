@@ -2,6 +2,7 @@ package fixture_test
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -71,6 +72,139 @@ func TestSecretKeyMatchingIgnoresCaseAndSeparators(t *testing.T) {
 
 // Identifiers are not secrets, but a committed fixture carrying a real plate or
 // badge number puts live site data in a public repository.
+// A capture run against a live site produces a person, a face and a place. None
+// of them is a credential, and a reviewer hunting for a leaked password does not
+// flag any of them — which is exactly how they get into a committed file.
+//
+// The list the sanitizer had was a list of things that look like secrets, so it
+// had none of these. A face is a biometric and a commit is permanent; a
+// latitude and longitude with a display name is an identified individual.
+func TestRedactsPeopleAndPlaces(t *testing.T) {
+	doc := map[string]any{
+		"Id":          "evt-1",
+		"Direction":   "Inbound",
+		"DisplayName": "A. Okonkwo",
+		"FirstName":   "Ada",
+		"EmployeeNo":  "EMP-0041",
+		"Latitude":    51.5072,
+		"Longitude":   -0.1276,
+		"ImageUrl":    "https://cam.internal.example/frames/0001.jpg",
+		"Photo":       "https://cam.internal.example/frames/0002.jpg",
+		"FaceDetections": []any{
+			map[string]any{"Confidence": 0.98, "FaceId": "face-77"},
+		},
+		"Coordinates": map[string]any{"lat": 51.5072, "lon": -0.1276},
+	}
+	out, err := fixture.RedactValue("", doc)
+	if err != nil {
+		t.Fatalf("RedactValue: %v", err)
+	}
+	m := out.(map[string]any)
+
+	for _, key := range []string{
+		"DisplayName", "FirstName", "EmployeeNo",
+		"Latitude", "Longitude", "ImageUrl", "Photo",
+	} {
+		if m[key] != fixture.RedactionMarker {
+			t.Errorf("%s was not redacted, got %v. A committed capture is permanent; a face "+
+				"and a name and a location do not un-leak", key, m[key])
+		}
+	}
+	faces, ok := m["FaceDetections"].([]any)
+	if !ok || len(faces) != 1 {
+		t.Fatalf("FaceDetections was not walked: %v", m["FaceDetections"])
+	}
+	face := faces[0].(map[string]any)
+	if face["FaceId"] != fixture.RedactionMarker {
+		t.Errorf("a face id survived redaction: %v", face["FaceId"])
+	}
+	if face["Confidence"] != 0.98 {
+		t.Errorf("a detection score was altered: %v", face["Confidence"])
+	}
+
+	if m["Coordinates"] != fixture.RedactionMarker {
+		t.Errorf("a nested coordinates object survived: %v", m["Coordinates"])
+	}
+	if m["Id"] != "evt-1" || m["Direction"] != "Inbound" {
+		t.Errorf("fields that identify nobody were altered: %v", m)
+	}
+}
+
+// A device identified by number is identified whether the number is a string or
+// an integer, and the value-level rules never saw the integers: RedactValue's
+// number branch passed a float64 straight through. site_id 3, device_id 41 and
+// partition 7 are enough to reconstruct a site's layout from a public file.
+func TestRedactsNumericDeviceIdentifiers(t *testing.T) {
+	doc := map[string]any{
+		"EventId":    "evt-1",
+		"Confidence": 0.97,
+		"LatencyMs":  4200,
+		"Metadata": map[string]any{
+			"SiteId":       3,
+			"deviceId":     41,
+			"Door":         float64(7),
+			"Partition_No": 2,
+			"ChannelId":    float64(9),
+			"Direction":    "Inbound",
+		},
+	}
+	out, err := fixture.RedactValue("", doc)
+	if err != nil {
+		t.Fatalf("RedactValue: %v", err)
+	}
+	meta := out.(map[string]any)["Metadata"].(map[string]any)
+
+	for _, key := range []string{"SiteId", "deviceId", "Door", "Partition_No", "ChannelId"} {
+		if meta[key] != fixture.RedactionMarker {
+			t.Errorf("%s (a numeric device identifier) was not redacted, got %v (%T)", key, meta[key], meta[key])
+		}
+	}
+	if meta["Direction"] != "Inbound" {
+		t.Errorf("a field that identifies nothing was altered: %v", meta["Direction"])
+	}
+
+	top := out.(map[string]any)
+	if top["Confidence"] != 0.97 || top["LatencyMs"] != 4200 {
+		t.Errorf("measurements were redacted: %v", top)
+	}
+}
+
+// The header allow-list is deny-by-default, and a header that is credential-shaped
+// has no business being in it. `x-milestone-session` is a session: a captured
+// value is a bearer of the vendor's authenticated session, committed to a
+// repository. Nothing replays on it.
+func TestTheHeaderAllowListCarriesNothingCredentialShaped(t *testing.T) {
+	resp := &http.Response{
+		StatusCode: 200,
+		Header:     http.Header{},
+		Body:       io.NopCloser(strings.NewReader(`{}`)),
+	}
+	resp.Header.Set("Content-Type", "application/json")
+	for _, h := range []string{
+		"X-Milestone-Session", "Authorization", "Cookie", "Set-Cookie",
+		"X-Api-Key", "X-Session-Token", "Proxy-Authorization",
+	} {
+		resp.Header.Set(h, "abc123")
+	}
+	_, headers, err := fixture.SanitizeResponse(resp)
+	if err != nil {
+		t.Fatalf("SanitizeResponse: %v", err)
+	}
+	for k := range headers {
+		switch strings.ToLower(k) {
+		case "authorization", "cookie", "set-cookie", "x-api-key", "x-session-token",
+			"proxy-authorization", "x-milestone-session":
+			t.Errorf("the allow-list carried the credential-shaped header %q. The list is "+
+				"deny-by-default, so a credential in it is a credential in every committed "+
+				"capture", k)
+		}
+	}
+	if len(headers) == 0 {
+		t.Error("no header survived; the allow-list has stopped carrying anything at all, " +
+			"which is a different failure from carrying the wrong thing")
+	}
+}
+
 func TestRedactsIdentifiers(t *testing.T) {
 	doc := map[string]any{
 		"Id":           "evt-1",
