@@ -36,13 +36,20 @@ type DeadLetters struct {
 var ErrNotWired = errors.New("read model is not configured")
 
 // Read returns dead letters of a kind, or both when kind is empty.
-func (d DeadLetters) Read(ctx context.Context, tenant, kind string, limit int) ([]DeadLetter, error) {
+// Read returns one queue's terminal failures, scoped to one site.
+//
+// The site is a parameter because `site_isolation` has been RESTRICTIVE since
+// migration 21: a listing that named only its tenant would return nothing, and an
+// operator shown an empty dead-letter list reads it as "the site is healthy".
+// The caller's own scope is what should narrow it, which is why this takes the
+// site rather than deriving one.
+func (d DeadLetters) Read(ctx context.Context, tenant, site, kind string, limit int) ([]DeadLetter, error) {
 	switch kind {
 	case "inbox":
 		if d.Inbox == nil {
 			return nil, ErrNotWired
 		}
-		letters, err := d.Inbox.DeadLetters(ctx, tenant, limit)
+		letters, err := d.Inbox.DeadLetters(ctx, tenant, site, limit)
 		if err != nil {
 			return nil, err
 		}
@@ -61,7 +68,7 @@ func (d DeadLetters) Read(ctx context.Context, tenant, kind string, limit int) (
 		if d.Jobs == nil {
 			return nil, ErrNotWired
 		}
-		letters, err := d.Jobs.DeadLetters(ctx, tenant, limit)
+		letters, err := d.Jobs.DeadLetters(ctx, tenant, site, limit)
 		if err != nil {
 			return nil, err
 		}
@@ -84,7 +91,7 @@ func (d DeadLetters) Read(ctx context.Context, tenant, kind string, limit int) (
 		if d.Relay == nil {
 			return nil, ErrNotWired
 		}
-		letters, err := d.Relay.DeadLetters(ctx, tenant, limit)
+		letters, err := d.Relay.DeadLetters(ctx, tenant, site, limit)
 		if err != nil {
 			return nil, err
 		}
@@ -106,22 +113,15 @@ func (d DeadLetters) Read(ctx context.Context, tenant, kind string, limit int) (
 	}
 
 	var out []DeadLetter
-	if d.Relay != nil {
-		items, err := d.Read(ctx, tenant, "outbox", limit)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, items...)
-	}
 	if d.Inbox != nil {
-		items, err := d.Read(ctx, tenant, "inbox", limit)
+		items, err := d.Read(ctx, tenant, site, "inbox", limit)
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, items...)
 	}
 	if d.Jobs != nil {
-		items, err := d.Read(ctx, tenant, "job", limit)
+		items, err := d.Read(ctx, tenant, site, "jobs", limit)
 		if err != nil {
 			return nil, err
 		}
@@ -171,11 +171,18 @@ type BacklogReader struct {
 // OutboxPending is the outbox depth reader.
 type OutboxPending func(ctx context.Context, tenant string) (int64, error)
 
-// Count reads the backlog.
-func (b BacklogReader) Count(ctx context.Context, tenant string) (BacklogCounts, error) {
+// Count reads the backlog for one site.
+//
+// The site is a parameter rather than a default because `site_isolation` has
+// been RESTRICTIVE since migration 21: a count over a site-scoped table that
+// names only its tenant reads nothing, and a backlog that reads zero because the
+// reader could not see the rows is a backlog an operator would read as "the site
+// is caught up". That is the failure the direction of the policy produces, and
+// the signature makes it a compile error rather than a runtime zero.
+func (b BacklogReader) Count(ctx context.Context, tenant, site string) (BacklogCounts, error) {
 	var out BacklogCounts
 	if b.Inbox != nil {
-		counts, err := b.Inbox.Counts(ctx, tenant)
+		counts, err := b.Inbox.Counts(ctx, tenant, site)
 		if err != nil {
 			return out, err
 		}
@@ -184,7 +191,7 @@ func (b BacklogReader) Count(ctx context.Context, tenant string) (BacklogCounts,
 		out.InboxDeadLetter = counts.DeadLetter
 	}
 	if b.Jobs != nil {
-		counts, err := b.Jobs.Counts(ctx, tenant)
+		counts, err := b.Jobs.Counts(ctx, tenant, site)
 		if err != nil {
 			return out, err
 		}

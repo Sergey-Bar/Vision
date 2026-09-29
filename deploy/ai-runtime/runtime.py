@@ -269,6 +269,9 @@ RUNTIME_VERSION = "ai-runtime/1"
 # those vectors still green; a verifier that rejects everything is a safe
 # failure and one that accepts everything is not, so the reject tests matter
 # more than the accept ones.
+#
+# Which equation is used, and what it does and does not buy, is documented at
+# ``ed25519_verify`` below. Read that comment before "simplifying" anything here.
 _ED_P = 2**255 - 19
 _ED_L = 2**252 + 27742317777372353535851937790883648493
 _ED_D = (-121665 * pow(121666, _ED_P - 2, _ED_P)) % _ED_P
@@ -281,6 +284,13 @@ def _ed_recover_x(y: int, sign: int) -> int | None:
     ``y >= p`` is rejected here and that rejection is load-bearing, not an
     edge case: a non-canonical y is a second encoding of a real point, and a
     verifier that accepts one accepts a signature nobody signed.
+
+    Neither this check nor the ``x == 0`` one below is redundant because the
+    cofactored equation is in use — the cofactor says nothing about canonical
+    encodings. They are kept because the alternative is a decoder that hands
+    back a point for bytes that name no point, and every later stage would then
+    have to defend against that. Said here rather than left to be "simplified"
+    away by someone reading the equation as if it covered them.
     """
     if y >= _ED_P:
         return None
@@ -300,6 +310,12 @@ def _ed_recover_x(y: int, sign: int) -> int | None:
 
 
 def _ed_decode_point(encoded: bytes) -> tuple[int, int, int, int] | None:
+    """The point named by ``encoded``, or None if those bytes name no point.
+
+    Canonical-only, per RFC 8032 §5.1.3: a non-canonical y and an x of zero with
+    the sign bit set both return None. This is a decoder, not a permissive
+    parser, and it says no rather than guessing which point was meant.
+    """
     if len(encoded) != 32:
         return None
     y = int.from_bytes(encoded, "little")
@@ -338,6 +354,22 @@ def _ed_equal(p: tuple[int, int, int, int], q: tuple[int, int, int, int]) -> boo
     return (p[1] * q[2] - q[1] * p[2]) % _ED_P == 0
 
 
+_ED_IDENTITY = (0, 1, 1, 0)
+
+
+def _ed_is_small_order(point: tuple[int, int, int, int]) -> bool:
+    """True when ``[8]point`` is the neutral element, i.e. the point dies in the
+    cofactor quotient.
+
+    Every point of order 1, 2, 4 or 8 answers True, which is the whole set this
+    exists to catch. Such a point is in the kernel of the cofactor
+    multiplication, so ``[8][k]A`` is the identity whatever ``k`` is and the
+    group equation constrains nothing about ``A``. The check in
+    ``ed25519_verify`` is what closes that; the cofactor is not.
+    """
+    return _ed_equal(_ed_mul(8, point), _ED_IDENTITY)
+
+
 _ED_G = _ed_decode_point(bytes.fromhex(
     "5866666666666666666666666666666666666666666666666666666666666666"
 ))
@@ -345,6 +377,42 @@ _ED_G = _ed_decode_point(bytes.fromhex(
 
 def ed25519_verify(public_key: bytes, message: bytes, signature: bytes) -> bool:
     """True when ``signature`` is a valid Ed25519 signature over ``message``.
+
+    The equation checked is the **cofactored** one, RFC 8032 §5.1.7 step 3 as
+    the RFC's own implementations run it:
+
+        [8][S]B == [8]R + [8][k]A          i.e.  [8]([S]B) == [8](R + [k]A)
+
+    What that comment used to say here was wrong about the reason, so this
+    paragraph replaces it rather than editing it. The old claim was that the
+    un-cofactored ``[S]B == R + [k]A`` "is the form the RFC's own reference
+    verifier uses". The reference verifier multiplies by the cofactor.
+
+    **What cofactoring actually does, stated honestly because the reverse of it
+    is the received wisdom.** Multiplication by 8 is a group homomorphism, so
+    ``[S]B == R + [k]A`` *implies* ``[8][S]B == [8]R + [8][k]A`` and never the
+    other way round. The cofactored equation is therefore strictly *weaker*: it
+    forgets the eight-torsion part of the equation, and the set of signatures it
+    accepts is a superset of the un-cofactored set. RFC 8032 permits both
+    ("it is sufficient, but not required, to check [S]B = R + [k]A" — the
+    cofactored form is the primary statement and the un-cofactored one is the
+    permitted shortcut), so both conform; only one of them is the strict one.
+    Test ``test_cofactored_verification_accepts_what_the_plain_equation_rejects``
+    pins that direction with a constructed signature so nobody "fixes" this
+    comment by reasoning from the folklore.
+
+    **What cofactoring does not do is stop a small-order attack.** For a key of
+    order 8, ``[8][k]A`` is the identity for every ``k``, so the equation is
+    satisfied by signatures no one signed, cofactored or not — the cofactor kills
+    the very information that would have exposed it. What closes that is the
+    explicit ``_ed_is_small_order`` refusal on both ``A`` and ``R`` below, the
+    same rule libsodium applies. Small-order keys are not exotic: the order-8
+    point has a published encoding, and a bundle can simply present it as the
+    vendor's key.
+
+    So: cofactored equation, canonical decoding, S < L, and no small-order A or
+    R. Removing any one of those needs the reason restated here, because each of
+    them is load-bearing and only one of them looks load-bearing.
 
     Never raises: every malformed input is a False, because this runs on
     whatever bytes arrived in an untrusted bundle and a verifier that throws
@@ -355,9 +423,17 @@ def ed25519_verify(public_key: bytes, message: bytes, signature: bytes) -> bool:
     a = _ed_decode_point(public_key)
     if a is None:
         return False
+    if _ed_is_small_order(a):
+        # A key in the cofactor's kernel constrains nothing: every message has a
+        # signature. Refused here rather than caught by the equation, which
+        # cannot catch it.
+        return False
     r_enc = signature[:32]
     r = _ed_decode_point(r_enc)
     if r is None:
+        return False
+    if _ed_is_small_order(r):
+        # Same argument as the key, from the other side.
         return False
     s = int.from_bytes(signature[32:], "little")
     if s >= _ED_L:
@@ -366,9 +442,23 @@ def ed25519_verify(public_key: bytes, message: bytes, signature: bytes) -> bool:
         # key, two "valid" bundles. RFC 8032 §5.1.7 step 1 rejects it.
         return False
     k = int.from_bytes(hashlib.sha512(r_enc + public_key + message).digest(), "little") % _ED_L
-    # RFC 8032 §5.1.7 step 3. Checking [S]B == R + [k]A without the cofactor
-    # multiplication is the form the RFC's own reference verifier uses.
-    return _ed_equal(_ed_mul(s, _ED_G), _ed_add(r, _ed_mul(k, a)))
+    # BOTH equations, not either.
+    #
+    # Multiplication by 8 is a group homomorphism, so [S]B == R + [k]A *implies*
+    # the cofactored form and never the reverse. Checking only the cofactored
+    # equation therefore accepts a strict superset of what it should, and the
+    # superset is exactly the set of small-order forgeries the two explicit
+    # refusals above already reject. Requiring the plain equation as well
+    # intersects the two sets, which is smaller than either, so a signature that
+    # would be accepted today is refused.
+    #
+    # Nothing legitimate is lost: a correctly generated signature satisfies both
+    # by construction, and the RFC 8032 section 7.1 vectors are asserted against
+    # both here. This is the strict form, and for a verifier that runs once per
+    # bundle load there is no reason to accept the looser one.
+    if not _ed_equal(_ed_mul(s, _ED_G), _ed_add(r, _ed_mul(k, a))):
+        return False
+    return _ed_equal(_ed_mul(8, _ed_mul(s, _ED_G)), _ed_mul(8, _ed_add(r, _ed_mul(k, a))))
 
 
 def _decode_key_material(text: str, what: str, expected: int) -> bytes:
@@ -445,11 +535,22 @@ class ModelBundle:
                 f"the configured public key is not a usable Ed25519 key ({exc}); refusing rather "
                 "than skipping the check",
             ) from exc
-        if _ed_decode_point(public_key) is None:
+        decoded_key = _ed_decode_point(public_key)
+        if decoded_key is None:
             raise InferenceUnavailable(
                 DEGRADED_MODEL_UNAVAILABLE,
                 "the configured public key is not a point on the edwards25519 curve; it cannot "
                 "verify anything, so the bundle is refused rather than assumed good",
+            )
+        if _ed_is_small_order(decoded_key):
+            # Checked here as well as in the verifier so the operator is told what
+            # is actually wrong. A key of order 8 is a real curve point and a real
+            # 32-byte string, so the "not a point" message above would be a lie,
+            # and the generic "does not verify" would not say why either.
+            raise InferenceUnavailable(
+                DEGRADED_MODEL_UNAVAILABLE,
+                "the configured public key is a small-order curve point (order 1, 2, 4 or 8); "
+                "such a key verifies signatures that nobody signed, so the bundle is refused",
             )
 
         try:

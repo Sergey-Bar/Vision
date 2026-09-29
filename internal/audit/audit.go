@@ -49,22 +49,28 @@ const (
 // that every auth event, every disposition, every bundle activation and every
 // dead letter has one.
 const (
-	ActionLoginAttempt         = "auth.login.attempt"
-	ActionLoginSuccess         = "auth.login.success"
-	ActionLoginFailed          = "auth.login.failed"
-	ActionLoginLocked          = "auth.login.locked"
-	ActionBreakGlassLogin      = "auth.login.break_glass"
-	ActionLogout               = "auth.logout"
-	ActionStepUpMFASucceeded   = "auth.stepup.succeeded"
-	ActionSessionRevoked       = "auth.session.revoked"
-	ActionRecoveryPerformed    = "identity.recovery.performed"
-	ActionBootstrapAdmin       = "identity.bootstrap_admin"
-	ActionRoleGranted          = "identity.role.granted"
-	ActionRoleRevoked          = "identity.role.revoked"
-	ActionDispositionRecorded  = "incident.disposition.recorded"
-	ActionIncidentCreated      = "incident.created"
-	ActionEvidenceFetched      = "evidence.fetched"
-	ActionEvidenceExported     = "evidence.exported"
+	ActionLoginAttempt        = "auth.login.attempt"
+	ActionLoginSuccess        = "auth.login.success"
+	ActionLoginFailed         = "auth.login.failed"
+	ActionLoginLocked         = "auth.login.locked"
+	ActionBreakGlassLogin     = "auth.login.break_glass"
+	ActionLogout              = "auth.logout"
+	ActionStepUpMFASucceeded  = "auth.stepup.succeeded"
+	ActionSessionRevoked      = "auth.session.revoked"
+	ActionRecoveryPerformed   = "identity.recovery.performed"
+	ActionBootstrapAdmin      = "identity.bootstrap_admin"
+	ActionRoleGranted         = "identity.role.granted"
+	ActionRoleRevoked         = "identity.role.revoked"
+	ActionDispositionRecorded = "incident.disposition.recorded"
+	ActionIncidentCreated     = "incident.created"
+	ActionEvidenceFetched     = "evidence.fetched"
+	// ActionEvidenceExported used to be declared here as "evidence.exported" and
+	// was appended to by nothing, ever. Its capability (evidence.export) was
+	// granted to two roles and enforced by no route, so there was no code path
+	// that could reach this row — and a ledger action nobody can write is a
+	// second thing that claims a capability exists. It was removed with the
+	// capability rather than left as a placeholder for a feature nobody specified.
+	// ActionEvidenceFetched is the row that records evidence bytes leaving.
 	ActionRuleBundleStored     = "rules.bundle.stored"
 	ActionRuleBundleActivated  = "rules.bundle.activated"
 	ActionRuleBundleRolledBack = "rules.bundle.rolled_back"

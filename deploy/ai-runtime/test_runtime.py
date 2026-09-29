@@ -424,6 +424,293 @@ class Ed25519RFC8032(unittest.TestCase):
         self.assertFalse(ed25519_verify(b"", b"", b""))
 
 
+class CofactoredVerification(unittest.TestCase):
+    """The equation that is actually checked, and the attacks around it.
+
+    Three separate claims live here and they are easy to confuse, so they are
+    kept apart:
+
+    1. ``ed25519_verify`` checks ``[8][S]B == [8]R + [8][k]A``, not
+       ``[S]B == R + [k]A``.
+    2. Cofactoring is a *weakening*, not a hardening. Multiplication by 8 is a
+       homomorphism, so the plain equation implies the cofactored one and never
+       the reverse. These tests pin that direction with a constructed signature
+       so the next reader cannot "prove" the opposite from memory.
+    3. What actually stops a small-order key is an explicit refusal, not the
+       cofactor. For an order-8 key ``[8][k]A`` is the identity for every k, so
+       the cofactored equation is satisfied by signatures nobody signed. That is
+       the attack this suite is really about, and it is live in the un-cofactored
+       form too — see ``test_a_signature_against_a_small_order_key_is_rejected``,
+       which fails against the previous implementation of ``ed25519_verify``.
+
+    Every negative case asserts its premise first — that the point really is
+    small-order, that the forged signature really does satisfy the group
+    equation — because a test that feeds a verifier a random wrong input and sees
+    ``False`` proves only that the verifier is not constantly true.
+    """
+
+    # The published encoding of a point of order 8 on edwards25519.
+    SMALL_ORDER_KEY = bytes.fromhex(
+        "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a"
+    )
+    IDENTITY = (0, 1)
+    IDENTITY_ENCODING = bytes.fromhex("0100000000000000000000000000000000000000000000000000000000000000")
+
+    # A signature over "small-order-key-forgery-0-5" under SMALL_ORDER_KEY with
+    # S = 0 and R = the identity. It satisfies the plain group equation exactly:
+    # the nonce k for that message is 0 mod 8, so [k]A is the identity, so
+    # R + [k]A is the identity, which is [0]B. No private key is involved; the
+    # message was found by brute-forcing the nonce residue, which is cheap
+    # because the attacker also controls the key here.
+    SMALL_ORDER_KEY_FORGERY = (
+        b"small-order-key-forgery-0-5",
+        bytes.fromhex("0100000000000000000000000000000000000000000000000000000000000000"
+                      "0000000000000000000000000000000000000000000000000000000000000000"),
+    )
+
+    # Same shape, but with the cofactored equation *only* satisfied: A and R are
+    # both small order, and the torsion components deliberately do not cancel, so
+    # the plain equation fails while [8] times both sides succeeds.
+    COFACTORED_ONLY_FORGERY = (
+        b"cofactored-only-0-0",
+        bytes.fromhex("0100000000000000000000000000000000000000000000000000000000000000"
+                      "0000000000000000000000000000000000000000000000000000000000000000"),
+    )
+
+    def _decode_affine(self, encoded: bytes):
+        y = int.from_bytes(encoded, "little") & ((1 << 255) - 1)
+        sign = int.from_bytes(encoded, "little") >> 255
+        x = _recover_x(y, sign)
+        return None if x is None else (x, y)
+
+    def _equation_forms(self, public: bytes, message: bytes, signature: bytes):
+        """(plain, cofactored) — which of the two group equations hold.
+
+        Computed in the test's own affine arithmetic, deliberately not through
+        the runtime's extended-coordinate code: a premise that reuses the code
+        under test proves nothing when that code is what is in question.
+        """
+        s = int.from_bytes(signature[32:], "little")
+        r_pt = self._decode_affine(signature[:32])
+        a_pt = self._decode_affine(public)
+        self.assertIsNotNone(r_pt)
+        self.assertIsNotNone(a_pt)
+        k = int.from_bytes(
+            hashlib.sha512(signature[:32] + public + message).digest(), "little"
+        ) % _L
+        lhs, rhs = _affine_mul(s, _G), _affine_add(r_pt, _affine_mul(k, a_pt))
+        plain = lhs == rhs
+        cofactored = _affine_mul(8, lhs) == _affine_mul(8, rhs)
+        return plain, cofactored
+
+    def _group_equation_holds(self, public: bytes, message: bytes, signature: bytes) -> bool:
+        return self._equation_forms(public, message, signature)[0]
+
+    def _cofactored_equation_holds(self, public: bytes, message: bytes, signature: bytes) -> bool:
+        return self._equation_forms(public, message, signature)[1]
+
+    # --- premises ---------------------------------------------------------
+
+    def test_the_small_order_key_really_is_small_order(self) -> None:
+        # Order 8 exactly: not the identity, not of order 2 or 4, and killed by
+        # the cofactor. If this ever fails the three tests below that rest on it
+        # are asserting rejection of a point that was never small order, which
+        # they would then pass for the wrong reason.
+        point = self._decode_affine(self.SMALL_ORDER_KEY)
+        self.assertNotEqual(point, self.IDENTITY)
+        self.assertNotEqual(_affine_mul(2, point), self.IDENTITY)
+        self.assertNotEqual(_affine_mul(4, point), self.IDENTITY)
+        self.assertEqual(_affine_mul(8, point), self.IDENTITY)
+        # And the runtime sees the same thing through its own arithmetic.
+        self.assertTrue(runtime_module._ed_is_small_order(
+            runtime_module._ed_decode_point(self.SMALL_ORDER_KEY)
+        ))
+        # The runtime's copy of the base point is of full order, so the small-order
+        # refusals below are not simply refusing everything.
+        self.assertFalse(runtime_module._ed_is_small_order(runtime_module._ED_G))
+
+    def test_the_identity_really_is_small_order(self) -> None:
+        self.assertEqual(_affine_mul(8, self.IDENTITY), self.IDENTITY)
+        self.assertTrue(runtime_module._ed_is_small_order(
+            runtime_module._ed_decode_point(self.IDENTITY_ENCODING)
+        ))
+
+    # --- the equation -----------------------------------------------------
+
+    def test_the_rfc_vectors_satisfy_both_equations(self) -> None:
+        # Premise for the two tests below: a genuine signature satisfies the
+        # plain equation, and therefore the cofactored one as well. If this
+        # failed, the "cofactored is weaker" argument would be resting on inputs
+        # the verifier would reject for some other reason.
+        for label, _secret, public_hex, message_hex, signature_hex in Ed25519RFC8032.VECTORS:
+            with self.subTest(vector=label):
+                public = bytes.fromhex(public_hex)
+                message = bytes.fromhex(message_hex)
+                signature = bytes.fromhex(signature_hex)
+                self.assertTrue(self._group_equation_holds(public, message, signature))
+                self.assertTrue(self._cofactored_equation_holds(public, message, signature))
+                self.assertTrue(ed25519_verify(public, message, signature))
+
+    def test_cofactored_verification_accepts_what_the_plain_equation_rejects(self) -> None:
+        # The direction of the change, pinned. This signature is accepted by
+        # [8][S]B == [8]R + [8][k]A and rejected by [S]B == R + [k]A, so the
+        # cofactored equation cannot be the strict one. It is still refused here,
+        # because both halves of the attack (a small-order key and a small-order
+        # R) are refused explicitly rather than by the equation.
+        message, signature = self.COFACTORED_ONLY_FORGERY
+        self.assertFalse(self._group_equation_holds(self.SMALL_ORDER_KEY, message, signature))
+        self.assertTrue(self._cofactored_equation_holds(self.SMALL_ORDER_KEY, message, signature))
+        self.assertFalse(ed25519_verify(self.SMALL_ORDER_KEY, message, signature))
+
+    def test_the_runtime_arithmetic_agrees_with_the_affine_cross_check(self) -> None:
+        # A cross-check, not a probe of which equation the verifier uses.
+        #
+        # Being straight about the limit of what is observable: after the
+        # small-order refusals, no signature exists that ``ed25519_verify``
+        # accepts under the cofactored equation and rejects under the plain one
+        # (or the reverse — the plain one is stricter). So the public entry point
+        # cannot be used to tell the two apart, and a test that claimed to was
+        # asserting nothing. This one instead pins the cofactored computation
+        # itself: the runtime's extended-coordinate arithmetic must agree with
+        # the test's independent affine arithmetic on the signature above.
+        message, signature = self.COFACTORED_ONLY_FORGERY
+        self.assertTrue(self._cofactored_equation_holds(self.SMALL_ORDER_KEY, message, signature))
+        r = runtime_module._ed_decode_point(signature[:32])
+        a = runtime_module._ed_decode_point(self.SMALL_ORDER_KEY)
+        self.assertIsNotNone(r)
+        self.assertIsNotNone(a)
+        k = int.from_bytes(
+            hashlib.sha512(signature[:32] + self.SMALL_ORDER_KEY + message).digest(), "little"
+        ) % runtime_module._ED_L
+        lhs = runtime_module._ed_mul(8, runtime_module._ed_mul(0, runtime_module._ED_G))
+        rhs = runtime_module._ed_mul(8, runtime_module._ed_add(
+            r, runtime_module._ed_mul(k, a)))
+        self.assertTrue(runtime_module._ed_equal(lhs, rhs))
+
+    # --- small order, the attack that is actually live --------------------
+
+    def test_a_signature_against_a_small_order_key_is_rejected(self) -> None:
+        # The red test. This signature satisfies the *plain* group equation —
+        # verified above with the test's own arithmetic, not the runtime's — and
+        # the previous implementation of ed25519_verify, which checked exactly
+        # that equation, returned True for it. Only the explicit small-order
+        # refusal turns it into False. Nothing about the cofactor does: [8] is
+        # the identity for this key, so both equations are satisfied.
+        message, signature = self.SMALL_ORDER_KEY_FORGERY
+        self.assertTrue(self._group_equation_holds(self.SMALL_ORDER_KEY, message, signature))
+        self.assertTrue(self._cofactored_equation_holds(self.SMALL_ORDER_KEY, message, signature))
+        self.assertEqual(int.from_bytes(signature[32:], "little"), 0)
+        self.assertFalse(ed25519_verify(self.SMALL_ORDER_KEY, message, signature))
+
+    def test_the_identity_as_a_public_key_is_rejected(self) -> None:
+        # No brute force needed. A = identity makes [k]A the identity for every
+        # k, so R = identity and S = 0 satisfies the equation for *every*
+        # message: a key that signs everything. The R here is small order too, so
+        # this case is closed by both refusals, which is why both are asserted
+        # separately below rather than only here.
+        signature = self.IDENTITY_ENCODING + bytes(32)
+        for message in (b"", b"a", b"the vendor never signed this"):
+            with self.subTest(message=message):
+                self.assertTrue(self._group_equation_holds(
+                    self.IDENTITY_ENCODING, message, signature))
+                self.assertFalse(ed25519_verify(self.IDENTITY_ENCODING, message, signature))
+
+    def test_a_small_order_r_is_rejected_even_under_a_real_key(self) -> None:
+        # R = identity with a genuine prime-order key and S set to the nonce.
+        # Honest note: the group equation rejects this one as well, because the
+        # prime-order part of R has to match the rest. So this test does not
+        # demonstrate a hole being closed; it asserts that the small-order
+        # refusal on R is a real defence in depth rather than dead code, and the
+        # premise that R is small order is asserted so it cannot quietly become
+        # a test of something else.
+        public = bytes.fromhex(Ed25519RFC8032.VECTORS[0][2])
+        message = b"identity-R-forgery"
+        nonce = int.from_bytes(
+            hashlib.sha512(self.IDENTITY_ENCODING + public + message).digest(), "little"
+        ) % _L
+        signature = self.IDENTITY_ENCODING + int.to_bytes(nonce, 32, "little")
+        r_point = runtime_module._ed_decode_point(signature[:32])
+        self.assertIsNotNone(r_point)
+        self.assertTrue(runtime_module._ed_is_small_order(r_point))
+        self.assertFalse(runtime_module._ed_is_small_order(
+            runtime_module._ed_decode_point(public)))
+        self.assertFalse(ed25519_verify(public, message, signature))
+
+    # --- non-canonical encodings ------------------------------------------
+
+    def test_a_non_canonical_r_is_rejected(self) -> None:
+        # y = 3 is a point of prime order, so this is not a small-order case in
+        # disguise: it is an ordinary curve point with two byte encodings, the
+        # canonical one (y = 3) and the non-canonical one (y = p + 3), which a
+        # decoder that reduced mod p would resolve to the same point. Accept both
+        # and one signed manifest has two valid signature files, which is exactly
+        # the malleability the canonical decoder exists to prevent.
+        #
+        # Worth knowing why only points with y <= 18 can have a second encoding
+        # at all: y must stay inside 255 bits, so y + p < 2^255 means y <= 18.
+        # That is why the encoding is not a threat to a prime-order key's
+        # *reputation* — but it is a real second encoding of a real point, and
+        # the decoder refuses it before any point exists to compare.
+        y = 3
+        canonical = int.to_bytes(y, 32, "little")
+        non_canonical = int.to_bytes(y + _P, 32, "little")
+        self.assertNotEqual(canonical, non_canonical)
+        self.assertEqual(non_canonical[-1] >> 7, 0, "premise: the sign bit is clear")
+        # Premise: the two encodings name the same field element.
+        self.assertEqual((y + _P) % _P, y)
+        self.assertEqual(_recover_x((y + _P) % _P, 0), _recover_x(y, 0))
+        self.assertIsNotNone(_ed_decode_point(canonical))
+        # The point is of prime order, so refusing it is about the encoding and
+        # not about small order.
+        self.assertFalse(runtime_module._ed_is_small_order(_ed_decode_point(canonical)))
+        # And the refusal: asserted at the decoder, because the group equation
+        # cannot distinguish these two encodings on its own.
+        self.assertIsNone(_ed_decode_point(non_canonical))
+
+        _label, _secret, public_hex, message_hex, signature_hex = Ed25519RFC8032.VECTORS[0]
+        signature = bytes.fromhex(signature_hex)
+        self.assertTrue(ed25519_verify(
+            bytes.fromhex(public_hex), bytes.fromhex(message_hex), signature))
+        self.assertFalse(ed25519_verify(
+            bytes.fromhex(public_hex), bytes.fromhex(message_hex),
+            non_canonical + signature[32:],
+        ))
+
+    def test_a_non_canonical_public_key_is_rejected(self) -> None:
+        # y = p, the encoding of the identity with an out-of-range y. The
+        # identity is also refused as small order, so this is closed twice over.
+        encoded = "edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f"
+        self.assertIsNone(_ed_decode_point(bytes.fromhex(encoded)))
+        self.assertFalse(
+            ed25519_verify(bytes.fromhex(encoded), b"", bytes.fromhex(Ed25519RFC8032.VECTORS[0][4]))
+        )
+
+    # --- the ordinary negatives, re-asserted on the current equation -------
+
+    def test_a_tampered_message_is_rejected(self) -> None:
+        secret = VENDOR_SECRET
+        public = ed25519_public_key(secret)
+        message = b'{"model":"vision-1","modelHash":"' + b"a" * 64 + b'"}'
+        signature = ed25519_sign(secret, message)
+        self.assertTrue(ed25519_verify(public, message, signature))
+        tampered = message.replace(b"vision-1", b"vision-2")
+        self.assertEqual(len(tampered), len(message))
+        self.assertFalse(ed25519_verify(public, tampered, signature))
+        self.assertFalse(ed25519_verify(public, message + b" ", signature))
+
+    def test_a_tampered_signature_is_rejected(self) -> None:
+        secret = VENDOR_SECRET
+        public = ed25519_public_key(secret)
+        message = b'{"model":"vision-1","modelHash":"' + b"a" * 64 + b'"}'
+        signature = ed25519_sign(secret, message)
+        self.assertTrue(ed25519_verify(public, message, signature))
+        for offset in (0, 20, 40, 63):
+            with self.subTest(offset=offset):
+                forged = bytearray(signature)
+                forged[offset] ^= 0x01
+                self.assertFalse(ed25519_verify(public, message, bytes(forged)))
+
+
 class GoldenSignedBundle(unittest.TestCase):
     """A frozen, correctly signed bundle â€” the accept path, byte for byte.
 

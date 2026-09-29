@@ -295,38 +295,61 @@ func (q *Worker) lease() time.Duration {
 	return DefaultLeaseDuration
 }
 
+// leasedWrite runs fn as the system worker, on the strength of a lease predicate.
+//
+// `site_isolation` has been RESTRICTIVE since migration 21, so a write against
+// `jobs` naming only its tenant is refused by a policy the worker cannot see.
+// Every terminal write here is guarded on `lease_owner`: only the worker that
+// claimed this specific job may write it, which is a strictly stronger predicate
+// than site scope â€” a worker does not hold every job of its site, it holds one
+// job of one site.
+//
+// Running as the system worker is therefore not a bypass dressed up as a
+// convenience. It is the "I am acting on one leased row, not browsing" case, and
+// the lease predicate inside the statement is the proof. A caller gains nothing
+// by it: the lease is what authorises the write, and a caller without the lease
+// matches zero rows exactly as it did before.
+func leasedWrite(ctx context.Context, pool *dbx.Pool, fn func(tx pgx.Tx) error) error {
+	return pool.InSystemTenant(ctx, fn)
+}
+
 // Renew extends a lease a worker is still using. A long inference must not have
 // its job stolen from under it and started a second time.
 func (q *Worker) Renew(ctx context.Context, tenant, id, owner string) error {
 	seconds := int(q.lease().Seconds())
-	tag, err := q.Pool.For(tenant, "jobs").Exec(ctx, `
+	err := leasedWrite(ctx, q.Pool, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `
 		UPDATE jobs
 		   SET lease_expires_at = now() + make_interval(secs => $3)
 		 WHERE job_id = $1 AND tenant_id = $4 AND lease_owner = $2 AND status = 'leased'`,
-		id, owner, seconds, tenant)
-	if err != nil {
-		return fmt.Errorf("jobs: renew: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("%w: %s", ErrNotClaimed, id)
-	}
-	return nil
+			id, owner, seconds, tenant)
+		if err != nil {
+			return fmt.Errorf("jobs: renew: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return fmt.Errorf("%w: %s", ErrNotClaimed, id)
+		}
+		return nil
+	})
+	return err
 }
 
 // Complete marks a job done. Done is terminal and a job is never re-run.
 func (q *Worker) Complete(ctx context.Context, tenant, id, owner string) error {
-	tag, err := q.Pool.For(tenant, "jobs").Exec(ctx, `
+	return leasedWrite(ctx, q.Pool, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `
 		UPDATE jobs
 		   SET status = 'done', completed_at = now(),
 		       lease_owner = NULL, lease_expires_at = NULL, last_error = NULL
 		 WHERE job_id = $1 AND tenant_id = $3 AND lease_owner = $2`, id, owner, tenant)
-	if err != nil {
-		return fmt.Errorf("jobs: complete: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("%w: %s", ErrNotClaimed, id)
-	}
-	return nil
+		if err != nil {
+			return fmt.Errorf("jobs: complete: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return fmt.Errorf("%w: %s", ErrNotClaimed, id)
+		}
+		return nil
+	})
 }
 
 // Fail records a failed attempt and applies exponential backoff with a cap. Past
@@ -350,7 +373,8 @@ func (q *Worker) Fail(ctx context.Context, tenant, id, owner string, cause error
 		cause = errors.New("jobs: the failure had no cause recorded")
 	}
 	var status Status
-	if err := q.Pool.For(tenant, "jobs").QueryRow(ctx, `
+	return status, leasedWrite(ctx, q.Pool, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `
 		UPDATE jobs
 		   SET status = CASE WHEN attempt_count >= max_attempts THEN 'dead_letter' ELSE 'failed' END,
 		       last_error = $3,
@@ -362,21 +386,22 @@ func (q *Worker) Fail(ctx context.Context, tenant, id, owner string, cause error
 		       -- Without it the listing ordered by created_at, which is when the
 		       -- job was enqueued: a job retried for a month and dead-lettered
 		       -- yesterday sorted above one that failed this morning, and the SLO
-		       -- is "a dead letter must be visible within 60 seconds of entering
-		       -- the state". The inbox and the outbox both carry the same column
-		       -- and both were wrong in the same way before they were fixed.
+		       -- is "a dead letter must be visible within 60 seconds of entering the
+		       -- state". The inbox and the outbox both carry the same column and
+		       -- both were wrong in the same way before they were fixed.
 		       completed_at = CASE WHEN attempt_count >= max_attempts THEN now() ELSE completed_at END,
 		       run_after = now() + make_interval(secs => (5 * power(2, least(attempt_count, 6)))::int),
 		       lease_owner = NULL,
 		       lease_expires_at = NULL
 		 WHERE job_id = $1 AND tenant_id = $4 AND lease_owner = $2
 		RETURNING status`, id, owner, cause.Error(), tenant).Scan(&status); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return "", fmt.Errorf("%w: %s", ErrNotClaimed, id)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("%w: %s", ErrNotClaimed, id)
+			}
+			return fmt.Errorf("jobs: fail: %w", err)
 		}
-		return "", fmt.Errorf("jobs: fail: %w", err)
-	}
-	return status, nil
+		return nil
+	})
 }
 
 // DeadLetter is one job that reached a terminal failure.
@@ -394,11 +419,16 @@ type DeadLetter struct {
 
 // DeadLetters lists dead-lettered jobs, newest first. Surfaced in the console
 // and audited: the plan is explicit that a dead letter is never silently dropped.
-func (q *Worker) DeadLetters(ctx context.Context, tenantID string, limit int) ([]DeadLetter, error) {
+//
+// The site is a parameter rather than a default. Since migration 21
+// `site_isolation` is RESTRICTIVE, so a tenant-scoped read of a site-scoped table
+// returns nothing rather than everything, and an operator shown an empty
+// dead-letter list reads it as "the site is healthy".
+func (q *Worker) DeadLetters(ctx context.Context, tenantID, siteID string, limit int) ([]DeadLetter, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	rows, err := q.Pool.For(tenantID, "jobs").Query(ctx, `
+	rows, err := q.Pool.WithSites(tenantID, "jobs", []string{siteID}).Query(ctx, `
 		SELECT job_id::text, tenant_id, site_id, queue, idempotency_key,
 		       attempt_count, max_attempts, COALESCE(dead_letter_reason, last_error, ''),
 		       -- completed_at, not created_at: the operator's question is "what
@@ -463,9 +493,13 @@ type Counts struct {
 }
 
 // Counts reads the queue's depth.
-func (q *Worker) Counts(ctx context.Context, tenantID string) (Counts, error) {
+//
+// Scoped to a site, like the dead-letter listing: a depth that reads zero
+// because the reader could not see the rows is a queue an operator would read as
+// drained.
+func (q *Worker) Counts(ctx context.Context, tenantID, siteID string) (Counts, error) {
 	var c Counts
-	err := q.Pool.For(tenantID, "jobs").QueryRow(ctx, `
+	err := q.Pool.WithSites(tenantID, "jobs", []string{siteID}).QueryRow(ctx, `
 		SELECT
 		    count(*) FILTER (WHERE status = 'pending'),
 		    count(*) FILTER (WHERE status = 'leased'),

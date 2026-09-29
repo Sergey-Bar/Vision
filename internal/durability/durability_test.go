@@ -323,7 +323,7 @@ func TestFailReachesDeadLetterWithAReason(t *testing.T) {
 			`UPDATE inbox_events SET lease_expires_at = now() WHERE tenant_id = $1`, tenant)
 	}
 
-	letters, err := w.DeadLetters(context.Background(), tenant, 10)
+	letters, err := w.DeadLetters(context.Background(), tenant, site, 10)
 	if err != nil {
 		t.Fatalf("DeadLetters: %v", err)
 	}
@@ -442,7 +442,7 @@ func TestReNormalizeIsANoOp(t *testing.T) {
 	// A retry of an already-normalized key is a no-op, and it is a no-op that
 	// says so.
 	//
-	// This used to accept either outcome — it counted the events in both arms
+	// This used to accept either outcome ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â it counted the events in both arms
 	// and asserted nothing about the error. That is how the replay path went on
 	// always failing: every call died at the key claim with "no rows in result
 	// set", which this test's tolerant arm was shaped to survive. A test that
@@ -757,7 +757,7 @@ func TestJobClaimIsExclusiveAndRecoverable(t *testing.T) {
 
 func TestJobDeadLetterIsVisibleWithAReason(t *testing.T) {
 	p := migrated(t)
-	tenant, _ := siteOf(t)
+	tenant, site := siteOf(t)
 	e := jobs.New(p)
 
 	if err := inTx(t, p, func(tx pgx.Tx) error {
@@ -787,7 +787,7 @@ func TestJobDeadLetterIsVisibleWithAReason(t *testing.T) {
 		t.Errorf("status is %q, want dead_letter", status)
 	}
 
-	letters, err := w.DeadLetters(context.Background(), tenant, 10)
+	letters, err := w.DeadLetters(context.Background(), tenant, site, 10)
 	if err != nil {
 		t.Fatalf("DeadLetters: %v", err)
 	}
@@ -804,7 +804,7 @@ func TestJobDeadLetterIsVisibleWithAReason(t *testing.T) {
 	if err := w.Replay(context.Background(), tenant, letters[0].ID); err != nil {
 		t.Fatalf("Replay: %v", err)
 	}
-	after, err := w.DeadLetters(context.Background(), tenant, 10)
+	after, err := w.DeadLetters(context.Background(), tenant, site, 10)
 	if err != nil {
 		t.Fatalf("DeadLetters after replay: %v", err)
 	}

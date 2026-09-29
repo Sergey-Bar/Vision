@@ -1,4 +1,4 @@
-package rlsrole_test
+package rlsrole
 
 import (
 	"context"
@@ -9,6 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
+
+	"github.com/Sergey-Bar/Ai-Captain/internal/inbox"
 	"github.com/Sergey-Bar/Ai-Captain/internal/testutil"
 )
 
@@ -41,7 +44,7 @@ func repoRootOf(t *testing.T) string {
 // not exist.
 //
 // Fixing it is `ALTER POLICY site_isolation ... AS RESTRICTIVE` on every
-// tenant-scoped table Ã¢â‚¬â€ one statement per table, and then *every* query that does
+// tenant-scoped table ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â one statement per table, and then *every* query that does
 // not set `app.site_ids` sees no site-bound rows. That is fail-closed, which is
 // the right direction and also the dangerous one: a consume loop that forgets
 // its scope ingests nothing, and that failure is invisible until a site has
@@ -128,26 +131,98 @@ func policyIsPermissive(t *testing.T, table, policy string) bool {
 	return permissive
 }
 
-// Condition one: the policies are still PERMISSIVE, which is the defect this
-// file exists to schedule the end of. When this fails, the flip has been done and
-// this whole file can go.
-func TestTheSitePolicyIsStillPermissiveAndThatIsTheDefect(t *testing.T) {
-	permissive := policyIsPermissive(t, "evidence", "site_isolation")
-	if !permissive {
-		t.Skip("site_isolation is already RESTRICTIVE; the flip has been done and the " +
-			"remaining conditions have been checked separately")
+// Condition one: the policy is now RESTRICTIVE, and this is the assertion that
+// says so.
+//
+// Before migration 21 both policies were PERMISSIVE and PostgreSQL ORed them, so
+// `tenant_isolation OR site_isolation` was `tenant_isolation` and there was no
+// site isolation at the row level at all. This file existed to schedule that
+// change; the change is made, and the first condition below is now the proof.
+func TestTheSitePolicyIsRestrictiveSoTheTwoCompose(t *testing.T) {
+	if policyIsPermissive(t, "evidence", "site_isolation") {
+		t.Fatal("site_isolation is PERMISSIVE. PostgreSQL ORs multiple permissive policies " +
+			"for the same command, so tenant_isolation OR site_isolation is " +
+			"tenant_isolation and there is no site isolation in the database. " +
+			"migrations/0021_site_isolation_restrictive has not been applied")
 	}
-	t.Log("site_isolation is PERMISSIVE, so it is ORed with tenant_isolation and there is " +
-		"no site isolation at the row level. This is the known gap; the fix is one " +
-		"ALTER POLICY per table once the conditions below hold.")
+	// And the tenant policy stays permissive, because a table whose only policies
+	// are RESTRICTIVE allows nothing at all.
+	if !policyIsPermissive(t, "evidence", "tenant_isolation") {
+		t.Error("tenant_isolation is RESTRICTIVE. A table with no permissive policy " +
+			"admits no rows to anybody, including the tenant that owns them")
+	}
+}
+
+// The composition itself, which is the property neither policy expresses alone.
+//
+// The other test in this package runs as the superuser, which bypasses RLS, so it
+// cannot see this. Only a canary running as the production role can, which is why
+// the first draft of these assertions could not be written at all.
+func TestTheTwoPoliciesComposeAsAnd(t *testing.T) {
+	pool := productionPool(t)
+	raw := testutil.Pool(t)
+	ctx := context.Background()
+	tenant, site, _ := testutil.NewTenant(t, raw)
+	_, otherSite, _ := testutil.NewTenant(t, raw)
+
+	// One row at the tenant's own site.
+	writer := &inbox.Writer{Pool: pool}
+	if _, err := writer.Write(ctx, inbox.WriteOptions{
+		TenantID: tenant, SiteID: site, IntegrationID: "int-1",
+		SourceEventID: "src-compose", Payload: []byte(`{"Id":"src-compose"}`),
+		ReceivedAt: clockAt,
+	}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// Scoped to the right site: sees the row.
+	var n int
+	testutil.AsRole(t, pool.Pool, "security_core", tenant, []string{site}, func(tx pgx.Tx) {
+		if err := tx.QueryRow(ctx,
+			`SELECT count(*) FROM inbox_events`).Scan(&n); err != nil {
+			t.Fatalf("count: %v", err)
+		}
+	})
+	if n != 1 {
+		t.Errorf("a reader scoped to the row's own site sees %d row(s), want 1", n)
+	}
+
+	// Same tenant, another site: sees nothing. Under the old permissive policies
+	// this returned the row, and no test anywhere could have said so.
+	n = 0
+	testutil.AsRole(t, pool.Pool, "security_core", tenant, []string{otherSite}, func(tx pgx.Tx) {
+		if err := tx.QueryRow(ctx,
+			`SELECT count(*) FROM inbox_events`).Scan(&n); err != nil {
+			t.Fatalf("count: %v", err)
+		}
+	})
+	if n != 0 {
+		t.Errorf("a reader scoped to another site in the same tenant sees %d of this "+
+			"tenant's row(s). The two policies are still ORing", n)
+	}
+
+	// No site at all: sees nothing, because an unspecified scope is not "every
+	// site". That is the fail-closed direction, and it is why every product
+	// statement was changed to name its site before this migration ran.
+	n = -1
+	testutil.AsRole(t, pool.Pool, "security_core", tenant, nil, func(tx pgx.Tx) {
+		if err := tx.QueryRow(ctx,
+			`SELECT count(*) FROM inbox_events`).Scan(&n); err != nil {
+			t.Fatalf("count: %v", err)
+		}
+	})
+	if n != 0 {
+		t.Errorf("a reader with no site scope sees %d row(s). An unspecified scope must "+
+			"not be read as every site", n)
+	}
 }
 
 // Condition two: every request-path query that touches a site-scoped table binds
 // the principal's site scope. `For` binds the tenant and nothing else.
 //
 // The decision is made by the *table*, not by the call. `audit_ledger` is
-// tenant-wide by design â€” a ledger row is attributed to a site by its
-// `site_scope` column and does not belong to one â€” so it is read with `For` and
+// tenant-wide by design ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â a ledger row is attributed to a site by its
+// `site_scope` column and does not belong to one ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â so it is read with `For` and
 // a rule that flagged it would be wrong in the strict direction, which is how a
 // guard gets switched off.
 func TestEveryRequestPathQueryOnASiteScopedTableBindsASiteScope(t *testing.T) {
@@ -224,32 +299,24 @@ func TestEveryRequestPathQueryOnASiteScopedTableBindsASiteScope(t *testing.T) {
 }
 
 // Condition three: every service that reads a site-scoped table can carry a
-// scope.
+// Condition three, which used to be the blocker and is now done.
 //
-// This is the blocker, and it is not close.
-//
-// The API handlers bind a scope directly, but the services they call take a
-// `tenant string` and build their own scoped pool, so a handler's scope is lost
-// the moment it crosses into `incidents`, `inbox`, `jobs` or `outbox`.
-// `incidents` has a scope-carrying method because the incident-list fix needed
-// one. The other three do not, and neither do the consume loops: they are
-// driven by `Deps.SiteID` and would each need a site-bound pool of their own.
-//
-// Flipping the policy to RESTRICTIVE before that is done would make every
-// site-scoped read through those services return nothing. That is fail-closed
-// and therefore not a security hole, and it is also an ingest outage on a site
-// that looks healthy in every other respect — the worst failure this codebase
-// could ship, and the reason the flip is a separate change.
-//
-// The check is a skip rather than a failure so the tree stays green, and the
-// skip names itself: `go test -v ./internal/rlsrole/ -run TestTheServiceLayer`
-// prints the blocker on every run until it is resolved.
-func TestTheServiceLayerCanCarryASiteScope(t *testing.T) {
+// The service layer carries a site scope. The statements that did not -- the
+// inbox write, the normalizer's insert, and the backlog count -- are exactly what
+// the RLS canary found when the policy flipped, because every other test in the
+// tree connects as the superuser and bypasses RLS entirely. That is the argument
+// for a canary: without one, a fail-closed policy has no failure to find.
+func TestTheServiceLayerCarriesASiteScope(t *testing.T) {
 	root := repoRootOf(t)
 	scoped := regexp.MustCompile(`func \([^)]*Service\) [A-Z]\w*Scoped\(`)
+	// A `SiteIDs` on a `TenantContext`, or a `WithSites` call, is a service that
+	// can narrow itself. Either is what this is looking for.
+	// Either shape counts: a service that can narrow itself. A lease-guarded
+	// terminal write runs as the system worker on the strength of the lease, which is
+	// a stronger predicate than site scope, and that is written as `leasedWrite`.
+	carries := regexp.MustCompile(`SiteIDs:\s*\[\]string\{|WithSites\(|leasedWrite\(`)
 
-	// Every package whose tables carry a site_id and whose code reads them.
-	packages := []string{"incidents", "inbox", "jobs", "outbox", "correlator"}
+	packages := []string{"incidents", "inbox", "jobs", "outbox", "correlator", "normalize"}
 	var missing []string
 	for _, pkg := range packages {
 		dir := filepath.Join(root, "internal", pkg)
@@ -263,7 +330,10 @@ func TestTheServiceLayerCanCarryASiteScope(t *testing.T) {
 				continue
 			}
 			body, readErr := os.ReadFile(filepath.Join(dir, e.Name()))
-			if readErr == nil && scoped.Match(body) {
+			if readErr != nil {
+				continue
+			}
+			if scoped.Match(body) || carries.Match(body) {
 				found = true
 				break
 			}
@@ -272,12 +342,10 @@ func TestTheServiceLayerCanCarryASiteScope(t *testing.T) {
 			missing = append(missing, pkg)
 		}
 	}
-
 	if len(missing) > 0 {
-		t.Skipf("BLOCKER for the site_isolation RESTRICTIVE flip: %v take a tenant and "+
-			"build their own scoped pool, so a handler's site scope is lost at the "+
-			"service boundary. Until each has a scope-carrying signature, flipping the "+
-			"policy would make every site-scoped read through them return nothing. "+
-			"See docs/status.md", missing)
+		t.Errorf("%v cannot narrow itself to a site. Since migration 21 a statement that "+
+			"reaches a site-scoped table without naming its site sees nothing, so a "+
+			"service that cannot pass a scope is a service that cannot read its own data",
+			missing)
 	}
 }

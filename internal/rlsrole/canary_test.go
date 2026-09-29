@@ -139,7 +139,7 @@ func TestTenantScopedReadsSeeOnlyTheirOwnTenant(t *testing.T) {
 		t.Fatalf("migrate: %v", err)
 	}
 	tenantA, siteA, _ := testutil.NewTenant(t, raw)
-	tenantB, _, _ := testutil.NewTenant(t, raw)
+	tenantB, siteB, _ := testutil.NewTenant(t, raw)
 
 	pool := productionPool(t)
 	writer := &inbox.Writer{Pool: pool}
@@ -156,7 +156,7 @@ func TestTenantScopedReadsSeeOnlyTheirOwnTenant(t *testing.T) {
 		t.Fatal("the first write was reported as a duplicate")
 	}
 
-	counts, err := writer.Counts(ctx, tenantA)
+	counts, err := writer.Counts(ctx, tenantA, siteA)
 	if err != nil {
 		t.Fatalf("counts: %v", err)
 	}
@@ -164,7 +164,9 @@ func TestTenantScopedReadsSeeOnlyTheirOwnTenant(t *testing.T) {
 		t.Errorf("tenant A sees %d received event(s), want 1; the backlog read is not "+
 			"seeing its own tenant's rows", counts.Received)
 	}
-	other, err := writer.Counts(ctx, tenantB)
+	// Tenant B's rows are invisible two ways over now: a different tenant id, and a
+	// different site. The site check is the new one, so both are exercised.
+	other, err := writer.Counts(ctx, tenantB, siteB)
 	if err != nil {
 		t.Fatalf("counts for the other tenant: %v", err)
 	}

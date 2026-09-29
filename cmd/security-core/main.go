@@ -197,7 +197,7 @@ func run() error {
 				Inbox:  inboxSvc,
 				Jobs:   jobWorker,
 				Outbox: relay.Pending,
-			}.Count(context.Background(), cfg.Tenant)
+			}.Count(context.Background(), cfg.Tenant, cfg.SiteID)
 			return api.Backlog{
 				InboxPending:    counts.InboxPending,
 				InboxDeadLetter: counts.InboxDeadLetter,

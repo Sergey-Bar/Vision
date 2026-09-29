@@ -66,6 +66,24 @@ type Deps struct {
 	Log     *slog.Logger
 	Metrics *observability.Registry
 
+	// Scoped returns a tenant-scoped connection bound to this install's site.
+	//
+	// Every statement the loops write reads a site-scoped table, and the RLS
+	// policy that is meant to enforce which site a row belongs to is currently
+	// PERMISSIVE, so the two policies OR and the site constraint does not exist
+	// at the database layer. `For` binds the tenant and nothing else, which means
+	// a loop could be reading and writing every site's rows with the site
+	// constraint living only in this file's comments.
+	//
+	// Making the site-bound pool the *only* way to reach one from here is the
+	// expand half of the fix: when `site_isolation` becomes RESTRICTIVE, a
+	// statement that reaches the pool by any other route stops seeing rows, and
+	// this method is the one that still works.
+	//
+	// An empty SiteID is refused rather than defaulted. "No site" is not "every
+	// site", and a loop that ingested nothing while believing it was ingesting
+	// everything is the failure this whole change is about.
+
 	Adapter   *milestone.Adapter
 	Inbox     *inbox.Writer
 	Normal    *normalize.Normalizer
@@ -90,7 +108,7 @@ type Deps struct {
 
 	// InSchedule resolves a schedule id against a site-local instant. A Deps with
 	// none gets `rules.SiteScheduleResolver(SiteLocation)`, which is the same
-	// default the simulation and the CLI use â€” the point being that they cannot
+	// default the simulation and the CLI use ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â the point being that they cannot
 	// disagree.
 	//
 	// There was no default before, so `matchSchedule` returned false for every
@@ -118,6 +136,36 @@ type Deps struct {
 	AIEndpoint string
 	// ClockPolicy is the site's clock policy, which decides the drift bands.
 	ClockPolicy clock.Policy
+}
+
+// Scoped returns a tenant-scoped connection bound to this install's site.
+//
+// Every statement the loops write reads a site-scoped table, and since migration
+// 21 `site_isolation` is RESTRICTIVE, so the effective policy is tenant AND
+// site: a connection that named only its tenant would see nothing. Making the
+// site-bound pool the *only* way to reach one from here is the expand half of
+// that change, and it is what stopped each loop needing to remember.
+//
+// An empty SiteID is refused rather than defaulted. "No site" is not "every site",
+// and a loop that ingested nothing while believing it was ingesting everything
+// is the failure this whole change is about.
+func (d Deps) Scoped(actor string) (*dbx.Tenant, error) {
+	if d.SiteID == "" {
+		return nil, errors.New("pipeline: Deps.SiteID is empty, so a site-scoped " +
+			"connection cannot be built. Set SP_SITE_ID; a loop with no site is not a " +
+			"loop that can see the whole tenant")
+	}
+	return d.Pool.WithSites(d.Tenant, actor, []string{d.SiteID}), nil
+}
+
+// IngestScoped is Scoped for the ingest path, which runs every poll and is the
+// one a missing site id would be least visible in.
+//
+// It takes no context. The context belongs to the statement, not to choosing which
+// connection to use, and threading one here would invite a caller to pass a
+// request's context to something that outlives it.
+func (d Deps) IngestScoped() (*dbx.Tenant, error) {
+	return d.Scoped("ingest")
 }
 
 // Loops runs every loop and waits for them.
@@ -185,14 +233,14 @@ func (l *Loops) runGauges(ctx context.Context) {
 //
 // Each read is independent and each failure is silent: a gauge that cannot be
 // measured keeps its previous value rather than being set to zero. A gauge set
-// to zero because its query failed is worse than a stale one â€” it reads as "the
+// to zero because its query failed is worse than a stale one ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â it reads as "the
 // backlog is clear", which is the one thing an operator must never be told by a
 // broken query.
 func (l *Loops) SampleGauges(ctx context.Context) {
 	if l.Deps.Metrics == nil || l.Deps.Inbox == nil {
 		return
 	}
-	counts, err := l.Deps.Inbox.Counts(ctx, l.Deps.Tenant)
+	counts, err := l.Deps.Inbox.Counts(ctx, l.Deps.Tenant, l.Deps.SiteID)
 	if err != nil {
 		if ctx.Err() == nil {
 			l.log("the inbox backlog could not be read; gauges keep their last value",
@@ -204,7 +252,7 @@ func (l *Loops) SampleGauges(ctx context.Context) {
 	l.set(observability.GaugeDeadLetterCount, float64(counts.DeadLetter))
 
 	if l.Deps.Jobs != nil {
-		jobCounts, err := l.Deps.Jobs.Counts(ctx, l.Deps.Tenant)
+		jobCounts, err := l.Deps.Jobs.Counts(ctx, l.Deps.Tenant, l.Deps.SiteID)
 		if err == nil {
 			l.set(observability.GaugeJobQueueDepth, float64(jobCounts.Pending+jobCounts.Failed))
 		}
@@ -225,7 +273,15 @@ func (l *Loops) SampleGauges(ctx context.Context) {
 	// gauges rather than counters because they are states an operator watches
 	// drift, not events they accumulate.
 	var severe int
-	if err := l.Deps.Pool.For(l.Deps.Tenant, "gauges").QueryRow(ctx, `
+	gaugeScope, gerr := l.Deps.Scoped("gauges")
+	if gerr != nil {
+		// A gauge is a reading, not a decision: a missing site leaves the last
+		// value in place and says why, the same way an unreadable backlog does.
+		l.log("the clock gauges could not be read; they keep their last value",
+			"error", gerr.Error())
+		return
+	}
+	if err := gaugeScope.QueryRow(ctx, `
 		SELECT count(*) FROM device_clocks WHERE tenant_id = $1 AND band = 'severe'`,
 		l.Deps.Tenant).Scan(&severe); err == nil {
 		l.set(observability.GaugeClockSevereDevices, float64(severe))
@@ -446,7 +502,11 @@ UPDATE integrations SET last_success_at = $3
 
 func (l *Loops) loadCursor(ctx context.Context) (*time.Time, error) {
 	var at time.Time
-	err := l.Deps.Pool.For(l.Deps.Tenant, "ingest").QueryRow(ctx, `
+	cursorScope, err := l.Deps.Scoped("ingest")
+	if err != nil {
+		return nil, fmt.Errorf("pipeline: read the poll cursor: %w", err)
+	}
+	err = cursorScope.QueryRow(ctx, `
 		SELECT last_success_at FROM integrations
 		 WHERE tenant_id = $1 AND integration_id = $2 AND last_success_at IS NOT NULL`,
 		l.Deps.Tenant, l.Deps.IntegrationID).Scan(&at)
@@ -457,7 +517,11 @@ func (l *Loops) loadCursor(ctx context.Context) (*time.Time, error) {
 }
 
 func (l *Loops) saveCursor(ctx context.Context, at time.Time) error {
-	_, err := l.Deps.Pool.For(l.Deps.Tenant, "ingest").Exec(ctx, cursorSQL,
+	cursorScope, err := l.Deps.Scoped("ingest")
+	if err != nil {
+		return fmt.Errorf("pipeline: write the poll cursor: %w", err)
+	}
+	_, err = cursorScope.Exec(ctx, cursorSQL,
 		l.Deps.Tenant, l.Deps.IntegrationID, at)
 	if err != nil {
 		return fmt.Errorf("pipeline: write the poll cursor: %w", err)
@@ -624,7 +688,11 @@ func (l *Loops) resolveDevice(ctx context.Context, ref string) (deviceID, zoneID
 	if ref == "" {
 		return "", "", nil
 	}
-	err = l.Deps.Pool.For(l.Deps.Tenant, "consume").QueryRow(ctx, `
+	consumeScope, cerr := l.Deps.Scoped("consume")
+	if cerr != nil {
+		return "", "", fmt.Errorf("pipeline: resolve device %q: %w", ref, cerr)
+	}
+	err = consumeScope.QueryRow(ctx, `
 		SELECT device_id, COALESCE(zone_id, '') FROM devices
 		 WHERE tenant_id = $1 AND site_id = $2
 		   AND (source_device_id = $3 OR device_id = $3)`,
@@ -738,7 +806,7 @@ func (l *Loops) decide(ctx context.Context, item inbox.Lease, result normalize.R
 	// A schedule resolver, and the same one the simulation and replay use.
 	//
 	// There was none, and `matchSchedule` returns false when the resolver is nil
-	// â€” correctly, because defaulting to true would make an after-hours rule fire
+	// ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â correctly, because defaulting to true would make an after-hours rule fire
 	// all day. So every schedule rule in the active bundle was dead in production:
 	// an after-hours rule never fired, and a `not: {schedule: business-hours}` rule
 	// matched twenty-four hours a day. The digest an operator acknowledged at
@@ -782,8 +850,8 @@ func (l *Loops) decide(ctx context.Context, item inbox.Lease, result normalize.R
 	//     RuleID and a zero Action. The rule whose entire purpose is to *prevent*
 	//     an incident was what created one, with the default severity `medium`.
 	//   - `then: {dispatch: [notify_operator]}` with no `create_incident` is
-	//     explicitly legal â€” the semantic validator treats a non-empty dispatch
-	//     list as a non-empty action â€” and its Decision carries a RuleID.
+	//     explicitly legal ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â the semantic validator treats a non-empty dispatch
+	//     list as a non-empty action ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â and its Decision carries a RuleID.
 	//
 	// `internal/simulate` already modelled this correctly: its diff says
 	// `IncidentRaised: d.Action.CreateIncident`. So the digest an operator
@@ -936,8 +1004,8 @@ func (l *Loops) activeBundle(ctx context.Context) (*activeBundle, error) {
 	// clause that declares `ifAIAvailable` without consuming an observation
 	// warns that the declaration has no effect. Both ship in the built-in bundle.
 	//
-	// This refused any bundle with any problem, so a single endorsed warning â€” a
-	// deliberate choice by a rule author â€” made `decide` fail for EVERY event, with
+	// This refused any bundle with any problem, so a single endorsed warning ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â a
+	// deliberate choice by a rule author ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â made `decide` fail for EVERY event, with
 	// one log line each. The whole AI-degradation warning path was a bundle-killer
 	// in production, and the bundle had already passed `Store` and `Activate`,
 	// which is where warnings are supposed to be allowed.

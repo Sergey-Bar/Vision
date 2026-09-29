@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -227,13 +228,40 @@ func EnvOrDefault(key, def string) string {
 	return def
 }
 
-func encodeSiteIDs(ids []string) string {
-	out := make([]byte, 0, len(ids)*8)
+// EncodeSiteIDs renders a site list as a PostgreSQL array literal, for
+// `set_config('app.site_ids', ...)`.
+//
+// The braces and the quoting are not decoration. `app_current_site_ids` is
+//
+//	nullif(current_setting('app.site_ids', true), '')::text[]
+//
+// so the setting is CAST to text[], and a bare `a,b` is a malformed array
+// literal: every query that consulted it failed with "malformed array literal".
+// The function used to emit the comma-joined form, and nothing noticed, because
+// `site_isolation` was PERMISSIVE and therefore never consulted it. The moment
+// the policy became RESTRICTIVE the setting started being read on every row and
+// the bug appeared on the first write.
+//
+// A site id containing a comma, a quote or a backslash is quoted and escaped,
+// because an unquoted one would silently change the list's length.
+func EncodeSiteIDs(ids []string) string {
+	var out strings.Builder
+	out.WriteByte('{')
 	for i, id := range ids {
 		if i > 0 {
-			out = append(out, ',')
+			out.WriteByte(',')
 		}
-		out = append(out, id...)
+		out.WriteByte('"')
+		for _, r := range id {
+			if r == '"' || r == '\\' {
+				out.WriteByte('\\')
+			}
+			out.WriteRune(r)
+		}
+		out.WriteByte('"')
 	}
-	return string(out)
+	out.WriteByte('}')
+	return out.String()
 }
+
+func encodeSiteIDs(ids []string) string { return EncodeSiteIDs(ids) }

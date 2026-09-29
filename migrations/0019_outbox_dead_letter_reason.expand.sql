@@ -1,0 +1,72 @@
+-- 0019_outbox_dead_letter_reason.expand.sql
+--
+-- outbox_events is the only durability table of the three that had no
+-- dead_letter_reason column. inbox_events and jobs both carry one, added by the
+-- migrations that made the dead-letter state a first-class thing rather than a
+-- status value with an error string beside it. The outbox was left out, and the
+-- consequence was that the one question an operator has about a dead letter —
+-- why did this stop — was answered out of `last_error`.
+--
+-- That answer is wrong, and wrong in a way that is invisible in review.
+--
+-- `last_error` is the *current* failure text. It is rewritten on every attempt
+-- that fails, and it is cleared to NULL by the mark-delivered write and by
+-- Replay. So it is the right column for a row that is still being retried and
+-- the wrong column for a row that has stopped. A dead letter carrying its reason
+-- in last_error means:
+--
+--   - the reason for a dead letter is whatever the last attempt happened to say,
+--     which is not necessarily why the message died. A relay that was
+--     misconfigured, then fixed, then hit a DNS failure leaves a dead letter
+--     explaining DNS.
+--   - the two tables answer the same operator question two different ways, so an
+--     auditor reading the inbox's dead letters and the outbox's has to know
+--     which column to look in, and there is nothing in either schema that says so.
+--
+-- The fix is additive and safe against the binary that shipped before it: a new
+-- nullable column with no default and no constraint. The running relay never
+-- writes it, so every row has it NULL and the listing below falls back to
+-- last_error, which is the same answer it gives today. There is no window in
+-- which the column's existence and the code's use of it disagree in a way that
+-- loses a reason: the worst case is a dead letter written by the old binary,
+-- which is reported from last_error exactly as it is today.
+--
+-- Nothing is dropped here. A dead_letter_reason that has been observed in the
+-- field, with a backfill, is a later release's question, and dropping last_error
+-- would be a contract step that this milestone cannot ship at all
+-- (migrations_test.go TestM1ContainsNoContractStep refuses any contract phase).
+
+ALTER TABLE outbox_events
+    ADD COLUMN IF NOT EXISTS dead_letter_reason TEXT;
+
+-- The index the operator's dead-letter listing actually needs.
+--
+-- Relay.DeadLetters filters on (tenant_id, status) and orders by the
+-- dead-letter instant DESC. Before this index the only candidates were
+-- outbox_pending_idx, which is partial on (pending, failed) and so does not
+-- contain a single dead_letter row, and outbox_tenant_idx on (tenant_id,
+-- created_at) — which is ordered by when the message was enqueued, the one
+-- column the listing does not sort on, so every dead letter on a tenant with a
+-- long history was read and then sorted in memory to answer a question whose
+-- whole point is "what just broke".
+--
+-- The predicate and the column order are the query's, verbatim:
+--
+--   WHERE tenant_id = $1 AND status = 'dead_letter' ORDER BY run_after DESC
+--
+-- tenant_id first, because the predicate is equality on it and it is the
+-- tenant-scoping column RLS filters on as well. run_after DESC second, because
+-- the sort is descending on it and an ASC-ordered index would have to be scanned
+-- backwards to serve the first page. Partial on status = 'dead_letter', because
+-- that is the only state this index serves and dead letters are a small fraction
+-- of the table — the rows that are actively being retried are the ones the
+-- existing indexes already cover.
+--
+-- markFailed sets run_after to now() on the transition to dead_letter, so on a
+-- dead-lettered row it is the instant the message entered the state, and the
+-- ordering is by when the message died rather than by when it was enqueued. That
+-- is the ordering DeadLetters has always asked for; this index is what makes the
+-- database able to produce it without reading the tenant's whole history.
+CREATE INDEX IF NOT EXISTS outbox_dead_letter_idx
+    ON outbox_events (tenant_id, run_after DESC)
+    WHERE status = 'dead_letter';

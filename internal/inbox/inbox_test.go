@@ -148,7 +148,7 @@ func TestDistinctRowsGetDistinctIdentities(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // The console's dead-letter list is what the "visible within 60 seconds of
-// entering the state" SLO is measured against, and it ordered by received_at —
+// entering the state" SLO is measured against, and it ordered by received_at ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â
 // ingest order, not dead-letter order.
 //
 // The two events below are ordered against each other on purpose: the one that
@@ -191,7 +191,7 @@ func TestTheDeadLetterListIsOrderedByWhenTheEventDied(t *testing.T) {
 		 WHERE tenant_id = $1 AND source_event_id = $2`,
 		tenant, ingestedOlder, time.Now().UTC().Add(-1*time.Minute))
 
-	letters, err := w.DeadLetters(ctx, tenant, 10)
+	letters, err := w.DeadLetters(ctx, tenant, site, 10)
 	if err != nil {
 		t.Fatalf("DeadLetters: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestTheDeadLetterUpdatedAtIsTheCompletionInstantNotTheIngestInstant(t *test
 		       dead_letter_reason = 'a month of retries'
 		 WHERE tenant_id = $1 AND source_event_id = 'src-old'`, tenant, died)
 
-	letters, err := w.DeadLetters(ctx, tenant, 10)
+	letters, err := w.DeadLetters(ctx, tenant, site, 10)
 	if err != nil {
 		t.Fatalf("DeadLetters: %v", err)
 	}
@@ -254,8 +254,8 @@ func TestTheDeadLetterUpdatedAtIsTheCompletionInstantNotTheIngestInstant(t *test
 	}
 }
 
-// A dead letter that reached the state through the ordinary retry path — Fail,
-// after the retry budget is spent — has to carry a completion instant too, or it
+// A dead letter that reached the state through the ordinary retry path ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Fail,
+// after the retry budget is spent ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â has to carry a completion instant too, or it
 // sorts as newest under DESC and heads the operator's list regardless of when it
 // died. This drives the real path rather than writing the row directly.
 func TestADeadLetterReachedThroughRetryCarriesACompletionInstant(t *testing.T) {
@@ -286,7 +286,7 @@ func TestADeadLetterReachedThroughRetryCarriesACompletionInstant(t *testing.T) {
 		t.Fatalf("Fail returned %q against a bound of 1, want dead_letter", status)
 	}
 
-	letters, err := w.DeadLetters(ctx, tenant, 10)
+	letters, err := w.DeadLetters(ctx, tenant, site, 10)
 	if err != nil {
 		t.Fatalf("DeadLetters: %v", err)
 	}
@@ -315,7 +315,7 @@ func TestADeadLetterReachedThroughRetryCarriesACompletionInstant(t *testing.T) {
 func TestTheDeadLetterListIsScopedToItsTenant(t *testing.T) {
 	pool := open(t)
 	tenantA, siteA, _ := testutil.NewTenant(t, testutil.Pool(t))
-	tenantB, _, _ := testutil.NewTenant(t, testutil.Pool(t))
+	tenantB, otherSiteB, _ := testutil.NewTenant(t, testutil.Pool(t))
 	w := inbox.NewWriter(pool)
 	ctx := context.Background()
 
@@ -326,13 +326,13 @@ func TestTheDeadLetterListIsScopedToItsTenant(t *testing.T) {
 		UPDATE inbox_events SET status = 'dead_letter', completed_at = now(),
 		       dead_letter_reason = 'x' WHERE tenant_id = $1`, tenantA)
 
-	if letters, err := w.DeadLetters(ctx, tenantB, 10); err != nil {
+	if letters, err := w.DeadLetters(ctx, tenantB, otherSiteB, 10); err != nil {
 		t.Fatalf("DeadLetters for the other tenant: %v", err)
 	} else if len(letters) != 0 {
 		t.Errorf("tenant B sees %d of tenant A's dead letters. The listing is not tenant-scoped, "+
 			"so one tenant's incident is on another tenant's console", len(letters))
 	}
-	if letters, err := w.DeadLetters(ctx, tenantA, 10); err != nil {
+	if letters, err := w.DeadLetters(ctx, tenantA, siteA, 10); err != nil {
 		t.Fatalf("DeadLetters: %v", err)
 	} else if len(letters) != 1 {
 		t.Errorf("tenant A sees %d dead letters, want 1", len(letters))

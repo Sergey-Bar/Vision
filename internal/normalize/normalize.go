@@ -157,7 +157,13 @@ func (n *Normalizer) Normalize(ctx context.Context, in Input) (Result, error) {
 
 	err = n.Pool.InTenant(ctx, dbx.TenantContext{
 		TenantID: in.Key.TenantID,
-		ActorID:  "normalizer",
+		// site_isolation has been RESTRICTIVE since migration 21, so a transaction
+		// that named only its tenant is refused by the WITH CHECK on the canonical
+		// event it is here to insert. The RLS canary is what found this: every other
+		// test connects as the superuser, which bypasses RLS entirely, so the whole
+		// ingest path ran green for as long as the policy did not consult the site.
+		SiteIDs: []string{in.Key.SiteID},
+		ActorID: "normalizer",
 	}, func(tx pgx.Tx) error {
 		eventID := n.eventID(in.Key)
 
@@ -405,7 +411,7 @@ type driftReading struct {
 // both would count the same skew twice.
 func (n *Normalizer) loadDrift(ctx context.Context, in Input) (driftReading, error) {
 	if in.DeviceID != "" {
-		device, err := n.readDrift(ctx, in.Key.TenantID, in.DeviceID)
+		device, err := n.readDrift(ctx, in.Key.TenantID, in.Key.SiteID, in.DeviceID)
 		if err != nil {
 			return driftReading{}, err
 		}
@@ -414,7 +420,7 @@ func (n *Normalizer) loadDrift(ctx context.Context, in Input) (driftReading, err
 			return device, nil
 		}
 	}
-	source, err := n.readDrift(ctx, in.Key.TenantID,
+	source, err := n.readDrift(ctx, in.Key.TenantID, in.Key.SiteID,
 		clocksub.SourceClockDeviceID(in.Key.IntegrationID))
 	if err != nil {
 		return driftReading{}, err
@@ -426,15 +432,22 @@ func (n *Normalizer) loadDrift(ctx context.Context, in Input) (driftReading, err
 }
 
 // readDrift reads one device_clocks row, or Found=false when there is none.
-func (n *Normalizer) readDrift(ctx context.Context, tenant, deviceID string) (driftReading, error) {
+//
+// The read is scoped to the site as well as the tenant. `device_clocks` is a
+// site-scoped table and the RLS policy meant to enforce that is PERMISSIVE â€” it
+// is ORed away by `tenant_isolation` â€” so the site constraint does not exist at
+// the database layer. Binding it here means the statement is correct on its own
+// terms and needs no change when the policy becomes RESTRICTIVE.
+func (n *Normalizer) readDrift(ctx context.Context, tenant, site, deviceID string) (driftReading, error) {
 	var d driftReading
-	err := n.Pool.For(tenant, "normalizer").QueryRow(ctx, `
+	scope := n.Pool.WithSites(tenant, "normalizer", []string{site})
+	err := scope.QueryRow(ctx, `
 		SELECT drift_ms, measured_at FROM device_clocks WHERE tenant_id = $1 AND device_id = $2`,
 		tenant, deviceID).Scan(&d.DriftMs, &d.MeasuredAt)
 	if err != nil {
 		// Only "not measured yet" is benign. Swallowing every error would turn a
 		// dropped connection, a cancelled context or a permission failure into
-		// "no drift", and that removes the clock correction silently — the
+		// "no drift", and that removes the clock correction silently Ã¢â‚¬â€ the
 		// correlation degrades and nothing says why.
 		if errors.Is(err, pgx.ErrNoRows) {
 			// No measurement is not an error. The device may not have been

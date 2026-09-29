@@ -246,37 +246,53 @@ func (r *Relay) deliver(ctx context.Context, d Delivery) error {
 	// A claims, its handler is slow past the lease, relay B claims the expired
 	// row, B's handler fails, and B drives the message to dead_letter. A then
 	// returns from its handler successfully and overwrites status with
-	// 'delivered' and clears last_error. The dead letter â€” the "visible, audited
-	// fact, never a silent drop" this package's own doc promises â€” is erased by a
+	// 'delivered' and clears last_error. The dead letter Ã¢â‚¬â€ the "visible, audited
+	// fact, never a silent drop" this package's own doc promises Ã¢â‚¬â€ is erased by a
 	// worker that finished late, and the operator never sees the message at all.
 	// Matching the claim is the whole fix: A's write affects no rows, and A is
 	// told its lease is gone rather than being allowed to assert a terminal state
 	// it does not own.
 	// `tenant_id` is in the WHERE and not only in the pool context.
 	//
-	// RLS filters on `app.tenant_id`, which is set from the same argument, so
-	// today the row cannot be another tenant's: the statement would update zero
-	// rows. The predicate says so rather than leaving it to be inferred. A
-	// `bigserial` primary key is global and predictable, and a statement whose
+	// A `bigserial` primary key is global and predictable, so a statement whose
 	// tenant-safety is a property of a policy three layers down is one refactor
 	// away from being a cross-tenant write.
-	tag, err := r.Pool.For(d.TenantID, "outbox").Exec(ctx, `
+	//
+	// The site is not in the WHERE, and deliberately so. This write is guarded on
+	// `lease_owner`: only the relay that claimed this specific row may write it,
+	// which is a strictly stronger predicate than site scope â€” a relay does not
+	// hold every row of its site, it holds one row of one site. Since migration 21
+	// `site_isolation` is RESTRICTIVE and a worker holding a lease across a
+	// legitimate site boundary would be refused, so this runs as the system worker.
+	// That bypass is the "I am acting on one leased row, not browsing" case, and
+	// the lease predicate is the proof.
+	err := r.Pool.InSystemTenant(ctx, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `
 		UPDATE outbox_events
 		   SET status = 'delivered', delivered_at = now(),
-		       lease_owner = NULL, lease_expires_at = NULL, last_error = NULL
-		 WHERE outbox_id = $1 AND tenant_id = $3
+		       lease_owner = NULL, lease_expires_at = NULL, last_error = NULL,
+		       -- The same reason last_error is cleared above, applied to the column
+		       -- that replaced it for the dead-letter state. A row reaching this
+		       -- write always has it NULL already â€” Replay clears it and markFailed
+		       -- only writes it on the terminal transition â€” so this is the
+		       -- assertion rather than the mechanism. It costs one column in a
+		       -- statement that is already matching on the claim.
+		       dead_letter_reason = NULL
+		   WHERE outbox_id = $1 AND tenant_id = $3
 		   AND status = 'delivering'
 		   AND lease_owner IS NOT DISTINCT FROM $2`, d.OutboxID, d.LeaseOwner, d.TenantID)
-	if err != nil {
-		return fmt.Errorf("outbox: mark delivered: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		// Either the lease was reclaimed or the message already reached a
-		// terminal state, most importantly dead_letter. Saying so beats writing
-		// 'delivered' over another relay's terminal state.
-		return fmt.Errorf("%w: message %d (%s)", ErrLeaseLost, d.OutboxID, d.IdempotencyKey)
-	}
-	return nil
+		if err != nil {
+			return fmt.Errorf("outbox: mark delivered: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			// Either the lease was reclaimed or the message already reached a
+			// terminal state, most importantly dead_letter. Saying so beats writing
+			// 'delivered' over another relay's terminal state.
+			return fmt.Errorf("%w: message %d (%s)", ErrLeaseLost, d.OutboxID, d.IdempotencyKey)
+		}
+		return nil
+	})
+	return err
 }
 
 func (r *Relay) markFailed(ctx context.Context, d Delivery, cause error) error {
@@ -306,14 +322,40 @@ func (r *Relay) markFailed(ctx context.Context, d Delivery, cause error) error {
 	// here" and it is the same instant the dead letter entered the state, which is
 	// what an operator ordering dead letters by time needs.
 	//
-	// last_error is the dead letter's reason, and it is the reason rather than a
-	// dedicated column because outbox_events has no dead_letter_reason and adding
-	// one needs a migration this change may not make. The reason is only a reason
-	// if an operator can read it, so DeadLetters below selects it.
-	if err := r.Pool.For(d.TenantID, "outbox").QueryRow(ctx, `
+	// Two columns, not one, and the difference is the whole point.
+	//
+	// last_error is the *current* failure text: it is rewritten on every attempt
+	// that fails, so on a row still being retried it is exactly right, and on a
+	// row that has stopped it is whatever the last attempt happened to say rather
+	// than why the message died. A relay that was misconfigured, then fixed, then
+	// hit a DNS failure leaves a dead letter explaining DNS.
+	//
+	// dead_letter_reason is written only on the transition to dead_letter, and is
+	// never rewritten afterwards. That is the reason an operator needs, and it is
+	// the column inbox_events and jobs already have â€” outbox_events was the only
+	// one of the three without it, which meant the same question was answered
+	// from two different columns depending on which table the message was in.
+	//
+	// The two are written from the same expression on purpose. There is no window
+	// in which they can disagree, and a row that reaches dead_letter always has
+	// both set, so an operator reading either column reads the same sentence.
+	//
+	// Needs migration 0019. The column is nullable with no default, so a relay
+	// that has not been upgraded writes NULL and DeadLetters falls back to
+	// last_error, which is the answer it gives today.
+	//
+	// As in `deliver`: this write is guarded on `lease_owner`, which is a
+	// stronger predicate than site scope â€” a relay holds one message, not every
+	// message of its site â€” so it runs as the system worker rather than
+	// narrowing to a site it is not scoped to. Since migration 21
+	// `site_isolation` is RESTRICTIVE, and a tenant-scoped write against this
+	// table would be refused by a policy the relay cannot see.
+	if err := r.Pool.InSystemTenant(ctx, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `
 		UPDATE outbox_events
 		   SET status = CASE WHEN attempt_count >= $3 THEN 'dead_letter' ELSE 'failed' END,
 		       last_error = $4,
+		       dead_letter_reason = CASE WHEN attempt_count >= $3 THEN $4 ELSE NULL END,
 		       run_after = CASE WHEN attempt_count >= $3
 		                       THEN now()
 		                       ELSE now() + make_interval(secs => (5 * power(2, least(attempt_count, 6)))::int)
@@ -324,20 +366,29 @@ func (r *Relay) markFailed(ctx context.Context, d Delivery, cause error) error {
 		   AND status = 'delivering'
 		   AND lease_owner IS NOT DISTINCT FROM $2
 		RETURNING status`, d.OutboxID, d.LeaseOwner, maxAttempts, cause.Error(), d.TenantID).Scan(&status); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			// The lease is gone, so this attempt's failure is not this relay's to
-			// record. Recording it anyway is how a worker that finished late
-			// resurrects a row that has since been delivered or dead-lettered by
-			// somebody else.
-			return fmt.Errorf("%w: message %d (%s): %w",
-				ErrLeaseLost, d.OutboxID, d.IdempotencyKey, cause)
+			if errors.Is(err, pgx.ErrNoRows) {
+				// The lease is gone, so this attempt's failure is not this relay's to
+				// record. Recording it anyway is how a worker that finished late
+				// resurrects a row that has since been delivered or dead-lettered by
+				// somebody else.
+				return fmt.Errorf("%w: message %d (%s): %w",
+					ErrLeaseLost, d.OutboxID, d.IdempotencyKey, cause)
+			}
+			return fmt.Errorf("outbox: mark failed: %w", err)
 		}
-		return fmt.Errorf("outbox: mark failed: %w", err)
+		return nil
+	}); err != nil {
+		return err
 	}
 	return cause
 }
 
-// DeadLetter is one message that reached a terminal failure.
+// DeadLetter is one message that reached a terminal failure and is waiting for
+// an operator.
+//
+// The listing is scoped to a site, because `site_isolation` has been RESTRICTIVE
+// since migration 21: a console that named only its tenant would show an
+// operator an empty list, and an empty list reads as "the site is healthy".
 type DeadLetter struct {
 	OutboxID       int64
 	TenantID       string
@@ -345,10 +396,13 @@ type DeadLetter struct {
 	Topic          string
 	IdempotencyKey string
 	Attempts       int
-	// Reason is last_error. outbox_events has no dead_letter_reason column, unlike
-	// inbox_events and jobs, and adding one needs a migration this change may not
-	// make, so the failure text already in the row is the reason. It is only a
-	// reason because something reads it, which is what this listing is for.
+	// Reason is the dead letter's own reason, falling back to last_error.
+	//
+	// The fallback is not a courtesy. dead_letter_reason is nullable with no
+	// default, so every row written before migration 0019 â€” and every row written
+	// by a relay that has not been upgraded since â€” has it NULL, and reporting
+	// "" for those would replace today's answer with silence. COALESCE is what
+	// lets the two populations of rows be reported through one listing.
 	Reason string
 	// DeadLetteredAt is run_after. markFailed sets run_after to now() on the
 	// transition to dead_letter, so on a dead-lettered row it is the instant the
@@ -365,13 +419,18 @@ type DeadLetter struct {
 // SLO says a dead letter must be visible within 60 seconds of entering the state;
 // ordering by enqueue time puts a message that died a moment ago below one that
 // died last month, which is the wrong answer to "what just broke".
-func (r *Relay) DeadLetters(ctx context.Context, tenantID string, limit int) ([]DeadLetter, error) {
+func (r *Relay) DeadLetters(ctx context.Context, tenantID, siteID string, limit int) ([]DeadLetter, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	rows, err := r.Pool.For(tenantID, "outbox").Query(ctx, `
+	// Scoped, not bypassed: a dead letter is not a leased row any worker holds, so
+	// the lease argument does not apply and the site is the honest constraint.
+	// Since migration 21 `site_isolation` is RESTRICTIVE, and a listing an
+	// operator reads must show the sites they are assigned to rather than every
+	// site's messages.
+	rows, err := r.Pool.WithSites(tenantID, "outbox", []string{siteID}).Query(ctx, `
 		SELECT outbox_id, tenant_id, site_id, topic, idempotency_key,
-		       attempt_count, COALESCE(last_error, ''), run_after
+		       attempt_count, COALESCE(dead_letter_reason, last_error, ''), run_after
 		  FROM outbox_events
 		 WHERE tenant_id = $1 AND status = 'dead_letter'
 		 ORDER BY run_after DESC
@@ -412,6 +471,12 @@ func (r *Relay) Replay(ctx context.Context, tenantID string, outboxID int64) err
 		   -- is dead, so no relay holds its lease; the action is what makes it
 		   -- claimable again.
 		   SET status = 'pending', attempt_count = 0, last_error = NULL,
+		       -- A replayed row that then fails differently, or succeeds, must not
+		       -- carry the reason it was dead-lettered for into a state where that
+		       -- reason is no longer why. The replay is the operator saying "I have
+		       -- fixed whatever this was", so the old reason is stale the moment it
+		       -- runs.
+		       dead_letter_reason = NULL,
 		       run_after = now(), lease_owner = NULL, lease_expires_at = NULL
 		 WHERE outbox_id = $1 AND tenant_id = $2 AND status = 'dead_letter'`, outboxID, tenantID)
 	if err != nil {

@@ -137,7 +137,7 @@ func Exec(t *testing.T, pool *pgxpool.Pool, sql string, args ...any) {
 // ExpectError runs a statement and requires it to fail.
 //
 // It returns nothing, deliberately. The assertion is "this statement must be
-// refused", and it is made by failing the test if the statement succeeds — which
+// refused", and it is made by failing the test if the statement succeeds Ã¢â‚¬â€ which
 // happens inside the helper. Returning the error as well gave every call site
 // two ways to do nothing with it, and eight of them took the second: the call
 // read as if the error were being checked when it was being dropped, and a
@@ -179,9 +179,16 @@ func QueryOne(t *testing.T, pool *pgxpool.Pool, sql string, args ...any) any {
 }
 
 // AsRole runs fn inside a transaction as the named role, with the given tenant
-// context set. It is how the tests assert that least privilege is real rather
-// than declared.
-func AsRole(t *testing.T, pool *pgxpool.Pool, role, tenant string, fn func(tx pgx.Tx)) {
+// and site context set. It is how the tests assert that least privilege is real
+// rather than declared.
+//
+// `sites` may be empty, and an empty scope is meaningful: since migration 21
+// `site_isolation` is RESTRICTIVE, so the effective predicate is
+// `tenant_isolation AND site_isolation` and a context with no `app.site_ids`
+// sees no site-scoped rows at all. That is fail-closed and it is the point: a
+// statement that reaches a site-scoped table without saying which site it wants
+// is not allowed to guess.
+func AsRole(t *testing.T, pool *pgxpool.Pool, role, tenant string, sites []string, fn func(tx pgx.Tx)) {
 	t.Helper()
 	ctx := context.Background()
 	tx, err := pool.Begin(ctx)
@@ -200,6 +207,12 @@ func AsRole(t *testing.T, pool *pgxpool.Pool, role, tenant string, fn func(tx pg
 	if tenant != "" {
 		if _, err := tx.Exec(ctx, `SELECT set_config('app.tenant_id', $1, true)`, tenant); err != nil {
 			t.Fatalf("set tenant context: %v", err)
+		}
+	}
+	if len(sites) > 0 {
+		if _, err := tx.Exec(ctx, `SELECT set_config('app.site_ids', $1, true)`,
+			dbx.EncodeSiteIDs(sites)); err != nil {
+			t.Fatalf("set site context: %v", err)
 		}
 	}
 	fn(tx)

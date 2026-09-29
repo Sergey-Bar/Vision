@@ -211,13 +211,29 @@ type Capability string
 // Capabilities. The closed set the service layer checks, matched exactly rather
 // than by prefix: a prefix match would let incident.read satisfy
 // incident.read_all, and an operator would escalate by accident.
+//
+// `evidence.export` is not in this list, and its absence is deliberate rather
+// than an oversight. It was declared here and granted to tenant_admin and
+// security_manager, and a tree-wide search for it found no route, no check and
+// no audit action — a capability that grants nothing, in the one document an
+// auditor reads to answer "who can take this site's evidence out of the
+// building". That is a role table which lies, and it was removed rather than
+// given a meaning: inventing an export route to justify a constant nobody asked
+// for would add a route, an audit action, an export format and a new way for
+// evidence bytes to leave a site, all to keep a name. `evidence.fetch` gates the
+// route that releases bytes and `evidence.read` gates the metadata; those are
+// the two things the product enforces, and the role table now says only those.
+//
+// The consequence, which is the control: a capability that nothing in the tree
+// checks is a capability that grants nothing, and it is asserted in
+// capability_coverage_test.go. Adding a constant to this block without adding
+// the check that reads it fails that test.
 const (
 	CapIncidentRead        Capability = "incident.read"
 	CapIncidentDisposition Capability = "incident.disposition"
 	CapIncidentEscalate    Capability = "incident.escalate"
 	CapEvidenceRead        Capability = "evidence.read"
 	CapEvidenceFetch       Capability = "evidence.fetch"
-	CapEvidenceExport      Capability = "evidence.export"
 	CapAuditRead           Capability = "audit.read"
 	CapRulesRead           Capability = "rules.read"
 	CapRulesWrite          Capability = "rules.write"
@@ -228,19 +244,43 @@ const (
 	CapDeadLetterReplay    Capability = "dead_letter.replay"
 )
 
+// AllCapabilities returns the closed set of capabilities this build declares.
+//
+// It exists so the set can be asserted rather than described. A capability is a
+// promise that some route or check enforces it, and until the set was
+// enumerable that promise could only be checked by reading every route by hand —
+// which is exactly how evidence.export sat here, granted to two roles and
+// enforced by nothing, without anybody noticing. Nothing grants a capability
+// from this list to a principal; the list is for the coverage check and for an
+// operator tool that wants to render the vocabulary.
+func AllCapabilities() []Capability {
+	return []Capability{
+		CapIncidentRead, CapIncidentDisposition, CapIncidentEscalate,
+		CapEvidenceRead, CapEvidenceFetch,
+		CapAuditRead, CapRulesRead, CapRulesWrite, CapRulesActivate,
+		CapIdentityManage, CapSiteConfigure,
+		CapDeadLetterRead, CapDeadLetterReplay,
+	}
+}
+
 // roleCapabilities is the shipped mapping. The database holds the same data; this
 // is the fallback for a bootstrap and the reference the migration seeds from.
+//
+// The list is the second half of the coverage control: a capability declared
+// above and granted to a role here is a capability somebody may rely on, and
+// capability_coverage_test.go asserts that every one of them is read by
+// something outside this file.
 var roleCapabilities = map[Role][]Capability{
 	RoleTenantAdmin: {
 		CapIncidentRead, CapIncidentDisposition, CapIncidentEscalate,
-		CapEvidenceRead, CapEvidenceFetch, CapEvidenceExport,
+		CapEvidenceRead, CapEvidenceFetch,
 		CapAuditRead, CapRulesRead, CapRulesWrite, CapRulesActivate,
 		CapIdentityManage, CapSiteConfigure,
 		CapDeadLetterRead, CapDeadLetterReplay,
 	},
 	RoleSecurityManager: {
 		CapIncidentRead, CapIncidentDisposition, CapIncidentEscalate,
-		CapEvidenceRead, CapEvidenceFetch, CapEvidenceExport,
+		CapEvidenceRead, CapEvidenceFetch,
 		CapAuditRead, CapRulesRead, CapDeadLetterRead, CapDeadLetterReplay,
 	},
 	RoleOperator: {

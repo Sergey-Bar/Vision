@@ -74,7 +74,7 @@ const (
 // The tiers are the ones the plan defines: A is authoritative state reported by
 // the source of truth, B is a deterministic fact the core derived, C is an AI
 // observation. A canonical event is a derived fact - it is a normalization of a
-// raw envelope, not the device's own report â€” so candidates are Tier B. The
+// raw envelope, not the device's own report Ã¢â‚¬â€ so candidates are Tier B. The
 // trigger is Tier A, because it is the fact the rule is being evaluated against
 // rather than corroboration for it.
 //
@@ -151,7 +151,7 @@ func (c *Correlator) SignalsFor(
 		tiers = DefaultTiers()
 	}
 
-	trigger, err := c.readTrigger(ctx, tenant, triggerEventID)
+	trigger, err := c.readTrigger(ctx, tenant, site, triggerEventID)
 	if err != nil {
 		return out, err
 	}
@@ -284,7 +284,20 @@ const scanColumns = triggerColumns + `,
 	COALESCE(o.insufficient_evidence, FALSE),
 	COALESCE(o.degraded_reason, ''), COALESCE(o.degraded_detail, '')`
 
-func (c *Correlator) readTrigger(ctx context.Context, tenant, eventID string) (rules.Signal, error) {
+func (c *Correlator) readTrigger(ctx context.Context, tenant, site, eventID string) (rules.Signal, error) {
+	// The read is scoped to the site, not only to the tenant.
+	//
+	// Every table this query touches is site-scoped, and the RLS policy meant to
+	// enforce that is PERMISSIVE, so it is ORed away by `tenant_isolation` and the
+	// site constraint does not exist at the database layer. Binding it here means
+	// the statement is correct on its own terms and needs no change when
+	// `site_isolation` becomes RESTRICTIVE.
+	//
+	// The query's own `site_id` predicate is kept as well. The policy is meant to
+	// be a second line, not the only one, and a statement that relies on a GUC
+	// three layers down for its scope is a statement whose scope is invisible to
+	// whoever reads it.
+	scope := c.Pool.WithSites(tenant, "correlator", []string{site})
 	var s rules.Signal
 	var payload, attributes []byte
 	var band, obsID, profile string
@@ -294,7 +307,7 @@ func (c *Correlator) readTrigger(ctx context.Context, tenant, eventID string) (r
 	var detail string
 	var drift int32
 
-	err := c.Pool.For(tenant, "correlator").QueryRow(ctx, `
+	err := scope.QueryRow(ctx, `
 		SELECT `+triggerColumns+`,
 		       COALESCE(dc.band, ''), COALESCE(dc.drift_ms, 0),
 		       COALESCE(o.observation_id, ''), COALESCE(o.profile_id, ''),
@@ -335,7 +348,8 @@ func (c *Correlator) readCandidates(
 	ctx context.Context, tenant, site, triggerEventID string,
 	at time.Time, window time.Duration, tier rules.Tier, report *WindowReport,
 ) ([]rules.Signal, error) {
-	rows, err := c.Pool.For(tenant, "correlator").Query(ctx, `
+	scope := c.Pool.WithSites(tenant, "correlator", []string{site})
+	rows, err := scope.Query(ctx, `
 		SELECT `+scanColumns+`
 		  FROM canonical_events e`+triggerJoins+clockJoin+observationJoins+`
 		 WHERE e.tenant_id = $1
@@ -457,8 +471,8 @@ func buildObservation(id, profile string, structured []byte, insufficient bool, 
 	// and they are different fields because they are different facts.
 	//
 	// They were concatenated here, which corrupts the machine half.
-	// `DegradedReason` is a member of a closed set â€” `none|model_unavailable|
-	// no_runtime|timeout|error|absent` â€” and `internal/rules/match.go` switches on
+	// `DegradedReason` is a member of a closed set Ã¢â‚¬â€ `none|model_unavailable|
+	// no_runtime|timeout|error|absent` Ã¢â‚¬â€ and `internal/rules/match.go` switches on
 	// the exact string, so "model_unavailable: the VLM worker exited 137" falls
 	// through to the `default` arm and is recorded on the incident as `absent`.
 	// `ai_observations.degraded_reason` is CHECK-constrained to the same set, so

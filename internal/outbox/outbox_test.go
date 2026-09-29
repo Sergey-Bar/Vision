@@ -90,10 +90,16 @@ func runAfterOf(t *testing.T, pool *dbx.Pool, tenant string) time.Time {
 // uniqueTenant gives a test a tenant nobody else has used.
 //
 // The suite does not reset the schema between runs, and the outbox key is
-// (tenant_id, idempotency_key) with ON CONFLICT DO NOTHING — so a fixed tenant
+// (tenant_id, idempotency_key) with ON CONFLICT DO NOTHING Ã¢â‚¬â€ so a fixed tenant
 // means the second run of the suite enqueues nothing and asserts against the
 // previous run's terminal row. The test passes or fails for reasons that have
 // nothing to do with the code under test, which is the worst kind of flake.
+// siteFor gives a site id for a synthetic tenant. The dead-letter listing is
+// scoped to a site, so every caller needs one; these tests connect as the
+// superuser, which bypasses RLS, so the value has to be consistent rather than
+// real.
+func siteFor(tenant string) string { return "site-of-" + tenant }
+
 func uniqueTenant(prefix string) string {
 	return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
 }
@@ -259,7 +265,7 @@ func TestASuccessfulDeliveryIsTerminal(t *testing.T) {
 // B's handler fails and B drives the message to dead_letter. A then returns
 // successfully and writes status = 'delivered', clearing last_error. The dead
 // letter is gone and the operator is never told the message could not be
-// delivered — which is not a lost event, since the event is still in the outbox,
+// delivered Ã¢â‚¬â€ which is not a lost event, since the event is still in the outbox,
 // but it is a lost incident, and the promise the package doc makes is the thing
 // that broke.
 func TestASlowRelayCannotOverwriteAnotherRelaysDeadLetter(t *testing.T) {
@@ -448,7 +454,7 @@ func TestAnOutboxDeadLetterReachesTheOperatorWithItsReason(t *testing.T) {
 		t.Fatalf("the message is %q after one failed attempt against a bound of 1", status)
 	}
 
-	letters, err := relay.DeadLetters(ctx, tenant, 10)
+	letters, err := relay.DeadLetters(ctx, tenant, siteFor(tenant), 10)
 	if err != nil {
 		t.Fatalf("DeadLetters: %v", err)
 	}
@@ -472,7 +478,7 @@ func TestAnOutboxDeadLetterReachesTheOperatorWithItsReason(t *testing.T) {
 	}
 }
 
-// A dead-lettered row used to carry run_after set to a backoff — a future
+// A dead-lettered row used to carry run_after set to a backoff Ã¢â‚¬â€ a future
 // instant. No claim ever selects a dead_letter row, so nothing reads it, and
 // everything that reads the row reads it as "this will be retried", which is the
 // opposite of what a dead letter means.
@@ -504,7 +510,7 @@ func TestADeadLetterDoesNotCarryAFutureNotBeforeTime(t *testing.T) {
 			"reads it as a pending retry", at)
 	}
 	// The listing is what an operator orders by, so it has to carry a real time.
-	letters, err := relay.DeadLetters(ctx, tenant, 10)
+	letters, err := relay.DeadLetters(ctx, tenant, siteFor(tenant), 10)
 	if err != nil {
 		t.Fatalf("DeadLetters: %v", err)
 	}
@@ -567,7 +573,7 @@ func TestReplayingADeadLetterRetriesIt(t *testing.T) {
 	if _, err := relay.DrainOnce(ctx, tenant, "relay-1", 10); err != nil {
 		t.Fatalf("drain: %v", err)
 	}
-	letters, err := relay.DeadLetters(ctx, tenant, 10)
+	letters, err := relay.DeadLetters(ctx, tenant, siteFor(tenant), 10)
 	if err != nil {
 		t.Fatalf("DeadLetters: %v", err)
 	}
@@ -581,7 +587,7 @@ func TestReplayingADeadLetterRetriesIt(t *testing.T) {
 	if err := relay.Replay(ctx, tenant, letters[0].OutboxID); err != nil {
 		t.Fatalf("Replay: %v", err)
 	}
-	if letters, err = relay.DeadLetters(ctx, tenant, 10); err != nil {
+	if letters, err = relay.DeadLetters(ctx, tenant, siteFor(tenant), 10); err != nil {
 		t.Fatalf("DeadLetters after replay: %v", err)
 	} else if len(letters) != 0 {
 		t.Fatalf("%d dead letter(s) remain after an operator replay", len(letters))
@@ -623,8 +629,8 @@ func outboxID(t *testing.T, pool *dbx.Pool, tenant string) int64 {
 // O6: the not-before time is the database's clock, not the host's.
 // ---------------------------------------------------------------------------
 
-// The claim predicate is `run_after <= now()` — the database's clock. The default
-// on insert used to be time.Now().UTC() — the host's. Those are two clocks, and a
+// The claim predicate is `run_after <= now()` Ã¢â‚¬â€ the database's clock. The default
+// on insert used to be time.Now().UTC() Ã¢â‚¬â€ the host's. Those are two clocks, and a
 // host behind the database writes a not-before time in the past (a delayed
 // message fires immediately, skipping its delay) while a host ahead writes one in
 // the future (the message sits unclaimed until the skew drains).
@@ -632,8 +638,8 @@ func outboxID(t *testing.T, pool *dbx.Pool, tenant string) int64 {
 // The value is compared against the database's clock, so it has to be written
 // from that same clock.
 //
-// The test cannot arrange for the two clocks to disagree — it has no way to move
-// the host's — so it proves the property that distinguishes them instead. now() in
+// The test cannot arrange for the two clocks to disagree Ã¢â‚¬â€ it has no way to move
+// the host's Ã¢â‚¬â€ so it proves the property that distinguishes them instead. now() in
 // Postgres is the transaction's start timestamp, fixed for the life of the
 // transaction, whereas time.Now() is the instant of the call. The enqueue
 // therefore happens three seconds into a transaction, and the stored run_after

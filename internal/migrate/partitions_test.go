@@ -110,7 +110,7 @@ func TestNewPartitionsCarryTenantAndSitePolicies(t *testing.T) {
 	}
 
 	var visible int
-	testutil.AsRole(t, pool, "security_core", tenant, func(tx pgx.Tx) {
+	testutil.AsRole(t, pool, "security_core", tenant, []string{site}, func(tx pgx.Tx) {
 		if err := tx.QueryRow(ctx,
 			`SELECT count(*) FROM inbox_events WHERE tenant_id = $1`, otherTenant).Scan(&visible); err != nil {
 			t.Fatalf("count as security_core: %v", err)

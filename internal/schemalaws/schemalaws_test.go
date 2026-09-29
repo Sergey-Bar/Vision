@@ -442,17 +442,24 @@ func TestRLSIsoTenants(t *testing.T) {
 	newIncident(t, pool, "inc-a", tenant, site)
 	newIncident(t, pool, "inc-b", other, otherSite)
 
+	// site is the site the reading principal is assigned to. Since migration 21 the
+	// two policies compose as AND, so a reader needs both: the cross-tenant cases
+	// pass a site belonging to a different tenant, which proves the tenant half, and
+	// the own-tenant case passes the matching site, which proves the site half.
 	for _, tc := range []struct {
 		name string
 		tnt  string
+		site string
 		want int
 	}{
-		{"own tenant", tenant, 1},
-		{"other tenant", "some-other-tenant", 0},
-		{"no context", "", 0},
+		{"own tenant and own site", tenant, site, 1},
+		{"own tenant, another tenant's site", tenant, otherSite, 0},
+		{"another tenant", "some-other-tenant", site, 0},
+		{"no tenant context", "", site, 0},
+		{"no site context", tenant, "", 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			testutil.AsRole(t, pool, "security_readonly", tc.tnt, func(tx pgx.Tx) {
+			testutil.AsRole(t, pool, "security_readonly", tc.tnt, []string{tc.site}, func(tx pgx.Tx) {
 				var n int
 				if err := tx.QueryRow(context.Background(),
 					`SELECT count(*) FROM incidents`).Scan(&n); err != nil {
@@ -499,7 +506,12 @@ func TestRLSIsoTenantsForLargeTables(t *testing.T) {
 	tables := []string{"incidents", "canonical_events", "evidence"}
 	for _, table := range tables {
 		t.Run(table, func(t *testing.T) {
-			testutil.AsRole(t, pool, "security_readonly", "some-other-tenant", func(tx pgx.Tx) {
+			// Another tenant's site as well as another tenant's id: since
+			// migration 21 the two policies compose as AND, and a reader that
+			// named only the tenant would be refused by the site policy instead of
+			// by the tenant one, which is a weaker proof than it looks.
+			otherTenant, otherSite, _ := testutil.NewTenant(t, pool)
+			testutil.AsRole(t, pool, "security_readonly", otherTenant, []string{otherSite}, func(tx pgx.Tx) {
 				var n int
 				if err := tx.QueryRow(context.Background(),
 					`SELECT count(*) FROM `+table+` WHERE tenant_id = $1`, tenant).Scan(&n); err != nil {
@@ -517,9 +529,10 @@ func TestRLSIsoTenantsForLargeTables(t *testing.T) {
 // gets into another customer's incident feed.
 func TestRLSBlocksCrossTenantWrite(t *testing.T) {
 	pool := migrated(t)
-	tenant, site, _ := testutil.NewTenant(t, pool)
+	_, site, _ := testutil.NewTenant(t, pool)
 
-	testutil.AsRole(t, pool, "security_readonly", "some-other-tenant", func(tx pgx.Tx) {
+	otherTenant, otherSite, _ := testutil.NewTenant(t, pool)
+	testutil.AsRole(t, pool, "security_readonly", otherTenant, []string{otherSite}, func(tx pgx.Tx) {
 		// security_readonly has no INSERT grant at all, which is the first
 		// control. This asserts that layer.
 		if _, err := tx.Exec(context.Background(), `
@@ -530,7 +543,6 @@ func TestRLSBlocksCrossTenantWrite(t *testing.T) {
 			t.Error("a read-only role inserted an incident")
 		}
 	})
-	_ = tenant
 }
 
 func TestTenantContextIsRequiredForWrites(t *testing.T) {
@@ -538,7 +550,7 @@ func TestTenantContextIsRequiredForWrites(t *testing.T) {
 	tenant, site, _ := testutil.NewTenant(t, pool)
 	// With no tenant context at all, a WITH CHECK policy rejects the write. This
 	// is the "a request that forgot to set the context fails closed" property.
-	testutil.AsRole(t, pool, "security_core", "", func(tx pgx.Tx) {
+	testutil.AsRole(t, pool, "security_core", "", nil, func(tx pgx.Tx) {
 		if _, err := tx.Exec(context.Background(), `
 			INSERT INTO incidents (incident_id, tenant_id, primary_site_id, rule_id, rule_bundle_version,
 			                       bundle_content_hash, policy_version, first_event_at, last_event_at)
@@ -555,7 +567,7 @@ func TestTenantContextIsRequiredForWrites(t *testing.T) {
 
 func TestAdapterCannotReadAuditLedger(t *testing.T) {
 	pool := migrated(t)
-	testutil.AsRole(t, pool, "security_adapter", "", func(tx pgx.Tx) {
+	testutil.AsRole(t, pool, "security_adapter", "", nil, func(tx pgx.Tx) {
 		if _, err := tx.Exec(context.Background(), `SELECT count(*) FROM audit_ledger`); err == nil {
 			t.Error("an adapter read the audit ledger")
 		}
@@ -570,7 +582,7 @@ func TestAdapterCannotReadAuditLedger(t *testing.T) {
 
 func TestAIRuntimeCannotAlterAuthoritativeState(t *testing.T) {
 	pool := migrated(t)
-	testutil.AsRole(t, pool, "security_ai", "", func(tx pgx.Tx) {
+	testutil.AsRole(t, pool, "security_ai", "", nil, func(tx pgx.Tx) {
 		for _, q := range []string{
 			`SELECT count(*) FROM incidents`,
 			`SELECT count(*) FROM dispositions`,
@@ -588,7 +600,7 @@ func TestAIRuntimeCannotAlterAuthoritativeState(t *testing.T) {
 
 func TestReadonlyHasNoGrantOnAuditLedger(t *testing.T) {
 	pool := migrated(t)
-	testutil.AsRole(t, pool, "security_readonly", "", func(tx pgx.Tx) {
+	testutil.AsRole(t, pool, "security_readonly", "", nil, func(tx pgx.Tx) {
 		if _, err := tx.Exec(context.Background(), `SELECT count(*) FROM audit_ledger`); err == nil {
 			t.Error("a read-only reporting role can read the audit ledger")
 		}

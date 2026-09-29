@@ -297,7 +297,14 @@ in and the only safe answer is a restore from backup.`,
 		}
 		state, err := lifecycle.ReadState(programDir)
 		if err != nil {
-			return err
+			// A state file this build cannot read, or a directory that is not an
+			// install, is a refusal rather than a failure. The three cases below
+			// already return command.Refuse, and this one did not: it returned
+			// lifecycle.ErrRefused, which the command tree does not recognise, so
+			// an operator whose state file was written by another installer saw
+			// exit 1 — indistinguishable from "the database is unreachable" —
+			// and retried the wrong thing.
+			return command.Refuse("%v", err)
 		}
 		if state.Version == "" {
 			return command.Refuse("nothing is installed in %s", programDir)
@@ -312,7 +319,11 @@ in and the only safe answer is a restore from backup.`,
 		// whether it can read the schema as it now stands.
 		previousWindow, err := readVersionWindow(programDir)
 		if err != nil {
-			return err
+			// Same reason as the state read above. readVersionWindow refuses when
+			// the previous install's manifest is absent or unreadable, and a
+			// refusal that exits as a generic error is a rollback that looks like
+			// a broken CLI rather than a rollback that declines to guess.
+			return command.Refuse("%v", err)
 		}
 		current, err := currentSchemaVersion()
 		if err != nil {
