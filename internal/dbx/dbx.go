@@ -93,8 +93,8 @@ func Open(ctx context.Context, cfg Config, password string) (*Pool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("dbx: parse config: %w", err)
 	}
-	poolCfg.MaxConns = int32(cfg.MaxOpenConns)
-	poolCfg.MinConns = int32(cfg.MaxIdleConns)
+	poolCfg.MaxConns = clampConns(cfg.MaxOpenConns)
+	poolCfg.MinConns = clampConns(cfg.MaxIdleConns)
 	poolCfg.MaxConnLifetime = cfg.ConnMaxLifetime
 	poolCfg.MaxConnIdleTime = 5 * time.Minute
 	poolCfg.HealthCheckPeriod = cfg.HealthCheckInterval
@@ -122,6 +122,26 @@ type TenantContext struct {
 	SiteIDs  []string
 	ActorID  string
 	Session  string
+}
+
+// clampConns keeps a connection count inside the range the pool's own field can
+// hold.
+//
+// The conversion is a narrowing one and the value comes from configuration, so a
+// typo like a missing digit wraps to a negative number. A negative MaxConns is
+// not a small pool; it is a pool that refuses to open a connection at all, and
+// the site fails at startup with a message about the driver rather than about the
+// setting.
+func clampConns(n int) int32 {
+	const ceiling = int64(1<<31 - 1)
+	switch {
+	case n < 0:
+		return 0
+	case int64(n) > ceiling:
+		return int32(ceiling)
+	default:
+		return int32(n)
+	}
 }
 
 // ErrNoTenant is returned when a tenant-scoped operation is attempted without

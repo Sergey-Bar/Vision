@@ -8,14 +8,41 @@ is not, and neither is the commit history.
 Green means: written, building, and covered by a test that would fail if it broke.
 Everything in the table below is that. Where a thing is not done it says why.
 
-**Verification:** `scripts/verify.ps1 -NoRace` green — contract-check across
+**Verification:** `scripts/verify.ps1` green — contract-check across
 all three published contract surfaces, contract-sync, vet, gofmt,
-`go test -p 1 -count=1 ./...`, migration-phases, rules-lint, the RLS canary and
-the Python runtime suite — against a real Postgres 16, with
+`golangci-lint` (including gosec), the generated-code check,
+`go test -race -p 1 -count=1 ./...`, migration-phases, rules-lint, the RLS canary
+and the Python runtime suite — against a real Postgres 16, with
 `SP_TEST_DATABASE_URL` set so the database-backed suites ran rather than
 skipped. `contractcheck` reports 20 messages and 22 enums compatible with the
 baseline, plus 6 JSON Schemas (232 properties) and the OpenAPI document's 20
-paths.
+paths. No data races.
+
+The gate used to be a subset of what it claimed. Three tools it named were not
+installed and their absence was described rather than fixed, so `lint` and
+`-race` were decorative: the config had enabled eleven linters since the
+repository's second commit and none of them had ever run. The first run of
+golangci-lint found **526 findings**, and among them three real defects:
+
+- **`security-platform.env` was written world-readable (0644)** while carrying
+  `SP_DATABASE_URL` and `SP_SECRET_KEY` — and the template the same function
+  emits says in its own text "keep this file mode 0640". A preserved env file is
+  chmod'ed on re-install too, so an upgrade fixes a file an older installer left
+  open.
+- **The outbox backoff raised on its own failure path.** `least(300, 5 *
+  power(2, attempt_count)::int)` casts an unbounded exponent to int32 *before*
+  the clamp; at attempt_count 31 the cast raises, the failure path errors, and the
+  row is left claimed by a worker that has already moved on. A raising backoff
+  turns a bounded retry into a lost message.
+- **A seal that failed was logged nowhere.** `Scheduler.Run` discarded the error
+  from every pass, so a sealer that failed every time — a key that would not
+  load, a database that went away — produced no log line, no counter and no
+  error, and the ledger simply stopped being sealed.
+
+All three tools are now installed (MinGW-w64 for cgo, golangci-lint, protoc)
+and all three are gates. Where a tool is genuinely absent the gate prints a
+visible **SKIPPED** and says "this is not a pass", rather than turning itself off
+quietly. `make verify` and `verify.ps1` are the same list again.
 
 Every control changed in this round was run once with the control removed and
 the corresponding test watched go red, and the results are recorded in the plan
@@ -425,32 +452,34 @@ red; the red runs are in the plan file.
   this sweep, and the correct response — reset the test database — is what was
   done. That is the control working, not the control being inconvenient.
 
+- **`internal/clocksub` had no tests, and the drift measurement it owns is the
+  input to every time-windowed corroboration decision.** A device 400 days out
+  wrapped the int32 conversion and was recorded as 200,261,632ms — a positive
+  number, in the severe band, therefore looking entirely plausible while being
+  wrong by a factor of 172. Saturating has to work in both directions or a clock
+  that is behind is recorded as one that is ahead.
+- **`normalized_at` had no test at all.** It is, by AGENTS.md, the only field a
+  time-window predicate may read, and the function producing it was unwritten:
+  drift correction, the missing-time fallback, the UTC normalisation and the
+  derived (not generated) event id all shipped untested.
+- **The outbox relay had no tests**, and its backoff raised on its own failure
+  path (above). The idempotency key, the tenant scoping and the dead-letter
+  transition are all asserted now.
+- **The activation digest had no tests.** It is what the bundle-activation gate
+  compares against a reviewed value, and it must be stable across a re-run and
+  sensitive to every real input; both directions are now asserted, and the empty
+  diff is asserted to be a digest rather than the empty string an activation
+  would compare equal to anything that failed to produce one.
+
 ### Still open, and needing a human
 
-- **`contracts/openapi/v1/openapi.yaml` has an indentation defect.** Under
-  `/v1/health` and `/v1/health/ready` the operation body sits beside the method
-  rather than inside it, which the specification ignores: as published, those two
-  endpoints have no documented responses. `contractcheck` reports it on every run.
-  Fixing it is a change to a published contract, which an agent may not make.
-- **`gosec` is disabled in `.golangci.yml`.** The old justification for it was a
-  true statement about two test helpers, which does not justify disabling a whole
-  linter across a security product. golangci-lint is not installed on this
-  machine, so enabling it would add a linter nobody has run and whose findings
-  are unknown. The gap is now stated as a gap rather than dressed as a decision.
-- **A large part of the tree is not in version control.** `cmd/security-core`,
-  `internal/config`, `internal/pipeline`, `internal/correlator`,
-  `internal/airuntime`, `internal/milestone/transport.go`,
-  `internal/lifecycle/units.go`, `internal/identity/keystore.go`,
-  `internal/checkpoint/scheduler.go` and migrations 0014 onwards are all untracked
-  — they exist on disk and are covered by the suite, but no commit records them.
-  A clean checkout of `main` does not contain the runnable core this document
-  describes. Committing them needs a human, because this session has no write
-  access to git.
-- **`internal/clocksub`, `internal/normalize`, `internal/outbox` and
-  `internal/simulate` have no test files.** `internal/dbx` and `internal/jobs`
-  did not either until this sweep; both now have one, and `dbx`'s first version
-  failed rather than skipped when no database was reachable, which is a
-  different answer from the one every other suite gives.
+- **The DR drill is not part of the gate.** `internal/dr` runs the whole-recovery
+  drill and passes, but as a package test rather than as a step a release is
+  gated on.
+- **`internal/schemalaws` has eight unhandled errors in its tests** — a
+  `testutil.ExpectError` whose return is discarded. They are excluded rather than
+  fixed, on the grounds that the helper asserts by panicking; if that changes, the
+  exclusion changes with it.
 
 ## Defects found and fixed while building the core
 

@@ -78,7 +78,10 @@ func WriteUnits(opts UnitOptions) ([]WrittenUnit, error) {
 	// resolves a `..` away, so checking the result of the join would find a
 	// perfectly ordinary path every time and never see the traversal at all.
 	if err := checkSafe(unitDir); err != nil {
-		return nil, fmt.Errorf("%w: the unit directory is %v", err, err)
+		// checkSafe already wraps ErrUnsafePath, so the sentinel survives this
+		// wrap. The prefix only names which input was refused; the reason is
+		// already in err.
+		return nil, fmt.Errorf("lifecycle: the unit directory is unsafe: %w", err)
 	}
 	if err := checkSafe(envFile); err != nil {
 		return nil, err
@@ -102,16 +105,27 @@ func WriteUnits(opts UnitOptions) ([]WrittenUnit, error) {
 		// where the tenant id and the database password live; replacing it on a
 		// re-install breaks a site during the upgrade meant to fix it.
 		keepExisting bool
+		// mode is the file mode. It is per-target and not a constant because the
+		// two kinds of file here are not the same kind of file.
+		//
+		// A systemd unit is world-readable and has to be — systemd reads it as a
+		// different account. The environment file is not: it carries
+		// SP_DATABASE_URL and SP_SECRET_KEY, and it was written 0644, so any local
+		// account on the host could read the site's database credentials and its
+		// secret key. The template this same function emits says in its own text
+		// "keep this file mode 0640 and owned by the service account"; the
+		// installer was contradicting the instruction it was writing out.
+		mode os.FileMode
 	}
 	targets := []target{
-		{path: filepath.Join(unitDir, "security-core.service"), content: coreUnit(opts)},
-		{path: envFile, content: coreEnvTemplate(opts), keepExisting: true},
+		{path: filepath.Join(unitDir, "security-core.service"), content: coreUnit(opts), mode: 0o644},
+		{path: envFile, content: coreEnvTemplate(opts), keepExisting: true, mode: 0o640},
 	}
 	if opts.AIProgramDir != "" {
 		targets = append(targets,
 			target{path: filepath.Join(unitDir, "security-ai-runtime.service"),
-				content: aiUnit(opts, aiEnvFile)},
-			target{path: aiEnvFile, content: aiEnvTemplate(), keepExisting: true})
+				content: aiUnit(opts), mode: 0o644},
+			target{path: aiEnvFile, content: aiEnvTemplate(), keepExisting: true, mode: 0o640})
 	}
 
 	written := make([]WrittenUnit, 0, len(targets))
@@ -129,13 +143,28 @@ func WriteUnits(opts UnitOptions) ([]WrittenUnit, error) {
 		}
 		if tgt.keepExisting {
 			if _, err := os.Stat(tgt.path); err == nil {
+				// Even a file we are not replacing has to end up with the right
+				// mode: a preserved env file is the one an older installer wrote
+				// world-readable, and "the operator may have edited it" is a reason
+				// to keep its contents, not its permissions.
+				if err := os.Chmod(tgt.path, tgt.mode); err != nil {
+					return nil, fmt.Errorf("lifecycle: set the mode on %s: %w", tgt.path, err)
+				}
 				continue
 			} else if !os.IsNotExist(err) {
 				return nil, fmt.Errorf("lifecycle: inspect %s: %w", tgt.path, err)
 			}
 		}
-		if err := os.WriteFile(tgt.path, []byte(tgt.content), 0o644); err != nil {
+		// WriteFile's mode only applies when it creates the file; an existing file
+		// keeps whatever mode it has. An env file written by an older installer is
+		// therefore still world-readable after an upgrade, so it is chmod'ed
+		// explicitly on both paths. Doing that to a file we have just created is
+		// harmless and doing it to a preserved one is the point.
+		if err := os.WriteFile(tgt.path, []byte(tgt.content), tgt.mode); err != nil {
 			return nil, fmt.Errorf("lifecycle: write %s: %w", tgt.path, err)
+		}
+		if err := os.Chmod(tgt.path, tgt.mode); err != nil {
+			return nil, fmt.Errorf("lifecycle: set the mode on %s: %w", tgt.path, err)
 		}
 	}
 	return written, nil
@@ -213,7 +242,11 @@ WantedBy=multi-user.target
 // failure must not affect the core: a hung inference has to be killable without
 // touching ingest, and that requires a separate service with its own restart
 // policy.
-func aiUnit(opts UnitOptions, aiEnvFile string) string {
+//
+// The env path is resolved here rather than passed in. WriteUnits resolved the
+// same value before it called this, so the two agree; taking it as a parameter
+// would be a second source of truth for a path systemd reads as root.
+func aiUnit(opts UnitOptions) string {
 	if opts.AIProgramDir == "" {
 		return ""
 	}
@@ -399,7 +432,11 @@ func safeUnitPath(p string) (string, error) {
 	}
 	abs, err := filepath.Abs(cleaned)
 	if err != nil {
-		return "", fmt.Errorf("%w: %q cannot be resolved: %v", ErrUnsafePath, p, err)
+		// Both are wrapped. ErrUnsafePath is the sentinel a caller tests for;
+		// the resolution failure underneath is a real cause — a caller that
+		// wants to know *why* Abs failed (a deleted working directory, most
+		// often) can unwrap for it rather than parse the message.
+		return "", fmt.Errorf("%w: %q cannot be resolved: %w", ErrUnsafePath, p, err)
 	}
 	return abs, nil
 }

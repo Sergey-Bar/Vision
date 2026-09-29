@@ -335,7 +335,16 @@ func (s *Service) EnrollWebAuthn(ctx context.Context, tenant, userID, credential
 // RFC 6238 default — and therefore the fallback for an authenticator that
 // ignores the `algorithm` parameter — is SHA-1. The caller tries both.
 func totpCode(secret []byte, h func() hash.Hash, at time.Time) string {
-	counter := uint64(at.Unix() / 30)
+	// The counter is a T/30 value since the epoch, and T/30 is non-negative for
+	// every time this program is asked about. A caller passing a timestamp
+	// before 1970 would otherwise wrap it to about 1.8e19 and produce a code from
+	// a counter no authenticator has ever reached, which is a valid-looking six
+	// digits rather than a refusal. The clamp makes the impossible case produce
+	// a fixed counter instead, which no enrolled device matches.
+	counter := uint64(0)
+	if secs := at.Unix(); secs > 0 {
+		counter = uint64(secs / 30)
+	}
 	var buf [8]byte
 	binary.BigEndian.PutUint64(buf[:], counter)
 
@@ -372,6 +381,28 @@ func (s *Service) unwrapTOTP(wrapped []byte) ([]byte, error) {
 		return nil, fmt.Errorf("identity: unwrap TOTP secret: %w", err)
 	}
 	return plain, nil
+}
+
+// adminUserID derives the first administrator's id from the tenant and the
+// username, so an operator following the same steps on two sites gets the same
+// name and can find the account without a lookup table.
+//
+// Two details are load-bearing and both were wrong at some point:
+//
+//   - `sha256.Sum256`, not `sha256.New().Sum(...)`. The latter returns its input
+//     with the digest of zero bytes appended, so every administrator in every
+//     deployment was "admin-e3b0c442" — e3b0c442 being the first eight hex
+//     characters of the SHA-256 of no input at all.
+//   - A NUL separator, so the two inputs are distinguishable. Without it
+//     ("ab", "c") and ("a", "bc") hash identically and two different tenants get
+//     the same administrator id.
+//
+// It is a function rather than three lines in the caller so it can be tested
+// without a database: the property is about two strings, and the test for it
+// should not need a tenant, a site and a password.
+func adminUserID(tenant, username string) string {
+	sum := sha256.Sum256([]byte(tenant + "\x00" + username))
+	return "admin-" + hex.EncodeToString(sum[:])[:8]
 }
 
 // BootstrapAdmin creates the first administrator.
@@ -435,13 +466,7 @@ func (s *Service) BootstrapAdmin(ctx context.Context, tenant, username, passphra
 	if err != nil {
 		return "", err
 	}
-	// sha256.Sum256 of the inputs, not `sha256.New().Sum(...)`. The latter
-	// appends the digest of zero bytes to whatever you hand it, so every
-	// bootstrap administrator in every tenant was called "admin-e3b0c442" —
-	// e3b0c442 is the first eight hex characters of the SHA-256 of nothing. The
-	// NUL separator matters too: without it ("t"+"a" and "ta"+"") hash the same.
-	sum := sha256.Sum256([]byte(tenant + "\x00" + username))
-	userID := "admin-" + hex.EncodeToString(sum[:])[:8]
+	userID := adminUserID(tenant, username)
 
 	// The write runs as a system worker, and that is the correct context rather
 	// than a workaround: this is the installer creating a tenant's first
@@ -604,19 +629,6 @@ func (s *Service) EnsureUser(ctx context.Context, tenant, userID, username, disp
 		return nil
 	})
 }
-
-// randomPassphrase produces a placeholder a new user immediately replaces via
-// SetPassword. It is not returned, so nobody can log in with it — the account
-// exists and has recovery_required set, which is the state that says "this
-// person's password has not been chosen yet".
-func randomPassphrase() string {
-	buf := make([]byte, 24)
-	if _, err := rand.Read(buf); err != nil {
-		return "recovery-required-not-yet-chosen-000000"
-	}
-	return hex.EncodeToString(buf)
-}
-
 func rolesFromJSON(s string) []Role {
 	var out []Role
 	_ = json.Unmarshal([]byte(s), &out)

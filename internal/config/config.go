@@ -231,7 +231,7 @@ func (c Config) validate() error {
 		!strings.HasPrefix(c.AIEndpoint, "https://"):
 		return fmt.Errorf("config: SP_AI_ENDPOINT must be an http:// or https:// URL, got %q", c.AIEndpoint)
 	}
-	if filepath.IsAbs(c.EvidenceRoot) == false && !strings.HasPrefix(c.EvidenceRoot, "/") {
+	if !filepath.IsAbs(c.EvidenceRoot) && !strings.HasPrefix(c.EvidenceRoot, "/") {
 		// Windows and POSIX are both handled by filepath; this only rejects the
 		// genuinely relative case, which would otherwise resolve against whatever
 		// the working directory happened to be when systemd started the unit.

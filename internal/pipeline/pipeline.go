@@ -89,7 +89,9 @@ type Deps struct {
 	// LeaseDuration is the inbox visibility timeout.
 	LeaseDuration time.Duration
 	// Relay drains the outbox. The daemon builds it because its handler closes
-	// over the logger; the pipeline owns when it runs.
+	// over the logger; the pipeline owns when it runs. There is no default: a
+	// Deps with no relay leaves the outbox pending and says so in the log, which
+	// is the state an operator can act on. See runOutbox.
 	Relay *outbox.Relay
 	// Jobs reads the queue depths for the gauges. Optional: without it the queue
 	// gauges stay absent rather than reporting a depth nobody read.
@@ -523,7 +525,7 @@ func (l *Loops) process(ctx context.Context, item inbox.Lease) {
 		return
 	}
 
-	deviceID, zoneID, err := l.resolveDevice(ctx, item, rec.SourceDeviceRef)
+	deviceID, zoneID, err := l.resolveDevice(ctx, rec.SourceDeviceRef)
 	if err != nil {
 		l.fail(ctx, item, "device resolution failed", err)
 		return
@@ -560,7 +562,7 @@ func (l *Loops) process(ctx context.Context, item inbox.Lease) {
 		return
 	}
 
-	l.writeEdges(ctx, item, rec, result, deviceID, zoneID)
+	l.writeEdges(ctx, item, result, deviceID, zoneID)
 	l.decide(ctx, item, result)
 }
 
@@ -597,7 +599,11 @@ func (l *Loops) fail(ctx context.Context, item inbox.Lease, what string, cause e
 // with no device. That is recorded as "unattributable" rather than attributed to
 // something guessed: a wrong device attribution is worse than a missing one,
 // because a rule that filters on device will then match the wrong camera.
-func (l *Loops) resolveDevice(ctx context.Context, item inbox.Lease, ref string) (deviceID, zoneID string, err error) {
+//
+// The lease is not a parameter. The tenant and site come from Deps, never from
+// the item, so a leased row cannot widen the lookup — and a future caller
+// passing a lease from another tenant would get a query that silently ignores it.
+func (l *Loops) resolveDevice(ctx context.Context, ref string) (deviceID, zoneID string, err error) {
 	if ref == "" {
 		return "", "", nil
 	}
@@ -607,8 +613,7 @@ func (l *Loops) resolveDevice(ctx context.Context, item inbox.Lease, ref string)
 		   AND (source_device_id = $3 OR device_id = $3)`,
 		l.Deps.Tenant, l.Deps.SiteID, ref).Scan(&deviceID, &zoneID)
 	if err != nil {
-		var noRows bool = errors.Is(err, pgx.ErrNoRows)
-		if noRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			// Unregistered. Not an error: the event still arrives.
 			return "", "", nil
 		}
@@ -622,7 +627,11 @@ func (l *Loops) resolveDevice(ctx context.Context, item inbox.Lease, ref string)
 // Both edges are attributed. An edge with no asserted_by is refused by the
 // schema, because an unattributed edge is exactly the one somebody would want to
 // be able to deny — and both here are things the core derived, so both name it.
-func (l *Loops) writeEdges(ctx context.Context, item inbox.Lease, rec milestone.RawRecord,
+//
+// The normalized record is not a parameter. The edges are built from the device
+// and zone resolveDevice already resolved, and carrying the whole record in
+// would be a second, unused way to reach the same two ids.
+func (l *Loops) writeEdges(ctx context.Context, item inbox.Lease,
 	result normalize.Result, deviceID, zoneID string) {
 	edges := []graph.Edge{}
 
@@ -890,9 +899,13 @@ type activeBundle struct {
 func (l *Loops) runOutbox(ctx context.Context) {
 	relay := l.Deps.Relay
 	if relay == nil {
-		// Named, not silent. A core with no relay accumulates an outbox nobody
-		// reads, and the backlog gauge stays at zero because nothing is watching
-		// it.
+		// Named, not silent, and deliberately not given a default handler. A
+		// core with no relay accumulates an outbox nobody reads, and the backlog
+		// gauge stays at zero because nothing is watching it. The alternative —
+		// installing an acknowledge-and-log handler so the queue drains — is
+		// strictly worse: it converts a visible stall into a silent loss, and the
+		// side effects it discarded are the ones an operator would have to notice
+		// are missing. There is no default handler for that reason.
 		l.log("no outbox relay is configured; side effects will queue and never be delivered")
 		<-ctx.Done()
 		return
@@ -920,17 +933,6 @@ func (l *Loops) runOutbox(ctx context.Context) {
 		case <-ticker.C:
 		}
 	}
-}
-
-// deliverOutbox is the default relay handler for a Deps built without one.
-//
-// It is the same acknowledgement the daemon installs: M1 dispatches no side
-// effects, so every message is acknowledged and logged rather than silently
-// disappearing.
-func (l *Loops) deliverOutbox(_ context.Context, d outbox.Delivery) error {
-	l.log("outbox message acknowledged", "topic", d.Topic, "outbox_id", d.OutboxID)
-	l.inc(observability.CounterOutboxDelivered)
-	return nil
 }
 
 // owner names this process's claim. It is stable across a boot and distinct per

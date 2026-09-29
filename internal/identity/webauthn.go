@@ -215,11 +215,19 @@ func ValidateCOSEKey(key []byte) error {
 			"to be a COSE key", ErrWebAuthn, len(key))
 	}
 	// Map: label 1, algorithm 3, key material last.
-	kty := int32(binary.BigEndian.Uint32(key[0:4]))
+	//
+	// The conversions below are int32 because the COSE algorithm registry is
+	// signed: ES256 is -7 and EdDSA is -8 (RFC 8152 §10). A credential whose
+	// declared algorithm exceeds 2^31 therefore becomes negative here, and lands
+	// in the same "this build does not verify" branch as an algorithm that was
+	// never registered at all. That is the correct outcome, and it is also what
+	// gosec's G115 objects to, which is why this site is annotated rather than
+	// "fixed": the conversion is what makes the comparison work.
+	kty := int32(binary.BigEndian.Uint32(key[0:4])) //nolint:gosec // G115: COSE labels are a signed registry; see above.
 	if kty != 2 {
 		return fmt.Errorf("%w: the COSE key label is %d, want 2 (an EC2 or OKP key)", ErrWebAuthn, kty)
 	}
-	alg := int32(binary.BigEndian.Uint32(key[8:12]))
+	alg := int32(binary.BigEndian.Uint32(key[8:12])) //nolint:gosec // G115: COSE algorithm ids are negative (RFC 8152).
 	switch alg {
 	case COSEES256, COSEEdDSA:
 	default:
@@ -317,7 +325,7 @@ func verifyAssertionSignature(publicKey []byte, a Assertion) error {
 	clientHash := sha256.Sum256([]byte(a.ClientDataJSON))
 	message := append(append([]byte{}, authData...), clientHash[:]...)
 
-	switch alg := int32(binary.BigEndian.Uint32(publicKey[8:12])); alg {
+	switch alg := int32(binary.BigEndian.Uint32(publicKey[8:12])); alg { //nolint:gosec // G115: COSE ids are signed.
 	case COSEES256:
 		// ES256 is ECDSA over P-256 with an ASN.1 DER signature.
 		//

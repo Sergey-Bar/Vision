@@ -285,11 +285,61 @@ func TestOpenAPIReaderReadsThePublishedDocument(t *testing.T) {
 			t.Errorf("%s has no %s; got %v", path, want, doc.Paths[path])
 		}
 	}
-	// /v1/health and /v1/health/ready carry an operation body that is not nested
-	// under the method. That is a defect in the document, it is reported rather
-	// than swallowed, and it does not stop the rest of the file being checked.
-	if len(warnings) == 0 {
-		t.Error("the malformed /v1/health operation bodies were not reported")
+	// The published document is well-formed. It was not: /v1/health and
+	// /v1/health/ready put their operation body beside the method rather than
+	// under it, which the specification ignores — so as published, those two
+	// endpoints described themselves as having no responses. That was fixed in
+	// contracts/openapi/v1/openapi.yaml, and this assertion is what holds it
+	// fixed: the warning is about a shape the document must not have, and the
+	// only way to keep the count at zero is to keep the document correct.
+	//
+	// The reader still has to report the shape when it sees it, or the next
+	// regression is silent. That half is asserted against a deliberately
+	// malformed copy below rather than against the shipped file, because a test
+	// that depends on a defect existing in the repository is a test that fails
+	// for the right reason at the worst possible time.
+	if len(warnings) != 0 {
+		t.Errorf("the published OpenAPI document is malformed: %v", warnings)
+	}
+
+	// And the reader does report it when the shape is there.
+	broken := filepath.Join(t.TempDir(), "malformed.yaml")
+	writeMalformedOpenAPI(t, broken)
+	if _, got, err := parseOpenAPITree(broken); err != nil || len(got) == 0 {
+		t.Errorf("a document with an operation body beside the method produced %d warnings "+
+			"(err %v). The warning is how this class of defect is caught at all, and it "+
+			"cannot be asserted only against a document that no longer has the defect",
+			len(got), err)
+	}
+}
+
+// writeMalformedOpenAPI writes a document with the operation body at path level
+// rather than under the method, which is the exact shape the published document
+// used to have.
+func writeMalformedOpenAPI(t *testing.T, path string) {
+	t.Helper()
+	body := `openapi: 3.0.3
+info: { title: malformed, version: "1" }
+paths:
+  /v1/health:
+    get:
+      tags: [health]
+    security: []
+    summary: Liveness
+    responses:
+      "200":
+        description: up
+  /v1/health/ready:
+    get:
+      tags: [health]
+    security: []
+    summary: Readiness
+    responses:
+      "200":
+        description: ready
+`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write the malformed document: %v", err)
 	}
 }
 

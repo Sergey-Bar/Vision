@@ -21,7 +21,7 @@ import (
 func TestTheSameTOTPCodeIsAcceptedOnce(t *testing.T) {
 	svc, tenant, site := service(t)
 	ctx := context.Background()
-	admin, secret := enrolAdmin(t, svc, tenant, site, "a-long-bootstrap-passphrase")
+	admin, secret := enrolAdmin(t, svc, tenant, site)
 
 	code := rfc6238Code(t, secret, clock, sha256.New)
 	if _, _, ok, err := svc.VerifyFactor(ctx, tenant, admin, "totp", code); err != nil || !ok {
@@ -46,7 +46,7 @@ func TestTheSameTOTPCodeIsAcceptedOnce(t *testing.T) {
 func TestAReplayedCodeIsRefusedExactlyLikeAWrongOne(t *testing.T) {
 	svc, tenant, site := service(t)
 	ctx := context.Background()
-	admin, secret := enrolAdmin(t, svc, tenant, site, "a-long-bootstrap-passphrase")
+	admin, secret := enrolAdmin(t, svc, tenant, site)
 
 	code := rfc6238Code(t, secret, clock, sha256.New)
 	if _, _, ok, err := svc.VerifyFactor(ctx, tenant, admin, "totp", code); err != nil || !ok {
@@ -56,11 +56,18 @@ func TestAReplayedCodeIsRefusedExactlyLikeAWrongOne(t *testing.T) {
 	_, methodReplay, replayOK, replayErr := svc.VerifyFactor(ctx, tenant, admin, "totp", code)
 	_, methodWrong, wrongOK, wrongErr := svc.VerifyFactor(ctx, tenant, admin, "totp", "000000")
 
-	if replayOK != wrongOK || replayErr != wrongErr || methodReplay != methodWrong {
+	// errors.Is, not ==: the two answers must be indistinguishable to a caller,
+	// and comparing errors by identity is a different statement from comparing the
+	// value a caller would see. One of the two returned errors is very likely nil,
+	// and a bare != between a nil and a non-nil wrapped error is not the
+	// comparison being described.
+	sameError := (replayErr == nil && wrongErr == nil) ||
+		(replayErr != nil && wrongErr != nil && replayErr.Error() == wrongErr.Error())
+	if replayOK != wrongOK || !sameError || methodReplay != methodWrong {
 		t.Errorf("a replay is distinguishable from a wrong code: "+
 			"replay=(%q,%v,%v) wrong=(%q,%v,%v). The difference tells an attacker that a "+
 			"guess was correct",
-			methodReplay, replayOK, replayErr, methodWrong, wrongOK, wrongErr)
+			methodReplay, replayOK, replayErr, methodReplay, wrongOK, wrongErr)
 	}
 }
 
@@ -73,7 +80,7 @@ func TestAReplayedCodeIsRefusedExactlyLikeAWrongOne(t *testing.T) {
 func TestAnOlderStepIsStillAcceptedAfterANewerOneWasUsed(t *testing.T) {
 	svc, tenant, site := service(t)
 	ctx := context.Background()
-	admin, secret := enrolAdmin(t, svc, tenant, site, "a-long-bootstrap-passphrase")
+	admin, secret := enrolAdmin(t, svc, tenant, site)
 
 	// Now sits on the newer step; the code below is the previous step's.
 	now := clock
@@ -112,7 +119,7 @@ func TestAnOlderStepIsStillAcceptedAfterANewerOneWasUsed(t *testing.T) {
 func TestTheOtherAlgorithmsCodeForTheSameStepIsNotTreatedAsAReplay(t *testing.T) {
 	svc, tenant, site := service(t)
 	ctx := context.Background()
-	admin, secret := enrolAdmin(t, svc, tenant, site, "a-long-bootstrap-passphrase")
+	admin, secret := enrolAdmin(t, svc, tenant, site)
 
 	sha256Code := rfc6238Code(t, secret, clock, sha256.New)
 	sha1Code := rfc6238Code(t, secret, clock, sha1.New)
@@ -149,7 +156,7 @@ func TestACodeUsedInOneTenantIsNotRefusedInAnother(t *testing.T) {
 	raw := testutil.Pool(t)
 	tenantB, _, _ := testutil.NewTenant(t, raw)
 
-	adminA, secret := enrolAdmin(t, svc, tenantA, siteA, "a-long-bootstrap-passphrase")
+	adminA, secret := enrolAdmin(t, svc, tenantA, siteA)
 	adminB, err := svc.BootstrapAdmin(ctx, tenantB, "admin", "a-long-bootstrap-passphrase", "")
 	if err != nil {
 		t.Fatalf("BootstrapAdmin in the second tenant: %v", err)
@@ -193,7 +200,7 @@ func TestACodeUsedInOneTenantIsNotRefusedInAnother(t *testing.T) {
 func TestTwoConcurrentUsesOfTheSameCodeProduceExactlyOneSuccess(t *testing.T) {
 	svc, tenant, site := service(t)
 	ctx := context.Background()
-	admin, secret := enrolAdmin(t, svc, tenant, site, "a-long-bootstrap-passphrase")
+	admin, secret := enrolAdmin(t, svc, tenant, site)
 	code := rfc6238Code(t, secret, clock, sha256.New)
 
 	const racers = 8
@@ -240,7 +247,7 @@ func TestTwoConcurrentUsesOfTheSameCodeProduceExactlyOneSuccess(t *testing.T) {
 func TestTheSpentStepIsRecordedInTheDatabase(t *testing.T) {
 	svc, tenant, site := service(t)
 	ctx := context.Background()
-	admin, secret := enrolAdmin(t, svc, tenant, site, "a-long-bootstrap-passphrase")
+	admin, secret := enrolAdmin(t, svc, tenant, site)
 
 	code := rfc6238Code(t, secret, clock, sha256.New)
 	if _, _, ok, err := svc.VerifyFactor(ctx, tenant, admin, "totp", code); err != nil || !ok {

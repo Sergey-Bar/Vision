@@ -79,7 +79,7 @@ func (s *Service) Measure(ctx context.Context, policy clock.Policy, obs Observat
 
 	now := s.now()
 	referenceNow := now
-	driftMS := int32(obs.Reported.Sub(referenceNow) / time.Millisecond)
+	driftMS := clampDriftMS(obs.Reported.Sub(referenceNow))
 
 	source := obs.Source
 	if source == "" {
@@ -132,6 +132,32 @@ func (s *Service) Measure(ctx context.Context, policy clock.Policy, obs Observat
 	return state, err
 }
 
+// clampDriftMS converts a duration to whole milliseconds without wrapping.
+//
+// The column is an int32, so the representable range is about 24.8 days either
+// way. A device whose clock is wrong by more than that is not producing a large
+// number — it is producing a number that means "this clock is not usable", and
+// letting it wrap turns a 30-day error into a small one that the severe-band
+// policy then reads as a healthy device. Saturating keeps the direction of the
+// error, which is the only thing a band check can act on.
+func clampDriftMS(d time.Duration) int32 {
+	// Bounds are in milliseconds; the incoming value is a Duration, so the
+	// comparison converts the Duration to millisecond counts first and compares
+	// those against int64 bounds. The narrowing to int32 happens once, on a
+	// value that has already been proved to be inside the range.
+	const upper int64 = 1<<31 - 1
+	const lower int64 = -upper
+	ms := int64(d / time.Millisecond)
+	switch {
+	case ms > upper:
+		return int32(upper)
+	case ms < lower:
+		return int32(lower)
+	default:
+		return int32(ms)
+	}
+}
+
 // MeasureFromSourceTimes records drift from a source system's own reported time
 // rather than a device's.
 //
@@ -141,7 +167,7 @@ func (s *Service) Measure(ctx context.Context, policy clock.Policy, obs Observat
 // on a camera *and* a VMS and correlation to be checked against both.
 func (s *Service) MeasureFromSourceTimes(ctx context.Context, policy clock.Policy, tenant, site, integration, referenceID string, sourceReported, referenceNow time.Time) (clock.DeviceState, error) {
 	var state clock.DeviceState
-	driftMS := int32(sourceReported.Sub(referenceNow) / time.Millisecond)
+	driftMS := clampDriftMS(sourceReported.Sub(referenceNow))
 	state = clock.DeviceState{
 		TenantID: tenant, DeviceID: "source:" + integration, SiteID: site,
 		Source: clock.SourceVMS, DriftMs: driftMS,

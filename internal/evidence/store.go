@@ -151,11 +151,15 @@ func containedIn(root, path string) error {
 	return nil
 }
 
-// Fsync reports whether writes are durable before acknowledgement, and
-// VerifyHashOnRead reports whether a read re-hashes the bytes. Exported so a
-// caller — or a test — can assert that the defaults it claims to apply were the
-// ones that got applied.
-func (s *Store) Fsync() bool            { return s.fsync }
+// Fsync reports whether writes are durable before acknowledgement. Exported so
+// a caller — or a test — can assert that the defaults it claims to apply were
+// the ones that got applied.
+func (s *Store) Fsync() bool { return s.fsync }
+
+// VerifyHashOnRead reports whether a read re-hashes the bytes against the row's
+// digest before returning them, and is exported for the same reason as Fsync:
+// the default is load-bearing, so it has to be observable from outside the
+// package rather than asserted only by the code that sets it.
 func (s *Store) VerifyHashOnRead() bool { return s.hashOnRead }
 
 // unsafeSegment matches a path segment that is a traversal, a drive, a UNC

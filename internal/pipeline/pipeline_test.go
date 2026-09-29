@@ -36,8 +36,8 @@ import (
 // component outside the process.
 //
 // The assertion is invariant 1 in one sentence: an event that reaches the inbox
-// reaches a terminal state. Everything else this test checks — the canonical
-// event, the graph edges, the incident, the enqueued second opinion — is detail,
+// reaches a terminal state. Everything else this test checks â€” the canonical
+// event, the graph edges, the incident, the enqueued second opinion â€” is detail,
 // and detail is only interesting once the invariant holds.
 
 // epoch is the fixture's time. Fixed, so the events fall inside the canonical
@@ -76,11 +76,6 @@ type harness struct {
 	tenant      string
 	site        string
 	integration string
-	raw         dbxQuerier
-}
-
-type dbxQuerier interface {
-	QueryRow(ctx context.Context, sql string, args ...any) interface{ Scan(...any) error }
 }
 
 func setup(t *testing.T, bundleYAML string, feed string) harness {
@@ -189,15 +184,15 @@ func setup(t *testing.T, bundleYAML string, feed string) harness {
 // bundle is one rule: motion in a restricted zone, corroborated by a second
 // independent signal inside the window, with an action that raises an incident.
 //
-// It reads the fields the correlator populates — event type, zone path prefix,
-// signal tier — which is the point of asserting through it: if the correlator
+// It reads the fields the correlator populates â€” event type, zone path prefix,
+// signal tier â€” which is the point of asserting through it: if the correlator
 // stopped filling ZonePath, the rule would stop matching and this test would say
 // so rather than quietly passing on a bundle that matched nothing.
 //
 // No AI observation is required. `requiresAIObservation` with
 // `degradeTo: UNVERIFIED` is the shape a rule that *does* consume a Tier C signal
 // must take, and requiring one here would make the test depend on a model being
-// present — which is a site with no AI plane, a supported configuration.
+// present â€” which is a site with no AI plane, a supported configuration.
 const bundle = `apiVersion: security.io/v1
 kind: RuleBundle
 version: 0.1.0
@@ -381,7 +376,7 @@ func TestAnEventReachesATerminalState(t *testing.T) {
 }
 
 // A second poll of the same feed must produce no new rows. This is what makes
-// the cursor an optimisation rather than a correctness mechanism — and the reason
+// the cursor an optimisation rather than a correctness mechanism â€” and the reason
 // a broken cursor cannot lose an event is that the dedupe key, not the cursor, is
 // what enforces it.
 func TestPollingTwiceIngestsEachEventOnce(t *testing.T) {
@@ -392,11 +387,11 @@ func TestPollingTwiceIngestsEachEventOnce(t *testing.T) {
 
 	h.loops.PollOnce(ctx)
 	h.loops.ConsumeOnce(ctx)
-	first := h.countCanonical(t, ctx)
+	first := h.countCanonical(ctx, t)
 
 	h.loops.PollOnce(ctx)
 	h.loops.ConsumeOnce(ctx)
-	second := h.countCanonical(t, ctx)
+	second := h.countCanonical(ctx, t)
 
 	if first != 1 {
 		t.Fatalf("the first pass produced %d canonical events, want 1", first)
@@ -409,7 +404,7 @@ func TestPollingTwiceIngestsEachEventOnce(t *testing.T) {
 
 // A crash between the claim and the normalization is recovered by the lease. The
 // row is left processing with an expired lease, and the next claim takes it and
-// produces the same derived event id — a retry, not a duplicate and not a loss.
+// produces the same derived event id â€” a retry, not a duplicate and not a loss.
 func TestALapsedLeaseIsRecoveredWithoutDuplicating(t *testing.T) {
 	h := setup(t, bundle, `[
 		{"Id":"e1","Type":"Motion","Timestamp":"2026-03-01T09:00:00Z","Source":"Entrance Camera 01 [cam-1]"}
@@ -425,13 +420,13 @@ func TestALapsedLeaseIsRecoveredWithoutDuplicating(t *testing.T) {
 		   SET status = 'processing', lease_owner = 'dead-worker', lease_expires_at = now() - interval '1 minute'
 		 WHERE tenant_id = $1`, h.tenant)
 
-	if got := h.countCanonical(t, ctx); got != 0 {
+	if got := h.countCanonical(ctx, t); got != 0 {
 		t.Fatalf("a canonical event exists before any consume pass (%d)", got)
 	}
 
 	h.loops.ConsumeOnce(ctx)
 
-	if got := h.countCanonical(t, ctx); got != 1 {
+	if got := h.countCanonical(ctx, t); got != 1 {
 		t.Errorf("after recovering the lapsed lease there are %d canonical events, want 1", got)
 	}
 	var processed int
@@ -448,7 +443,7 @@ func TestALapsedLeaseIsRecoveredWithoutDuplicating(t *testing.T) {
 // With no active bundle the core still ingests, still normalizes, and raises
 // nothing. An operator who has not activated a bundle has not asked for
 // decisions yet, and the alternative is a core that refuses events it cannot
-// decide on — which is a loss of the events themselves.
+// decide on â€” which is a loss of the events themselves.
 func TestWithNoActiveBundleEventsAreStillIngestedAndNormalized(t *testing.T) {
 	h := setup(t, "", `[
 		{"Id":"e1","Type":"Motion","Timestamp":"2026-03-01T09:00:00Z","Source":"Entrance Camera 01 [cam-1]"}
@@ -458,7 +453,7 @@ func TestWithNoActiveBundleEventsAreStillIngestedAndNormalized(t *testing.T) {
 	h.loops.PollOnce(ctx)
 	h.loops.ConsumeOnce(ctx)
 
-	if got := h.countCanonical(t, ctx); got != 1 {
+	if got := h.countCanonical(ctx, t); got != 1 {
 		t.Errorf("with no bundle there are %d canonical events, want 1; refusing to ingest "+
 			"an event because no rule is active loses the event", got)
 	}
@@ -536,7 +531,7 @@ func TestBacklogGaugeIsMeasuredNotLeftAtZero(t *testing.T) {
 			"detect", got)
 	}
 
-	// After the work drains, the same measurement reads zero — and it is a
+	// After the work drains, the same measurement reads zero â€” and it is a
 	// measurement, because it was read again.
 	h.loops.ConsumeOnce(ctx)
 	h.loops.SampleGauges(ctx)
@@ -554,7 +549,7 @@ func (h harness) gauge(name string) float64 {
 	return -1
 }
 
-func (h harness) countCanonical(t *testing.T, ctx context.Context) int {
+func (h harness) countCanonical(ctx context.Context, t *testing.T) int {
 	t.Helper()
 	var n int
 	if err := h.loops.Deps.Pool.For(h.tenant, "test").QueryRow(ctx,

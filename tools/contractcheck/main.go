@@ -240,9 +240,13 @@ func report(findings []finding, w io.Writer) {
 		}
 		return findings[i].Kind < findings[j].Kind
 	})
-	fmt.Fprintf(w, "  %-56s %-26s %s\n", "SYMBOL", "KIND", "DETAIL")
+	// The report is written into a strings.Builder by one caller and to stderr by
+	// the other. A write error on a report that is already being discarded or is
+	// about to be turned into the tool's own error text carries no decision, so it
+	// is dropped deliberately rather than checked and ignored somewhere noisier.
+	_, _ = fmt.Fprintf(w, "  %-56s %-26s %s\n", "SYMBOL", "KIND", "DETAIL")
 	for _, f := range findings {
-		fmt.Fprintf(w, "  %-56s %-26s %s\n", f.Symbol, f.Kind, f.Detail)
+		_, _ = fmt.Fprintf(w, "  %-56s %-26s %s\n", f.Symbol, f.Kind, f.Detail)
 	}
 }
 

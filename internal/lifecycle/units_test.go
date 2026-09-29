@@ -3,6 +3,7 @@ package lifecycle_test
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -223,6 +224,122 @@ func TestTheAIUnitIsOnlyWrittenWhenTheRuntimeIsInstalled(t *testing.T) {
 // The paths are built by string concatenation, not filepath.Join: Join cleans
 // the `..` away, which would test a traversal-free path while claiming to test a
 // traversal. The production check exists for exactly the case this builds.
+// The environment file carries SP_DATABASE_URL and SP_SECRET_KEY. It was written
+// 0644 — world-readable — while the template this same function emits says in
+// its own text "keep this file mode 0640 and owned by the service account". Any
+// local account on the host could read the site's database credentials and its
+// secret key.
+// requirePOSIXModes skips on a platform that has no POSIX permission bits.
+//
+// Windows has a read-only flag and nothing else: `os.Chmod` there cannot express
+// 0640, and `os.Stat` reports a synthesised 0666 or 0444 regardless of what was
+// asked for. These two assertions are therefore about a Linux install, which is
+// the only place this installer runs, and a Windows run of them would be testing
+// the Go standard library rather than this code. The test is not deleted on
+// Windows — it is skipped, loudly, and it runs on the platform that matters.
+func requirePOSIXModes(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no POSIX permission bits: os.Chmod cannot express 0640 and " +
+			"os.Stat reports a synthesised mode. This control is about a Linux install")
+	}
+}
+
+func TestTheEnvironmentFileIsNotWorldReadable(t *testing.T) {
+	requirePOSIXModes(t)
+	dir := t.TempDir()
+	opts := lifecycle.UnitOptions{
+		UnitDir:    filepath.Join(dir, "unit"),
+		ProgramDir: dir,
+		EnvFile:    filepath.Join(dir, "etc", "security-platform.env"),
+	}
+	written, err := lifecycle.WriteUnits(opts)
+	if err != nil {
+		t.Fatalf("WriteUnits: %v", err)
+	}
+
+	for _, w := range written {
+		info, err := os.Stat(w.Path)
+		if err != nil {
+			t.Fatalf("stat %s: %v", w.Path, err)
+		}
+		switch filepath.Base(w.Path) {
+		case "security-platform.env":
+			if info.Mode().Perm()&0o007 != 0 {
+				t.Errorf("%s is mode %o. It carries the database URL and the secret key, and "+
+					"every local account on the host can read them", w.Path, info.Mode().Perm())
+			}
+			if info.Mode().Perm()&0o060 != 0o060 {
+				t.Errorf("%s is mode %o, want 0640: the verifying operator runs as a "+
+					"different account in the same group and has to be able to read it",
+					w.Path, info.Mode().Perm())
+			}
+		default:
+			// A systemd unit is read by systemd as a different account and has to
+			// stay readable. This is the control on the other branch: tightening
+			// everything would also be wrong.
+			if info.Mode().Perm()&0o004 == 0 {
+				t.Errorf("%s is mode %o; systemd reads the unit as a different "+
+					"account and it has to stay world-readable", w.Path, info.Mode().Perm())
+			}
+		}
+	}
+}
+
+// An env file left behind by an older installer is world-readable, and a
+// re-install preserves it. "The operator may have edited it" is a reason to keep
+// its contents, not its permissions.
+func TestAPreservedEnvironmentFileIsTightenedOnReinstall(t *testing.T) {
+	requirePOSIXModes(t)
+	dir := t.TempDir()
+	opts := lifecycle.UnitOptions{
+		UnitDir:    filepath.Join(dir, "unit"),
+		ProgramDir: dir,
+		EnvFile:    filepath.Join(dir, "etc", "security-platform.env"),
+	}
+	written, err := lifecycle.WriteUnits(opts)
+	if err != nil {
+		t.Fatalf("WriteUnits: %v", err)
+	}
+
+	var envPath string
+	for _, w := range written {
+		if filepath.Base(w.Path) == "security-platform.env" {
+			envPath = w.Path
+		}
+	}
+	if envPath == "" {
+		t.Fatal("no environment file was written")
+	}
+
+	// An operator edited it, and a previous version of the installer had it
+	// world-readable.
+	if err := os.WriteFile(envPath, []byte("SP_TENANT_ID=edited\n"), 0o666); err != nil {
+		t.Fatalf("simulate the old mode: %v", err)
+	}
+	if _, err := lifecycle.WriteUnits(opts); err != nil {
+		t.Fatalf("re-install: %v", err)
+	}
+
+	info, err := os.Stat(envPath)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if info.Mode().Perm()&0o007 != 0 {
+		t.Errorf("the preserved env file is still mode %o after a re-install. A secrets file "+
+			"whose permissions are never revisited is a secrets file that is never fixed",
+			info.Mode().Perm())
+	}
+	body, err := os.ReadFile(envPath)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if !strings.Contains(string(body), "edited") {
+		t.Error("the re-install replaced the operator's edited env file; preserving it is why " +
+			"keepExisting exists")
+	}
+}
+
 func TestUnsafePathsAreRefused(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -231,38 +348,38 @@ func TestUnsafePathsAreRefused(t *testing.T) {
 		{
 			name: "traversal in the unit directory",
 			build: func(o *lifecycle.UnitOptions) {
-				o.UnitDir = o.UnitDir + "/../escaped"
+				o.UnitDir += "/../escaped"
 			},
 		},
 		{
 			name: "traversal in the env file",
 			build: func(o *lifecycle.UnitOptions) {
-				o.EnvFile = o.EnvFile + "/../../escaped.env"
+				o.EnvFile += "/../../escaped.env"
 			},
 		},
 		{
 			name: "a null byte in the env file",
 			build: func(o *lifecycle.UnitOptions) {
-				o.EnvFile = o.EnvFile + "\x00.txt"
+				o.EnvFile += "\x00.txt"
 			},
 		},
 		{
 			name: "a null byte in the unit directory",
 			build: func(o *lifecycle.UnitOptions) {
-				o.UnitDir = o.UnitDir + "\x00"
+				o.UnitDir += "\x00"
 			},
 		},
 		{
 			name: "traversal in the program directory",
 			build: func(o *lifecycle.UnitOptions) {
-				o.ProgramDir = o.ProgramDir + "/../elsewhere"
+				o.ProgramDir += "/../elsewhere"
 			},
 		},
 		{
 			name: "traversal in the AI env file",
 			build: func(o *lifecycle.UnitOptions) {
 				o.AIProgramDir = filepath.Join(t.TempDir(), "ai")
-				o.AIEnvFile = o.AIEnvFile + "/../escaped.env"
+				o.AIEnvFile += "/../escaped.env"
 			},
 		},
 		{
@@ -301,7 +418,7 @@ func TestNoProgramDirectoryIsRefused(t *testing.T) {
 // service that starts and cannot find its configuration.
 func TestNothingIsWrittenWhenOnePathIsRefused(t *testing.T) {
 	o := opts(t)
-	o.EnvFile = o.EnvFile + "\x00"
+	o.EnvFile += "\x00"
 
 	if _, err := lifecycle.WriteUnits(o); err == nil {
 		t.Fatal("a bad env file was accepted")

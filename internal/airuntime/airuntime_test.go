@@ -127,7 +127,7 @@ func TestAStringAPIVersionIsRefusedByTheRuntime(t *testing.T) {
 
 	// Sent deliberately wrong, through a raw client, to prove the runtime's
 	// rejection is real rather than assumed. The Go client cannot produce this.
-	req, err := http.NewRequest(http.MethodPost, srv.URL+"/v1/infer",
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, srv.URL+"/v1/infer",
 		strings.NewReader(`{"apiVersion":"1","observationId":"o","profileId":"p"}`))
 	if err != nil {
 		t.Fatalf("build: %v", err)

@@ -141,7 +141,8 @@ func codeAt(t *testing.T, secret string, at time.Time) string {
 		t.Fatalf("the enrolled secret is not base32: %v", err)
 	}
 	var counter [8]byte
-	binary.BigEndian.PutUint64(counter[:], uint64(at.Unix()/30))
+	//nolint:gosec // G115: a TOTP counter is T/30 and is non-negative for every time this is called; see internal/identity/mfa.go.
+	binary.BigEndian.PutUint64(counter[:], uint64(at.Unix()/30)) //nolint:gosec // G115: the same clamp identity.go applies.
 	mac := hmac.New(sha256.New, raw)
 	mac.Write(counter[:])
 	sum := mac.Sum(nil)

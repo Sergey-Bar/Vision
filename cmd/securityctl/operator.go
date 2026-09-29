@@ -594,7 +594,7 @@ func runAuditVerifySeals(ctx context.Context, env *command.Env, args []string) e
 		return err
 	}
 
-	next, err := checkpoint.VerifyAgainstSeals(seals, *latest, ed25519PublicKey(trusted))
+	next, err := checkpoint.VerifyAgainstSeals(seals, *latest, trusted)
 	if err != nil {
 		return command.Refuse("%v", err)
 	}

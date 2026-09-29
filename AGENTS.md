@@ -20,14 +20,20 @@ This is the first thing that will waste your time.
 | Tool | Where | On `PATH`? |
 |---|---|---|
 | `go` | `C:\Program Files\Go\bin\go.exe` | **No** |
-| `protoc` | winget | **No** |
-| `golangci-lint` | `$(go env GOPATH)\bin`, installed by `make bootstrap` | **No** |
-| `make` | Git Bash, or use the `go` invocations directly | **No** |
-| `py`, `git`, `docker` | — | Yes |
+| `gcc` (cgo, for `-race`) | `C:\msys64\mingw64\bin\gcc.exe` | **No** |
+| `protoc` | `...\WinGet\Packages\Google.Protobuf_...\bin\protoc.exe` | **No** |
+| `protoc-gen-go` | `$(go env GOPATH)\bin`, installed by `make bootstrap` | **No** |
+| `golangci-lint` | `$(go env GOPATH)\bin` | **No** |
+| `py`, `git`, `docker`, `winget` | — | Yes |
+
+All five of the first were missing at some point, and the gate said so by
+describing the absence rather than by fixing it. `scripts/verify.ps1` now
+locates each one itself and, where a tool is genuinely absent, prints a visible
+**SKIPPED** with the install command — never a quiet pass.
 
 ```powershell
 # PowerShell, for this session
-$env:Path += ";C:\Program Files\Go\bin;$env:USERPROFILE\go\bin"
+$env:Path += ";C:\Program Files\Go\bin;C:\msys64\mingw64\bin;$env:USERPROFILE\go\bin"
 ```
 
 Verify before you trust anything:
@@ -145,19 +151,28 @@ Two consequences that are easy to get wrong:
 
 ## Verification
 
-**`scripts/verify.ps1` is the gate. It runs locally, it needs nothing installed
-beyond Go, and it is the thing to trust.**
+**`scripts/verify.ps1` is the gate. It runs locally, and it is the thing to
+trust.**
 
 ```powershell
-.\scripts\verify.ps1            # contract-check, contract-sync, vet, gofmt,
-                                # test -race -p 1, migration-phases, rules-lint
+.\scripts\verify.ps1            # contract-check (three surfaces), contract-sync,
+                                # vet, gofmt, lint, generated-code, test -race
+                                # -p 1, migration-phases, rules-lint, rls-canary,
+                                # ai-runtime
 .\scripts\verify.ps1 -NoRace    # same, without the race detector
 ```
 
-It runs `contract-check`, `contract-sync`, `vet`, `gofmt`, `test -race -p 1`,
-`migration-phases` and `rules-lint`, in that order, and exits non-zero naming
-whatever failed. It resolves `go` and `gofmt` itself, because neither is on
-`PATH` on this machine.
+It exits non-zero naming whatever failed, and it resolves `go`, `gofmt`, `gcc`,
+`golangci-lint` and `protoc` itself, because none of them is on `PATH` on a
+default Windows shell.
+
+`lint` and `generated-code` used to be named in this file and absent from the
+script, because the tools they need were not installed and the absence was
+described rather than fixed. All three tools are installed now and all three are
+gates. golangci-lint's first run found 526 findings, among them a secrets file
+written world-readable and a backoff expression that raised on its own failure
+path. A gate listed in a document and not run is worse than one that is not
+listed, because the document says the code was checked.
 
 **`make verify` is the same list** and is what the `Makefile` and the roadmap
 documents name, but **`make` is not installed here** — not on `PATH`, not in Git

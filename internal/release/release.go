@@ -326,6 +326,22 @@ func Verify(archivePath string, manifest Manifest, trustedKey ed25519.PublicKey)
 	return manifest.Files, nil
 }
 
+// claimedSize bounds a size the archive *claims* before it reaches an int64.
+//
+// A zip entry's declared size is a 64-bit unsigned value chosen by whoever built
+// the archive. Above 2^63 the conversion wraps to a negative number, and a
+// negative size then travels into the manifest comparison and the operator's
+// `describe` output as though it meant something. The body itself is already
+// capped by the LimitReader above, so the value is advisory; making it advisory
+// rather than a source of nonsense is the whole fix.
+func claimedSize(n uint64) int64 {
+	const ceiling = int64(1<<63 - 1)
+	if n > uint64(ceiling) {
+		return ceiling
+	}
+	return int64(n)
+}
+
 type archiveEntry struct {
 	size int64
 	sum  string
@@ -462,7 +478,7 @@ func readZip(f *os.File, add func(string, ...any)) (map[string]archiveEntry, []s
 		if err := ScanForSecrets(name, body); err != nil {
 			add("%v", err)
 		}
-		out[name] = archiveEntry{size: int64(zf.UncompressedSize64), sum: hex.EncodeToString(hasher.Sum(nil))}
+		out[name] = archiveEntry{size: claimedSize(zf.UncompressedSize64), sum: hex.EncodeToString(hasher.Sum(nil))}
 	}
 	return out, nil
 }

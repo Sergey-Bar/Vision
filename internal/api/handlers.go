@@ -515,7 +515,15 @@ func (s *Server) handleEvidenceContent(w http.ResponseWriter, r *http.Request, p
 // the version the exposition this package emits is the 0.0.4 text format. A
 // collector that is handed the wrong content type will parse it as JSON and
 // report a parse failure that looks like a broken core.
-func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
+//
+// It takes a principal it does not read. The exposition is process-wide and the
+// registry has no per-tenant view, so there is nothing in the scrape that
+// varies by caller; the parameter is carried because every other gated handler
+// in this file has the same shape, and the audit.read check that actually
+// authorizes the scrape happens in requireCapability at the call site. Dropping
+// the argument would be free today and would make the next handler that does
+// need the principal the odd one out.
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) { //nolint:unparam // p is the gated-handler signature every sibling handler here carries; the audit.read check happens in requireCapability, not here.
 	if d.Metrics == nil {
 		WriteError(w, http.StatusServiceUnavailable, "not_wired",
 			"The metrics registry is not configured. A scrape that returns an empty "+

@@ -82,12 +82,14 @@ func TestADeclaredSBOMHashMustMatchTheArchive(t *testing.T) {
 	dir := t.TempDir()
 	priv, pub := keyPair(t)
 
-	real := []byte(`{"spdxVersion":"SPDX-2.3","name":"the real one"}`)
-	other := []byte(`{"spdxVersion":"SPDX-2.3","name":"a different one"}`)
+	// genuine is what goes into the archive; declared is the hash the signed
+	// manifest claims for it. They have to differ for this test to mean anything.
+	genuine := []byte(`{"spdxVersion":"SPDX-2.3","name":"the real one"}`)
+	declared := []byte(`{"spdxVersion":"SPDX-2.3","name":"a different one"}`)
 
 	inputs := []release.SourceFile{
 		{ArchivePath: "core.exe", SourcePath: writeTemp(t, dir, "core", []byte("binary"))},
-		{ArchivePath: "sbom.spdx.json", SourcePath: writeTemp(t, dir, "sbom", real)},
+		{ArchivePath: "sbom.spdx.json", SourcePath: writeTemp(t, dir, "sbom", genuine)},
 	}
 	archivePath, manifest, err := release.Build(dir, release.BuildInput{
 		Version:  "1.0.0",
@@ -101,7 +103,7 @@ func TestADeclaredSBOMHashMustMatchTheArchive(t *testing.T) {
 			MinCoreVersion: "1.0.0", MaxCoreVersion: "1.x",
 			ContractsVersion: "security/v1",
 		},
-		SBOM:    release.SBOM{Path: "sbom.spdx.json", Format: "spdx-json", SHA256: sha256Hex(other)},
+		SBOM:    release.SBOM{Path: "sbom.spdx.json", Format: "spdx-json", SHA256: sha256Hex(declared)},
 		Builder: "test",
 	}, priv, "key-1")
 	if err != nil {

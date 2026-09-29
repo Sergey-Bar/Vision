@@ -21,10 +21,10 @@ import (
 // clock's code here would be refused — correctly, and for a reason that has
 // nothing to do with what those tests are about. `enrolAdmin` therefore returns
 // the secret and the test asks for the step it wants.
-func enrolAdmin(t *testing.T, svc *identity.Service, tenant, site, password string) (string, string) {
+func enrolAdmin(t *testing.T, svc *identity.Service, tenant, site string) (string, string) {
 	t.Helper()
 	ctx := context.Background()
-	admin, err := svc.BootstrapAdmin(ctx, tenant, "admin", password, site)
+	admin, err := svc.BootstrapAdmin(ctx, tenant, "admin", "a-long-bootstrap-passphrase", site)
 	if err != nil {
 		t.Fatalf("BootstrapAdmin: %v", err)
 	}
@@ -54,7 +54,7 @@ func nextStep(secret string, n int) string {
 func TestAMFAChallengeIsSingleUse(t *testing.T) {
 	svc, tenant, site := service(t)
 	ctx := context.Background()
-	_, secret := enrolAdmin(t, svc, tenant, site, "a-long-bootstrap-passphrase")
+	_, secret := enrolAdmin(t, svc, tenant, site)
 
 	res, err := svc.PasswordStep(ctx, tenant, "admin", "a-long-bootstrap-passphrase", "10.0.0.1")
 	if err != nil {
@@ -91,7 +91,7 @@ func TestMFAVerifyIsBoundedByAnAttemptCounter(t *testing.T) {
 	svc, tenant, site := service(t)
 	ctx := context.Background()
 	svc.MaxFailedAttempts = 3
-	_, secret := enrolAdmin(t, svc, tenant, site, "a-long-bootstrap-passphrase")
+	_, secret := enrolAdmin(t, svc, tenant, site)
 
 	res, err := svc.PasswordStep(ctx, tenant, "admin", "a-long-bootstrap-passphrase", "10.0.0.1")
 	if err != nil {
@@ -121,7 +121,7 @@ func TestTheChallengeCounterDoesNotLockTheAccount(t *testing.T) {
 	svc, tenant, site := service(t)
 	ctx := context.Background()
 	svc.MaxFailedAttempts = 3
-	_, secret := enrolAdmin(t, svc, tenant, site, "a-long-bootstrap-passphrase")
+	_, secret := enrolAdmin(t, svc, tenant, site)
 
 	res, err := svc.PasswordStep(ctx, tenant, "admin", "a-long-bootstrap-passphrase", "10.0.0.1")
 	if err != nil {
@@ -144,7 +144,7 @@ func TestTheChallengeCounterDoesNotLockTheAccount(t *testing.T) {
 func TestMFARequiredLoginNamesThePrincipal(t *testing.T) {
 	svc, tenant, site := service(t)
 	ctx := context.Background()
-	admin, _ := enrolAdmin(t, svc, tenant, site, "a-long-bootstrap-passphrase")
+	admin, _ := enrolAdmin(t, svc, tenant, site)
 
 	res, err := svc.PasswordStep(ctx, tenant, "admin", "a-long-bootstrap-passphrase", "10.0.0.1")
 	if err != nil {
@@ -277,39 +277,8 @@ func TestBootstrapAdminIdsAreDistinctPerTenant(t *testing.T) {
 	}
 }
 
-// The separator matters for the same reason the digest did: without one, ("ab","c")
-// and ("a","bc") hash the same.
-func TestBootstrapAdminIdSeparatesItsInputs(t *testing.T) {
-	svc, _, _ := service(t)
-	ctx := context.Background()
-	raw := testutil.Pool(t)
-
-	for _, id := range []string{"ab", "a"} {
-		if err := raw.QueryRow(context.Background(),
-			`SELECT count(*) FROM tenants WHERE tenant_id = $1`, id).Scan(new(int)); err != nil {
-			t.Fatalf("probe tenant %q: %v", id, err)
-		}
-	}
-	testutil.Exec(t, raw, `INSERT INTO tenants (tenant_id, name) VALUES ('ab','collision')
-		ON CONFLICT (tenant_id) DO NOTHING`)
-	testutil.Exec(t, raw, `INSERT INTO tenants (tenant_id, name) VALUES ('a','collision')
-		ON CONFLICT (tenant_id) DO NOTHING`)
-	testutil.Exec(t, raw, `INSERT INTO sites (site_id, tenant_id, name, timezone)
-		SELECT 's1', 'ab', 'one', 'UTC' WHERE NOT EXISTS (SELECT 1 FROM sites WHERE site_id = 's1')`)
-	testutil.Exec(t, raw, `INSERT INTO sites (site_id, tenant_id, name, timezone)
-		SELECT 's2', 'a', 'two', 'UTC' WHERE NOT EXISTS (SELECT 1 FROM sites WHERE site_id = 's2')`)
-
-	id1, err := svc.BootstrapAdmin(ctx, "ab", "c", "a-long-bootstrap-passphrase", "s1")
-	if err != nil {
-		t.Fatalf("BootstrapAdmin: %v", err)
-	}
-	id2, err := svc.BootstrapAdmin(ctx, "a", "bc", "a-long-bootstrap-passphrase", "s2")
-	if err != nil {
-		t.Fatalf("BootstrapAdmin: %v", err)
-	}
-	if id1 == id2 {
-		t.Errorf("tenant %q with user %q produced the same id %q as tenant %q with user %q. The "+
-			"inputs are concatenated without a separator, so they are not distinguishable",
-			"ab", "c", id1, "a", "bc")
-	}
-}
+// The separator and the digest are asserted against the derivation itself, in
+// adminid_internal_test.go, rather than here. Driving them through BootstrapAdmin
+// needed two fixed tenant ids in the shared database, which made the test
+// impossible to run twice: the bootstrap refuses to create a second
+// administrator, so the second run failed before it could assert anything.

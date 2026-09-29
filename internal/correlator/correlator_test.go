@@ -60,7 +60,7 @@ func setup(t *testing.T) fixture {
 		tenant, site)
 	// One device is deliberately in the severe band. Its clock is 40 seconds
 	// fast, which is past any plausible window, so it must be excluded from
-	// corroboration — and must still be returned, because a corroborating signal
+	// corroboration Ã¢â‚¬â€ and must still be returned, because a corroborating signal
 	// that vanishes without explanation is the thing an operator stops trusting
 	// the product over.
 	testutil.Exec(t, raw, `
@@ -80,17 +80,17 @@ func setup(t *testing.T) fixture {
 
 // addEvent writes one canonical event.
 //
-// observedAt and normalizedAt are separate parameters because a test that cannot
-// express a drift correction cannot assert that the corrector was applied to the
-// right column. Pass a zero normalizedAt to make them equal.
+// normalized_at is set equal to observed_at here. The corrector that makes them
+// differ lives in normalize, not in the correlator, and the drift this package
+// actually asserts on is a *device* clock drift read through device_clocks Ã¢â‚¬â€
+// see the cam-drifted fixture. A test that needs a corrected normalized_at
+// inserts the row itself; making this helper take a value no caller passes
+// would only be a parameter that reads as coverage and is not.
 func (f fixture) addEvent(t *testing.T, id, eventType, device string,
-	observedAt, normalizedAt time.Duration, payload string) {
+	observedAt time.Duration, payload string) {
 	t.Helper()
 	observed := epoch.Add(observedAt)
-	normalized := epoch.Add(normalizedAt)
-	if normalizedAt == 0 {
-		normalized = observed
-	}
+	normalized := observed
 	if payload == "" {
 		payload = `{}`
 	}
@@ -106,12 +106,17 @@ func (f fixture) addEvent(t *testing.T, id, eventType, device string,
 // addObservation writes an AI observation against an event.
 //
 // ai_observations.incident_id is NOT NULL, which is why the observation is always
-// written after the incident that caused it — the ordering the plan fixes in
-// §Decisions. The incident is created here too so the fixture is legal.
-func (f fixture) addObservation(t *testing.T, eventID, observationID, structured string,
-	insufficient bool, degraded, detail string) {
+// written after the incident that caused it Ã¢â‚¬â€ the ordering the plan fixes in
+// Ã‚Â§Decisions. The incident is created here too so the fixture is legal.
+//
+// The id and the insufficient-evidence flag are fixed because the correlator
+// reads neither: it matches an observation by event id, and InsufficientEvidence
+// is a property the *rules* consume, which are not under test here. A test that
+// needs a second observation on one event, or an insufficient one, calls
+// addObservationSuperseding directly.
+func (f fixture) addObservation(t *testing.T, eventID, structured, degraded, detail string) {
 	t.Helper()
-	f.addObservationSuperseding(t, eventID, observationID, "", structured, insufficient, degraded, detail)
+	f.addObservationSuperseding(t, eventID, "obs-1", "", structured, false, degraded, detail)
 }
 
 // addObservationSuperseding writes an observation, optionally naming the one it
@@ -180,13 +185,13 @@ func TestSignalsAreAssembledFromStoredFacts(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
 
-	f.addEvent(t, "evt-trigger", "motion", "cam-clean", 10*time.Second, 0,
+	f.addEvent(t, "evt-trigger", "motion", "cam-clean", 10*time.Second,
 		`{"zone":"restricted"}`)
-	f.addEvent(t, "evt-analytics", "analytics", "cam-clean", 12*time.Second, 0, `{}`)
-	f.addEvent(t, "evt-door", "access.granted", "reader-1", 11*time.Second, 0, `{}`)
+	f.addEvent(t, "evt-analytics", "analytics", "cam-clean", 12*time.Second, `{}`)
+	f.addEvent(t, "evt-door", "access.granted", "reader-1", 11*time.Second, `{}`)
 	// A device 40 seconds fast, and an event far outside every plausible window.
-	f.addEvent(t, "evt-drifted", "analytics", "cam-drifted", 30*time.Second, 0, `{}`)
-	f.addEvent(t, "evt-distant", "analytics", "cam-clean", 40*time.Minute, 0, `{}`)
+	f.addEvent(t, "evt-drifted", "analytics", "cam-drifted", 30*time.Second, `{}`)
+	f.addEvent(t, "evt-distant", "analytics", "cam-clean", 40*time.Minute, `{}`)
 
 	res, err := f.corr.SignalsFor(ctx, f.tenant, f.site, "evt-trigger", nil)
 	if err != nil {
@@ -281,16 +286,16 @@ func TestSignalsAreAssembledFromStoredFacts(t *testing.T) {
 }
 
 // A degraded observation is still an observation, and it must be carried as one
-// with Degraded set — because a recorded degradation is a fact and an absent
+// with Degraded set Ã¢â‚¬â€ because a recorded degradation is a fact and an absent
 // observation is not. Collapsing the two would make "we could not ask" and "we
 // asked and it said insufficient" indistinguishable at evaluation time.
 func TestDegradedObservationIsCarriedAndFlagged(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
 
-	f.addEvent(t, "evt-trigger", "motion", "cam-clean", 10*time.Second, 0, `{}`)
-	f.addEvent(t, "evt-analytics", "analytics", "cam-clean", 11*time.Second, 0, `{}`)
-	f.addObservation(t, "evt-analytics", "obs-1", `{}`, false, "no_runtime",
+	f.addEvent(t, "evt-trigger", "motion", "cam-clean", 10*time.Second, `{}`)
+	f.addEvent(t, "evt-analytics", "analytics", "cam-clean", 11*time.Second, `{}`)
+	f.addObservation(t, "evt-analytics", `{}`, "no_runtime",
 		"no AI endpoint is configured")
 
 	res, err := f.corr.SignalsFor(ctx, f.tenant, f.site, "evt-trigger", nil)
@@ -325,10 +330,10 @@ func TestObservationIsReplayedFromStorage(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
 
-	f.addEvent(t, "evt-trigger", "motion", "cam-clean", 10*time.Second, 0, `{}`)
-	f.addEvent(t, "evt-analytics", "analytics", "cam-clean", 11*time.Second, 0, `{}`)
-	f.addObservation(t, "evt-analytics", "obs-1",
-		`{"restricted_person":true,"confidence":0.82}`, false, "none", "")
+	f.addEvent(t, "evt-trigger", "motion", "cam-clean", 10*time.Second, `{}`)
+	f.addEvent(t, "evt-analytics", "analytics", "cam-clean", 11*time.Second, `{}`)
+	f.addObservation(t, "evt-analytics",
+		`{"restricted_person":true,"confidence":0.82}`, "none", "")
 
 	res, err := f.corr.SignalsFor(ctx, f.tenant, f.site, "evt-trigger", nil)
 	if err != nil {
@@ -360,9 +365,9 @@ func TestSupersededObservationIsNotReturned(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
 
-	f.addEvent(t, "evt-trigger", "motion", "cam-clean", 10*time.Second, 0, `{}`)
-	f.addEvent(t, "evt-analytics", "analytics", "cam-clean", 11*time.Second, 0, `{}`)
-	f.addObservation(t, "evt-analytics", "obs-1", `{"v":1}`, false, "none", "")
+	f.addEvent(t, "evt-trigger", "motion", "cam-clean", 10*time.Second, `{}`)
+	f.addEvent(t, "evt-analytics", "analytics", "cam-clean", 11*time.Second, `{}`)
+	f.addObservation(t, "evt-analytics", `{"v":1}`, "none", "")
 	f.addObservationSuperseding(t, "evt-analytics", "obs-2", "obs-1", `{"v":2}`, false, "none", "")
 
 	res, err := f.corr.SignalsFor(ctx, f.tenant, f.site, "evt-trigger", nil)
@@ -419,7 +424,7 @@ func TestWindowIsBoundedAndTheClampIsReported(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
 
-	f.addEvent(t, "evt-trigger", "motion", "cam-clean", 0, 0, `{}`)
+	f.addEvent(t, "evt-trigger", "motion", "cam-clean", 0, `{}`)
 
 	// A bundle asking for a two-second window gets two seconds.
 	res, err := f.corr.SignalsFor(ctx, f.tenant, f.site, "evt-trigger", withWindow(2))
@@ -478,7 +483,7 @@ func TestWindowIsBoundedAndTheClampIsReported(t *testing.T) {
 // corroboration. The two must not look the same.
 func TestMissingTriggerIsDistinctFromEmptyCorroboration(t *testing.T) {
 	f := setup(t)
-	f.addEvent(t, "evt-trigger", "motion", "cam-clean", 0, 0, `{}`)
+	f.addEvent(t, "evt-trigger", "motion", "cam-clean", 0, `{}`)
 
 	res, err := f.corr.SignalsFor(context.Background(), f.tenant, f.site, "evt-trigger", nil)
 	if err != nil {
@@ -503,7 +508,7 @@ func TestMissingTriggerIsDistinctFromEmptyCorroboration(t *testing.T) {
 // asked for.
 func TestTriggerIsNotAmongItsOwnCandidates(t *testing.T) {
 	f := setup(t)
-	f.addEvent(t, "evt-trigger", "motion", "cam-clean", 0, 0, `{}`)
+	f.addEvent(t, "evt-trigger", "motion", "cam-clean", 0, `{}`)
 
 	res, err := f.corr.SignalsFor(context.Background(), f.tenant, f.site, "evt-trigger", nil)
 	if err != nil {
@@ -524,10 +529,10 @@ func TestAnotherTenantsEventsAreNeverCandidates(t *testing.T) {
 	other := setup(t)
 	ctx := context.Background()
 
-	f.addEvent(t, "evt-trigger", "motion", "cam-clean", 0, 0, `{}`)
+	f.addEvent(t, "evt-trigger", "motion", "cam-clean", 0, `{}`)
 	// Same site id would be impossible; the same *time* is the point. If tenant
 	// scoping were missing, these land in the window.
-	other.addEvent(t, "evt-theirs", "analytics", "cam-clean", time.Second, 0, `{}`)
+	other.addEvent(t, "evt-theirs", "analytics", "cam-clean", time.Second, `{}`)
 
 	res, err := f.corr.SignalsFor(ctx, f.tenant, f.site, "evt-trigger", nil)
 	if err != nil {
@@ -547,11 +552,11 @@ func TestOrderIsStableAcrossReads(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
 
-	f.addEvent(t, "evt-trigger", "motion", "cam-clean", 0, 0, `{}`)
+	f.addEvent(t, "evt-trigger", "motion", "cam-clean", 0, `{}`)
 	// Two events at the same instant: the tiebreak is the event id.
-	f.addEvent(t, "evt-b", "analytics", "cam-clean", 5*time.Second, 0, `{}`)
-	f.addEvent(t, "evt-a", "analytics", "cam-clean", 5*time.Second, 0, `{}`)
-	f.addEvent(t, "evt-c", "analytics", "cam-clean", 3*time.Second, 0, `{}`)
+	f.addEvent(t, "evt-b", "analytics", "cam-clean", 5*time.Second, `{}`)
+	f.addEvent(t, "evt-a", "analytics", "cam-clean", 5*time.Second, `{}`)
+	f.addEvent(t, "evt-c", "analytics", "cam-clean", 3*time.Second, `{}`)
 
 	var first []string
 	for run := 0; run < 5; run++ {
@@ -581,9 +586,9 @@ func TestSignalsRenderByteStably(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
 
-	f.addEvent(t, "evt-trigger", "motion", "cam-clean", 10*time.Second, 0, `{"zone":"restricted"}`)
-	f.addEvent(t, "evt-drifted", "analytics", "cam-drifted", 12*time.Second, 0, `{}`)
-	f.addObservation(t, "evt-drifted", "obs-1", `{"restricted_person":true}`, false, "none", "")
+	f.addEvent(t, "evt-trigger", "motion", "cam-clean", 10*time.Second, `{"zone":"restricted"}`)
+	f.addEvent(t, "evt-drifted", "analytics", "cam-drifted", 12*time.Second, `{}`)
+	f.addObservation(t, "evt-drifted", `{"restricted_person":true}`, "none", "")
 
 	res, err := f.corr.SignalsFor(ctx, f.tenant, f.site, "evt-trigger", nil)
 	if err != nil {

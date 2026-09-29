@@ -115,21 +115,22 @@ contract-sync: contract-check-schema
 
 ci: contract-check contract-check-schema contract-check-openapi contract-sync vet lint test-race migration-phases rules-lint
 
-# The gate that actually runs, and the one to trust.
+# The gate that runs, and the one to trust.
 #
-# `ci` above is the full list but it needs protoc and golangci-lint, which are
-# not on PATH on a default Windows shell and are not installed by default. This
-# target is the subset that needs nothing beyond the Go toolchain, so it runs
-# anywhere and it is what a change is expected to pass before it is committed.
+# `ci` is the same list. They were different for months: this target left lint
+# and the generated-code check out because the tools were not installed, and the
+# exclusion was described rather than fixed. golangci-lint is now a real gate —
+# it found an environment file written world-readable and a backoff expression
+# that raised on its own failure path — so leaving it out of the gate a developer
+# actually runs was leaving the useful half out.
 #
-# Deliberately absent: lint (needs golangci-lint) and the generated-code check
-# (needs protoc). Both still matter and both still run before a release — see
-# `ci` and `generate`. What this target buys is that the common case, "did I
-# break anything", has one command that always works.
+# What is still absent is the generated-code check, which needs protoc. It is
+# named here rather than quietly dropped, and `generate` is the target that
+# satisfies it.
 #
 # The database-backed suites skip rather than fail without SP_TEST_DATABASE_URL,
 # so a green run here can be a run that tested nothing. See AGENTS.md.
-verify: contract-check contract-check-schema contract-check-openapi contract-sync vet fmt-check test-race migration-phases rules-lint
+verify: contract-check contract-check-schema contract-check-openapi contract-sync vet fmt-check lint test-race migration-phases rules-lint
 
 # Fails if anything is unformatted. Same intent as the CI fmt job, phrased so it
 # does not depend on a shell pipeline.

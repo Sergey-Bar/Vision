@@ -370,17 +370,17 @@ func TestHealthUptimeIsRealAndMonotonic(t *testing.T) {
 
 func TestHealthStartTimeIsRecordedByListenAndServe(t *testing.T) {
 	s := &api.Server{Secure: true, Tenant: "t-1"}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	// A listener that is immediately shut down still has to leave a start time,
 	// because the start time is what makes uptime mean anything.
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
 	addr := ln.Addr().String()
 	_ = ln.Close()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	done := make(chan error, 1)
 	go func() { done <- s.ListenAndServe(ctx, addr, "", "") }()
 

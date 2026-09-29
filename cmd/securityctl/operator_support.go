@@ -15,6 +15,8 @@ import (
 )
 
 // ed25519PublicKey aliases the key type so the operator file reads as prose.
+// It is the declared type decodePublicKey hands back, which is why the operator
+// command passes the decoded key through without a redundant conversion.
 type ed25519PublicKey = ed25519.PublicKey
 
 // newIdentityService builds the identity service for the CLI.

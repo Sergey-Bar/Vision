@@ -68,7 +68,7 @@ func NewVLMWorker(pool *jobs.Worker, client *Client, obs *observations.Writer,
 			Handler: nil,
 		},
 	}
-	w.Worker.Handler = w.Handle
+	w.Handler = w.Handle
 	return w
 }
 
@@ -133,10 +133,9 @@ func (w *VLMWorker) Handle(ctx context.Context, j jobs.Job) error {
 	// model is a real deployment — and the honest record is a degraded
 	// observation saying so, not a connection error and not a fabricated answer.
 	if w.Client == nil {
-		_, err := w.record(ctx, base, nil, nil,
+		return w.record(ctx, base, nil, nil,
 			observations.DegradationNoRuntime,
 			"no AI endpoint is configured on this core")
-		return err
 	}
 
 	evidenceList, degraded, err := w.gatherEvidence(ctx, enqueued)
@@ -144,8 +143,7 @@ func (w *VLMWorker) Handle(ctx context.Context, j jobs.Job) error {
 		return fail(err)
 	}
 	if degraded != nil {
-		_, err := w.record(ctx, base, evidenceList, nil, *degraded, degradedDetail(*degraded))
-		return err
+		return w.record(ctx, base, evidenceList, nil, *degraded, degradedDetail(*degraded))
 	}
 
 	// The observation id is generated here, before the call, so the same id is
@@ -167,7 +165,7 @@ func (w *VLMWorker) Handle(ctx context.Context, j jobs.Job) error {
 		// plane was unreachable at 03:14" is the fact a pilot is measuring. The
 		// error is returned so the job retries — a retry that also fails writes
 		// another observation, which is honest: they were separate attempts.
-		if _, rerr := w.record(ctx, applied, evidenceList, &result,
+		if rerr := w.record(ctx, applied, evidenceList, &result,
 			result.DegradedReason, callErr.Error()); rerr != nil {
 			return fail(rerr)
 		}
@@ -178,8 +176,7 @@ func (w *VLMWorker) Handle(ctx context.Context, j jobs.Job) error {
 		// The runtime answered, and the answer was that it could not answer.
 		// That is a success: the job is done, the row is written, and nothing
 		// retries.
-		_, err := w.record(ctx, applied, evidenceList, &result, result.DegradedReason, result.DegradedDetail)
-		return err
+		return w.record(ctx, applied, evidenceList, &result, result.DegradedReason, result.DegradedDetail)
 	}
 
 	_, err = w.recordResult(ctx, applied, evidenceList, result)
@@ -192,7 +189,13 @@ func (w *VLMWorker) Handle(ctx context.Context, j jobs.Job) error {
 // obtained, because "we could not fetch the evidence" is a recorded degradation
 // and not a job failure worth retrying: the fetch will not succeed on a retry
 // either if the object is gone.
-func (w *VLMWorker) gatherEvidence(ctx context.Context, p vlmPayload) ([]Evidence, *observations.Degradation, error) {
+//
+// The context is accepted for symmetry with the rest of the worker's methods and
+// is not yet plumbed into the fetch: evidence.Open is a local read, and the
+// lease that bounds this work is the job's, not a deadline the store honours.
+// The parameter is named _ rather than dropped so a context-aware Open is a
+// one-line change here rather than a signature change at every call site.
+func (w *VLMWorker) gatherEvidence(_ context.Context, p vlmPayload) ([]Evidence, *observations.Degradation, error) {
 	if p.EvidenceID == "" {
 		reason := observations.DegradationAbsent
 		return nil, &reason, nil
@@ -262,11 +265,16 @@ func applyResult(base observations.Observation, r Result) observations.Observati
 // forces StructuredOutput to {} and InsufficientEvidence to true, so a consumer
 // that forgets to check the degradation fails closed rather than reading an
 // empty output as a negative answer.
+//
+// It returns only the error. Every caller discards the stored observation: the
+// id it is given is derived from the job, so the caller could reconstruct it and
+// a returned copy would only invite a caller to believe the row exists without
+// having checked the error.
 func (w *VLMWorker) record(ctx context.Context, base observations.Observation,
 	evidenceList []Evidence, result *Result, reason observations.Degradation, detail string,
-) (observations.Observation, error) {
+) error {
 	if w.Observations == nil {
-		return observations.Observation{}, errors.New("airuntime: no observation writer is " +
+		return errors.New("airuntime: no observation writer is " +
 			"configured; an inference that produced no record is not an inference")
 	}
 	// A degraded response from the runtime carries no attribution, because there
@@ -288,7 +296,7 @@ func (w *VLMWorker) record(ctx context.Context, base observations.Observation,
 				"incident_id", base.IncidentID, "reason", string(reason),
 				"error", err.Error())
 		}
-		return observations.Observation{}, err
+		return err
 	}
 	if w.Log != nil {
 		w.Log.Info("recorded a degraded observation",
@@ -297,7 +305,7 @@ func (w *VLMWorker) record(ctx context.Context, base observations.Observation,
 			"observation_id", recorded.ObservationID,
 			"reason", string(reason))
 	}
-	return recorded, nil
+	return nil
 }
 
 // recordResult persists a real inference.

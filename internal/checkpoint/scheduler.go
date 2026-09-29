@@ -70,8 +70,17 @@ type PGXPooler interface {
 // It returns nil on cancellation: a scheduler stopped by a shutdown is the
 // expected path, not an error to log. It seals once immediately, because a core
 // that restarts should not wait a full interval before protecting anything.
+//
+// A failed pass is logged and the loop continues. It used to be discarded
+// entirely, which meant a sealer that failed every time — a key that would not
+// load, a database that went away, a signature that stopped verifying — produced
+// no log line, no counter and no error, and the ledger simply stopped being
+// sealed. The ledger is append-only and hash-chained precisely so that a gap in
+// its protection is detectable, and a scheduler that cannot report the gap makes
+// it undetectable. Running on after a failure is right: one bad pass is not a
+// reason to stop protecting; going quiet about it is.
 func (s *Scheduler) Run(ctx context.Context) error {
-	s.sealOnce(ctx)
+	s.reportSeal(ctx)
 
 	interval := s.Interval
 	if interval <= 0 {
@@ -84,8 +93,31 @@ func (s *Scheduler) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			s.sealOnce(ctx)
+			s.reportSeal(ctx)
 		}
+	}
+}
+
+// reportSeal runs one pass and says what happened, in a way that survives the
+// caller doing nothing with the return values.
+//
+// A context cancelled during shutdown is not a seal failure and is not reported
+// as one: the loop is stopping by request, and a log line saying the sealer is
+// broken every time a core restarts teaches its reader to ignore the ones that
+// matter.
+func (s *Scheduler) reportSeal(ctx context.Context) {
+	sealed, err := s.sealOnce(ctx)
+	if err == nil {
+		if !sealed && s.Logf != nil {
+			s.Logf("checkpoint: no seal written; nothing new since the last one")
+		}
+		return
+	}
+	if ctx.Err() != nil {
+		return
+	}
+	if s.Logf != nil {
+		s.Logf("checkpoint: seal failed: %v", err)
 	}
 }
 

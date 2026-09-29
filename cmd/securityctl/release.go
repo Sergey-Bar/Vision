@@ -299,7 +299,7 @@ func loadSigningKey(path string) (ed25519.PrivateKey, ed25519.PublicKey, error) 
 	return priv, pub, nil
 }
 
-func decodePublicKey(s string) (ed25519.PublicKey, error) {
+func decodePublicKey(s string) (ed25519PublicKey, error) {
 	raw, err := hex.DecodeString(strings.TrimSpace(s))
 	if err != nil {
 		return nil, fmt.Errorf("the trusted key is not hex: %w", err)

@@ -113,7 +113,20 @@ func VerifyPassword(encoded, password string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("identity: decode hash: %w", err)
 	}
-	got := argon2id([]byte(password), salt, timeCost, memory, threads, uint32(len(want)))
+	// The stored hash length is argon2id's key length. This build always writes
+	// argon2.KeyLength, so a row that says otherwise is a row this build did not
+	// write, and a hash of several gigabytes would otherwise be truncated to a
+	// 32-bit length and verified against a different value than the one stored.
+	// Refusing it is the same answer the constant-time compare would give, and it
+	// is reached without allocating.
+	if len(want) != int(argonKeyLen) {
+		return false, fmt.Errorf("identity: the stored hash is %d bytes, this build writes %d. "+
+			"A row in the database does not get to choose how much of it is compared",
+			len(want), argonKeyLen)
+	}
+	// argonKeyLen directly: the length was just checked against it, so the
+	// conversion is a widening of a constant, not a narrowing of a value.
+	got := argon2id([]byte(password), salt, timeCost, memory, threads, argonKeyLen)
 	return subtle.ConstantTimeCompare(got, want) == 1, nil
 }
 

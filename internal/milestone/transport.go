@@ -93,10 +93,7 @@ func (t *httpTransport) Get(ctx context.Context, route Route, query Query) (*Res
 		return nil, &UnauthenticatedError{Route: route, Status: 0}
 	}
 
-	target, err := t.urlFor(route, query)
-	if err != nil {
-		return nil, err
-	}
+	target := t.urlFor(route, query)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
 	if err != nil {
@@ -171,7 +168,13 @@ func (t *httpTransport) Get(ctx context.Context, route Route, query Query) (*Res
 // parameter is set explicitly rather than appended by concatenation, so a cursor
 // containing a reserved character is encoded rather than becoming a second
 // parameter.
-func (t *httpTransport) urlFor(route Route, query Query) (*url.URL, error) {
+//
+// It cannot fail, so it does not return an error. It was shaped as
+// (*url.URL, error) back when it composed the query by string concatenation,
+// where an unencoded ampersand in a cursor was a real failure; the values are
+// built through url.Values and Encode now, and a nil error on that path is a
+// result every caller would have had to check to learn nothing.
+func (t *httpTransport) urlFor(route Route, query Query) *url.URL {
 	target := *t.base
 	target.Path = strings.TrimRight(t.base.Path, "/") + "/" + strings.TrimLeft(route.Path, "/")
 
@@ -188,7 +191,7 @@ func (t *httpTransport) urlFor(route Route, query Query) (*url.URL, error) {
 		q.Set("cursor", query.Cursor)
 	}
 	target.RawQuery = q.Encode()
-	return &target, nil
+	return &target
 }
 
 // Close releases the connection pool.
@@ -221,9 +224,9 @@ func summarize(raw []byte) string {
 	return clip(strings.TrimSpace(string(raw)), 200)
 }
 
-func clip(s string, max int) string {
-	if len(s) <= max {
+func clip(s string, limit int) string {
+	if len(s) <= limit {
 		return s
 	}
-	return s[:max] + "…"
+	return s[:limit] + "…"
 }

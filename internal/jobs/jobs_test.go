@@ -34,12 +34,12 @@ func open(t *testing.T) *dbx.Pool {
 	return pool
 }
 
-func enqueue(t *testing.T, pool *dbx.Pool, tenant, key string) (created bool, jobID string) {
+func enqueue(t *testing.T, pool *dbx.Pool, tenant, key string) (created bool) {
 	t.Helper()
 	err := pool.InTenant(context.Background(), dbx.TenantContext{TenantID: tenant, ActorID: "test"},
 		func(tx pgx.Tx) error {
 			var err error
-			created, jobID, err = jobs.New(pool).Enqueue(context.Background(), tx, jobs.Enqueue{
+			created, _, err = jobs.New(pool).Enqueue(context.Background(), tx, jobs.Enqueue{
 				TenantID: tenant, Queue: jobs.QueueVLM, IdempotencyKey: key,
 				Payload: []byte(`{"evidence":"x"}`),
 			})
@@ -48,7 +48,7 @@ func enqueue(t *testing.T, pool *dbx.Pool, tenant, key string) (created bool, jo
 	if err != nil {
 		t.Fatalf("enqueue %s: %v", key, err)
 	}
-	return created, jobID
+	return created
 }
 
 // A job is delivered to exactly one worker.
@@ -69,7 +69,7 @@ func enqueue(t *testing.T, pool *dbx.Pool, tenant, key string) (created bool, jo
 func TestAJobIsClaimedByExactlyOneWorker(t *testing.T) {
 	pool := open(t)
 	tenant, _, _ := testutil.NewTenant(t, testutil.Pool(t))
-	firstCreated, _ := enqueue(t, pool, tenant, "single-claim")
+	firstCreated := enqueue(t, pool, tenant, "single-claim")
 	if !firstCreated {
 		t.Fatal("the first enqueue reported no work created")
 	}
@@ -118,11 +118,11 @@ func TestAnIdempotencyKeyCreatesOneJob(t *testing.T) {
 	tenant, _, _ := testutil.NewTenant(t, testutil.Pool(t))
 	ctx := context.Background()
 
-	created, _ := enqueue(t, pool, tenant, "same-key")
+	created := enqueue(t, pool, tenant, "same-key")
 	if !created {
 		t.Fatal("the first enqueue reported no work created")
 	}
-	created, _ = enqueue(t, pool, tenant, "same-key")
+	created = enqueue(t, pool, tenant, "same-key")
 	if created {
 		t.Error("a repeated idempotency key created a second job. A retried poll, a restarted " +
 			"producer and a duplicated webhook all land here, and the key is the only thing " +
@@ -175,7 +175,7 @@ func TestAnIdempotencyKeyIsScopedToItsQueue(t *testing.T) {
 func TestOnlyTheLeaseHolderMayCompleteAJob(t *testing.T) {
 	pool := open(t)
 	tenant, _, _ := testutil.NewTenant(t, testutil.Pool(t))
-	_, _ = enqueue(t, pool, tenant, "lease-holder")
+	_ = enqueue(t, pool, tenant, "lease-holder")
 	ctx := context.Background()
 
 	holder := &jobs.Worker{Enqueuer: jobs.Enqueuer{Pool: pool}, LeaseDuration: time.Second}

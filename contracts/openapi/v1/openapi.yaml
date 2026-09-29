@@ -426,28 +426,28 @@ paths:
   /v1/health:
     get:
       tags: [health]
-    security: []
-    summary: Liveness
-    responses:
-      "200":
-        description: Process is up. Deliberately excludes the AI plane: core liveness must not depend on it.
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/Health" }
+      security: []
+      summary: Liveness
+      responses:
+        "200":
+          description: Process is up. Deliberately excludes the AI plane: core liveness must not depend on it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
 
   /v1/health/ready:
     get:
       tags: [health]
-    security: []
-    summary: Readiness
-    description: Requires the database and the evidence root. Does not require the AI runtime.
-    responses:
-      "200":
-        description: Ready
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/Readiness" }
-      "503": { $ref: "#/components/responses/Error" }
+      security: []
+      summary: Readiness
+      description: Requires the database and the evidence root. Does not require the AI runtime.
+      responses:
+        "200":
+          description: Ready
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Readiness" }
+        "503": { $ref: "#/components/responses/Error" }
 
 components:
   securitySchemes:

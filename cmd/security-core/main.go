@@ -156,7 +156,7 @@ func run() error {
 			// behaviour; a topic with no consumer that silently disappears is a
 			// dead-letter backlog nobody is watching.
 			log.Info("outbox message acknowledged",
-				"tenant_id", d.TenantID, "topic", d.Message.Topic, "outbox_id", d.OutboxID)
+				"tenant_id", d.TenantID, "topic", d.Topic, "outbox_id", d.OutboxID)
 			return nil
 		},
 		MaxAttempts: 5,
@@ -171,7 +171,7 @@ func run() error {
 		// loopback listener, so this cannot silently hand a session to the network.
 		Secure:         cfg.SessionCookieSecure,
 		Pool:           pool,
-		HealthCheck:    readinessChecks(cfg, aiClient, store),
+		HealthCheck:    readinessChecks(aiClient, store),
 		BehindProxy:    cfg.BehindProxy,
 		TrustedProxies: cfg.TrustedProxyCIDRs,
 	}
@@ -320,15 +320,15 @@ func readiness(ctx context.Context, pool *dbx.Pool, log *slog.Logger) error {
 // because a site with no model is a supported configuration and taking the
 // console down with it would make the console unavailable exactly when an
 // operator needs to read about why.
-func readinessChecks(cfg config.Config, ai *airuntime.Client, store *evidence.Store) map[string]func(context.Context) error {
+func readinessChecks(ai *airuntime.Client, store *evidence.Store) map[string]func(context.Context) error {
 	return map[string]func(context.Context) error{
-		"evidenceRoot": func(ctx context.Context) error {
+		"evidenceRoot": func(_ context.Context) error {
 			if store == nil || store.Root() == "" {
 				return errors.New("no evidence root is configured")
 			}
 			return nil
 		},
-		"aiRuntime": func(ctx context.Context) error {
+		"aiRuntime": func(_ context.Context) error {
 			if ai == nil || ai.BaseURL == "" {
 				return errors.New("no AI runtime is configured; every observation will be " +
 					"recorded as degraded with reason no_runtime, which is the correct " +

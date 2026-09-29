@@ -215,11 +215,18 @@ func (r *Relay) markFailed(ctx context.Context, d Delivery, cause error) error {
 		maxAttempts = 8
 	}
 	var status string
+	// The backoff exponent is capped *before* the cast, not after. The original
+	// expression was `least(300, 5 * power(2, attempt_count)::int)`, which casts
+	// an unbounded exponent to int32 first: at attempt_count = 31 the cast raises
+	// and the whole failure path errors out, so the row is left claimed by a
+	// worker that has already moved on and is never marked at all. A raising
+	// backoff on the failure path turns a bounded retry into a lost message,
+	// which is the one thing this table exists to prevent.
 	if err := r.Pool.For(d.TenantID, "outbox").QueryRow(ctx, `
 		UPDATE outbox_events
 		   SET status = CASE WHEN attempt_count >= $2 THEN 'dead_letter' ELSE 'failed' END,
 		       last_error = $3,
-		       run_after = now() + make_interval(secs => least(300, 5 * power(2, attempt_count)::int))
+		       run_after = now() + make_interval(secs => (5 * power(2, least(attempt_count, 6)))::int)
 		 WHERE outbox_id = $1
 		RETURNING status`, d.OutboxID, maxAttempts, cause.Error()).Scan(&status); err != nil {
 		return fmt.Errorf("outbox: mark failed: %w", err)

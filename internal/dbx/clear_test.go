@@ -42,7 +42,7 @@ func TestAFailedTenantClearDestroysTheConnection(t *testing.T) {
 		t.Fatalf("acquire after the failed clear: %v", err)
 	}
 	defer next.Release()
-	if got := pidOf(t, ctx, next); got == dirty {
+	if got := pidOf(ctx, t, next); got == dirty {
 		t.Errorf("backend %d, whose tenant clear failed, was handed to the next caller. It may "+
 			"still be carrying app.tenant_id, so that caller's statement runs as the previous "+
 			"tenant and reports success while doing so", dirty)
@@ -65,7 +65,7 @@ func TestACleanTenantClearKeepsTheConnection(t *testing.T) {
 		t.Fatalf("acquire after the clean clear: %v", err)
 	}
 	defer next.Release()
-	if got := pidOf(t, ctx, next); got != dirty {
+	if got := pidOf(ctx, t, next); got != dirty {
 		t.Errorf("a cleanly cleared connection (backend %d) was replaced by %d. The pool opens "+
 			"a fresh connection per statement, and a site under load runs out of connections",
 			dirty, got)
@@ -109,10 +109,10 @@ func acquireDirty(t *testing.T, pool *pgxpool.Pool) (*pgxpool.Conn, int) {
 	if _, err := conn.Exec(ctx, `SELECT set_config('app.tenant_id', 'tenant-a', false)`); err != nil {
 		t.Fatalf("set the tenant: %v", err)
 	}
-	return conn, pidOf(t, ctx, conn)
+	return conn, pidOf(ctx, t, conn)
 }
 
-func pidOf(t *testing.T, ctx context.Context, conn *pgxpool.Conn) int {
+func pidOf(ctx context.Context, t *testing.T, conn *pgxpool.Conn) int {
 	t.Helper()
 	var pid int
 	if err := conn.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
@@ -149,13 +149,25 @@ func openRawPool(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-func waitForNoAcquiredConns(t *testing.T, pool *pgxpool.Pool) int32 {
+// waitForNoAcquiredConns blocks until the pool has no acquired connections.
+//
+// A timeout is a test failure, not a return value every caller has to remember
+// to check. The callers acquire immediately afterwards, and a pool that still
+// holds the connection they just released would hand that Acquire a backend
+// that never went through the release path under test, which would turn these
+// assertions into a statement about the wrong connection.
+func waitForNoAcquiredConns(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		n := pool.Stat().AcquiredConns()
-		if n == 0 || time.Now().After(deadline) {
-			return n
+		if n == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d connection(s) still acquired 5s after release; the next Acquire may "+
+				"return a backend that never went through the release path under test", n)
+			return
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
