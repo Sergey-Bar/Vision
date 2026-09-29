@@ -18,6 +18,7 @@ import (
 
 	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
 	"github.com/Sergey-Bar/Ai-Captain/internal/migrate"
+	"github.com/Sergey-Bar/Ai-Captain/migrations"
 )
 
 func main() {
@@ -79,6 +80,12 @@ func run() error {
 		if err != nil {
 			return err
 		}
+		// The phase on a migration says how it was *meant* to ship. A carried
+		// violation says one of them was not, and the operator reading a status
+		// report is entitled to know which version that is â€” otherwise "every
+		// migration is an expand and every expand is safe" is something the tool
+		// asserts about a tree where it is not true.
+		report.CarriedViolations = migrations.CarriedContractViolations()
 		if *asJSON {
 			return json.NewEncoder(os.Stdout).Encode(report)
 		}
@@ -167,7 +174,7 @@ func printStatus(s migrate.Status) {
 	if s.Compatible {
 		fmt.Println("compatibility  : OK")
 	} else {
-		fmt.Println("compatibility  : OUT OF RANGE — upgrade or roll back the binary")
+		fmt.Println("compatibility  : OUT OF RANGE â€” upgrade or roll back the binary")
 	}
 	if len(s.Pending) > 0 {
 		fmt.Printf("pending (%d):\n", len(s.Pending))
@@ -186,10 +193,20 @@ func printStatus(s migrate.Status) {
 				a.Checksum[:12])
 		}
 	}
+	// The phase column above says how a migration was meant to ship. This is the
+	// list of the ones where that is not the whole truth, printed here because
+	// this is the output an operator reads to decide whether a database is in the
+	// state they think it is.
+	if len(s.CarriedViolations) > 0 {
+		fmt.Println("carried phase violations:")
+		for file, why := range s.CarriedViolations {
+			fmt.Printf("  %-40s %s\n", file, why)
+		}
+	}
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `security-migrate — ordered Postgres migrations, forward-only.
+	fmt.Fprint(os.Stderr, `security-migrate â€” ordered Postgres migrations, forward-only.
 
 Usage:
   security-migrate [flags] <command>

@@ -366,6 +366,15 @@ type Status struct {
 	Applied        []Applied                `json:"applied"`
 	Compat         migrations.Compatibility `json:"compatibility"`
 	Compatible     bool                     `json:"compatible"`
+	// CarriedViolations names migrations whose phase label does not describe
+	// what they do, and is empty when there are none.
+	//
+	// It is here rather than only in `migrations` because a status report is what
+	// an operator reads to decide whether a database is in the state they think it
+	// is. A migration that drops a column while calling itself an expand is a fact
+	// about that database, and reporting the version as clean without it is how a
+	// tool ends up asserting something it knows to be untrue.
+	CarriedViolations map[string]string `json:"carriedViolations,omitempty"`
 }
 
 // PendingStatus is the preflight view of a database-s schema: what it is at
