@@ -526,7 +526,21 @@ func (s *Server) handleEvidenceContent(w http.ResponseWriter, r *http.Request, p
 	// policies for the same command, so `tenant_isolation OR site_isolation` is
 	// just `tenant_isolation`. There is no site isolation at the database layer
 	// - see docs/status.md - which makes the handler the only place it happens.
-	err := d.Incidents.Pool.For(p.TenantID, "api").QueryRow(r.Context(), `
+	// The principal's site scope, not just the tenant.
+	//
+	// `For` binds the tenant and nothing else, so the query runs with an empty
+	// `app.site_ids`. That is invisible today because both policies on `evidence`
+	// are PERMISSIVE and PostgreSQL ORs them — `tenant_isolation OR
+	// site_isolation` is `tenant_isolation` — so there is no site isolation at the
+	// database layer at all and the handler's own `p.CanSeeSite` check is the
+	// only one. Binding the scope as well means the statement is correct on its
+	// own terms, and the day `site_isolation` becomes RESTRICTIVE this path
+	// needs no change.
+	//
+	// The audit-ledger read below is not site-scoped at all: the ledger is the
+	// tenant's, and a row is attributed to a site by its content rather than
+	// belonging to one. It is listed here so the distinction is written down.
+	err := d.Incidents.Pool.WithSites(p.TenantID, "api", p.SiteScope).QueryRow(r.Context(), `
 		SELECT storage_ref, sha256, site_id FROM evidence
 		 WHERE tenant_id = $1 AND evidence_id = $2`,
 		p.TenantID, id).Scan(&ref, &wantHash, &siteID)
