@@ -100,11 +100,42 @@ class Evidence:
         Refusing evidence whose hash does not match is the point: an observation
         citing evidence the model never actually saw is worse than no observation,
         because it looks corroborated.
+
+        Empty evidence is refused. It used to ``return True`` for
+        ``not self.data``, and ``self.data`` comes from
+        ``base64.b64decode(item.get("dataBase64", ""))``, so an item with no
+        ``dataBase64`` — or an empty one — yielded ``b""`` and passed against
+        whatever ``sha256`` the caller wrote next to it. The only other check,
+        ``if not request.evidence``, is on the *tuple*, not on any item, so a
+        request carrying one empty item passed every check in the class.
+
+        There is a real case behind that, and it is worth naming: the core holds
+        the evidence bytes and the plane is handed a reference. A reference cannot
+        be verified here, so it must not be *accepted* here either — which is why
+        the request boundary refuses a request whose evidence has no bytes, rather
+        than this function guessing which kind it is looking at.
         """
         if not self.data:
-            return True
+            return False
         actual = hashlib.sha256(self.data).hexdigest()
         return actual == self.sha256
+
+
+def _require_bytes(items: "tuple[Evidence, ...]") -> None:
+    """Refuse a request whose evidence carries no bytes to check.
+
+    Raised as a ValueError so the caller answers 400 rather than degrading: this
+    is a malformed request, not an AI outage, and answering `model_unavailable`
+    would send the operator to look at the wrong thing.
+    """
+    for item in items:
+        if not item.data:
+            raise ValueError(
+                f"evidence {item.evidence_id!r} has no bytes. The plane verifies the bytes it "
+                f"is given against the hash it is given; a reference it cannot check is not "
+                f"evidence, and accepting one would let an observation cite a hash nobody "
+                f"verified."
+            )
 
 
 @dataclass(frozen=True)
@@ -622,6 +653,14 @@ class Handler(BaseHTTPRequestHandler):
                 profile_schema=payload.get("profileSchema") or {},
                 deadline_seconds=float(payload.get("deadlineSeconds", 10.0)),
             )
+            # A request whose evidence carries no bytes is refused here, at the
+            # boundary, rather than downstream where `verify()` has to guess.
+            #
+            # The guessing was the defect: `Evidence` could not tell a reference
+            # (id and hash, bytes held by the core) from an item that simply had
+            # no `dataBase64`, and it waved the second through. Making the
+            # distinction here means `verify()` has one answer.
+            _require_bytes(request.evidence)
         except (KeyError, TypeError, ValueError) as exc:
             self._send(400, {"error": f"the request is malformed: {exc}"})
             return

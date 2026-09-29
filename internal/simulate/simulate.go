@@ -34,7 +34,12 @@ const (
 	ChangeSeverityChanged ChangeKind = "severity_changed"
 	ChangeDegradedChanged ChangeKind = "degraded_flag_changed"
 	ChangeStateChanged    ChangeKind = "verification_state_changed"
-	ChangeNoChange        ChangeKind = "no_change"
+	// ChangeRuleChanged and ChangeEscalationChanged are the two differences
+	// `classify` used to drop. See the note on classify for why they are
+	// classified last rather than near the top.
+	ChangeRuleChanged       ChangeKind = "rule_changed"
+	ChangeEscalationChanged ChangeKind = "escalation_changed"
+	ChangeNoChange          ChangeKind = "no_change"
 )
 
 // Change is one difference between two runs.
@@ -75,12 +80,21 @@ type Report struct {
 	DiffDigest string         `json:"diffDigest"`
 	Changes    []Change       `json:"changes"`
 	Totals     map[string]int `json:"totals"`
-	// ScenariosRun and MaxEvents are recorded so a digest over a truncated run
-	// cannot be mistaken for a digest over the whole fixture set.
-	ScenariosRun int       `json:"scenariosRun"`
-	MaxEvents    int       `json:"maxEvents"`
-	FixtureSet   string    `json:"fixtureSet"`
-	SimulatedAt  time.Time `json:"simulatedAt"`
+	// ScenariosRun, MaxEvents and Truncated are recorded so a digest over a
+	// truncated run cannot be mistaken for a digest over the whole fixture set.
+	//
+	// MaxEvents was declared here and never assigned by anything, so the field
+	// read 0 in every report ever printed and promised a guarantee it did not
+	// provide. It is assigned now, and a run that hit the cap additionally
+	// carries a change row saying so - see DiffCapped.
+	ScenariosRun int `json:"scenariosRun"`
+	MaxEvents    int `json:"maxEvents"`
+	// Truncated says the run stopped at MaxEvents rather than running out of
+	// fixtures. It is false when the run was uncapped, which is the normal
+	// case: 0 on its own is indistinguishable from "nobody said".
+	Truncated   bool      `json:"truncated"`
+	FixtureSet  string    `json:"fixtureSet"`
+	SimulatedAt time.Time `json:"simulatedAt"`
 }
 
 // Scenario is one named set of signals to run a bundle over.
@@ -156,12 +170,37 @@ func (r *Runner) Run(bundle *rules.CompiledBundle, scenarios []Scenario, maxEven
 }
 
 // Diff compares two runs and produces the report activation is gated on.
+//
+// `Diff` is handed two complete outcome lists and truncated neither, so it makes
+// no claim about a cap it was never told about: it calls DiffCapped with a cap
+// of 0, which is the honest reading of "this run finished". A caller whose run
+// *did* hit a cap must call DiffCapped, because Diff cannot see the difference
+// between a run that stopped at the cap and one that stopped at the end of the
+// fixture set - the two produce the same outcomes over the same prefix.
 func Diff(bundleVersion, baselineVersion, fixtureSet string, before, after []Outcome) Report {
+	return DiffCapped(bundleVersion, baselineVersion, fixtureSet, before, after, 0)
+}
+
+// DiffCapped is Diff with the cap that produced `after`, which is the one input
+// a truncated run and a whole run share and a diff cannot otherwise recover.
+//
+// The cap reaches the digest, not just the report, because the guarantee the
+// field makes is about the digest: "a digest over a truncated run cannot be
+// mistaken for a digest over the whole fixture set". A truncated run's change
+// list is a prefix of a whole run's, so a digest over the changes alone is
+// identical, and reporting the truncation only in a field the gate does not read
+// would leave the promise exactly as unkept as it was when MaxEvents was never
+// assigned. So a capped run carries a change row naming the truncation, in the
+// same shape the misaligned-run case above already uses, and the row is visible
+// to the operator reading the report rather than hidden in a number.
+func DiffCapped(bundleVersion, baselineVersion, fixtureSet string, before, after []Outcome, maxEvents int) Report {
 	report := Report{
 		BundleVersion:   bundleVersion,
 		BaselineVersion: baselineVersion,
 		FixtureSet:      fixtureSet,
 		ScenariosRun:    distinctScenarios(after),
+		MaxEvents:       maxEvents,
+		Truncated:       maxEvents > 0 && len(after) >= maxEvents,
 		SimulatedAt:     time.Now().UTC(),
 		Totals:          map[string]int{"scenarios": distinctScenarios(after), "outcomes": len(after)},
 	}
@@ -176,8 +215,7 @@ func Diff(bundleVersion, baselineVersion, fixtureSet string, before, after []Out
 		for _, a := range after {
 			report.Totals[outcomeKey(a)]++
 		}
-		report.DiffDigest = DigestFor(bundleVersion, fixtureSet, nil)
-		return report
+		return report.seal()
 	}
 
 	// The two runs must line up. A different number of results means a different
@@ -189,8 +227,7 @@ func Diff(bundleVersion, baselineVersion, fixtureSet string, before, after []Out
 			Before: Outcome{State: fmt.Sprintf("%d outcomes", len(before))},
 			After:  Outcome{State: fmt.Sprintf("%d outcomes", len(after))},
 		}}
-		report.DiffDigest = DigestFor(bundleVersion, fixtureSet, report.Changes)
-		return report
+		return report.seal()
 	}
 	for i := range before {
 		b, a := before[i], after[i]
@@ -205,28 +242,54 @@ func Diff(bundleVersion, baselineVersion, fixtureSet string, before, after []Out
 			Kind: kind, ScenarioID: a.ScenarioID, SignalID: a.SignalID,
 			Before: b, After: a,
 		})
-		switch kind {
-		case ChangeCreated:
-			report.Totals["created"]++
-		case ChangeClosed:
-			report.Totals["closed"]++
-		case ChangeSeverityChanged:
-			report.Totals["severityChanged"]++
-		case ChangeDegradedChanged:
-			report.Totals["degradedChanged"]++
-		case ChangeStateChanged:
-			report.Totals["stateChanged"]++
-		}
+		report.Totals[totalsKey(kind)]++
 	}
 
-	sort.SliceStable(report.Changes, func(i, j int) bool {
-		if report.Changes[i].ScenarioID != report.Changes[j].ScenarioID {
-			return report.Changes[i].ScenarioID < report.Changes[j].ScenarioID
+	return report.seal()
+}
+
+// seal is the one place a report is finished, so that sorting and the digest are
+// computed over exactly the change list a caller can see - including the
+// truncation row, which has to be in the list before the digest is taken or it
+// does not reach the digest at all.
+func (r *Report) seal() Report {
+	if r.Truncated {
+		r.Changes = append(r.Changes, Change{
+			Kind:   ChangeStateChanged,
+			Before: Outcome{State: "the whole fixture set"},
+			After:  Outcome{State: fmt.Sprintf("truncated at %d outcome(s)", r.MaxEvents)},
+		})
+		r.Totals["truncated"]++
+	}
+	sort.SliceStable(r.Changes, func(i, j int) bool {
+		if r.Changes[i].ScenarioID != r.Changes[j].ScenarioID {
+			return r.Changes[i].ScenarioID < r.Changes[j].ScenarioID
 		}
-		return report.Changes[i].SignalID < report.Changes[j].SignalID
+		return r.Changes[i].SignalID < r.Changes[j].SignalID
 	})
-	report.DiffDigest = DigestFor(bundleVersion, fixtureSet, report.Changes)
-	return report
+	r.DiffDigest = DigestFor(r.BundleVersion, r.FixtureSet, r.Changes)
+	return *r
+}
+
+func totalsKey(kind ChangeKind) string {
+	switch kind {
+	case ChangeCreated:
+		return "created"
+	case ChangeClosed:
+		return "closed"
+	case ChangeSeverityChanged:
+		return "severityChanged"
+	case ChangeDegradedChanged:
+		return "degradedChanged"
+	case ChangeStateChanged:
+		return "stateChanged"
+	case ChangeRuleChanged:
+		return "ruleChanged"
+	case ChangeEscalationChanged:
+		return "escalationChanged"
+	default:
+		return string(kind)
+	}
 }
 
 // outcomeKey names a totals bucket for one outcome, so a first-bundle report
@@ -253,6 +316,25 @@ func distinctScenarios(outcomes []Outcome) int {
 // classify names the most consequential difference, in that order. An incident
 // appearing or disappearing outranks a severity change, because that is what an
 // operator's workload changes by.
+//
+// It used to read IncidentRaised, Severity, Degraded and State, and nothing else.
+// RuleID and Escalate were on the Outcome and never read, so a candidate bundle
+// that swaps *which* rule raises an incident, or turns escalation on, produced
+// classify == ChangeNoChange for that signal: no change row, no totals entry, and
+// above all no contribution to the digest. An operator who acknowledged that
+// digest had reviewed a report that could not have told them the deciding rule
+// had changed underneath them. A change in rule identity is a change because the
+// incident the operator triaged is now the output of a different piece of policy
+// - the same incident, the same severity and the same state, decided by something
+// else - and "same outcome" is not the same question as "same decision".
+//
+// They are classified last rather than near the top on purpose. Every difference
+// above is one an operator can see in a console row; which rule fired is the
+// subtlest of the seven, and a signal that changed severity *and* rule is already
+// reported as a severity change. Nothing is lost by the ordering: every change row
+// carries the full Before and After pair, so the rule id is on the row either
+// way, and the kind names the most visible difference rather than the first one
+// the comparison happens to reach.
 func classify(before, after Outcome) ChangeKind {
 	switch {
 	case !before.IncidentRaised && after.IncidentRaised:
@@ -265,6 +347,10 @@ func classify(before, after Outcome) ChangeKind {
 		return ChangeDegradedChanged
 	case before.State != after.State:
 		return ChangeStateChanged
+	case before.RuleID != after.RuleID:
+		return ChangeRuleChanged
+	case before.Escalate != after.Escalate:
+		return ChangeEscalationChanged
 	default:
 		return ChangeNoChange
 	}

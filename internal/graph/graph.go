@@ -323,7 +323,15 @@ func (s *Service) Walk(ctx context.Context, tenant, nodeType, nodeID string, t T
 		var n Node
 		var edgeID string
 		var depth int
-		if err := rows.Scan(&n.Type, &n.ID, &n.ID, &depth); err != nil {
+		// node_id and edge_id are separate destinations.
+		//
+		// They were scanned into `&n.ID` twice, so the edge id overwrote the node
+		// id: every `Result.Nodes[].ID` was an edge id, and any caller that
+		// traversed from a returned node id got no rows back. The declared
+		// `edgeID` stayed empty, so `Result.EdgeIDs` was a list of empty strings.
+		// The dedupe below keyed on `type/edgeID`, which is unique per row, so it
+		// never fired and the accumulating branch was unreachable.
+		if err := rows.Scan(&n.Type, &n.ID, &edgeID, &depth); err != nil {
 			return out, fmt.Errorf("graph: scan walk: %w", err)
 		}
 		if len(out.EdgeIDs) >= t.MaxNodes {

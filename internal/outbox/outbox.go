@@ -61,14 +61,32 @@ func Enqueue(ctx context.Context, tx pgx.Tx, m Message) error {
 	if len(m.Payload) == 0 {
 		return errors.New("outbox: payload is required")
 	}
-	if m.RunAfter.IsZero() {
-		m.RunAfter = time.Now().UTC()
+	// run_after is left to the column default when the caller did not ask for a
+	// delay, and the default is the DATABASE's now(), not the application's.
+	//
+	// Every claim predicate compares run_after against the database clock
+	// (`run_after <= now()`), so a value written from the host's clock is being
+	// compared against a clock it may not agree with. A host behind the database
+	// writes a run_after in the past and the message fires immediately, skipping
+	// the delay the caller asked for; a host ahead writes one in the future and
+	// the message sits unclaimed until the skew drains. The inbox already requires
+	// its caller to supply ReceivedAt for the same reason and takes it from the
+	// platform's own clock; the outbox did not, and its default was
+	// time.Now().UTC().
+	//
+	// Passing NULL and letting the column default apply is what makes the two
+	// clocks the same clock. It needs no migration: the column already carries
+	// DEFAULT now(), which is why this is a change to the INSERT rather than to
+	// the schema.
+	var runAfter any
+	if !m.RunAfter.IsZero() {
+		runAfter = m.RunAfter.UTC()
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO outbox_events (tenant_id, site_id, topic, payload, idempotency_key, run_after)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		VALUES ($1, $2, $3, $4, $5, COALESCE($6::timestamptz, now()))
 		ON CONFLICT (tenant_id, idempotency_key) DO NOTHING`,
-		m.TenantID, nullString(m.SiteID), m.Topic, m.Payload, m.IdempotencyKey, m.RunAfter.UTC(),
+		m.TenantID, nullString(m.SiteID), m.Topic, m.Payload, m.IdempotencyKey, runAfter,
 	); err != nil {
 		return fmt.Errorf("outbox: enqueue: %w", err)
 	}
@@ -80,6 +98,11 @@ type Delivery struct {
 	OutboxID int64
 	Message
 	AttemptCount int
+	// LeaseOwner is the relay that claimed this message. It is carried on the
+	// delivery rather than taken as a parameter because it is the half of the
+	// claim that the completion write has to match on, and a completion that
+	// does not carry it cannot match on it.
+	LeaseOwner string
 }
 
 // Handler consumes a delivery. It must be idempotent on IdempotencyKey: the relay
@@ -119,8 +142,8 @@ WITH candidate AS (
           OR (status = 'delivering' AND lease_expires_at IS NOT NULL AND lease_expires_at < now())
            )
      ORDER BY run_after, outbox_id
-     FOR UPDATE SKIP LOCKED
-     LIMIT $1
+		FOR UPDATE SKIP LOCKED
+		LIMIT $1
 )
 UPDATE outbox_events o
    SET status = 'delivering',
@@ -129,8 +152,21 @@ UPDATE outbox_events o
        attempt_count = o.attempt_count + 1
   FROM candidate c
  WHERE o.outbox_id = c.outbox_id
+-- lease_owner is returned as well as the message, because every write that
+-- follows the claim has to be able to match the claim. A completion that cannot
+-- name its holder is a completion that can be applied by anybody.
 RETURNING o.outbox_id, o.tenant_id, o.site_id, o.topic, o.payload,
-          o.idempotency_key, o.attempt_count`
+          o.idempotency_key, o.attempt_count, o.lease_owner`
+
+// ErrLeaseLost is returned when a relay tries to finish a message it no longer
+// holds.
+//
+// It is not a retry signal. The row is somebody else's now: either it was
+// reclaimed after this relay's lease lapsed, or it already reached a terminal
+// state. The correct response is to log it and move on, and treating it as
+// "retry me" is how a dead letter gets overwritten by a worker that finished
+// late.
+var ErrLeaseLost = errors.New("outbox: the lease on this message is no longer held by this relay")
 
 // DrainOnce delivers up to limit messages and returns how many it handled.
 //
@@ -164,7 +200,7 @@ func (r *Relay) DrainOnce(ctx context.Context, tenantID, owner string, limit int
 			var d Delivery
 			var siteID *string
 			if err := rows.Scan(&d.OutboxID, &d.TenantID, &siteID, &d.Topic, &d.Payload,
-				&d.IdempotencyKey, &d.AttemptCount); err != nil {
+				&d.IdempotencyKey, &d.AttemptCount, &d.LeaseOwner); err != nil {
 				return fmt.Errorf("outbox: scan: %w", err)
 			}
 			if siteID != nil {
@@ -198,18 +234,45 @@ func (r *Relay) deliver(ctx context.Context, d Delivery) error {
 	// Delivered is terminal. A redelivery after a crash between the handler
 	// succeeding and this write is why handlers must be idempotent; marking it
 	// here is what stops the common case, not the rare one.
-	_, err := r.Pool.For(d.TenantID, "outbox").Exec(ctx, `
+	//
+	// The write matches the claim: status = 'delivering' AND lease_owner = this
+	// relay. It used to match on outbox_id alone, which made the mark-delivered
+	// statement applicable by anybody at any time. The interleaving that costs
+	// something is reachable, because a handler is not bounded by the lease: relay
+	// A claims, its handler is slow past the lease, relay B claims the expired
+	// row, B's handler fails, and B drives the message to dead_letter. A then
+	// returns from its handler successfully and overwrites status with
+	// 'delivered' and clears last_error. The dead letter — the "visible, audited
+	// fact, never a silent drop" this package's own doc promises — is erased by a
+	// worker that finished late, and the operator never sees the message at all.
+	// Matching the claim is the whole fix: A's write affects no rows, and A is
+	// told its lease is gone rather than being allowed to assert a terminal state
+	// it does not own.
+	tag, err := r.Pool.For(d.TenantID, "outbox").Exec(ctx, `
 		UPDATE outbox_events
 		   SET status = 'delivered', delivered_at = now(),
 		       lease_owner = NULL, lease_expires_at = NULL, last_error = NULL
-		 WHERE outbox_id = $1`, d.OutboxID)
+		 WHERE outbox_id = $1
+		   AND status = 'delivering'
+		   AND lease_owner IS NOT DISTINCT FROM $2`, d.OutboxID, d.LeaseOwner)
 	if err != nil {
 		return fmt.Errorf("outbox: mark delivered: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		// Either the lease was reclaimed or the message already reached a
+		// terminal state, most importantly dead_letter. Saying so beats writing
+		// 'delivered' over another relay's terminal state.
+		return fmt.Errorf("%w: message %d (%s)", ErrLeaseLost, d.OutboxID, d.IdempotencyKey)
 	}
 	return nil
 }
 
 func (r *Relay) markFailed(ctx context.Context, d Delivery, cause error) error {
+	if cause == nil {
+		// The failure path, and `cause.Error()` below would panic while building
+		// the arguments, before the query is sent.
+		cause = errors.New("outbox: the delivery had no cause recorded")
+	}
 	maxAttempts := r.MaxAttempts
 	if maxAttempts <= 0 {
 		maxAttempts = 8
@@ -222,16 +285,127 @@ func (r *Relay) markFailed(ctx context.Context, d Delivery, cause error) error {
 	// worker that has already moved on and is never marked at all. A raising
 	// backoff on the failure path turns a bounded retry into a lost message,
 	// which is the one thing this table exists to prevent.
+	//
+	// run_after is set to now(), not to a backoff, on the transition to
+	// dead_letter. It used to be set to a future instant on that transition too,
+	// which is a fact that reads as "this will be retried" and is not: no claim
+	// ever selects a dead_letter row, so the value is a lie in the only column an
+	// operator or a query has to judge from. now() is the honest "this stopped
+	// here" and it is the same instant the dead letter entered the state, which is
+	// what an operator ordering dead letters by time needs.
+	//
+	// last_error is the dead letter's reason, and it is the reason rather than a
+	// dedicated column because outbox_events has no dead_letter_reason and adding
+	// one needs a migration this change may not make. The reason is only a reason
+	// if an operator can read it, so DeadLetters below selects it.
 	if err := r.Pool.For(d.TenantID, "outbox").QueryRow(ctx, `
 		UPDATE outbox_events
-		   SET status = CASE WHEN attempt_count >= $2 THEN 'dead_letter' ELSE 'failed' END,
-		       last_error = $3,
-		       run_after = now() + make_interval(secs => (5 * power(2, least(attempt_count, 6)))::int)
+		   SET status = CASE WHEN attempt_count >= $3 THEN 'dead_letter' ELSE 'failed' END,
+		       last_error = $4,
+		       run_after = CASE WHEN attempt_count >= $3
+		                       THEN now()
+		                       ELSE now() + make_interval(secs => (5 * power(2, least(attempt_count, 6)))::int)
+		                   END,
+		       lease_owner = NULL,
+		       lease_expires_at = NULL
 		 WHERE outbox_id = $1
-		RETURNING status`, d.OutboxID, maxAttempts, cause.Error()).Scan(&status); err != nil {
+		   AND status = 'delivering'
+		   AND lease_owner IS NOT DISTINCT FROM $2
+		RETURNING status`, d.OutboxID, d.LeaseOwner, maxAttempts, cause.Error()).Scan(&status); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// The lease is gone, so this attempt's failure is not this relay's to
+			// record. Recording it anyway is how a worker that finished late
+			// resurrects a row that has since been delivered or dead-lettered by
+			// somebody else.
+			return fmt.Errorf("%w: message %d (%s): %w",
+				ErrLeaseLost, d.OutboxID, d.IdempotencyKey, cause)
+		}
 		return fmt.Errorf("outbox: mark failed: %w", err)
 	}
 	return cause
+}
+
+// DeadLetter is one message that reached a terminal failure.
+type DeadLetter struct {
+	OutboxID       int64
+	TenantID       string
+	SiteID         string
+	Topic          string
+	IdempotencyKey string
+	Attempts       int
+	// Reason is last_error. outbox_events has no dead_letter_reason column, unlike
+	// inbox_events and jobs, and adding one needs a migration this change may not
+	// make, so the failure text already in the row is the reason. It is only a
+	// reason because something reads it, which is what this listing is for.
+	Reason string
+	// DeadLetteredAt is run_after. markFailed sets run_after to now() on the
+	// transition to dead_letter, so on a dead-lettered row it is the instant the
+	// message entered the state and nothing else. Ordering by it is what makes a
+	// newly dead-lettered message appear at the top of the operator's list even
+	// when it was enqueued weeks ago and has been retrying ever since.
+	DeadLetteredAt time.Time
+}
+
+// DeadLetters lists dead-lettered messages, most recently dead-lettered first.
+//
+// It is the operator's reason surface for this table, and it is ordered by the
+// instant the message reached the state rather than by when it was enqueued. The
+// SLO says a dead letter must be visible within 60 seconds of entering the state;
+// ordering by enqueue time puts a message that died a moment ago below one that
+// died last month, which is the wrong answer to "what just broke".
+func (r *Relay) DeadLetters(ctx context.Context, tenantID string, limit int) ([]DeadLetter, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	rows, err := r.Pool.For(tenantID, "outbox").Query(ctx, `
+		SELECT outbox_id, tenant_id, site_id, topic, idempotency_key,
+		       attempt_count, COALESCE(last_error, ''), run_after
+		  FROM outbox_events
+		 WHERE tenant_id = $1 AND status = 'dead_letter'
+		 ORDER BY run_after DESC
+		 LIMIT $2`, tenantID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("outbox: list dead letters: %w", err)
+	}
+	defer rows.Close()
+
+	var out []DeadLetter
+	for rows.Next() {
+		var d DeadLetter
+		var siteID *string
+		if err := rows.Scan(&d.OutboxID, &d.TenantID, &siteID, &d.Topic, &d.IdempotencyKey,
+			&d.Attempts, &d.Reason, &d.DeadLetteredAt); err != nil {
+			return nil, fmt.Errorf("outbox: scan dead letter: %w", err)
+		}
+		if siteID != nil {
+			d.SiteID = *siteID
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// Replay moves a dead letter back to pending so it is retried.
+//
+// Replay is an operator action and never automatic: a message that could not be
+// delivered usually means something on the other end is broken, and retrying it
+// in a loop turns a visible incident into invisible load. Replaying also clears
+// the attempt count, because the bound that produced the dead letter has already
+// been spent and a replay that kept the count would dead-letter on the first
+// attempt again.
+func (r *Relay) Replay(ctx context.Context, tenantID string, outboxID int64) error {
+	tag, err := r.Pool.For(tenantID, "outbox").Exec(ctx, `
+		UPDATE outbox_events
+		   SET status = 'pending', attempt_count = 0, last_error = NULL,
+		       run_after = now(), lease_owner = NULL, lease_expires_at = NULL
+		 WHERE outbox_id = $1 AND status = 'dead_letter'`, outboxID)
+	if err != nil {
+		return fmt.Errorf("outbox: replay: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("outbox: message %d is not a dead letter", outboxID)
+	}
+	return nil
 }
 
 func (r *Relay) lease() time.Duration {

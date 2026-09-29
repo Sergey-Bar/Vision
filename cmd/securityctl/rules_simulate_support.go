@@ -69,15 +69,18 @@ func activeBundle(ctx context.Context) (string, []byte, error) {
 
 // businessHoursSchedule resolves the schedule the built-in bundle names.
 //
+// It delegates to `rules.BusinessHoursSchedule` so the simulation and the
+// production pipeline answer the same question. It used to carry its own copy,
+// hardcoded to UTC: three callers read a schedule and each supplied a different
+// answer, and the one that mattered most — the production pipeline — supplied
+// none at all, so every schedule rule in the active bundle was dead. A digest
+// acknowledged at activation then certified a behaviour the product did not have.
+//
 // Schedules are site data rather than bundle data, so they live in one place an
 // operator edits rather than in every rule. A site with different hours supplies
-// its own; the test and simulation default is 08:00 to 18:00 UTC.
+// its own resolver; the default is 08:00 to 18:00.
 func businessHoursSchedule(id string, at time.Time) bool {
-	if id != "business-hours" {
-		return false
-	}
-	h := at.UTC().Hour()
-	return h >= 8 && h < 18
+	return rules.BusinessHoursSchedule(id, at, time.UTC)
 }
 
 // scenariosFromFixtures turns a fixture set into simulate scenarios.

@@ -58,8 +58,23 @@ type AIObservation struct {
 	InsufficientEvidence bool
 	// Degraded is set when the observation records a degradation rather than a
 	// real inference. A degraded observation is not evidence at all.
-	Degraded       bool
+	Degraded bool
+	// DegradedReason is the machine-readable half: a member of the closed set
+	// `none|model_unavailable|no_runtime|timeout|error|absent`, which is what
+	// `ai_observations.degraded_reason` is CHECK-constrained to and what a rule
+	// switches on.
+	//
+	// It must be exactly one of those values. A reason with prose appended is not
+	// a member of a closed set, and everything that reads it — `match.go`, the
+	// console, the incident's verification row, the replay narrative — falls
+	// through to `absent`. An operator triaging an AI outage is then told the
+	// model was never asked, which is the one answer that sends them to the wrong
+	// place.
 	DegradedReason string
+	// DegradedDetail is the human half: the exit code, the endpoint, the message.
+	// It is free text, it is never switched on, and `ai_observations` has a column
+	// for it because the two are different facts.
+	DegradedDetail string
 }
 
 // Context is everything an evaluation may read that is not a signal.

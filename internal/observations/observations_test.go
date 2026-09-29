@@ -2,6 +2,7 @@ package observations_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -298,6 +299,56 @@ func TestStatsReportAvailability(t *testing.T) {
 	}
 	if stats.DegradedByReason["no_runtime"] != 1 {
 		t.Errorf("the degradation breakdown is %v", stats.DegradedByReason)
+	}
+}
+
+// The non-random id fallback has to be unique per call, and the comment in
+// observations.go says so: "A failure to read randomness is a failure to be able
+// to distinguish two runs, and a fallback that is not unique would silently lose
+// one."
+//
+// It was not unique. The fallback hashed o.CreatedAt, and Record called newID
+// before defaulting CreatedAt, so CreatedAt was always the zero time in that
+// path: every degraded or failed observation for one (tenant, event, prompt
+// version) derived the same id, and the second insert failed on the primary
+// key. Two model outages on the same event, and the second was lost.
+//
+// The clock is injected and frozen, so this does not depend on two records
+// landing in different ticks - which is the point: a uniqueness guarantee that
+// holds only when the clock moves is not a guarantee.
+func TestTheNonRandomIdFallbackIsStillUniquePerCall(t *testing.T) {
+	w, tenant, site := writer(t)
+	ctx := context.Background()
+	w.RandRead = func([]byte) (int, error) { return 0, errors.New("no entropy") }
+
+	first, err := w.RecordDegraded(ctx, base(tenant, site),
+		observations.DegradationTimeout, "the runtime did not answer")
+	if err != nil {
+		t.Fatalf("first degraded record: %v", err)
+	}
+	second, err := w.RecordDegraded(ctx, base(tenant, site),
+		observations.DegradationTimeout, "the runtime did not answer again")
+	if err != nil {
+		t.Fatalf("second degraded record: %v", err)
+	}
+	if first.ObservationID == second.ObservationID {
+		t.Fatalf("both runs of the same model over the same event derived the id %s; the "+
+			"second insert would have failed on the primary key", first.ObservationID)
+	}
+	// Both are real rows, not one row read twice.
+	for _, o := range []observations.Observation{first, second} {
+		if _, err := w.Get(ctx, tenant, o.ObservationID); err != nil {
+			t.Errorf("observation %s is not readable back: %v", o.ObservationID, err)
+		}
+	}
+	var n int
+	if err := testutil.Pool(t).QueryRow(ctx,
+		`SELECT count(*) FROM ai_observations WHERE tenant_id = $1 AND observation_id IN ($2, $3)`,
+		tenant, first.ObservationID, second.ObservationID).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("%d rows stored for two distinct runs, want 2", n)
 	}
 }
 

@@ -241,22 +241,33 @@ func (s *Service) reevaluate(in ReplayInputs, detail Detail) (rules.Decision, bo
 	if skew <= 0 {
 		skew = in.Bundle.Settings.Clock.SkewToleranceMS
 	}
-	siteLoc := in.Policy
-	_ = siteLoc
-
+	// The evaluation location. `in.Policy` is a clock policy, not a location, and
+	// passing one to a `*time.Location` is a type error the compiler caught Ã¢â‚¬â€ which
+	// is why the site timezone was never actually threaded through here and a
+	// replay evaluated every schedule in UTC. Defaulted to UTC until the incident
+	// carries one.
+	loc := time.UTC
 	engine := rules.NewEngine(in.Bundle, rules.Context{
 		// The incident's own first event time stands in for "now": a schedule
 		// condition has to be evaluated against when the event happened, not
 		// against when the replay runs, or a months-old after-hours incident would
 		// replay differently depending on the hour someone ran the query.
 		Now: detail.FirstEvent,
+		// The same resolver the production pipeline and the simulation use, unless
+		// the caller supplied its own.
+		//
+		// It used to answer only from `in.InSchedule`, and the production pipeline
+		// supplied nothing at all Ã¢â‚¬â€ so three callers read a schedule and each gave
+		// a different answer, one of which was "false, always". A digest an
+		// operator acknowledged certified a behaviour the product did not have.
 		InSchedule: func(id string, at time.Time) bool {
-			if in.InSchedule == nil {
-				return false
+			if in.InSchedule != nil {
+				return in.InSchedule(id, at.Unix())
 			}
-			return in.InSchedule(id, at.Unix())
+			return rules.BusinessHoursSchedule(id, at, loc)
 		},
 		SkewTolerance: durationMS(skew),
+		SiteTimezone:  loc,
 	})
 
 	trigger, others := signalsFrom(detail)
@@ -324,14 +335,20 @@ func signalsFrom(d Detail) (rules.Signal, []rules.Signal) {
 		if i == 0 {
 			sig.AIObservation = triggerObs
 		}
-		if sig.AIObservation == nil {
-			for _, id := range d.Verification.SupportingObservations {
-				if obs, ok := byID[id]; ok {
-					sig.AIObservation = obs
-					break
-				}
-			}
-		}
+		// A non-trigger event does NOT get the incident's observation.
+		//
+		// It used to: any event whose own observation was nil was handed the first
+		// entry of `Verification.SupportingObservations`, which belongs to a
+		// different event. `matchCorroboration` then records that observation id
+		// in the corroborating signal, so the replay cites evidence the rule never
+		// matched on. It also made `aiAvailable` true for a trigger whose real
+		// observation was absent, which turns UNVERIFIED into CORROBORATED in a
+		// replay that then disagrees with the live decision for a reason that is an
+		// artefact of this loop.
+		//
+		// An event with no observation of its own has no observation. That is
+		// invariant 3 stated about replay rather than about evaluation, and it is
+		// the same statement in both places.
 		if i == 0 {
 			trigger = sig
 			continue

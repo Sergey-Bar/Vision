@@ -28,6 +28,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -73,7 +74,7 @@ const (
 // The tiers are the ones the plan defines: A is authoritative state reported by
 // the source of truth, B is a deterministic fact the core derived, C is an AI
 // observation. A canonical event is a derived fact - it is a normalization of a
-// raw envelope, not the device's own report — so candidates are Tier B. The
+// raw envelope, not the device's own report â€” so candidates are Tier B. The
 // trigger is Tier A, because it is the fact the rule is being evaluated against
 // rather than corroboration for it.
 //
@@ -452,15 +453,26 @@ func buildObservation(id, profile string, structured []byte, insufficient bool, 
 	if obs.Structured == nil {
 		obs.Structured = map[string]any{}
 	}
-	// The reason is the machine-readable half; the detail is the human one, and
-	// only the human one is ever long. Prefixing keeps the machine half
-	// readable while not losing the explanation.
+	// The reason is the machine-readable half and the detail is the human one,
+	// and they are different fields because they are different facts.
+	//
+	// They were concatenated here, which corrupts the machine half.
+	// `DegradedReason` is a member of a closed set â€” `none|model_unavailable|
+	// no_runtime|timeout|error|absent` â€” and `internal/rules/match.go` switches on
+	// the exact string, so "model_unavailable: the VLM worker exited 137" falls
+	// through to the `default` arm and is recorded on the incident as `absent`.
+	// `ai_observations.degraded_reason` is CHECK-constrained to the same set, so
+	// the database would have refused the write; the corruption happened in memory
+	// first and then reached the incident's verification row and the replay
+	// narrative, which are free text and accepted it.
 	if detail != "" {
-		if obs.DegradedReason != "" {
-			obs.DegradedReason += ": " + detail
-		} else {
-			obs.DegradedReason = detail
+		if obs.DegradedReason == "" {
+			// A detail with no class is a degradation the caller named in prose.
+			// `error` is the honest member of the closed set: something went wrong
+			// and the caller said so.
+			obs.DegradedReason = "error"
 		}
+		obs.DegradedDetail = strings.TrimSpace(obs.DegradedDetail + " " + detail)
 	}
 	return obs
 }

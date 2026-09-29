@@ -127,9 +127,28 @@ func (s *Service) CreateIncident(ctx context.Context, in Create) (string, error)
 		// The supporting events and the verification result are in the same
 		// transaction as the incident. An incident whose justification is written
 		// separately is an incident that can exist without one.
-		for _, eventID := range in.Decision.SupportingEvents {
+		//
+		// The trigger is linked whether or not the decision lists it.
+		//
+		// This iterated only `in.Decision.SupportingEvents`, and read
+		// `in.SupportingEventIDs` solely to decide which of them was the trigger.
+		// A rule with no `corroborate` clause resolves to StateCorroborated with
+		// the reason "no_corroboration_required" and an EMPTY supporting list, so
+		// the incident was inserted with no `incident_events` rows at all. Replay
+		// then reads `detail.Events == nil`, `signalsFrom` returns a zero-valued
+		// trigger, and `reevaluate` runs the rule against `EventType: ""`. The
+		// replay mismatch was structural â€” the incident had never recorded what it
+		// was about â€” and not a property of the bundle.
+		linked := make([]string, 0, len(in.Decision.SupportingEvents)+1)
+		trigger := first(in.SupportingEventIDs)
+		if trigger != "" {
+			linked = append(linked, trigger)
+		}
+		linked = append(linked, in.Decision.SupportingEvents...)
+
+		for _, eventID := range linked {
 			role := "supporting"
-			if eventID == first(in.SupportingEventIDs) {
+			if eventID == trigger {
 				role = "trigger"
 			}
 			if _, err := tx.Exec(ctx, `
@@ -571,50 +590,80 @@ func scanDispositions(ctx context.Context, tx pgx.Tx, tenant, incidentID string,
 }
 
 // SetState moves an incident through its lifecycle, auditing every transition.
+//
+// The read, the check and the write are one statement.
+//
+// The current state was read on a separate connection outside the transaction,
+// checked against a lifecycle table that is advisory, and then written with no
+// guard on the state it was read from. Two operators racing â€” A reads `open` and
+// asks for `in_review`, B closes â€” had A's update land after B's and set
+// `state = 'in_review'` while `COALESCE($4, closed_at)` preserved the close
+// timestamp. The incident was simultaneously dispositioned-as-open and closed,
+// and nothing in the ledger recorded that the two updates interleaved.
+//
+// `AND state = $from` is the whole fix: the update matches the state the check was
+// made against, so the loser of a race updates zero rows and is told so, rather
+// than silently overwriting the winner.
 func (s *Service) SetState(ctx context.Context, tenant, incidentID string, to State, actor, reason string) error {
-	from, err := s.currentState(ctx, tenant, incidentID)
-	if err != nil {
-		return err
-	}
-	if !lifecycleAllows(from, to) {
-		return fmt.Errorf("incidents: %s cannot move from %s to %s", incidentID, from, to)
-	}
-
-	return s.Pool.InTenant(ctx, dbx.TenantContext{TenantID: tenant, ActorID: actor},
+	var from State
+	err := s.Pool.InTenant(ctx, dbx.TenantContext{TenantID: tenant, ActorID: actor},
 		func(tx pgx.Tx) error {
+			if err := tx.QueryRow(ctx, `
+				SELECT state FROM incidents
+				 WHERE tenant_id = $1 AND incident_id = $2
+				 FOR UPDATE`, tenant, incidentID).Scan(&from); err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					return fmt.Errorf("incidents: no such incident %s", incidentID)
+				}
+				return fmt.Errorf("incidents: read state: %w", err)
+			}
+			if !lifecycleAllows(from, to) {
+				return fmt.Errorf("incidents: %s cannot move from %s to %s", incidentID, from, to)
+			}
 			closed := any(nil)
 			if to == StateClosed {
 				closed = time.Now().UTC()
 			}
-			if _, err := tx.Exec(ctx, `
-				UPDATE incidents SET state = $3, closed_at = COALESCE($4, closed_at)
-				 WHERE tenant_id = $1 AND incident_id = $2`,
-				tenant, incidentID, string(to), closed); err != nil {
+			tag, err := tx.Exec(ctx, `
+				UPDATE incidents SET state = $4, closed_at = COALESCE($5, closed_at)
+				 WHERE tenant_id = $1 AND incident_id = $2 AND state = $3`,
+				tenant, incidentID, string(from), string(to), closed)
+			if err != nil {
 				return fmt.Errorf("incidents: set state: %w", err)
+			}
+			if tag.RowsAffected() == 0 {
+				// The row lock held for the whole transaction, so this is only
+				// reachable if the lifecycle changed underneath us. Either way the
+				// caller is told the move did not happen.
+				return fmt.Errorf("incidents: %s is no longer in %s; the transition to %s did "+
+					"not happen", incidentID, from, to)
 			}
 			if s.Audit == nil {
 				return nil
 			}
-			_, err := s.Audit.Append(ctx, tx, audit.Entry{
+			// The action is the transition, not a creation.
+			//
+			// It wrote `ActionIncidentCreated` for every lifecycle change, with the
+			// from and to states in the state-hash fields. A reader filtering the
+			// ledger on "incident created" saw N+1 creations for one incident, and
+			// the rows that were not creations were indistinguishable from the one
+			// that was. An append-only ledger is worth something precisely because
+			// two different events are two different rows.
+			_, err = s.Audit.Append(ctx, tx, audit.Entry{
 				TenantID: tenant, Actor: actor, ActorType: audit.ActorOperator,
-				Action: audit.ActionIncidentCreated, TargetType: "incident", TargetID: incidentID,
-				PrevStateHash: string(from), ResultStateHash: string(to), Reason: reason,
+				Action:     string(to),
+				TargetType: "incident",
+				TargetID:   incidentID,
+				Reason:     reason,
+				RequestID:  incidentID,
+				SessionID:  actor,
+				EvidenceRefs: []string{
+					"from=" + string(from), "to=" + string(to),
+				},
 			})
 			return err
 		})
-}
-
-func (s *Service) currentState(ctx context.Context, tenant, incidentID string) (State, error) {
-	var st State
-	err := s.Pool.For(tenant, "incidents").QueryRow(ctx, `SELECT state FROM incidents WHERE tenant_id = $1 AND incident_id = $2`,
-		tenant, incidentID).Scan(&st)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return "", ErrNotFound
-		}
-		return "", fmt.Errorf("incidents: current state: %w", err)
-	}
-	return st, nil
+	return err
 }
 
 // lifecycleAllows enforces the transitions. Not every pair is legal: a closed

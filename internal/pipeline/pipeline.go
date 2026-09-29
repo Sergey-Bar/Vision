@@ -82,6 +82,23 @@ type Deps struct {
 	SiteID        string
 	IntegrationID string
 
+	// SiteLocation is the site's timezone, used to evaluate a schedule.
+	//
+	// It used to be hardcoded UTC in the evaluation context, which makes a
+	// schedule wrong by the site's offset.
+	SiteLocation *time.Location
+
+	// InSchedule resolves a schedule id against a site-local instant. A Deps with
+	// none gets `rules.SiteScheduleResolver(SiteLocation)`, which is the same
+	// default the simulation and the CLI use â€” the point being that they cannot
+	// disagree.
+	//
+	// There was no default before, so `matchSchedule` returned false for every
+	// schedule and every schedule rule in the active bundle was dead in
+	// production: an after-hours rule never fired, and a negated business-hours
+	// rule matched all day.
+	InSchedule func(id string, at time.Time) bool
+
 	// PollInterval is how often the ingest loop polls.
 	PollInterval time.Duration
 	// ClaimBatch is how many inbox rows one consume pass takes.
@@ -168,7 +185,7 @@ func (l *Loops) runGauges(ctx context.Context) {
 //
 // Each read is independent and each failure is silent: a gauge that cannot be
 // measured keeps its previous value rather than being set to zero. A gauge set
-// to zero because its query failed is worse than a stale one — it reads as "the
+// to zero because its query failed is worse than a stale one â€” it reads as "the
 // backlog is clear", which is the one thing an operator must never be told by a
 // broken query.
 func (l *Loops) SampleGauges(ctx context.Context) {
@@ -708,10 +725,35 @@ func (l *Loops) decide(ctx context.Context, item inbox.Lease, result normalize.R
 			"used_seconds", correlation.Window.Used.Seconds())
 	}
 
+	// The site's location, used to evaluate a schedule.
+	//
+	// It was hardcoded UTC, which makes a schedule wrong by the site's offset: a
+	// site in UTC+3 had its business hours evaluated three hours early and an
+	// after-hours rule fired at two in the afternoon. AGENTS.md is explicit that a
+	// site's timezone is the site's timezone and never the host's.
+	siteLoc := time.UTC
+	if l.Deps.SiteLocation != nil {
+		siteLoc = l.Deps.SiteLocation
+	}
+	// A schedule resolver, and the same one the simulation and replay use.
+	//
+	// There was none, and `matchSchedule` returns false when the resolver is nil
+	// â€” correctly, because defaulting to true would make an after-hours rule fire
+	// all day. So every schedule rule in the active bundle was dead in production:
+	// an after-hours rule never fired, and a `not: {schedule: business-hours}` rule
+	// matched twenty-four hours a day. The digest an operator acknowledged at
+	// activation was produced by a resolver the product did not use, so the gate
+	// certified a behaviour that did not exist.
+	schedule := l.Deps.InSchedule
+	if schedule == nil {
+		schedule = rules.SiteScheduleResolver(siteLoc)
+	}
+
 	engine := rules.NewEngine(bundle.Compiled, rules.Context{
 		Now:           result.NormalizedAt,
 		SkewTolerance: time.Duration(bundle.Compiled.Settings.Clock.SkewToleranceMS) * time.Millisecond,
-		SiteTimezone:  time.UTC,
+		SiteTimezone:  siteLoc,
+		InSchedule:    schedule,
 	})
 	decision := engine.Resolve(engine.Evaluate(correlation.Trigger, correlation.Available))
 
@@ -729,6 +771,32 @@ func (l *Loops) decide(ctx context.Context, item inbox.Lease, result normalize.R
 		// no rule cares about.
 		return
 	}
+
+	// Whether an incident is raised is the rule author's decision, not a
+	// consequence of the rule having matched.
+	//
+	// It used to be `RuleID != ""`, which raised an incident for two kinds of
+	// decision that mean the opposite:
+	//
+	//   - `then: {suppress: true}` resolves to State SUPPRESSED with a non-empty
+	//     RuleID and a zero Action. The rule whose entire purpose is to *prevent*
+	//     an incident was what created one, with the default severity `medium`.
+	//   - `then: {dispatch: [notify_operator]}` with no `create_incident` is
+	//     explicitly legal â€” the semantic validator treats a non-empty dispatch
+	//     list as a non-empty action â€” and its Decision carries a RuleID.
+	//
+	// `internal/simulate` already modelled this correctly: its diff says
+	// `IncidentRaised: d.Action.CreateIncident`. So the digest an operator
+	// acknowledged at activation said "no incident" for a bundle that raised one
+	// in production, which is the one thing the activation gate exists to prevent.
+	if !decision.Action.CreateIncident {
+		l.log("a rule matched and asked for no incident",
+			"event_id", result.EventID, "rule_id", decision.RuleID,
+			"state", string(decision.State),
+			"suppressed", decision.State == rules.StateSuppressed)
+		return
+	}
+
 	// An unverified decision still raises an incident, and that is the engine's
 	// deliberate answer rather than an accident: StateUnverified is a first-class
 	// verification state, it is indexed as one, and a matched rule whose
@@ -736,11 +804,7 @@ func (l *Loops) decide(ctx context.Context, item inbox.Lease, result normalize.R
 	// rule author who sets create_incident has asked for the match to be
 	// recorded; silently dropping it would leave a rule that fired with no
 	// record anywhere, which is the failure mode this product exists to avoid.
-	//
-	// What was wrong here was the log line, not the control: it said "no incident
-	// raised" and then raised one, so an operator reading the log was told the
-	// opposite of what happened. The line now names what the incident will carry.
-	if decision.State != rules.StateCorroborated && decision.Action.CreateIncident {
+	if decision.State != rules.StateCorroborated {
 		l.log("a rule matched but the outcome is not corroborated; raising the incident "+
 			"as UNVERIFIED for an operator to verify",
 			"event_id", result.EventID, "rule_id", decision.RuleID,
@@ -828,6 +892,17 @@ var errNoActiveBundle = errors.New("pipeline: no active rule bundle")
 
 // activeBundle returns the compiled active bundle, cached by (version, hash).
 //
+// InvalidateBundleCache drops the compiled bundle so the next decision recompiles.
+//
+// It exists so a test can activate a different bundle and see the change. The product
+// path does not need it: ctiveBundle reloads when the version or the content hash
+// changes, which is when an operator activates one.
+func (l *Loops) InvalidateBundleCache() {
+	l.bundleMu.Lock()
+	defer l.bundleMu.Unlock()
+	l.bundle = nil
+}
+
 // Compilation is not free - YAML, JSON Schema, and a semantic pass - and this is
 // the hot path, once per event. Recompiling per event would make the rule engine
 // the most expensive thing in the pipeline for no benefit: the bundle changes
@@ -850,9 +925,39 @@ func (l *Loops) activeBundle(ctx context.Context) (*activeBundle, error) {
 	}
 
 	compiled, problems := rules.NewCompiler().Compile(content)
+
+	// A warning is not a failure, and the difference is load-bearing.
+	//
+	// The compiler emits warnings for things an author has *decided*: a rule that
+	// degrades to `proceed_without` warns that it creates incidents on less
+	// evidence, and `internal/rules/semantic.go` documents that as the intended
+	// shape for a rule that must still work with the AI plane down. A corroborate
+	// clause that declares `ifAIAvailable` without consuming an observation
+	// warns that the declaration has no effect. Both ship in the built-in bundle.
+	//
+	// This refused any bundle with any problem, so a single endorsed warning â€” a
+	// deliberate choice by a rule author â€” made `decide` fail for EVERY event, with
+	// one log line each. The whole AI-degradation warning path was a bundle-killer
+	// in production, and the bundle had already passed `Store` and `Activate`,
+	// which is where warnings are supposed to be allowed.
+	//
+	// An error still is a failure. A bundle with an error-level problem cannot
+	// have been stored or activated, so reaching here with one means something is
+	// wrong between that check and this one, and it is refused rather than
+	// evaluated.
+	for _, pr := range problems {
+		if pr.Severity != rules.SeverityWarning {
+			return nil, fmt.Errorf("pipeline: the active bundle does not compile: %s: %s",
+				pr.Code, pr.Message)
+		}
+	}
 	if len(problems) > 0 {
-		return nil, fmt.Errorf("pipeline: the active bundle does not compile: %s",
-			problems[0].Message)
+		// Said once, at load, rather than per event. An operator who needs to know
+		// what the active bundle warns about can ask; an operator who does not
+		// should not read the same line on every event for the life of the process.
+		l.log("the active bundle compiles with warnings",
+			"version", version, "warnings", len(problems),
+			"first", problems[0].Code+": "+problems[0].Message)
 	}
 	compiled.Version = version
 	compiled.ContentHash = hash

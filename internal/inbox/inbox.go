@@ -60,7 +60,12 @@ type Accepted struct {
 	Duplicate bool
 	Status    Status
 	// EventID is the inbox row's identity, present on both paths so a caller
-	// can log a correlation id for a duplicate too.
+	// can log a correlation id for a duplicate too. It is the scoped natural key
+	// rendered as one value — tenant, integration and source event id — because
+	// that triple is what identifies the row and no single column names it. It
+	// was documented as present on both paths and was assigned on neither, so it
+	// was always ""; a caller correlating a duplicate, which is the case where a
+	// correlation id matters most, had nothing to correlate with.
 	EventID string
 	// ReceivedAt is the value the database stored, which is the partition the row
 	// actually landed in. It is read back rather than echoed from the request,
@@ -107,13 +112,37 @@ INSERT INTO inbox_events (
     tenant_id, integration_id, source_event_id, site_id,
     status, payload, payload_hash, received_at, attempt_count, retention_until
 ) VALUES ($1, $2, $3, $4, 'received', $5, $6, $7, 0, $8)
-RETURNING received_at`
+-- The natural key is returned, not just the timestamp. Accepted.EventID promises
+-- the row's identity on both paths, and the only honest way to fill it is to read
+-- it back from the row the database just wrote rather than to echo the request:
+-- the two are the same values today, and the day they are not, an echo is a lie
+-- dressed as an identity.
+RETURNING received_at, tenant_id, integration_id, source_event_id`
 
 const insertKeySQL = `
 INSERT INTO inbox_event_keys (tenant_id, integration_id, source_event_id, inbox_partition)
 VALUES ($1, $2, $3, $4)
 ON CONFLICT (tenant_id, integration_id, source_event_id) DO NOTHING
 RETURNING 1`
+
+// readExistingEventSQL reads the identity of a row that is already in the inbox.
+//
+// This exists because of a promise Accepted makes and did not keep. EventID is
+// documented as "present on both paths so a caller can log a correlation id for a
+// duplicate too", and it was assigned on neither: both duplicate returns built
+// Accepted{Duplicate: true, Status: StatusReceived} and left it "". A caller
+// correlating a duplicate — which is the case where a correlation id matters most,
+// because the duplicate is the confusing one — had nothing to correlate with and
+// no error telling it so.
+//
+// The lookup is on the scoped key, which is the table's primary key, so it is an
+// index probe rather than a scan. Its received_at is returned as well, and for
+// the same reason the insert reads it back: it is the partition the row landed in,
+// and a duplicate is precisely the case where the caller cannot know it.
+const readExistingEventSQL = `
+SELECT received_at, tenant_id, integration_id, source_event_id
+  FROM inbox_events
+ WHERE tenant_id = $1 AND integration_id = $2 AND source_event_id = $3`
 
 // Write accepts one event.
 //
@@ -145,30 +174,67 @@ func (w *Writer) Write(ctx context.Context, opts WriteOptions) (Accepted, error)
 			opts.TenantID, opts.IntegrationID, opts.SourceEventID, partition).Scan(&claimed)
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
-			accepted = Accepted{Duplicate: true, Status: StatusReceived}
-			return nil
+			return w.acceptedExisting(ctx, tx, opts, &accepted)
 		case err != nil:
 			return fmt.Errorf("inbox: claim dedupe key: %w", err)
 		}
 		if claimed == 0 {
-			accepted = Accepted{Duplicate: true, Status: StatusReceived}
-			return nil
+			return w.acceptedExisting(ctx, tx, opts, &accepted)
 		}
 
-		// received_at is read back rather than assumed: it is the partition key,
-		// so a write that landed in a different month than the caller expected
-		// would leave the dedupe key's partition label wrong.
+		// received_at and the natural key are read back rather than assumed:
+		// received_at is the partition key, so a write that landed in a different
+		// month than the caller expected would leave the dedupe key's partition
+		// label wrong, and the key is the identity the caller was promised.
 		var storedReceivedAt time.Time
+		var id Key
 		if err := tx.QueryRow(ctx, insertInboxSQL,
 			opts.TenantID, opts.IntegrationID, opts.SourceEventID, opts.SiteID,
 			opts.Payload, Hash(opts.Payload), opts.ReceivedAt.UTC(), opts.RetentionUntil,
-		).Scan(&storedReceivedAt); err != nil {
+		).Scan(&storedReceivedAt, &id.TenantID, &id.IntegrationID, &id.SourceEventID); err != nil {
 			return fmt.Errorf("inbox: insert event: %w", err)
 		}
-		accepted = Accepted{Status: StatusReceived, ReceivedAt: storedReceivedAt.UTC()}
+		accepted = Accepted{
+			Status:     StatusReceived,
+			EventID:    id.String(),
+			ReceivedAt: storedReceivedAt.UTC(),
+		}
 		return nil
 	})
 	return accepted, err
+}
+
+// acceptedExisting fills Accepted for an event that is already in the inbox.
+//
+// The row is read rather than reconstructed from the request. Reading it means
+// the duplicate carries the identity and the ingest instant of the row that
+// actually exists, which is the only version of those two facts an operator can
+// use. A key row with no inbox row behind it would return no rows here, and that
+// is a real state — the two writes are in one transaction, so it can only be a
+// row that some other process is mid-transaction on, and the isolation level is
+// what decides whether this sees it. It is reported as a fresh accept rather than
+// as a duplicate with a blank identity, because the alternative is a duplicate
+// carrying no identity at all, which is the defect being fixed.
+func (w *Writer) acceptedExisting(ctx context.Context, tx pgx.Tx, opts WriteOptions, accepted *Accepted) error {
+	var storedReceivedAt time.Time
+	var id Key
+	err := tx.QueryRow(ctx, readExistingEventSQL,
+		opts.TenantID, opts.IntegrationID, opts.SourceEventID,
+	).Scan(&storedReceivedAt, &id.TenantID, &id.IntegrationID, &id.SourceEventID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		*accepted = Accepted{Status: StatusReceived}
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inbox: read the existing event: %w", err)
+	}
+	*accepted = Accepted{
+		Duplicate:  true,
+		Status:     StatusReceived,
+		EventID:    id.String(),
+		ReceivedAt: storedReceivedAt.UTC(),
+	}
+	return nil
 }
 
 func validateWrite(o WriteOptions) error {
@@ -221,6 +287,21 @@ type Key struct {
 	TenantID      string
 	IntegrationID string
 	SourceEventID string
+}
+
+// String renders the key as one value, for a log line or a correlation id.
+//
+// The three fields are the row's identity and there is no single column that
+// names it: inbox_events cannot carry a unique constraint on the triple, because
+// it is range-partitioned on received_at and Postgres requires the partition key
+// in every unique index on a partitioned table. That is why uniqueness lives on
+// inbox_event_keys instead, and it is why the identity an operator or a log line
+// needs is a composite one. The separator is a slash because none of the three
+// components may contain one: an integration id is a configured slug and a source
+// event id is whatever the vendor chose, and a rendered key that cannot be
+// unambiguously split back into its parts is not an identity.
+func (k Key) String() string {
+	return k.TenantID + "/" + k.IntegrationID + "/" + k.SourceEventID
 }
 
 // DefaultLeaseDuration is the visibility timeout. It is long enough that a
@@ -463,6 +544,16 @@ func (w *Writer) Fail(ctx context.Context, key Key, owner string, cause error, m
 			   SET status = CASE WHEN attempt_count >= $4 THEN 'dead_letter' ELSE 'failed' END,
 			       last_error = $5,
 			       dead_letter_reason = CASE WHEN attempt_count >= $4 THEN $5 ELSE NULL END,
+			       -- completed_at is written on the transition to dead_letter and
+			       -- only there. It used to not be written at all on this path, which
+			       -- left a dead letter with no completion instant: the console's
+			       -- dead-letter list orders by completed_at, and a NULL sorts first
+			       -- under DESC, so every dead letter that came through Fail would
+			       -- have headed the list regardless of when it died. The instant the
+			       -- row entered its terminal state is what the list is ordered by and
+			       -- what the 60-second visibility SLO is measured against, so it is
+			       -- recorded here.
+			       completed_at = CASE WHEN attempt_count >= $4 THEN now() ELSE completed_at END,
 			       lease_owner = NULL,
 			       lease_expires_at = CASE
 			           WHEN attempt_count >= $4 THEN NULL
@@ -488,6 +579,12 @@ type DeadLetter struct {
 	Attempts  int
 	Reason    string
 	FirstSeen time.Time
+	// UpdatedAt is when the event entered dead_letter — completed_at. It was
+	// scanned from received_at, which is not an update time in any sense: it is
+	// when the event arrived, and for an event that spent a month being retried
+	// the two are a month apart. A console column labelled "updated" showing the
+	// ingest instant tells an operator the age of the event rather than the age
+	// of the incident.
 	UpdatedAt time.Time
 }
 
@@ -495,7 +592,15 @@ type DeadLetter struct {
 //
 // This is a console and an alert surface. The SLO says a dead letter must be
 // visible within 60 seconds of entering the state, which is only achievable if
-// the query behind this is cheap enough to run constantly.
+// the query behind this is cheap enough to run constantly and orders by the
+// thing the SLO is about.
+//
+// It orders by completed_at, the instant the row entered dead_letter. It used to
+// order by received_at, which is ingest order: an event ingested today and
+// dead-lettered after a month of retries sorted below one ingested yesterday and
+// dead-lettered immediately, so the message that just died — the one the operator
+// opened the page for — was not on it. That is not a presentation nit, it is the
+// ordering that decides whether the 60-second visibility SLO is met.
 func (w *Writer) DeadLetters(ctx context.Context, tenantID string, limit int) ([]DeadLetter, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
@@ -503,10 +608,15 @@ func (w *Writer) DeadLetters(ctx context.Context, tenantID string, limit int) ([
 	rows, err := w.Pool.For(tenantID, "inbox").Query(ctx, `
 		SELECT tenant_id, integration_id, source_event_id, site_id,
 		       attempt_count, COALESCE(dead_letter_reason, last_error, ''),
-		       first_seen_at, received_at
+		       first_seen_at, completed_at
 		  FROM inbox_events
 		 WHERE tenant_id = $1 AND status = 'dead_letter'
-		 ORDER BY received_at DESC
+		 -- NULLS LAST explicitly. Postgres puts NULLs first under DESC, so without
+		 -- it a dead letter with no completion instant would sort above every real
+		 -- one. Every path into the state now writes completed_at, which is why
+		 -- there should be none; the clause is what makes a row that somehow has
+		 -- one sort as unknown rather than as newest, which is the honest answer.
+		 ORDER BY completed_at DESC NULLS LAST
 		 LIMIT $2`, tenantID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("inbox: list dead letters: %w", err)
@@ -516,9 +626,19 @@ func (w *Writer) DeadLetters(ctx context.Context, tenantID string, limit int) ([
 	var out []DeadLetter
 	for rows.Next() {
 		var d DeadLetter
+		// completed_at is nullable in the schema, and a dead-lettered row always
+		// has it: Fail and the expireExhausted statement both write it, and they
+		// are the only two ways into the state. COALESCE rather than a scan error
+		// anyway, because a dead letter with no completion instant would take the
+		// whole operator list down with it, and one unreadable row is a worse
+		// reason to show nothing than showing the rest.
+		var completedAt *time.Time
 		if err := rows.Scan(&d.TenantID, &d.IntegrationID, &d.SourceEventID,
-			&d.SiteID, &d.Attempts, &d.Reason, &d.FirstSeen, &d.UpdatedAt); err != nil {
+			&d.SiteID, &d.Attempts, &d.Reason, &d.FirstSeen, &completedAt); err != nil {
 			return nil, fmt.Errorf("inbox: scan dead letter: %w", err)
+		}
+		if completedAt != nil {
+			d.UpdatedAt = completedAt.UTC()
 		}
 		out = append(out, d)
 	}

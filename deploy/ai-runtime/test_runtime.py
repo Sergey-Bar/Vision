@@ -7,7 +7,7 @@ rather than a guess, and that a degraded answer cannot be read as a negative.
 
 The last one is the whole product. If a consumer that ignores the degradation
 field reads an empty output as "nobody was present", the platform is worse than
-having no AI at all — so ``insufficientEvidence`` is true on every degraded
+having no AI at all â€” so ``insufficientEvidence`` is true on every degraded
 response even when the caller forgets to look at ``degradedReason``.
 """
 
@@ -21,6 +21,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import runtime as runtime_module  # noqa: E402
 from runtime import (  # noqa: E402
     ALLOWED_DEGRADATIONS,
     DEGRADED_ABSENT,
@@ -57,7 +58,7 @@ PROFILE_SCHEMA = {
 #
 # The runtime verifies and never signs: a private key has no business inside
 # the AI plane. So the signing half lives here, in the test, using the
-# *affine* group formulas from RFC 8032 §3 rather than the extended-coordinate
+# *affine* group formulas from RFC 8032 Â§3 rather than the extended-coordinate
 # ones the runtime uses. If both were the same code, a bug in the curve
 # arithmetic would cancel itself out and the tests would prove nothing. Two
 # different formulations agreeing on the RFC vectors is a real cross-check.
@@ -67,7 +68,7 @@ _D = (-121665 * pow(121666, _P - 2, _P)) % _P
 
 
 def _affine_add(pt1, pt2):
-    # RFC 8032 §3, with a = -1: y3 = (y1*y2 - a*x1*x2) / (1 - d*x1*x2*y1*y2),
+    # RFC 8032 Â§3, with a = -1: y3 = (y1*y2 - a*x1*x2) / (1 - d*x1*x2*y1*y2),
     # so the x product is *added*. Getting that sign wrong produces a coherent
     # but wrong group, which is exactly the class of bug the RFC vectors exist
     # to catch.
@@ -228,7 +229,7 @@ class Ed25519RFC8032(unittest.TestCase):
     here reaches the network, and an air-gapped site can run this.
     """
 
-    # (label, secret key, public key, message hex, signature hex) — RFC 8032 §7.1
+    # (label, secret key, public key, message hex, signature hex) â€” RFC 8032 Â§7.1
     VECTORS = [
         (
             "TEST 1 (empty message)",
@@ -324,7 +325,7 @@ class Ed25519RFC8032(unittest.TestCase):
         # S + L encodes the same mathematical signature and is the classic Ed25519
         # malleability trick. A verifier that skips the S < L check accepts it,
         # which means two distinct byte strings both verify for one signed
-        # manifest — and a signature you can edit is not a signature.
+        # manifest â€” and a signature you can edit is not a signature.
         public = bytes.fromhex(self.VECTORS[0][2])
         message = bytes.fromhex(self.VECTORS[0][3])
         signature = bytes.fromhex(self.VECTORS[0][4])
@@ -424,14 +425,14 @@ class Ed25519RFC8032(unittest.TestCase):
 
 
 class GoldenSignedBundle(unittest.TestCase):
-    """A frozen, correctly signed bundle — the accept path, byte for byte.
+    """A frozen, correctly signed bundle â€” the accept path, byte for byte.
 
     The other bundle tests sign at run time, which proves the round trip but
     would also pass if the signer and the verifier were wrong in the same way.
     These are literals: the manifest bytes, the signature and the public key
     are all fixed, so the only thing that can make them pass is a verifier
     that agrees with the RFC. And the tampered half is a one-byte edit of the
-    same fixture, which is the check that matters — a verifier that always
+    same fixture, which is the check that matters â€” a verifier that always
     accepts would sail through the accept tests and be caught here.
     """
 
@@ -655,11 +656,34 @@ class EvidenceIntegrity(unittest.TestCase):
     def test_matched_evidence_passes_the_check(self) -> None:
         self.assertTrue(evidence().verify())
 
-    def test_empty_evidence_is_not_a_hash_mismatch(self) -> None:
-        # A reference to a stored object the service was not given the bytes for
-        # is legitimate: the core holds the evidence, the plane holds the hash.
+    def test_empty_evidence_is_refused(self) -> None:
+        # This test asserted the opposite, and its name gave the reason: an
+        # evidence with no bytes "is not a hash mismatch". That statement is true
+        # and it was used to justify `return True` â€” which is a different claim,
+        # and the one the product rests on. `verify()` does not verify anything
+        # when there are no bytes; it reports that it verified, which is the
+        # condition the docstring calls worse than no observation.
+        #
+        # There is a real case behind it: the core holds the evidence and the
+        # plane is handed a reference. A reference cannot be verified here, so it
+        # must not be *accepted* here either â€” which is why the request boundary
+        # now refuses a request whose evidence carries no bytes, and this function
+        # has one answer.
         reference_only = Evidence(evidence_id="ev-1", sha256="a" * 64, content_type="video/mp4")
-        self.assertTrue(reference_only.verify())
+        self.assertFalse(reference_only.verify())
+
+    def test_a_request_whose_evidence_has_no_bytes_is_refused(self) -> None:
+        # The boundary check, which is where the distinction between "a reference"
+        # and "nothing was supplied" is actually available.
+        with self.assertRaises(ValueError) as caught:
+            runtime_module._require_bytes(
+                (Evidence(evidence_id="ev-1", sha256="a" * 64, content_type="video/mp4"),)
+            )
+        self.assertIn("ev-1", str(caught.exception))
+
+    def test_a_request_with_real_bytes_is_accepted(self) -> None:
+        good = evidence(b"bytes", "ev-1")
+        runtime_module._require_bytes((good,))  # must not raise
 
     def test_input_hash_is_stable_and_order_independent(self) -> None:
         a = evidence(b"one", "ev-1")

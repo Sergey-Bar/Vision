@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Sergey-Bar/Ai-Captain/internal/audit"
 	"github.com/Sergey-Bar/Ai-Captain/internal/bundles"
 	"github.com/Sergey-Bar/Ai-Captain/internal/evidence"
 	"github.com/Sergey-Bar/Ai-Captain/internal/identity"
@@ -15,6 +16,7 @@ import (
 	"github.com/Sergey-Bar/Ai-Captain/internal/observability"
 	"github.com/Sergey-Bar/Ai-Captain/internal/rules"
 	"github.com/Sergey-Bar/Ai-Captain/internal/simulate"
+	"github.com/jackc/pgx/v5"
 )
 
 // Deps are the services the API routes onto.
@@ -122,8 +124,19 @@ func (s *Server) RegisterRoutes(d Deps) func(*http.ServeMux) {
 			s.requireCapability(identity.CapEvidenceRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
 				s.handleIncidentEvidence(w, r, p, d)
 			}))
+		// `evidence.fetch`, not `evidence.read`.
+		//
+		// The two capabilities are distinct in the role table and in the seed the
+		// migration ships - `viewer` holds `evidence.read` and nothing else, and
+		// `operator` is the role the incident queue is run from - so the
+		// distinction is the model saying "reading the evidence list is not the
+		// same as taking the bytes". This route gated on `evidence.read`, which
+		// made both capabilities grant nothing and left a viewer able to stream
+		// raw video out of the filesystem: a capability table that grants nothing
+		// is a role table that lies, and it lied in the direction of least
+		// privilege.
 		mux.Handle("GET /v1/evidence/{evidenceId}/content",
-			s.requireCapability(identity.CapEvidenceRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+			s.requireCapability(identity.CapEvidenceFetch, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
 				s.handleEvidenceContent(w, r, p, d)
 			}))
 
@@ -489,6 +502,17 @@ func (s *Server) handleIncidentEvidence(w http.ResponseWriter, r *http.Request, 
 // The hash is verified on the way out, so a file altered on disk is reported
 // rather than served: an operator looking at evidence that cannot be proven to be
 // the evidence an incident cited is worse off than being told the file is wrong.
+//
+// The fetch is written to the audit ledger before the first byte goes out.
+// `audit.ActionEvidenceFetched` was declared and never appended to, so every
+// byte of every piece of evidence left the building with no ledger row - the one
+// action on this route that an incident responder would ask about afterwards is
+// the one the ledger does not record. It is written before the response rather
+// than after the stream because a stream that is cut short by a killed process
+// still released bytes, and a row that only lands on a clean finish is a row that
+// is missing from exactly the fetches worth investigating. The cost is that a
+// ledger write which fails refuses the fetch, which is the right way round: an
+// unrecorded release of evidence is worse than a refused one.
 func (s *Server) handleEvidenceContent(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
 	id := r.PathValue("evidenceId")
 	var ref, wantHash, siteID string
@@ -532,6 +556,14 @@ func (s *Server) handleEvidenceContent(w http.ResponseWriter, r *http.Request, p
 	}
 	defer func() { _ = rc.Close() }()
 
+	if err := s.auditEvidenceFetched(r, p, id, siteID, obj); err != nil {
+		// The evidence is not released. A response already committed at this
+		// point could not be withdrawn, so the row is written before the header
+		// is and a failure here is a 500 rather than a silent skip.
+		WriteError(w, http.StatusInternalServerError, "audit_failed", err.Error(), requestID(r))
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Length", itoa(obj.SizeBytes))
 	w.Header().Set("X-Content-SHA256", obj.SHA256)
@@ -541,6 +573,37 @@ func (s *Server) handleEvidenceContent(w http.ResponseWriter, r *http.Request, p
 	w.WriteHeader(http.StatusOK)
 	buf := make([]byte, 64*1024)
 	_, _ = copyStream(w, rc, buf)
+}
+
+// auditEvidenceFetched records the release of raw evidence bytes.
+//
+// The row names the evidence, the site it belongs to, and the digest of exactly
+// what was served, so an investigator asking "who took the video, and is it the
+// video the incident cited" has an answer without trusting the operator's
+// account of it.
+//
+// A server with no audit writer configured is left alone rather than failing the
+// fetch: the same nil check `auditDenied` makes, and for the same reason — a
+// deployment that has not wired the ledger is already broken, and turning every
+// evidence read into a 500 hides that behind a different symptom.
+func (s *Server) auditEvidenceFetched(r *http.Request, p identity.Principal, evidenceID, siteID string, obj evidence.Object) error {
+	if s.Audit == nil || s.Pool == nil {
+		return nil
+	}
+	return s.Pool.InSystemTenant(r.Context(), func(tx pgx.Tx) error {
+		_, err := s.Audit.Append(r.Context(), tx, audit.Entry{
+			TenantID: p.TenantID, Actor: p.Username, ActorType: audit.ActorOperator,
+			Action: audit.ActionEvidenceFetched, TargetType: "evidence", TargetID: evidenceID,
+			// The digest of the bytes, not of the row: the row's digest is what
+			// should have been on disk, and this route is the moment that claim
+			// stops being a claim and becomes a fact.
+			ResultStateHash: obj.SHA256,
+			EvidenceRefs:    []string{obj.Ref},
+			RequestID:       requestID(r), SessionID: p.SessionID, SiteScope: p.SiteScope,
+			Reason: "raw evidence released over " + siteID,
+		})
+		return err
+	})
 }
 
 // handleMetrics renders the Prometheus text exposition.

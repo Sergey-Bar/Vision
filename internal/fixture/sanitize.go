@@ -2,7 +2,9 @@ package fixture
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"strings"
@@ -410,13 +412,33 @@ func readLimited(r interface{ Read([]byte) (int, error) }, limit int64) ([]byte,
 			if isEOF(err) {
 				return buf, nil
 			}
+			if errors.Is(err, io.ErrUnexpectedEOF) {
+				// The stream ended before the body did, which is a different fact
+				// from the body ending at its boundary. Returning `buf` here would
+				// record a connection that died mid-body as a complete capture, and
+				// the manifest hash would then match the truncated bytes - so
+				// VerifyManifest would pass over a fixture that is not the one
+				// anybody reviewed.
+				return nil, fmt.Errorf("fixture: the body ended %d byte(s) before the "+
+					"stream did, so this capture is incomplete and is not being recorded: %w",
+					len(buf), err)
+			}
 			return nil, err
 		}
 	}
 }
 
+// isEOF reports whether err is a clean end of stream.
+//
+// It used to be a substring test for "EOF", which accepted `unexpected EOF` and
+// any wrapper embedding it. That is a shape check standing in for a semantic
+// one: `io.EOF` says the reader reached the boundary and stopped, and
+// `io.ErrUnexpectedEOF` says it ran out of bytes in the middle of something. A
+// connection that dies mid-body is the second, and a fixture recorded from one is
+// a fixture that looks reviewed and is not. `errors.Is` is used rather than `==`
+// so a clean EOF that our own code wrapped with context is still a clean EOF.
 func isEOF(err error) bool {
-	return err != nil && (err.Error() == "EOF" || strings.Contains(err.Error(), "EOF"))
+	return err != nil && errors.Is(err, io.EOF)
 }
 
 // SortedNames returns manifest entries in a stable order, so a regenerated

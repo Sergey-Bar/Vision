@@ -158,6 +158,15 @@ func clampDriftMS(d time.Duration) int32 {
 	}
 }
 
+// SourceClockDeviceID is the reserved device_clocks id under which a source
+// system's own clock is stored. It is exported because normalization reads that
+// row back to apply the skew, and a second spelling of the same id would be a
+// silent miss: the measurement is recorded under one name and read under
+// another, and a VMS forty seconds fast stays uncorrected with nothing saying so.
+func SourceClockDeviceID(integration string) string {
+	return "source:" + integration
+}
+
 // MeasureFromSourceTimes records drift from a source system's own reported time
 // rather than a device's.
 //
@@ -165,11 +174,16 @@ func clampDriftMS(d time.Duration) int32 {
 // against the site's reference. A VMS 40 seconds fast is not one bad camera, it
 // is every event it produced, which is why the plan asks for skew to be injected
 // on a camera *and* a VMS and correlation to be checked against both.
+//
+// The row this writes is read by normalize.loadDrift as the fallback for events
+// whose device has no measurement of its own. It was written by nothing and read
+// by nothing until that, which is why a fast VMS produced uncorrected
+// normalized_at with no degradation recorded.
 func (s *Service) MeasureFromSourceTimes(ctx context.Context, policy clock.Policy, tenant, site, integration, referenceID string, sourceReported, referenceNow time.Time) (clock.DeviceState, error) {
 	var state clock.DeviceState
 	driftMS := clampDriftMS(sourceReported.Sub(referenceNow))
 	state = clock.DeviceState{
-		TenantID: tenant, DeviceID: "source:" + integration, SiteID: site,
+		TenantID: tenant, DeviceID: SourceClockDeviceID(integration), SiteID: site,
 		Source: clock.SourceVMS, DriftMs: driftMS,
 		Band: policy.Band(driftMS), ReferenceID: referenceID, MeasuredAt: s.now(),
 	}

@@ -26,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -157,9 +158,32 @@ type Plan struct {
 	Existing State
 	// IsUpgrade is true when a version is already installed.
 	IsUpgrade bool
+	// Build is the compatibility window of the binary running this install. It is
+	// kept on the plan so a refusal can name both sides: "this build reads X, the
+	// archive needs Y" is actionable and "incompatible" is not.
+	Build release.Compatibility
 	// SchemaWindowOverlaps says whether this build can read the database the
 	// archive expects. False is the case that half-upgrades a site.
 	SchemaWindowOverlaps bool
+	// CoreWindowOverlaps says whether this build's core version is inside the
+	// core window the archive declares it runs on.
+	//
+	// MinCoreVersion, MaxCoreVersion and ContractsVersion were signed, written
+	// into the manifest, copied into the install state - and never read for a
+	// decision by anything. A release declaring maxCoreVersion "0.x" installed
+	// onto a 1.x core without a word, and because the fields are recorded in
+	// Installed the incompatibility then looked compatible after the fact.
+	//
+	// CoreWindowError carries the reason when the window could not be compared
+	// at all, which is refused rather than passed: a bound nobody can parse is a
+	// bound nobody is enforcing.
+	CoreWindowOverlaps bool
+	CoreWindowError    string
+	// ContractsVersionMatches says the archive speaks the same contracts this
+	// build does. The two names the same wire format, and an archive built
+	// against a different one produces incidents this binary cannot read and
+	// fields it silently drops.
+	ContractsVersionMatches bool
 	// HasContractStep is set when the archive carries a contract migration. The
 	// plan refuses to install one in the same archive as its expand.
 	HasContractStep bool
@@ -177,6 +201,7 @@ func Verify(archivePath, programDir string, manifest release.Manifest, trustedKe
 	var p Plan
 	p.ArchivePath = archivePath
 	p.Manifest = manifest
+	p.Build = buildCompatibility
 
 	existing, err := ReadState(programDir)
 	if err != nil {
@@ -211,7 +236,121 @@ func Verify(archivePath, programDir string, manifest release.Manifest, trustedKe
 	archiveMax := manifest.Compatibility.MaxSchemaVersion
 	p.SchemaWindowOverlaps = buildCompatibility.MinSchemaVersion <= archiveMin &&
 		archiveMax <= buildCompatibility.MaxSchemaVersion
+
+	// The same containment test, on the same build's own window, for the two
+	// signed fields that were never compared. The shape is deliberately the
+	// schema window's: the archive's window must sit inside the build's, not
+	// merely overlap it, because the rollback target after a bad install is the
+	// same build and not something that can read more.
+	//
+	// A version bound that does not parse is a refusal rather than a pass. The
+	// field is signed by the release key, so an unparseable one is either a
+	// broken release or a bad manifest, and both of those are a reason to stop
+	// rather than a reason to install and hope.
+	p.CoreWindowOverlaps, p.CoreWindowError = coreWindowContains(
+		buildCompatibility, manifest.Compatibility)
+	p.ContractsVersionMatches = manifest.Compatibility.ContractsVersion != "" &&
+		buildCompatibility.ContractsVersion != "" &&
+		manifest.Compatibility.ContractsVersion == buildCompatibility.ContractsVersion
 	return p, nil
+}
+
+// coreWindowContains reports whether the archive's core window sits inside the
+// build's.
+//
+// "Sits inside" is the same relation the schema window uses and for the same
+// reason: a build that cannot be the rollback target is a build that must not be
+// the upgrade target either. The comparison is on parsed versions rather than on
+// strings because the declared bounds are ranges - "0.x", "2.x" - and "2.x" is
+// not between "10.0.0" and "1.0.0" the way a string comparison would say it is.
+func coreWindowContains(build, archive release.Compatibility) (bool, string) {
+	buildMin, err := parseCoreVersion("minCoreVersion", build.MinCoreVersion)
+	if err != nil {
+		return false, err.Error()
+	}
+	buildMax, err := parseCoreVersion("maxCoreVersion", build.MaxCoreVersion)
+	if err != nil {
+		return false, err.Error()
+	}
+	archiveMin, err := parseCoreVersion("minCoreVersion", archive.MinCoreVersion)
+	if err != nil {
+		return false, err.Error()
+	}
+	archiveMax, err := parseCoreVersion("maxCoreVersion", archive.MaxCoreVersion)
+	if err != nil {
+		return false, err.Error()
+	}
+	if buildMin.atLeast(archiveMin) && archiveMax.atMost(buildMax) {
+		return true, ""
+	}
+	return false, ""
+}
+
+// coreVersion is one parsed core-version bound.
+//
+// A component of "x" or "*" - and every component after it - is Unbounded, so
+// "1.x" is [1, +inf, +inf] and means "any 1.y.z", which is what a manifest
+// author writing "1.x" means and what a string comparison would not.
+type coreVersion struct {
+	parts     [3]int
+	unbounded [3]bool
+}
+
+func parseCoreVersion(field, s string) (coreVersion, error) {
+	var v coreVersion
+	if strings.TrimSpace(s) == "" {
+		return v, Refuse("%s is empty. A release that does not declare which core "+
+			"versions it runs on cannot be checked against one, and an unchecked "+
+			"bound is not a bound", field)
+	}
+	segments := strings.Split(strings.TrimSpace(s), ".")
+	if len(segments) > 3 {
+		return v, Refuse("%s %q has more than three components; this build reads "+
+			"MAJOR.MINOR.PATCH and a bound it cannot read is a bound it cannot enforce",
+			field, s)
+	}
+	for i, seg := range segments {
+		switch seg {
+		case "x", "X", "*":
+			for j := i; j < 3; j++ {
+				v.unbounded[j] = true
+			}
+		default:
+			n, err := strconv.Atoi(seg)
+			if err != nil || n < 0 {
+				return v, Refuse("%s %q is not a version this build can compare. "+
+					"Each component is a number, or x for \"any\"", field, s)
+			}
+			v.parts[i] = n
+		}
+	}
+	return v, nil
+}
+
+// atLeast and atMost order a bound against another. An unbounded component is
+// larger than any number, which is the whole meaning of "1.x" as an upper bound
+// and the reason it is not comparable as a string.
+func (v coreVersion) atLeast(other coreVersion) bool { return compareCoreVersions(v, other) >= 0 }
+func (v coreVersion) atMost(other coreVersion) bool  { return compareCoreVersions(v, other) <= 0 }
+
+func compareCoreVersions(a, b coreVersion) int {
+	for i := range 3 {
+		switch {
+		case a.unbounded[i] && b.unbounded[i]:
+			continue
+		case a.unbounded[i]:
+			return 1
+		case b.unbounded[i]:
+			return -1
+		}
+		if a.parts[i] != b.parts[i] {
+			if a.parts[i] < b.parts[i] {
+				return -1
+			}
+			return 1
+		}
+	}
+	return 0
 }
 
 // CheckRefusals applies the rules that stop a bad install, in the order an
@@ -229,6 +368,35 @@ func CheckRefusals(p Plan) error {
 				"so the state cannot be recovered from",
 			windowText(p.Manifest.Compatibility), p.Manifest.Compatibility.MinSchemaVersion,
 			p.Manifest.Compatibility.MaxSchemaVersion)
+	}
+	// The core window and the contracts version are checked before the
+	// expand/contract rule, and for the same reason the schema window is first:
+	// each is a fact about whether these two binaries belong on one machine at
+	// all, and the contract rule is about how the archive is put together.
+	if p.CoreWindowError != "" {
+		return Refuse("%s. The archive's core window is %s to %s and this build's is "+
+			"%s to %s. A bound neither side can read is a bound nobody is checking",
+			p.CoreWindowError,
+			p.Manifest.Compatibility.MinCoreVersion, p.Manifest.Compatibility.MaxCoreVersion,
+			p.Build.MinCoreVersion, p.Build.MaxCoreVersion)
+	}
+	if !p.CoreWindowOverlaps {
+		return Refuse(
+			"this build's core window is %s to %s and the archive runs on core %s to %s. "+
+				"The archive's window is not inside this build's, so installing puts a core "+
+				"and a release that were never in the same window on one site — and the "+
+				"rollback target is the same core, so the state cannot be recovered from",
+			p.Build.MinCoreVersion, p.Build.MaxCoreVersion,
+			p.Manifest.Compatibility.MinCoreVersion, p.Manifest.Compatibility.MaxCoreVersion)
+	}
+	if !p.ContractsVersionMatches {
+		return Refuse(
+			"the archive speaks contracts %s and this build speaks %s. A release built "+
+				"against a different wire format produces incidents this binary cannot read "+
+				"and drops fields it does not recognise, so the two must not be mixed on one "+
+				"site",
+			quotedOrUndeclared(p.Manifest.Compatibility.ContractsVersion),
+			quotedOrUndeclared(p.Build.ContractsVersion))
 	}
 	if p.HasContractStep {
 		return Refuse(
@@ -254,6 +422,17 @@ func windowText(c release.Compatibility) string {
 	return fmt.Sprintf("%d to %d", c.MinSchemaVersion, c.MaxSchemaVersion)
 }
 
+// quotedOrUndeclared renders a version name for a message. A name that is empty
+// is said to be undeclared rather than printed as "", because "the archive speaks
+// contracts " with nothing after it is not a sentence an operator can act on - and
+// an undeclared name is the more likely of the two problems.
+func quotedOrUndeclared(v string) string {
+	if strings.TrimSpace(v) == "" {
+		return "nothing (it declares no contracts version)"
+	}
+	return fmt.Sprintf("%q", v)
+}
+
 // Describe renders a plan for an operator, so a refusal or an install reads as a
 // list of consequences rather than as a log line.
 func Describe(p Plan) string {
@@ -267,6 +446,16 @@ func Describe(p Plan) string {
 	fmt.Fprintf(&b, "  signed by    : %s\n", p.Manifest.Signature.KeyID)
 	fmt.Fprintf(&b, "  schema window: [%d, %d]\n",
 		p.Manifest.Compatibility.MinSchemaVersion, p.Manifest.Compatibility.MaxSchemaVersion)
+	// The core window and the contracts name are printed because they are signed
+	// fields an operator is asked to trust. A plan that does not show them is a
+	// plan that verified them without ever reading them, which is what used to
+	// happen.
+	fmt.Fprintf(&b, "  core window  : %s to %s (this build: %s to %s)\n",
+		p.Manifest.Compatibility.MinCoreVersion, p.Manifest.Compatibility.MaxCoreVersion,
+		p.Build.MinCoreVersion, p.Build.MaxCoreVersion)
+	fmt.Fprintf(&b, "  contracts    : %s (this build: %s)\n",
+		quotedOrUndeclared(p.Manifest.Compatibility.ContractsVersion),
+		quotedOrUndeclared(p.Build.ContractsVersion))
 	fmt.Fprintf(&b, "  migrations   : %d\n", len(p.Manifest.Migrations))
 	if p.IsUpgrade {
 		fmt.Fprintf(&b, "  replacing   : %s (installed %s)\n",
@@ -280,6 +469,18 @@ func Describe(p Plan) string {
 	}
 	if !p.SchemaWindowOverlaps {
 		b.WriteString("  REFUSED     : the schema windows do not overlap\n")
+	}
+	if p.CoreWindowError != "" {
+		fmt.Fprintf(&b, "  REFUSED     : %s\n", p.CoreWindowError)
+	} else if !p.CoreWindowOverlaps {
+		fmt.Fprintf(&b, "  REFUSED     : the core window %s to %s is not inside this build's %s to %s\n",
+			p.Manifest.Compatibility.MinCoreVersion, p.Manifest.Compatibility.MaxCoreVersion,
+			p.Build.MinCoreVersion, p.Build.MaxCoreVersion)
+	}
+	if !p.ContractsVersionMatches {
+		fmt.Fprintf(&b, "  REFUSED     : contracts %s against this build's %s\n",
+			quotedOrUndeclared(p.Manifest.Compatibility.ContractsVersion),
+			quotedOrUndeclared(p.Build.ContractsVersion))
 	}
 	return b.String()
 }

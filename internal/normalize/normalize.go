@@ -31,6 +31,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/Sergey-Bar/Ai-Captain/internal/clocksub"
 	securityv1 "github.com/Sergey-Bar/Ai-Captain/internal/contracts/securityv1"
 	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
 	"github.com/Sergey-Bar/Ai-Captain/internal/inbox"
@@ -81,7 +82,34 @@ type Result struct {
 	// because "we guessed" and "the source said so" must not look identical
 	// months later.
 	UsedReceivedFallback bool
+	// ClockDriftMeasured says a clock measurement existed for this event's
+	// source. It is the difference the schema has no column for and the doc
+	// comment has been claiming since the first draft: a device measured at
+	// exactly zero drift and a device never sampled used to produce
+	// byte-identical normalized_at and byte-identical clock_drift_ms, so
+	// nothing downstream could tell "checked, clock is fine" from "never
+	// checked" and both read as a trustworthy timeline.
+	ClockDriftMeasured bool
+	// ClockDriftFrom names which measurement was applied: DriftFromDevice,
+	// DriftFromSourceSystem, or "" when nothing was measured. A VMS-wide skew
+	// applies to every event the system produced, including events that name no
+	// device, so the source of the correction is itself a stored fact.
+	ClockDriftFrom string
+	// ClockMeasuredAt is when the applied measurement was taken. It is
+	// deliberately NOT written into the stored payload: a re-measurement
+	// between two normalization runs of the same source event would then change
+	// the event's integrity hash, which is a worse version of the defect the
+	// hash fix above is about.
+	ClockMeasuredAt time.Time
 }
+
+// The two things a drift measurement can be. A device's own clock is the more
+// specific measurement and wins when there is one; the source system's is the
+// fallback for everything it produced.
+const (
+	DriftFromDevice       = "device"
+	DriftFromSourceSystem = "source_system"
+)
 
 // Normalizer converts inbox rows to canonical events.
 type Normalizer struct {
@@ -109,20 +137,23 @@ func (n *Normalizer) Normalize(ctx context.Context, in Input) (Result, error) {
 		return result, err
 	}
 
-	driftMs, err := n.loadDrift(ctx, in)
+	drift, err := n.loadDrift(ctx, in)
 	if err != nil {
 		return result, err
 	}
+	result.ClockDriftMeasured = drift.Found
+	result.ClockDriftFrom = drift.From
+	result.ClockMeasuredAt = drift.MeasuredAt
 
-	normalizedAt, usedFallback := NormalizedTime(in.ObservedAt, in.ReceivedAt, driftMs)
+	normalizedAt, usedFallback := NormalizedTime(in.ObservedAt, in.ReceivedAt, drift.DriftMs)
 	result.NormalizedAt = normalizedAt
 	result.UsedReceivedFallback = usedFallback
 
-	payload, err := canonicalPayload(in)
+	payload, err := canonicalPayload(in, drift)
 	if err != nil {
 		return result, err
 	}
-	integrity := IntegrityHash(in, normalizedAt, payload)
+	integrity := IntegrityHash(in, normalizedAt, in.Payload)
 
 	err = n.Pool.InTenant(ctx, dbx.TenantContext{
 		TenantID: in.Key.TenantID,
@@ -133,20 +164,39 @@ func (n *Normalizer) Normalize(ctx context.Context, in Input) (Result, error) {
 		// The scoped dedupe key for canonical events is taken first, exactly as
 		// the inbox's is. A conflict means this source event already produced a
 		// canonical event, and the correct outcome is no work.
+		//
+		// ON CONFLICT DO NOTHING returns *no row* rather than a zero, and this
+		// used to treat that as a failure - so the branch below was unreachable:
+		// every replay of an already-normalized key died here with "no rows in
+		// result set", and the no-op the package doc promises never ran. The
+		// inbox writer has always made the same distinction; this now does too.
 		var claimed int
-		if err := tx.QueryRow(ctx, `
+		err := tx.QueryRow(ctx, `
 			INSERT INTO canonical_event_keys (tenant_id, integration_id, source_event_id, event_id)
 			VALUES ($1, $2, $3, $4)
 			ON CONFLICT (tenant_id, integration_id, source_event_id) DO NOTHING
 			RETURNING 1`,
 			in.Key.TenantID, in.Key.IntegrationID, in.Key.SourceEventID, eventID,
-		).Scan(&claimed); err != nil {
+		).Scan(&claimed)
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+			claimed = 0
+		case err != nil:
 			return fmt.Errorf("normalize: claim canonical key: %w", err)
 		}
 		if claimed == 0 {
+			// The key already produced an event. This is a retry, and a retry is
+			// a no-op with a report - not an error.
 			result.AlreadyNormalized = true
 			result.EventID = eventID
-			return n.completeInbox(ctx, tx, in, eventID)
+			// The derived facts are deterministic, so they are filled in on this
+			// path too. A caller comparing this run's integrity hash with the
+			// stored one is comparing the same two things; leaving it empty made
+			// "already normalized" indistinguishable from "produced nothing",
+			// and the replay's own hash was the one value the N1 defect made
+			// wrong.
+			result.IntegrityHash = integrity
+			return n.settleReplay(ctx, tx, in, eventID)
 		}
 
 		// observed_at is NOT NULL. A source that sent an unreadable timestamp
@@ -172,7 +222,7 @@ func (n *Normalizer) Normalize(ctx context.Context, in Input) (Result, error) {
 			in.Key.SourceEventID, in.Key.IntegrationID,
 			in.EventType, SchemaVersion, observed, in.ReceivedAt.UTC(), normalizedAt,
 			nullString(in.SourceTZ), clockSourceOrUnknown(in.ClockSource),
-			driftMs, nullString(in.DeviceID), nullString(in.ZoneID),
+			drift.DriftMs, nullString(in.DeviceID), nullString(in.ZoneID),
 			correlationID(in), in.Key.SourceEventID,
 			payload, vendorRef(in), integrity,
 		).Scan(&storedEventID); err != nil {
@@ -217,6 +267,91 @@ func (n *Normalizer) completeInbox(ctx context.Context, tx pgx.Tx, in Input, eve
 	return nil
 }
 
+// settleReplay is what a repeat normalization does to the inbox row.
+//
+// The defect this replaces: the already-normalized branch called completeInbox,
+// which requires status='processing' AND lease_owner = ours. On a row a prior
+// attempt already drove to 'processed' - where lease_owner is NULL, because
+// completing a row releases the lease - that match found no row, the function
+// returned an error, and the whole transaction rolled back. So the package
+// documented at the top of this file ("re-running normalization for a key that
+// already produced an event is a no-op, not a second event, so crash recovery is
+// a retry rather than a reconciliation") was false: it was an error. The
+// consequence was at the call site, in pipeline.process, which checks err before
+// result.AlreadyNormalized - a replay of a fully processed event was routed to
+// inbox.Fail and eventually dead-lettered, with its canonical event, its edges
+// and its incident all present. Invariant 1 says a row reaches a terminal state
+// unless explicitly dead-lettered; a row that was successfully processed must
+// not end up dead-lettered as collateral of a retry.
+//
+// So the three states are separated here:
+//
+//   - still claimable by us (status='processing', lease ours): complete it. The
+//     key existed without this worker having finished, which is what a crash
+//     between the key claim and the inbox update leaves.
+//   - already terminal ('processed', or 'dead_letter' from some earlier attempt):
+//     no work. The lease is not ours and is not required, because there is
+//     nothing left to transition.
+//   - 'processing' under somebody else's lease, or any non-terminal status: an
+//     error, so the caller retries and the row is never left claimable-and-skipped
+//     for ever, which is how an accepted event would be lost.
+func (n *Normalizer) settleReplay(ctx context.Context, tx pgx.Tx, in Input, eventID string) error {
+	tag, err := tx.Exec(ctx, `
+		UPDATE inbox_events
+		   SET status = 'processed', completed_at = now(),
+		       canonical_event_id = $5,
+		       lease_owner = NULL, lease_expires_at = NULL, last_error = NULL
+		 WHERE tenant_id = $1 AND integration_id = $2 AND source_event_id = $3
+		   AND status = 'processing'
+		   AND lease_owner IS NOT DISTINCT FROM $4`,
+		in.Key.TenantID, in.Key.IntegrationID, in.Key.SourceEventID, in.LeaseOwner, eventID)
+	if err != nil {
+		return fmt.Errorf("normalize: complete inbox event: %w", err)
+	}
+	if tag.RowsAffected() > 0 {
+		return nil
+	}
+
+	var status string
+	err = tx.QueryRow(ctx, `
+		SELECT status FROM inbox_events
+		 WHERE tenant_id = $1 AND integration_id = $2 AND source_event_id = $3`,
+		in.Key.TenantID, in.Key.IntegrationID, in.Key.SourceEventID).Scan(&status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// The key exists but the inbox row does not. The two are written in one
+		// transaction, so this state is not reachable from this code; if it is
+		// ever observed the row is gone and silence would hide it.
+		return fmt.Errorf("normalize: %s/%s has a canonical event but no inbox row; "+
+			"refusing to report a successful replay", in.Key.IntegrationID, in.Key.SourceEventID)
+	}
+	if err != nil {
+		return fmt.Errorf("normalize: read the inbox state of a replayed event: %w", err)
+	}
+
+	switch inbox.Status(status) {
+	case inbox.StatusProcessed, inbox.StatusDeadLetter:
+		// Terminal, and the canonical event is behind it. A dead letter here is
+		// left as it is: it is the stored record of an attempt that failed for
+		// some other reason, and un-dead-lettering it from a replay would
+		// rewrite a fact rather than finish a job.
+		return nil
+	case inbox.StatusProcessing:
+		// Claimable, by somebody else. Rolling back is what stops two workers
+		// from both writing; the loser retries and finds the key claimed.
+		return fmt.Errorf("normalize: inbox lease on %s/%s is no longer held by %q; "+
+			"rolling back so the worker that now holds it can finish",
+			in.Key.IntegrationID, in.Key.SourceEventID, in.LeaseOwner)
+	default:
+		// 'received' or 'failed': not claimable by us, not terminal. Returning
+		// nil here would leave the row to be re-claimed, hit this branch again
+		// and return nil again, for ever - an accepted event that never reaches
+		// a terminal state. An error puts it back on the retry path instead.
+		return fmt.Errorf("normalize: %s/%s is %q while its canonical event already exists; "+
+			"it is neither claimable by %q nor terminal, so no-op here would strand it",
+			in.Key.IntegrationID, in.Key.SourceEventID, status, in.LeaseOwner)
+	}
+}
+
 func validateInput(in Input) error {
 	switch {
 	case in.Key.TenantID == "":
@@ -237,20 +372,65 @@ func validateInput(in Input) error {
 	return nil
 }
 
-// loadDrift reads the measured clock drift for the event's device.
+// driftReading is one clock measurement, and whether it existed at all.
+type driftReading struct {
+	DriftMs int32
+	// Found separates "measured, and the measurement was zero" from "never
+	// measured". loadDrift used to return only the value, so both were the int32
+	// zero and the difference existed only in a doc comment.
+	Found bool
+	// From is DriftFromDevice, DriftFromSourceSystem, or "" when nothing was
+	// measured.
+	From string
+	// MeasuredAt is when the measurement was taken, from device_clocks.
+	MeasuredAt time.Time
+}
+
+// loadDrift reads the clock drift that applies to this event, and says whether a
+// measurement existed at all.
 //
-// A device with no measurement yields zero with found=false, and the caller
+// A device with no measurement yields zero with Found=false, and the caller
 // applies no correction. That is deliberately different from a device measured at
 // exactly zero drift: the first has never been checked and the second has been
-// checked and is fine.
-func (n *Normalizer) loadDrift(ctx context.Context, in Input) (int32, error) {
-	if in.DeviceID == "" {
-		return 0, nil
+// checked and is fine, and the stored row now says which one it was.
+//
+// When the device itself has never been measured, the source system's
+// measurement is used instead. That is the VMS case: the whole system is the
+// clock, so its drift is the drift of every event it produced, including events
+// naming no device. It was measured and stored by clocksub under a reserved id
+// and read by nobody - a VMS 40 seconds fast produced 40 seconds of uncorrected
+// normalized_at with no degradation recorded anywhere, which is the exact
+// failure the clocksub package exists to prevent. The device's own measurement
+// wins where there is one: it is the more specific measurement, and applying
+// both would count the same skew twice.
+func (n *Normalizer) loadDrift(ctx context.Context, in Input) (driftReading, error) {
+	if in.DeviceID != "" {
+		device, err := n.readDrift(ctx, in.Key.TenantID, in.DeviceID)
+		if err != nil {
+			return driftReading{}, err
+		}
+		if device.Found {
+			device.From = DriftFromDevice
+			return device, nil
+		}
 	}
-	var drift int32
-	err := n.Pool.For(in.Key.TenantID, "normalizer").QueryRow(ctx, `
-		SELECT drift_ms FROM device_clocks WHERE tenant_id = $1 AND device_id = $2`,
-		in.Key.TenantID, in.DeviceID).Scan(&drift)
+	source, err := n.readDrift(ctx, in.Key.TenantID,
+		clocksub.SourceClockDeviceID(in.Key.IntegrationID))
+	if err != nil {
+		return driftReading{}, err
+	}
+	if source.Found {
+		source.From = DriftFromSourceSystem
+	}
+	return source, nil
+}
+
+// readDrift reads one device_clocks row, or Found=false when there is none.
+func (n *Normalizer) readDrift(ctx context.Context, tenant, deviceID string) (driftReading, error) {
+	var d driftReading
+	err := n.Pool.For(tenant, "normalizer").QueryRow(ctx, `
+		SELECT drift_ms, measured_at FROM device_clocks WHERE tenant_id = $1 AND device_id = $2`,
+		tenant, deviceID).Scan(&d.DriftMs, &d.MeasuredAt)
 	if err != nil {
 		// Only "not measured yet" is benign. Swallowing every error would turn a
 		// dropped connection, a cancelled context or a permission failure into
@@ -260,11 +440,13 @@ func (n *Normalizer) loadDrift(ctx context.Context, in Input) (int32, error) {
 			// No measurement is not an error. The device may not have been
 			// sampled yet, and inventing a drift value would be worse than
 			// recording none.
-			return 0, nil
+			return driftReading{}, nil
 		}
-		return 0, fmt.Errorf("normalize: read the device clock: %w", err)
+		return driftReading{}, fmt.Errorf("normalize: read the device clock: %w", err)
 	}
-	return drift, nil
+	d.Found = true
+	d.MeasuredAt = d.MeasuredAt.UTC()
+	return d, nil
 }
 
 // NormalizedTime applies a device's measured drift to the source's claim.
@@ -304,7 +486,7 @@ func DeriveEventID(key inbox.Key) string {
 	return "evt_" + hex.EncodeToString(sum[:12])
 }
 
-func canonicalPayload(in Input) (json.RawMessage, error) {
+func canonicalPayload(in Input, drift driftReading) (json.RawMessage, error) {
 	// The vendor envelope is carried inside the canonical payload rather than
 	// beside it, so a reader has the source's own words without a second join.
 	var raw any
@@ -317,6 +499,14 @@ func canonicalPayload(in Input) (json.RawMessage, error) {
 		"receivedAt":     isoOrEmpty(in.ReceivedAt),
 		"sourceTimezone": in.SourceTZ,
 		"clockSource":    clockSourceOrUnknown(in.ClockSource),
+		// The clock correction is a stored fact and so is the provenance of the
+		// correction, and with it the absence of one. Without these two keys a
+		// device measured at exactly zero drift and a device never sampled
+		// produced byte-identical rows, and every downstream reader - the
+		// correlator, the console, a months-late audit - read both as a clock
+		// that had been checked and found fine.
+		"clockDriftMeasured": drift.Found,
+		"clockDriftFrom":     drift.From,
 	}
 	if in.DeviceID == "" {
 		// Marked, not defaulted. A rule that requires a device must refuse this
@@ -338,7 +528,25 @@ func canonicalPayload(in Input) (json.RawMessage, error) {
 // time: two runs over the same source event at different wall-clock instants
 // must produce the same hash, or the determinism the golden tests depend on is
 // only apparent.
-func IntegrityHash(in Input, normalizedAt time.Time, payload []byte) string {
+//
+// It used to be the other way round. This function enumerated the covered fields
+// and then finished with h.Write(payload), where payload was the whole
+// canonical document - whose canonical map contains "receivedAt". So the receipt
+// time was in the hashed bytes by the back door, and the doc comment above was
+// false: the same source event normalized at two instants produced two
+// integrity hashes, which defeats hash comparison as a replay or dedupe check
+// and makes golden-fixture byte-stability unachievable.
+//
+// The envelope was the mistake, and there are two ways to remove it. The first
+// is to drop receivedAt from the stored canonical map, which would fix the hash
+// by deleting a real stored fact - the receipt time is a column on the row and
+// belongs in the document a reader consults. The second, taken here, is to stop
+// hashing our own serialization and hash the vendor's bytes instead: the
+// sanitized envelope is stored verbatim in source_events, so hashing it ties the
+// row to exactly the bytes it was derived from, keeps the receipt time out, and
+// stops the hash from moving every time a field is added to the canonical map -
+// which is how this defect happened.
+func IntegrityHash(in Input, normalizedAt time.Time, vendorEnvelope []byte) string {
 	h := sha256.New()
 	for _, part := range []string{
 		in.Key.TenantID, in.Key.IntegrationID, in.Key.SourceEventID,
@@ -348,7 +556,11 @@ func IntegrityHash(in Input, normalizedAt time.Time, payload []byte) string {
 	} {
 		_, _ = fmt.Fprintf(h, "%d:%s", len(part), part)
 	}
-	h.Write(payload)
+	// Length-prefixed for the same reason the fields are: a byte stream that is
+	// the concatenation of two different documents must not collide with the
+	// stream that is one.
+	_, _ = fmt.Fprintf(h, "envelope:%d:", len(vendorEnvelope))
+	h.Write(vendorEnvelope)
 	return hex.EncodeToString(h.Sum(nil))
 }
 

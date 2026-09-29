@@ -25,7 +25,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -223,6 +225,10 @@ type Writer struct {
 	Pool *dbx.Pool
 	// IDGenerator produces observation ids. Injectable so a golden test is stable.
 	IDGenerator func(tenant, profile, event string) string
+	// RandRead produces observation id bytes, and defaults to crypto/rand.Read.
+	// It is injectable so a test can drive the non-random fallback, which is the
+	// path whose uniqueness is a comment's claim and would otherwise never run.
+	RandRead func(b []byte) (int, error)
 	// Now is injectable so a golden test is stable.
 	Now func() time.Time
 	// Profiles is the profile set this build enforces. Defaults to M1Profiles.
@@ -270,11 +276,18 @@ func (w *Writer) Record(ctx context.Context, o Observation) (Observation, error)
 		return o, err
 	}
 
-	if o.ObservationID == "" {
-		o.ObservationID = w.newID(o)
-	}
+	// The defect this ordering encoded: newID was called first, and newID's
+	// fallback hashed o.CreatedAt, which at that point was always the zero time.
+	// So every degraded or failed observation for one (tenant, event, prompt
+	// version) derived the same id and the second insert failed on the primary
+	// key - two model outages on the same event, and the second one lost.
+	// CreatedAt is a fact of the row, and the identity is derived from facts, so
+	// the fact has to exist first.
 	if o.CreatedAt.IsZero() {
 		o.CreatedAt = w.now()
+	}
+	if o.ObservationID == "" {
+		o.ObservationID = w.newID(o)
 	}
 
 	ids, _ := json.Marshal(orEmptyList(o.InputEvidenceIDs))
@@ -348,14 +361,39 @@ func (w *Writer) newID(o Observation) string {
 	// The content hash is what identifies an observation's meaning; the id
 	// identifies the run.
 	var buf [16]byte
-	if _, err := rand.Read(buf[:]); err != nil {
+	if _, err := w.randRead(buf[:]); err != nil {
 		// A failure to read randomness is a failure to be able to distinguish two
 		// runs, and a fallback that is not unique would silently lose one.
-		sum := sha256.Sum256([]byte(o.TenantID + "\x00" + o.EventID +
-			"\x00" + o.CreatedAt.Format(time.RFC3339Nano) + "\x00" + o.PromptVersion))
+		//
+		// The sequence number is what makes it unique per call. Without it this
+		// was sha256(tenant, event, CreatedAt, promptVersion), and CreatedAt - a
+		// clock, in a test a frozen one - is the only thing that varied, so two
+		// runs in the same clock tick derived the same id and the second insert
+		// failed on the primary key. The clock still contributes; the counter is
+		// what guarantees the comment above is true rather than usually true.
+		seq := fallbackSeq.Add(1)
+		sum := sha256.Sum256([]byte(o.TenantID + "\x00" + o.EventID + "\x00" +
+			o.PromptVersion + "\x00" + o.CreatedAt.UTC().Format(time.RFC3339Nano) +
+			"\x00" + strconv.FormatUint(seq, 10)))
 		return "obs_" + hex.EncodeToString(sum[:12])
 	}
 	return "obs_" + hex.EncodeToString(buf[:])
+}
+
+// fallbackSeq counts the ids issued by the non-random path. It is a package
+// counter rather than a field on Writer because a failure to read randomness is
+// a process-wide condition, not a per-writer one, and two writers in one process
+// must not be able to derive the same id as each other.
+var fallbackSeq atomic.Uint64
+
+// randRead is crypto/rand.Read, behind a method so a test can force the
+// fallback path. The fallback is otherwise unreachable, and a code path that
+// cannot be reached is a code path that is not tested.
+func (w *Writer) randRead(b []byte) (int, error) {
+	if w.RandRead != nil {
+		return w.RandRead(b)
+	}
+	return rand.Read(b)
 }
 
 // validateAgainstProfile refuses a field the profile does not declare.

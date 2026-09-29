@@ -123,22 +123,34 @@ func setup(t *testing.T, bundleYAML string, feed string) harness {
 	if bundleYAML != "" {
 		svc := &bundles.Service{Pool: pool, Compiler: rules.NewCompiler(),
 			Audit: &audit.Writer{Pool: pool}}
-		if _, problems, err := svc.Store(context.Background(), tenant,
-			[]byte(bundleYAML), "test", "tester", ""); err != nil {
+		meta, problems, err := svc.Store(context.Background(), tenant,
+			[]byte(bundleYAML), "test", "tester", "")
+		if err != nil {
 			t.Fatalf("store the bundle: %v", err)
-		} else if len(problems) > 0 {
-			for _, p := range problems {
-				t.Logf("bundle problem: %s %s %s", p.Severity, p.Code, p.Message)
+		}
+		// A warning is logged, not fatal.
+		//
+		// The compiler warns about things a rule author has decided — a
+		// `proceed_without` fallback, an `ifAIAvailable` that has no AI to apply
+		// to. Treating any problem as fatal here would have made this harness
+		// unable to express the very case it needs to test, which is how a
+		// harness can quietly decide what a test is allowed to ask.
+		for _, p := range problems {
+			t.Logf("bundle problem: %s %s %s", p.Severity, p.Code, p.Message)
+			if p.Severity == rules.SeverityError {
+				t.Fatalf("the bundle has an error-level problem and was not stored: %s", p.Message)
 			}
-			t.Fatalf("the bundle did not compile cleanly")
+		}
+		if meta.Version == "" {
+			t.Fatal("the bundle was not stored, and no problem said why")
 		}
 		// Activation goes through the gate, as it must: a bundle that has not been
 		// simulated cannot be activated. The test acknowledges a digest rather than
 		// bypassing the check, because a test that bypasses it would still pass the
 		// day the gate stopped existing.
-		rep := simulate.Report{BundleVersion: "0.1.0", FixtureSet: "fixtures-1"}
+		rep := simulate.Report{BundleVersion: meta.Version, FixtureSet: "fixtures-1"}
 		rep.DiffDigest = simulate.DigestFor(rep.BundleVersion, rep.FixtureSet, rep.Changes)
-		if err := svc.Activate(context.Background(), tenant, "0.1.0", rep, "tester"); err != nil {
+		if err := svc.Activate(context.Background(), tenant, meta.Version, rep, "tester"); err != nil {
 			t.Fatalf("activate the bundle: %v", err)
 		}
 	}

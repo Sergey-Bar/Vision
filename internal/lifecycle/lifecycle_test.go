@@ -201,11 +201,21 @@ func TestContractStepAlongsideExpandIsRefused(t *testing.T) {
 
 	// Layer two: the installer's gate, exercised on a plan built directly so it
 	// is tested even when the verifier above has already stopped the flow.
+	//
+	// The compatibility fields are set from buildCompat rather than left at their
+	// zero values. They are a precondition, not the subject: this test is about
+	// the contract rule, and a plan that fails the core window or the contracts
+	// version first would refuse for a different reason and assert nothing about
+	// contract steps at all. Every other field is a zero value, which is why the
+	// schema window is the one boolean that has to be stated.
 	plan := lifecycle.Plan{
-		Manifest:             manifest,
-		HasContractStep:      true,
-		ContractVersions:     []int{2},
-		SchemaWindowOverlaps: true,
+		Manifest:                manifest,
+		Build:                   buildCompat,
+		HasContractStep:         true,
+		ContractVersions:        []int{2},
+		SchemaWindowOverlaps:    true,
+		CoreWindowOverlaps:      true,
+		ContractsVersionMatches: true,
 	}
 	err := lifecycle.CheckRefusals(plan)
 	if err == nil {

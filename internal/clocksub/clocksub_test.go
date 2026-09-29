@@ -217,6 +217,15 @@ func TestASourceSystemIsStoredUnderAReservedID(t *testing.T) {
 	if state.DeviceID != "source:int-vms" {
 		t.Errorf("the VMS is stored under %q, want the reserved id", state.DeviceID)
 	}
+	// The reserved id is spelled in two packages now: here, where the row is
+	// written, and in normalize, where it is read back to correct the skew. Two
+	// spellings of the same id are a silent miss - the measurement is recorded
+	// under one name and read under another, and a VMS forty seconds fast stays
+	// uncorrected with nothing recording that it is wrong.
+	if state.DeviceID != clocksub.SourceClockDeviceID("int-vms") {
+		t.Errorf("the stored id %q is not the one normalization reads (%q)", state.DeviceID,
+			clocksub.SourceClockDeviceID("int-vms"))
+	}
 	if state.DriftMs != 40000 || state.Band != clock.BandSevere {
 		t.Errorf("a VMS 40s fast is %dms in band %q; the system is the clock, so this is every "+
 			"event it produced", state.DriftMs, state.Band)

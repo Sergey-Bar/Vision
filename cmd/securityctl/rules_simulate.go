@@ -105,7 +105,12 @@ func runRulesSimulate(ctx context.Context, env *command.Env, args []string) erro
 	}
 
 	fixtureSet := filepath.Base(*fixturePath)
-	report := simulate.Diff(candidate.Version, baselineVersion, fixtureSet, before, after)
+	// DiffCapped, not Diff: `--max-events` was accepted and printed and then
+	// thrown away, so a run that stopped early produced a digest indistinguishable
+	// from a run that saw everything. The truncation now reaches the digest and
+	// the report, which is what the flag's documentation has been promising.
+	report := simulate.DiffCapped(candidate.Version, baselineVersion, fixtureSet,
+		before, after, *maxEvents)
 
 	if *asJSON {
 		enc := json.NewEncoder(env.Stdout)

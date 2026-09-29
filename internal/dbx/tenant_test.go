@@ -59,20 +59,24 @@ func TestForRefusesAnEmptyTenant(t *testing.T) {
 func TestAClearedConnectionIsReused(t *testing.T) {
 	pool := openPool(t)
 
-	first := backendPID(t, pool, "tenant-a")
+	first := backendPID(t, pool)
 	for i := 0; i < 3; i++ {
-		if got := backendPID(t, pool, "tenant-a"); got != first {
+		if got := backendPID(t, pool); got != first {
 			t.Fatalf("iteration %d got backend %d, want the pooled %d", i, got, first)
 		}
 	}
 }
 
-func backendPID(t *testing.T, pool *dbx.Pool, tenant string) int {
+// backendPID reads the backend of a connection the pool hands to a tenant-scoped
+// query. The tenant is fixed: what is under test is that the connection is reused
+// after a clear, and varying the tenant would only test that two different
+// settings land on one connection, which is a different claim.
+func backendPID(t *testing.T, pool *dbx.Pool) int {
 	t.Helper()
 	var pid int
-	if err := pool.For(tenant, "test").QueryRow(context.Background(),
+	if err := pool.For("tenant-a", "test").QueryRow(context.Background(),
 		`SELECT pg_backend_pid()`).Scan(&pid); err != nil {
-		t.Fatalf("backend pid for %s: %v", tenant, err)
+		t.Fatalf("backend pid: %v", err)
 	}
 	return pid
 }
