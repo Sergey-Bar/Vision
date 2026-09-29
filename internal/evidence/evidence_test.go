@@ -24,6 +24,32 @@ func newStore(t *testing.T) *evidence.Store {
 	return s
 }
 
+// storedAgo stands in for the `evidence` table's stored_at column. Sweep reads
+// age from there, never from the filesystem, so a test that wants an object to
+// look old says so here rather than touching the file's mtime — and the whole
+// point of D5 is that those two are not the same thing.
+type fakeEvidenceTable map[string]time.Time
+
+func (f fakeEvidenceTable) storedAt(ref string) (time.Time, error) {
+	t, ok := f[ref]
+	if !ok {
+		// No row. The zero time is how the store is told the age is unknown.
+		return time.Time{}, nil
+	}
+	return t, nil
+}
+
+// putStored stores bytes and records them in the table as stored now.
+func putStored(t *testing.T, s *evidence.Store, table fakeEvidenceTable, tenant, body string) evidence.Object {
+	t.Helper()
+	obj, err := s.Put(tenant, strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	table[obj.Ref] = time.Now()
+	return obj
+}
+
 // The defaults are load-bearing and both were once wrong: Fsync took a plain
 // bool, so Options{Root: dir} — which is every caller — got a store that
 // acknowledged evidence it had not fsynced, and VerifyHashOnRead was read by
@@ -130,7 +156,10 @@ func TestSymlinkEscapeIsRefused(t *testing.T) {
 		if _, err := s.Exists(ref); !errors.Is(err, evidence.ErrPathRejected) {
 			t.Errorf("reference %q escaped via symlink (got %v)", ref, err)
 		}
-		if _, _, err := s.Open(ref, ""); !errors.Is(err, evidence.ErrPathRejected) {
+		// A hash is supplied so that the only thing this can be failing on is the
+		// path. The reference is rejected before the hash is ever consulted, which
+		// is also the order the code documents.
+		if _, _, err := s.Open(ref, strings.Repeat("a", 64)); !errors.Is(err, evidence.ErrPathRejected) {
 			t.Errorf("Open(%q) escaped via symlink (got %v)", ref, err)
 		}
 	}
@@ -250,7 +279,10 @@ func TestSweepRefusesATenantThatEscapesTheRoot(t *testing.T) {
 		"C:\\Windows",
 	} {
 		t.Run(tenant, func(t *testing.T) {
-			if _, err := s.Sweep(tenant, evidence.RetentionPolicy{Before: time.Now()}, false); err == nil {
+			if _, err := s.Sweep(tenant, evidence.RetentionPolicy{
+				Before:   time.Now(),
+				StoredAt: fakeEvidenceTable{}.storedAt,
+			}, false); err == nil {
 				t.Fatalf("Sweep(%q) was accepted; it walks and deletes outside the evidence root",
 					tenant)
 			}
@@ -277,18 +309,16 @@ func TestSweepDeletesOnlyExpiredObjectsInTheNamedTenant(t *testing.T) {
 		t.Fatalf("Put: %v", err)
 	}
 
-	age := func(obj evidence.Object) {
-		t.Helper()
-		p := filepath.Join(s.Root(), filepath.FromSlash(obj.Ref))
-		old := time.Now().Add(-90 * 24 * time.Hour)
-		if err := os.Chtimes(p, old, old); err != nil {
-			t.Fatalf("age %s: %v", obj.Ref, err)
-		}
+	table := fakeEvidenceTable{
+		keep.Ref:  time.Now(),
+		drop.Ref:  time.Now().Add(-90 * 24 * time.Hour),
+		other.Ref: time.Now().Add(-90 * 24 * time.Hour),
 	}
-	age(drop)
-	age(other)
 
-	res, err := s.Sweep("tenant-a", evidence.RetentionPolicy{Before: time.Now().Add(-30 * 24 * time.Hour)}, false)
+	res, err := s.Sweep("tenant-a", evidence.RetentionPolicy{
+		Before:   time.Now().Add(-30 * 24 * time.Hour),
+		StoredAt: table.storedAt,
+	}, false)
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
 	}
@@ -314,10 +344,13 @@ func TestSweepDeletesOnlyExpiredObjectsInTheNamedTenant(t *testing.T) {
 
 func TestOpenRejectsTraversalAndReportsMissing(t *testing.T) {
 	s := newStore(t)
-	if _, _, err := s.Open("../../etc/passwd", ""); !errors.Is(err, evidence.ErrPathRejected) {
+	if _, _, err := s.Open("../../etc/passwd", strings.Repeat("a", 64)); !errors.Is(err, evidence.ErrPathRejected) {
 		t.Errorf("a traversal was accepted by Open: %v", err)
 	}
-	_, _, err := s.Open("tenant-a/aa/deadbeef", "")
+	// A missing object says it is missing even when the caller also forgot the
+	// hash: "no such evidence" is the more useful of the two facts to whoever is
+	// reading the error.
+	_, _, err := s.Open("tenant-a/aa/deadbeef", strings.Repeat("a", 64))
 	if !errors.Is(err, evidence.ErrNotFound) {
 		t.Errorf("a missing object produced %v, want ErrNotFound", err)
 	}
@@ -348,24 +381,23 @@ func TestPutRefusesAnUnusableTenant(t *testing.T) {
 
 func TestSweepRespectsRetentionAndLegalHold(t *testing.T) {
 	s := newStore(t)
-	old, err := s.Put("tenant-a", strings.NewReader("old"))
-	if err != nil {
-		t.Fatalf("Put old: %v", err)
-	}
-	recent, err := s.Put("tenant-a", strings.NewReader("recent"))
-	if err != nil {
-		t.Fatalf("Put recent: %v", err)
-	}
+	table := fakeEvidenceTable{}
+	old := putStored(t, s, table, "tenant-a", "old")
+	// Recorded as stored a hundred days ago, in the table rather than on the
+	// filesystem. That is where the retention law reads age from.
+	table[old.Ref] = time.Now().Add(-100 * 24 * time.Hour)
+	recent := putStored(t, s, table, "tenant-a", "recent")
 
-	// Age the first object.
-	oldPath := filepath.Join(s.Root(), filepath.FromSlash(old.Ref))
-	past := time.Now().Add(-100 * 24 * time.Hour)
-	if err := os.Chtimes(oldPath, past, past); err != nil {
-		t.Fatalf("chtimes: %v", err)
+	policy := func(hold func(string) (bool, error)) evidence.RetentionPolicy {
+		return evidence.RetentionPolicy{
+			MaxAge:        30 * 24 * time.Hour,
+			StoredAt:      table.storedAt,
+			SkipLegalHold: hold,
+		}
 	}
 
 	// A dry run reports without removing.
-	dry, err := s.Sweep("tenant-a", evidence.RetentionPolicy{MaxAge: 30 * 24 * time.Hour}, true)
+	dry, err := s.Sweep("tenant-a", policy(nil), true)
 	if err != nil {
 		t.Fatalf("Sweep dry: %v", err)
 	}
@@ -377,10 +409,9 @@ func TestSweepRespectsRetentionAndLegalHold(t *testing.T) {
 	}
 
 	// Legal hold wins over retention, always.
-	held, err := s.Sweep("tenant-a", evidence.RetentionPolicy{
-		MaxAge:        30 * 24 * time.Hour,
-		SkipLegalHold: func(ref string) (bool, error) { return ref == old.Ref, nil },
-	}, false)
+	held, err := s.Sweep("tenant-a", policy(func(ref string) (bool, error) {
+		return ref == old.Ref, nil
+	}), false)
 	if err != nil {
 		t.Fatalf("Sweep held: %v", err)
 	}
@@ -392,7 +423,7 @@ func TestSweepRespectsRetentionAndLegalHold(t *testing.T) {
 	}
 
 	// Without the hold, the old object goes and the recent one stays.
-	if _, err := s.Sweep("tenant-a", evidence.RetentionPolicy{MaxAge: 30 * 24 * time.Hour}, false); err != nil {
+	if _, err := s.Sweep("tenant-a", policy(nil), false); err != nil {
 		t.Fatalf("Sweep: %v", err)
 	}
 	if exists, _ := s.Exists(old.Ref); exists {
@@ -407,17 +438,13 @@ func TestSweepRespectsRetentionAndLegalHold(t *testing.T) {
 // open here would remove evidence the moment the database is unreachable.
 func TestSweepFailsClosedWhenLegalHoldCannotBeChecked(t *testing.T) {
 	s := newStore(t)
-	obj, err := s.Put("tenant-a", strings.NewReader("held"))
-	if err != nil {
-		t.Fatalf("Put: %v", err)
-	}
-	past := time.Now().Add(-100 * 24 * time.Hour)
-	if err := os.Chtimes(filepath.Join(s.Root(), filepath.FromSlash(obj.Ref)), past, past); err != nil {
-		t.Fatalf("chtimes: %v", err)
-	}
+	table := fakeEvidenceTable{}
+	obj := putStored(t, s, table, "tenant-a", "held")
+	table[obj.Ref] = time.Now().Add(-100 * 24 * time.Hour)
 
 	result, err := s.Sweep("tenant-a", evidence.RetentionPolicy{
-		MaxAge: 30 * 24 * time.Hour,
+		MaxAge:   30 * 24 * time.Hour,
+		StoredAt: table.storedAt,
 		SkipLegalHold: func(string) (bool, error) {
 			return false, errors.New("database unreachable")
 		},
@@ -437,13 +464,15 @@ func TestSweepFailsClosedWhenLegalHoldCannotBeChecked(t *testing.T) {
 // crash must not be mistaken for evidence.
 func TestStagingFilesAreNotEvidence(t *testing.T) {
 	s := newStore(t)
-	if _, err := s.Put("tenant-a", strings.NewReader("real")); err != nil {
-		t.Fatalf("Put: %v", err)
-	}
+	table := fakeEvidenceTable{}
+	putStored(t, s, table, "tenant-a", "real")
 	if err := os.WriteFile(filepath.Join(s.Root(), ".incoming-crashed"), []byte("partial"), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	result, err := s.Sweep("tenant-a", evidence.RetentionPolicy{MaxAge: time.Nanosecond}, false)
+	result, err := s.Sweep("tenant-a", evidence.RetentionPolicy{
+		MaxAge:   time.Nanosecond,
+		StoredAt: table.storedAt,
+	}, false)
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
 	}

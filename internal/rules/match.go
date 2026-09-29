@@ -15,14 +15,44 @@ import (
 // which signals satisfied it is not explainable six months later, and the plan's
 // central requirement is that an incident can be justified by naming its exact
 // evidence.
+// eval carries the evaluation in progress: the trigger, the signals available
+// to corroborate it, the outcome being accumulated, and the time window in
+// force where this condition sits.
+//
+// The window is threaded rather than read off the corroboration clause because
+// a window is a sibling of the clause it bounds, not a field of it. An `all`
+// that declares both applies its window to every corroboration clause beneath
+// it, which is the pairing the language documents and the one the correlator
+// sizes its scan from.
+type eval struct {
+	trigger   Signal
+	available []Signal
+	out       *Outcome
+	window    *TimeWindow
+}
+
 func (e *Engine) match(c CompiledCondition, trigger Signal, available []Signal, out *Outcome) bool {
+	ev := &eval{trigger: trigger, available: available, out: out}
+	return e.matchIn(c, ev)
+}
+
+func (e *Engine) matchIn(c CompiledCondition, ev *eval) bool {
 	switch c.Kind {
 	case KindImpossible:
 		return false
 
 	case KindAll:
+		// A window declared among the children of this `all` bounds the
+		// corroboration clauses beside it. Collected before any child runs so the
+		// pairing does not depend on the order the author wrote the list in.
+		inner := *ev
 		for i := range c.All {
-			if !e.match(c.All[i], trigger, available, out) {
+			if c.All[i].Kind == KindTimeWindow && c.All[i].Window != nil {
+				inner.window = c.All[i].Window
+			}
+		}
+		for i := range c.All {
+			if !e.matchIn(c.All[i], &inner) {
 				return false
 			}
 		}
@@ -32,12 +62,36 @@ func (e *Engine) match(c CompiledCondition, trigger Signal, available []Signal, 
 		// Any is short-circuiting, so a rule that accepts several event types
 		// records only the arm that actually fired. Recording all of them would
 		// claim evidence the rule did not use.
+		//
+		// Degradation is the exception, and it is the exception invariant 3
+		// needs. An arm that could not be evaluated is not an arm that held, and
+		// `any` means "at least one of these held" — the author cannot know that
+		// the satisfied arm is the right one when a sibling was unknowable. So an
+		// any is degraded overall whenever any arm it actually evaluated
+		// degraded, whether or not the matching arm was the one that degraded.
+		// Arms after the one that fired are never evaluated, so they contribute
+		// nothing: recording a degradation nobody looked for would be a guess.
+		var unevaluated []Outcome
 		for i := range c.Any {
 			probe := Outcome{DegradedReason: DegradedNone}
-			if e.match(c.Any[i], trigger, available, &probe) {
-				mergeInto(out, probe)
+			arm := *ev
+			arm.out = &probe
+			if e.matchIn(c.Any[i], &arm) {
+				mergeInto(ev.out, probe)
+				for _, p := range unevaluated {
+					mergeDegraded(ev.out, p)
+				}
 				return true
 			}
+			if probe.Degraded {
+				unevaluated = append(unevaluated, probe)
+			}
+		}
+		// Nothing fired. The degradation is still a fact about the evaluation and
+		// is recorded, exactly as an `all` records the degradation of a child
+		// that failed.
+		for _, p := range unevaluated {
+			mergeDegraded(ev.out, p)
 		}
 		return false
 
@@ -46,16 +100,29 @@ func (e *Engine) match(c CompiledCondition, trigger Signal, available []Signal, 
 			return false
 		}
 		probe := Outcome{DegradedReason: DegradedNone}
-		return !e.match(*c.Not, trigger, available, &probe)
+		inner := *ev
+		inner.out = &probe
+		matched := e.matchIn(*c.Not, &inner)
+		if probe.Degraded {
+			// The negation of "we do not know" is "we do not know", not "yes".
+			// A child that could not be evaluated does not satisfy its negation,
+			// so the `not` fails, and the degradation is kept rather than
+			// discarded with the probe: invariant 3 says a missing AI observation
+			// is never a negative observation, and returning true here would
+			// hand the operator a corroborated incident built from one.
+			mergeDegraded(ev.out, probe)
+			return false
+		}
+		return !matched
 
 	case KindEventType:
-		return c.EventTypes[trigger.EventType]
+		return c.EventTypes[ev.trigger.EventType]
 
 	case KindDevice:
-		return e.matchDevice(c.Device, trigger)
+		return e.matchDevice(c.Device, ev.trigger)
 
 	case KindZone:
-		return e.matchZone(c.Zone, trigger)
+		return e.matchZone(c.Zone, ev.trigger)
 
 	case KindSchedule:
 		if e.ctx.InSchedule == nil {
@@ -70,28 +137,56 @@ func (e *Engine) match(c CompiledCondition, trigger Signal, available []Signal, 
 		return in
 
 	case KindTimeWindow:
-		// The window is read by the corroboration clause that owns it. On its
-		// own it constrains nothing, which is why an unused window is a
-		// compile-time warning.
+		// The window bounds the corroboration clause beside it; on its own it
+		// constrains nothing, which is why an unused window is a compile-time
+		// warning. It is threaded into the evaluation by the enclosing `all`.
 		return true
 
 	case KindClockDrift:
-		abs := trigger.ClockDriftMS
-		if abs < 0 {
-			abs = -abs
-		}
-		return abs <= c.Drift.MaxMS
+		return e.matchDrift(c.Drift, ev.trigger)
 
 	case KindField:
-		return e.matchField(c.Field, trigger)
+		return e.matchField(c.Field, ev.trigger)
 
 	case KindAIObservation:
-		return e.matchAIObservation(c.AIObs, trigger, out)
+		return e.matchAIObservation(c.AIObs, ev.trigger, ev.out)
 
 	case KindCorroboration:
-		return e.matchCorroboration(c.Corr, trigger, available, out)
+		return e.matchCorroboration(c.Corr, ev.trigger, ev.available, ev.window, ev.out)
 	}
 	return false
+}
+
+// matchDrift admits an event whose device drift is inside both the site's severe
+// band and the rule's own bound.
+//
+// The two bounds are not the same test, and treating them as one was a boundary
+// bug: the site's policy admits a device while `abs < SevereMs` and excludes it
+// at `abs >= SevereMs`, while the rule admitted `abs <= MaxMS`. A bundle saying
+// `maxMs: 10000` at a site with `driftSevereMs: 10000` therefore accepted
+// exactly the devices the policy excluded, and the two disagreed silently
+// because each looked self-consistent on its own.
+//
+// The site's severe band is authoritative. It is what the clock subsystem, the
+// correlator and the operator's console already use to decide that a device is
+// too far off to be trusted in a time window, and a rule is not entitled to
+// declare a device usable that the site has already excluded from time-windowed
+// corroboration. The rule's `maxMs` is a bound the author may tighten below the
+// site policy, never loosen above it. So the effective bound is the stricter of
+// the two, and both are compared at the boundary the same way.
+func (e *Engine) matchDrift(d *DriftCondition, s Signal) bool {
+	if d == nil {
+		return true
+	}
+	abs := s.ClockDriftMS
+	if abs < 0 {
+		abs = -abs
+	}
+	severe := e.bundle.Settings.Clock.DriftSevereMS
+	if severe > 0 && abs >= severe {
+		return false
+	}
+	return abs <= d.MaxMS
 }
 
 func (e *Engine) matchDevice(m *DeviceMatch, s Signal) bool {
@@ -206,7 +301,25 @@ func (e *Engine) matchField(f *FieldCondition, s Signal) bool {
 		// A field that is not present is not "not equal" to something; it is
 		// unknown. Treating absence as inequality makes a rule fire on every
 		// event that lacks the field.
-		return present && !equalScalar(value, f.Value)
+		if !present {
+			return false
+		}
+		// A type mismatch is not a comparison that succeeded either. An object
+		// is genuinely not the string "open", and that is precisely why `ne`
+		// over an object-valued path matched everything: equalScalar reports
+		// false for an incomparable pair, and false was read as "not equal". A
+		// payload field is untrusted input whose shape varies by vendor, so
+		// "the vendor sent us an object where the rule expected a string" is
+		// not evidence the rule author wanted.
+		//
+		// The decision is deliberately not to degrade. Degradation is the
+		// record that a signal the rule wanted was unavailable, and a field of
+		// the wrong type is available: the value is there and the rule cannot
+		// use it. Silently degrading every `ne` over a variant payload would
+		// make the incident queue unusable and would train operators to ignore
+		// the flag. So `ne` against an incomparable type does not match, and
+		// says nothing.
+		return comparableScalar(value, f.Value) && !equalScalar(value, f.Value)
 	case "gt", "gte", "lt", "lte":
 		if !present {
 			return false
@@ -230,18 +343,31 @@ func (e *Engine) matchField(f *FieldCondition, s Signal) bool {
 		if !ok {
 			return false
 		}
+		if !present {
+			// Absence is not evidence either way: a field that was not sent is
+			// not a member of the list and not a non-member of it.
+			return false
+		}
 		found := false
+		anyComparable := false
 		for _, v := range values {
+			if !comparableScalar(value, v) {
+				continue
+			}
+			anyComparable = true
 			if equalScalar(value, v) {
 				found = true
 				break
 			}
 		}
 		if f.Op == "in" {
-			return present && found
+			return found
 		}
-		// Absence again: a missing field is not evidence of absence.
-		return present && !found
+		// not_in over a value of a type the list never mentions is the same
+		// mistake `ne` was making, and is refused the same way: no match, and no
+		// degradation, because the field was present and unusable rather than
+		// absent.
+		return anyComparable && !found
 	case "contains_prefix":
 		if !present {
 			return false
@@ -252,6 +378,15 @@ func (e *Engine) matchField(f *FieldCondition, s Signal) bool {
 		}
 		prefix, ok := f.Value.(string)
 		if !ok {
+			return false
+		}
+		if prefix == "" {
+			// HasPrefix(s, "") is true for every s, so an empty prefix would make
+			// the condition match every present string — a rule an operator
+			// believes narrows to one prefix and in fact filters on nothing but
+			// presence. Rejected at compile time as well; this is the runtime
+			// half, and the two are not redundant because a CompiledBundle can be
+			// built without the compiler.
 			return false
 		}
 		return strings.HasPrefix(s, prefix)
@@ -279,7 +414,14 @@ func (e *Engine) matchAIObservation(c *AIObservationCondition, s Signal, out *Ou
 		out.DegradedReason = DegradedAbsent
 		return false
 	}
+	// A profile mismatch is a fourth kind of "we do not know", and it degrades
+	// like the other three. The observation stored against this event came from
+	// some other profile, so the profile this rule asked was never asked: the
+	// value there is an answer to a different question, and answering a
+	// different question is not a negative answer to this one.
 	if obs.ProfileID != c.ProfileID {
+		out.Degraded = true
+		out.DegradedReason = DegradedAbsent
 		return false
 	}
 	if obs.Degraded {
@@ -297,6 +439,12 @@ func (e *Engine) matchAIObservation(c *AIObservationCondition, s Signal, out *Ou
 
 	value, present := lookupPath(obs.Structured, c.Field)
 	if !present {
+		// The profile ran and answered, but the field the rule reads was not in
+		// the answer. That is a missing Tier C signal, not a negative one, and it
+		// is a different fact from a profile that answered "no": here the model
+		// was asked and could not support a determination about this field.
+		out.Degraded = true
+		out.DegradedReason = DegradedAbsent
 		return false
 	}
 	if c.Equals == nil {
@@ -326,7 +474,7 @@ func degradeReasonFromString(s string) DegradedReason {
 // the severe drift band is excluded and recorded, corroboration is counted over
 // what remains, and the rule's declared behaviour without a Tier C signal is
 // applied rather than guessed.
-func (e *Engine) matchCorroboration(c *CompiledCorroboration, trigger Signal, available []Signal, out *Outcome) bool {
+func (e *Engine) matchCorroboration(c *CompiledCorroboration, trigger Signal, available []Signal, window *TimeWindow, out *Outcome) bool {
 	if c == nil {
 		return true
 	}
@@ -356,9 +504,7 @@ func (e *Engine) matchCorroboration(c *CompiledCorroboration, trigger Signal, av
 		}
 	}
 
-	aiAvailable := trigger.AIObservation != nil &&
-		!trigger.AIObservation.Degraded &&
-		!trigger.AIObservation.InsufficientEvidence
+	aiAvailable := usableAIObservation(trigger)
 
 	for _, s := range available {
 		if s.EventID == trigger.EventID {
@@ -382,7 +528,7 @@ func (e *Engine) matchCorroboration(c *CompiledCorroboration, trigger Signal, av
 			})
 			continue
 		}
-		if !e.inWindow(trigger.NormalizedAt, s.NormalizedAt) {
+		if !e.inWindow(trigger.NormalizedAt, s.NormalizedAt, window) {
 			continue
 		}
 		obsID := ""
@@ -447,6 +593,16 @@ func (e *Engine) matchCorroboration(c *CompiledCorroboration, trigger Signal, av
 	return len(supporting) >= c.MinSignals
 }
 
+// usableAIObservation reports whether a signal carries an AI observation that
+// can answer a question: present, not degraded, and not the model declining to
+// support a determination. All three absences are the same fact to a rule — the
+// Tier C signal is not available — which is invariant 3.
+func usableAIObservation(s Signal) bool {
+	return s.AIObservation != nil &&
+		!s.AIObservation.Degraded &&
+		!s.AIObservation.InsufficientEvidence
+}
+
 func degradeReasonOf(s Signal) DegradedReason {
 	if s.AIObservation == nil {
 		return DegradedAbsent
@@ -454,17 +610,87 @@ func degradeReasonOf(s Signal) DegradedReason {
 	return degradeReasonFromString(s.AIObservation.DegradedReason)
 }
 
-// inWindow reports whether two normalized timestamps are within the site's skew
-// tolerance, extended by the rule's own window when it declared one.
-func (e *Engine) inWindow(triggerAt, otherAt time.Time) bool {
+// inWindow reports whether two normalized timestamps fall inside the rule's
+// declared window, and inside the site's skew tolerance when the rule declared
+// no window of its own.
+//
+// The rule chosen, and the reason for it:
+//
+//   - The author's window is the bound. `durationSeconds: 2` means two seconds.
+//     The site-wide skew tolerance is not a substitute for it, and a rule
+//     asking for 300 seconds at a site with a 5s tolerance is not silently cut
+//     to 5s: it is a 300-second window, and if the site cannot produce the
+//     corroboration inside it, the rule does not corroborate.
+//   - The skew tolerance is how much clock disagreement is tolerated when
+//     deciding whether two events are the same moment at all, so it widens the
+//     author's bound by at most the tolerance. The effective window is
+//     `duration + skewTolerance`, not `max(duration, skewTolerance)` and not
+//     `skewTolerance` alone. It is also never narrower than the tolerance: a
+//     zero-length window with a 5s tolerance still admits a signal 5s away,
+//     because the site has said those are the same moment.
+//   - `direction` is a signed constraint on the same bound, evaluated after it.
+//     `before` keeps signals at or before the trigger, `after` at or after it.
+//     The skew tolerance applies to the direction boundary too, for the same
+//     reason it applies to the duration: two events the site considers
+//     simultaneous have no order, and `before` must not turn that into a
+//     failure. An empty direction is `either`.
+//
+// A window with no durationSeconds falls back to the site's skew tolerance
+// alone, which is what a rule that named the window only to be read by the CLI
+// meant.
+func (e *Engine) inWindow(triggerAt, otherAt time.Time, w *TimeWindow) bool {
 	if triggerAt.IsZero() || otherAt.IsZero() {
 		return false
 	}
 	delta := otherAt.Sub(triggerAt)
-	if delta < 0 {
-		delta = -delta
+	abs := delta
+	if abs < 0 {
+		abs = -abs
 	}
-	return delta <= e.ctx.SkewTolerance
+
+	skew := e.ctx.SkewTolerance
+	if w == nil {
+		return abs <= skew
+	}
+
+	bounded := w.DurationSeconds > 0
+	if bounded {
+		limit := time.Duration(w.DurationSeconds)*time.Second + skew
+		if abs > limit {
+			return false
+		}
+	} else if abs > skew {
+		return false
+	}
+
+	switch w.Direction {
+	case "", "either":
+		return true
+	case "before":
+		// delta <= 0, widened by the skew in the direction the site's tolerance
+		// can justify.
+		return delta <= skew
+	case "after":
+		return delta >= -skew
+	}
+	return true
+}
+
+// mergeDegraded copies one outcome's degradation onto another without
+// carrying its evidence across.
+//
+// The distinction matters at every site that evaluates a condition into a
+// throwaway probe: the evidence an arm used is the arm's, but a degradation is
+// a fact about the evaluation as a whole, and dropping it with the probe is how
+// a rule that could not ask the model reported itself fully corroborated.
+func mergeDegraded(dst *Outcome, src Outcome) {
+	if !src.Degraded {
+		return
+	}
+	dst.Degraded = true
+	if dst.DegradedReason == DegradedNone || dst.DegradedReason == DegradedAbsent {
+		dst.DegradedReason = src.DegradedReason
+	}
 }
 
 func mergeInto(dst *Outcome, src Outcome) {
@@ -472,12 +698,31 @@ func mergeInto(dst *Outcome, src Outcome) {
 	dst.SupportingObservations = append(dst.SupportingObservations, src.SupportingObservations...)
 	dst.ContradictingEvents = append(dst.ContradictingEvents, src.ContradictingEvents...)
 	dst.DriftExclusions = append(dst.DriftExclusions, src.DriftExclusions...)
-	if src.Degraded {
-		dst.Degraded = true
-		if dst.DegradedReason == DegradedNone || dst.DegradedReason == DegradedAbsent {
-			dst.DegradedReason = src.DegradedReason
-		}
+	mergeDegraded(dst, src)
+}
+
+// comparableScalar reports whether two scalars can be compared at all.
+//
+// equalScalar answers "are these equal", and answering false to an object and
+// a string is a true statement about equality. It is the wrong answer to feed a
+// `ne` or a `not_in`, which ask the opposite question and read false as "not
+// equal, therefore match". This is the predicate that keeps the two apart: a
+// pair that cannot be compared is not a comparison that succeeded, and it is
+// also not a missing signal, so it degrades nothing.
+func comparableScalar(a, b any) bool {
+	if _, aok := asFloat(a); aok {
+		_, bok := asFloat(b)
+		return bok
 	}
+	if _, aok := a.(string); aok {
+		_, bok := b.(string)
+		return bok
+	}
+	if _, aok := a.(bool); aok {
+		_, bok := b.(bool)
+		return bok
+	}
+	return a == nil && b == nil
 }
 
 func contains(list []string, want string) bool {

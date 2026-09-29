@@ -29,6 +29,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -42,6 +43,19 @@ var ErrHashMismatch = errors.New("evidence: stored bytes do not match their reco
 
 // ErrNotFound is returned when a reference resolves to nothing.
 var ErrNotFound = errors.New("evidence: no such object")
+
+// ErrHashRequired is returned when Open is asked for an object without the
+// expected hash.
+//
+// An empty hash is a caller error, not a request for an unverified read. Every
+// caller of this package reaches the object through a row in `evidence`, and
+// that row's `sha256` is `NOT NULL` with a hex CHECK, so an empty string here
+// means the caller lost the row rather than that the object has no hash. Open
+// used to treat it as "no verification wanted" and return the bytes with an
+// empty SHA256 on the Object, which is indistinguishable from a real one to
+// everything downstream: the API handler put it in an X-Content-SHA256 header,
+// and the AI worker cited it in an observation.
+var ErrHashRequired = errors.New("evidence: an expected sha256 is required to open an object")
 
 // Store is a filesystem evidence store rooted at one directory.
 type Store struct {
@@ -263,6 +277,18 @@ type Object struct {
 	SizeBytes int64
 	SHA256    string
 	MediaType string
+	// Verified says whether the bytes this Object describes were hashed and
+	// matched against the row's digest on the way out. It is false exactly when
+	// the store has VerifyHashOnRead turned off, which is a debugging aid; an
+	// empty SHA256 alongside Verified true cannot happen, because verification is
+	// what fills it in.
+	//
+	// This field exists because SHA256 alone could not carry the distinction. A
+	// store with verification off returned an empty SHA256, and every consumer
+	// read that as "a hash that happens to be empty" — the handler published it
+	// as an X-Content-SHA256 response header. A caller that wants to know
+	// whether it is looking at proven bytes has to ask.
+	Verified bool
 }
 
 // Put stores bytes under a reference and returns its address and hash.
@@ -337,19 +363,79 @@ func (s *Store) Put(tenant string, body io.Reader) (Object, error) {
 		}
 		return Object{}, fmt.Errorf("evidence: publish: %w", err)
 	}
+	// The rename itself has to reach stable storage, not just the bytes it
+	// moved. tmp.Sync() above made the content durable, but a rename is a
+	// directory-entry update, and on ext4 and XFS that entry lives in the
+	// parent directory's journal rather than in the file. A power loss after
+	// this function returned can therefore leave an acknowledged object absent —
+	// which is the exact failure the Fsync option exists to prevent, and the one
+	// an object-addressed store is least able to detect, because a later Put of
+	// the same bytes simply rewrites the file and nothing ever notices the gap.
+	if err := s.syncDir(filepath.Dir(full)); err != nil {
+		return Object{}, err
+	}
 	return Object{Ref: ref, SizeBytes: written, SHA256: sum}, nil
 }
 
-// Open streams an object, verifying its hash against the row when the caller
-// supplies one.
+// syncDir fsyncs a directory so a rename into it is durable.
+//
+// On Windows the runtime cannot sync a directory handle at all — os.Open on a
+// directory succeeds and Sync on it fails with ERROR_ACCESS_DENIED, because
+// there is no directory fsync in the Win32 model. NTFS metadata journaling and
+// its write-ahead log are what cover the rename there, and a rename on NTFS is
+// made durable by the log record rather than by a call this package could make.
+// So the call is skipped on Windows and the gap is named rather than hidden: the
+// durability this buys is real on Linux, and is provided by the filesystem on
+// Windows.
+//
+// Everywhere else the error is returned rather than swallowed. A store that
+// cannot promise durability should say so at the point where it acknowledged a
+// write, not silently downgrade the guarantee the caller asked for.
+func (s *Store) syncDir(dir string) error {
+	if !s.fsync || runtime.GOOS == "windows" {
+		return nil
+	}
+	d, err := os.Open(dir)
+	if err != nil {
+		return fmt.Errorf("evidence: open directory %q to sync: %w", dir, err)
+	}
+	defer func() { _ = d.Close() }()
+	if err := d.Sync(); err != nil {
+		return fmt.Errorf("evidence: sync directory %q: %w", dir, err)
+	}
+	return nil
+}
+
+// Open streams an object, verifying its hash against the row.
 //
 // The hash check is the reason a file that has been altered on disk is reported
 // rather than served. An operator looking at evidence that cannot be proven to be
 // the evidence an incident cited is worse off than being told the file is wrong.
+//
+// expectSHA is required. An empty one is refused with ErrHashRequired rather than
+// read as "serve it unverified", because every caller reaches an object through
+// a row that carries a NOT NULL sha256, and an empty string there means the
+// caller lost the row. Serving the bytes anyway produced an Object whose empty
+// SHA256 was indistinguishable from a real one: the API handler put it in an
+// X-Content-SHA256 header and the AI worker cited it in an observation that
+// claims the platform verified those bytes. That is a false claim about evidence,
+// which is the one thing this package exists to prevent.
+//
+// A store built with VerifyHashOnRead(false) does skip the check — that is what
+// the option is for — and marks the returned Object Verified: false so the skip
+// is visible to a caller rather than only to the code that configured it.
 func (s *Store) Open(ref, expectSHA string) (io.ReadCloser, Object, error) {
 	full, err := s.resolve(ref)
 	if err != nil {
 		return nil, Object{}, err
+	}
+	// Checked after resolve, not before: a rejected reference should say it was
+	// rejected, whatever the caller also got wrong. And a missing object should
+	// say it is missing rather than complaining about the hash, because "no such
+	// evidence" is the more useful of the two facts to whoever is reading.
+	if expectSHA == "" {
+		return nil, Object{}, fmt.Errorf("%w: %q cannot be opened without the sha256 its "+
+			"row records", ErrHashRequired, ref)
 	}
 	f, err := os.Open(full)
 	if err != nil {
@@ -365,7 +451,10 @@ func (s *Store) Open(ref, expectSHA string) (io.ReadCloser, Object, error) {
 	}
 
 	obj := Object{Ref: ref, SizeBytes: info.Size()}
-	if expectSHA == "" {
+	if !s.hashOnRead {
+		// The documented debugging escape. It returns the bytes and says, in the
+		// one field a caller can read, that they were not proven to be the
+		// evidence the row names.
 		return f, obj, nil
 	}
 
@@ -379,6 +468,7 @@ func (s *Store) Open(ref, expectSHA string) (io.ReadCloser, Object, error) {
 		return nil, Object{}, fmt.Errorf("evidence: rewind: %w", err)
 	}
 	obj.SHA256 = hex.EncodeToString(hasher.Sum(nil))
+	obj.Verified = true
 	if obj.SHA256 != expectSHA {
 		_ = f.Close()
 		return nil, Object{}, fmt.Errorf("%w: %q hashes to %s, row says %s",
@@ -429,10 +519,31 @@ type RetentionPolicy struct {
 	Before time.Time
 	// MaxAge, when positive, is a second bound applied to StoredAt.
 	MaxAge time.Duration
+	// StoredAt reports when an object was stored, from the `evidence` row that
+	// names it. A callback rather than a field, for the same reason
+	// SkipLegalHold is one: "when was this stored" is a question only the
+	// database can answer, and a policy object carrying its own snapshot of the
+	// answer is a snapshot that is wrong by the time the walk reaches the
+	// object it is wrong about.
+	//
+	// Returning the zero time means the age is unknown and the object is kept.
+	// Returning an error records it in SweepResult.Errors and keeps the object:
+	// a sweep that cannot reach the database fails closed, because the failure
+	// mode of the other choice is deleting evidence because the query timed out.
+	//
+	// This is required whenever the policy can expire anything. Sweep has no
+	// filesystem fallback, deliberately — see the mtime note on Sweep.
+	StoredAt func(ref string) (time.Time, error)
 	// SkipLegalHold is a callback rather than a field, because "is this on legal
 	// hold" is a question only the database can answer and a policy object with a
 	// stale snapshot of it is worse than a query.
 	SkipLegalHold func(ref string) (bool, error)
+}
+
+// needsStoredAt reports whether the policy can remove anything, and therefore
+// needs to be able to answer "when was this stored".
+func (p RetentionPolicy) needsStoredAt() bool {
+	return !p.Before.IsZero() || p.MaxAge > 0
 }
 
 // Sweep removes objects past the policy and reports what it did.
@@ -440,6 +551,23 @@ type RetentionPolicy struct {
 // It is an operator action with a dry-run, not a background timer: deleting
 // evidence on a schedule nobody is watching is how a site discovers its retention
 // policy was wrong after the fact.
+//
+// Age comes from the database, through RetentionPolicy.StoredAt, and never from
+// the filesystem's mtime. Sweep used to read info.ModTime(), which is not when
+// anything was stored: a `touch`, a backup restore, a copy, or a filesystem that
+// records mtime from the source archive all produce an mtime unrelated to
+// evidence.stored_at. An object restored from last week's backup then looks ten
+// years old and a retention sweep deletes it on sight, and an object touched by
+// an operator looks brand new and survives a policy it has long outlived. The
+// retention law is a fact about the row, and the row is where it is read from.
+//
+// One query per object, deliberately. A batched lookup would mean a pre-pass over
+// the whole tree to collect references, which is a second walk of a directory
+// that can hold a site's entire incident history, and it would put a memory
+// ceiling on a sweep whose current failure mode is a disk. The cost is a query
+// per object on an operator action that a human is watching with a dry-run
+// available, which is the right place to spend it. Callers that cannot afford it
+// should narrow the walk, not have this guess.
 func (s *Store) Sweep(tenant string, policy RetentionPolicy, dryRun bool) (SweepResult, error) {
 	var result SweepResult
 
@@ -464,6 +592,18 @@ func (s *Store) Sweep(tenant string, policy RetentionPolicy, dryRun bool) (Sweep
 	if err := containedIn(s.root, tenantRoot); err != nil {
 		return result, fmt.Errorf("evidence: refusing to sweep %q: %w", tenant, err)
 	}
+
+	// An expiry policy with no way to read the stored-at time is refused rather
+	// than served from the filesystem. Falling back to mtime here would restore
+	// the exact bug this replaced, and it would be silent: the caller asked to
+	// delete by age, got a sweep that ran, and never learned the age came from
+	// the wrong source.
+	if policy.needsStoredAt() && policy.StoredAt == nil {
+		return result, errors.New("evidence: a sweep that can expire objects needs " +
+			"RetentionPolicy.StoredAt; object age is read from the evidence row, not from " +
+			"the filesystem mtime, which says when a file was last written or copied")
+	}
+
 	err := filepath.WalkDir(tenantRoot, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -496,7 +636,29 @@ func (s *Store) Sweep(tenant string, policy RetentionPolicy, dryRun bool) (Sweep
 			result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", ref, infoErr))
 			return nil
 		}
-		storedAt := info.ModTime()
+
+		// Age, from the row. An object with no evidence row, or a lookup that
+		// cannot answer, has an unknown age, and an unknown age is not an old
+		// age: it is kept, and the reason is recorded rather than swallowed.
+		//
+		// A nil lookup is reached when the policy cannot expire anything, and is
+		// checked here rather than only at the top of Sweep because the walk
+		// runs once per object and this is the line that dereferences it.
+		if policy.StoredAt == nil {
+			return nil
+		}
+		storedAt, ageErr := policy.StoredAt(ref)
+		if ageErr != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: stored-at: %v", ref, ageErr))
+			return nil
+		}
+		if storedAt.IsZero() {
+			// No row, or a row that does not say. Kept, and not recorded as an
+			// error: an object with no evidence row is an orphan, not a fault, and
+			// reporting one per sweep would bury the errors that matter.
+			return nil
+		}
+
 		expired := !policy.Before.IsZero() && storedAt.Before(policy.Before)
 		if !expired && policy.MaxAge > 0 {
 			expired = time.Since(storedAt) > policy.MaxAge

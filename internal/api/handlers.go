@@ -14,6 +14,7 @@ import (
 	"github.com/Sergey-Bar/Ai-Captain/internal/incidents"
 	"github.com/Sergey-Bar/Ai-Captain/internal/observability"
 	"github.com/Sergey-Bar/Ai-Captain/internal/rules"
+	"github.com/Sergey-Bar/Ai-Captain/internal/simulate"
 )
 
 // Deps are the services the API routes onto.
@@ -637,8 +638,15 @@ func (s *Server) handleRuleStore(w http.ResponseWriter, r *http.Request, p ident
 	WriteJSON(w, http.StatusCreated, meta)
 }
 
+// activateRequest carries the simulation report, not a digest.
+//
+// The route used to take `simulateDiffDigest: string` and pass it straight
+// through, which meant the gate checked that 64 hex characters had been typed
+// and nothing else. A digest is an output, not evidence: the operator reviewed a
+// report, and the report is what the gate can re-hash and compare. A caller that
+// wants to acknowledge a bundle sends the report.
 type activateRequest struct {
-	SimulateDiffDigest string `json:"simulateDiffDigest"`
+	SimulateReport simulate.Report `json:"simulateReport"`
 }
 
 func (s *Server) handleRuleActivate(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
@@ -648,7 +656,7 @@ func (s *Server) handleRuleActivate(w http.ResponseWriter, r *http.Request, p id
 		return
 	}
 	version := r.PathValue("version")
-	if err := d.Bundles.Activate(r.Context(), p.TenantID, version, req.SimulateDiffDigest, p.UserID); err != nil {
+	if err := d.Bundles.Activate(r.Context(), p.TenantID, version, req.SimulateReport, p.UserID); err != nil {
 		var gate *bundles.ErrGateNotSatisfied
 		if asGate(err, &gate) {
 			WriteError(w, http.StatusConflict, "gate_not_satisfied", gate.Reason, requestID(r))
@@ -657,7 +665,10 @@ func (s *Server) handleRuleActivate(w http.ResponseWriter, r *http.Request, p id
 		WriteError(w, http.StatusBadRequest, "activate_failed", err.Error(), requestID(r))
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"activeVersion": version})
+	WriteJSON(w, http.StatusOK, map[string]any{
+		"activeVersion": version,
+		"reviewedDiff":  req.SimulateReport.DiffDigest,
+	})
 }
 
 func (s *Server) handleRuleRollback(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {

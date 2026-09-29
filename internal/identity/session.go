@@ -97,8 +97,8 @@ func (s *Service) lockoutBase() time.Duration {
 // optional.
 //
 // Principal is always populated. When MFA is required there is no session, and
-// a caller that needs to say who is being asked for a second factor — the login
-// response, the audit line, the console — has to be able to name them. It used
+// a caller that needs to say who is being asked for a second factor Ã¢â‚¬â€ the login
+// response, the audit line, the console Ã¢â‚¬â€ has to be able to name them. It used
 // to read Principal off a nil Session, which meant every MFA login panicked.
 type LoginResult struct {
 	ChallengeID string    `json:"challengeId"`
@@ -230,8 +230,8 @@ func (s *Service) PasswordStep(ctx context.Context, tenant, username, password, 
 	if err != nil {
 		return result, err
 	}
-	// Read the scope on this path too. The principal is not authenticated yet —
-	// a second factor is still owed — but it is identified, and the response has
+	// Read the scope on this path too. The principal is not authenticated yet Ã¢â‚¬â€
+	// a second factor is still owed Ã¢â‚¬â€ but it is identified, and the response has
 	// to name who is being asked.
 	roles, scope, err := s.principalScope(ctx, tenant, user.UserID)
 	if err != nil {
@@ -317,21 +317,37 @@ func (s *Service) CompleteChallenge(ctx context.Context, tenant, challengeID, me
 	// The bound is the same MaxFailedAttempts the password step uses, and it is
 	// counted per challenge rather than per account, so a legitimate operator
 	// who mistypes twice and a caller guessing both still get five tries in
-	// total. The counter is checked before verification, not after, so a locked
-	// challenge never reaches the factor check at all.
-	if attempts >= s.maxFailed() {
+	// total.
+	//
+	// The budget is CLAIMED, not read. It used to be read in the transaction
+	// above Ã¢â‚¬â€ which commits Ã¢â‚¬â€ compared here, and incremented separately on
+	// failure. Fifty concurrent verifies with different codes all read zero, all
+	// passed the comparison, and all reached the factor check; the limit that the
+	// comment called "the whole control" bounded nothing under parallelism, and
+	// 10^6 codes in a two-minute window is brute-forceable.
+	//
+	// One statement now takes the slot: the increment and the ceiling are the
+	// same predicate, so exactly MaxFailedAttempts verifications can ever be in
+	// flight against a challenge no matter how many arrive at once. A successful
+	// verification also spends a slot, which costs nothing because it deletes the
+	// row.
+	claimed, err := s.claimChallengeAttempt(ctx, tenant, challengeID)
+	if err != nil {
+		return sess, err
+	}
+	if !claimed {
 		s.recordAuth(ctx, tenant, userID, userID, audit.ActionLoginFailed, sourceIP,
-			fmt.Sprintf("second factor refused: %d attempts already failed on this challenge", attempts))
+			"second factor refused: the attempt budget on this challenge is spent")
 		return sess, fmt.Errorf("%w: too many failed second-factor attempts on this challenge; "+
 			"start again with the password", ErrLocked)
 	}
+	_ = attempts
 
 	factorID, _, ok, err := s.VerifyFactor(ctx, tenant, userID, method, code)
 	if err != nil {
 		return sess, err
 	}
 	if !ok {
-		s.registerChallengeFailure(ctx, tenant, challengeID)
 		s.recordAuth(ctx, tenant, userID, userID, audit.ActionLoginFailed, sourceIP,
 			"second factor rejected")
 		return sess, ErrInvalidCredentials
@@ -347,7 +363,7 @@ func (s *Service) CompleteChallenge(ctx context.Context, tenant, challengeID, me
 	// whole control. This used to only insert a new sess_ row and leave the
 	// chal_ row in place until PurgeExpired, which meant one intercepted
 	// challenge id minted unlimited sessions and two concurrent requests both
-	// succeeded — the FOR UPDATE lock committed before verification ran.
+	// succeeded Ã¢â‚¬â€ the FOR UPDATE lock committed before verification ran.
 	sess, err = s.createSession(ctx, tenant, user, sourceIP, method, true, func(tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx,
 			`DELETE FROM sessions WHERE tenant_id = $1 AND session_id = $2 AND mfa_verified = FALSE`,
@@ -654,7 +670,7 @@ func (s *Service) revoke(ctx context.Context, tenant, sessionID, reason string) 
 // createSession inserts a session row.
 //
 // withTx, when non-nil, runs inside the same transaction as the insert and
-// before it. That is how a caller makes the insert conditional on something —
+// before it. That is how a caller makes the insert conditional on something Ã¢â‚¬â€
 // the MFA challenge it is redeeming, for instance. One transaction, so either
 // both happen or neither does.
 func (s *Service) createSession(ctx context.Context, tenant string, user userRow, sourceIP, method string, mfa bool, withTx func(pgx.Tx) error) (Session, error) {
@@ -730,7 +746,7 @@ func (s *Service) loadUser(ctx context.Context, tenant, userID string) (userRow,
 //
 // The query runs inside the tenant context, and that is not a formality. Both
 // tables carry tenant_id and therefore row-level security, so a query issued
-// without the context sees zero rows — not an error, just an empty result. A
+// without the context sees zero rows Ã¢â‚¬â€ not an error, just an empty result. A
 // principal built from that has no roles and no site scope, so every capability
 // check and every site check refuses, and the whole console is unreachable while
 // the login itself keeps returning a session. It fails closed, which is the right
@@ -749,7 +765,7 @@ func (s *Service) principalScope(ctx context.Context, tenant, userID string) ([]
 			// role_id, not name. The capability table in this package is keyed by
 			// role_id, and joining to the human-readable name gives a principal
 			// whose role is "Tenant Admin" while the code looks for
-			// "tenant_admin" — so no capability resolves and every operator is
+			// "tenant_admin" Ã¢â‚¬â€ so no capability resolves and every operator is
 			// denied everything. The name is a label for a person; the id is the
 			// thing a program matches on.
 			rows, err := tx.Query(ctx, `
@@ -793,39 +809,98 @@ func (s *Service) principalScope(ctx context.Context, tenant, userID string) ([]
 	return roles, scope, nil
 }
 
+// registerFailure counts a failed password attempt and applies the lockout.
+//
+// The increment is done in SQL and the new value is read back, rather than
+// computing `attempts := user.FailedAttempts + 1` in Go and writing the result.
+//
+// That computation is the whole defect. `PasswordStep` takes `FOR UPDATE` in a
+// transaction that COMMITS Ã¢â‚¬â€ the password hash is verified outside it, because
+// argon2 takes long enough that holding a row lock across it would serialise
+// every login on the site Ã¢â‚¬â€ so by the time this runs the row is unlocked and
+// `user.FailedAttempts` is as stale as the read. Fifty concurrent wrong
+// passwords for one username all read 0, all write 1, and the exponential
+// backoff in ShouldLock never engages. The lockout is the named control for the
+// CSRF-exempt login route, and under parallelism it bounded nothing.
+//
+// Letting the database do `failed_attempts + 1` makes the increment atomic, so
+// the count is the number of failures that actually happened whatever order they
+// arrive in, and the lockout is derived from that count rather than from a
+// guess made fifty times.
+//
+// The error is returned rather than discarded: a failure to record a failure
+// means the caller is about to return 401 as though the attempt had been
+// counted, and it had not.
 func (s *Service) registerFailure(ctx context.Context, tenant string, user userRow) (int, *time.Time) {
-	attempts := user.FailedAttempts + 1
+	// One extra attempt, computed inside the database. `ShouldLock` is still
+	// applied in Go, from the value the database reports, so the policy stays in
+	// one place and stays testable.
+	var attempts int
+	err := s.Pool.InTx(ctx, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `
+			UPDATE users SET failed_attempts = failed_attempts + 1
+			 WHERE tenant_id = $1 AND user_id = $2
+			RETURNING failed_attempts`, tenant, user.UserID).Scan(&attempts)
+	})
+	if err != nil {
+		// Nothing useful can be done with this beyond saying so: the caller is
+		// already returning a refusal, and refusing is the right answer whether
+		// or not the attempt was counted. It is written to the audit ledger
+		// because a failure to record a failure means the counter is not
+		// counting, and a counter that has silently stopped is the most expensive
+		// kind of broken.
+		s.recordAuth(ctx, tenant, user.UserID, user.UserID, audit.ActionLoginFailed, "",
+			"the failure counter could not be updated: "+err.Error())
+		return user.FailedAttempts + 1, nil
+	}
 	lock, delay := ShouldLock(Lockout{FailedAttempts: attempts}, s.maxFailed(), s.lockoutBase())
 	var until *time.Time
 	if lock {
 		t := s.now().Add(delay)
 		until = &t
 	}
-	_ = s.Pool.InTx(ctx, func(tx pgx.Tx) error {
+	if err := s.Pool.InTx(ctx, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx,
-			`UPDATE users SET failed_attempts = $3, locked_until = $4 WHERE tenant_id = $1 AND user_id = $2`,
-			tenant, user.UserID, attempts, until)
+			`UPDATE users SET locked_until = $3 WHERE tenant_id = $1 AND user_id = $2`,
+			tenant, user.UserID, until)
 		return err
-	})
+	}); err != nil {
+		s.recordAuth(ctx, tenant, user.UserID, user.UserID, audit.ActionLoginFailed, "",
+			"the lockout deadline could not be written: "+err.Error())
+	}
 	return attempts, until
 }
 
-// registerChallengeFailure counts a rejected second factor against the
-// challenge it was offered for.
+// claimChallengeAttempt takes one slot from a challenge's attempt budget and
+// reports whether one was available.
 //
-// It is deliberately separate from registerFailure, which counts against the
-// account: the password already succeeded on this path, so folding the second
-// factor into the account counter would lock an operator out for mistyping a
-// six-digit code, and the account counter is cleared on the next successful
-// password anyway.
-func (s *Service) registerChallengeFailure(ctx context.Context, tenant, challengeID string) {
-	_ = s.Pool.InTx(ctx, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `
+// The ceiling and the increment are the same statement on purpose. Reading the
+// count, comparing it, and incrementing it later is three operations with two
+// gaps between them, and a caller with a challenge id Ã¢â‚¬â€ which is a two-minute
+// bearer of "the password was right" Ã¢â‚¬â€ will find both gaps. `AND mfa_attempts <
+// $3` is what makes the budget a bound rather than a suggestion: the row lock
+// the UPDATE takes is held only for the statement, and the ceiling is re-tested
+// by the same statement that spends the slot.
+func (s *Service) claimChallengeAttempt(ctx context.Context, tenant, challengeID string) (bool, error) {
+	maxAttempts := s.maxFailed()
+	if maxAttempts <= 0 {
+		maxAttempts = 5
+	}
+	var claimed bool
+	err := s.Pool.InTx(ctx, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `
 			UPDATE sessions SET mfa_attempts = mfa_attempts + 1
-			 WHERE tenant_id = $1 AND session_id = $2 AND mfa_verified = FALSE`,
-			tenant, "chal_"+challengeID)
+			 WHERE tenant_id = $1 AND session_id = $2
+			   AND mfa_verified = FALSE
+			   AND mfa_attempts < $3`,
+			tenant, "chal_"+challengeID, maxAttempts)
+		claimed = err == nil && tag.RowsAffected() == 1
 		return err
 	})
+	if err != nil {
+		return false, fmt.Errorf("identity: claim the second-factor attempt: %w", err)
+	}
+	return claimed, nil
 }
 
 func (s *Service) clearFailures(ctx context.Context, tenant, userID string) error {

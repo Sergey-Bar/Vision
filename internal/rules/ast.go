@@ -185,7 +185,16 @@ func compileCondition(c Condition, path string) CompiledCondition {
 			EventTypes: c.Corroborate.EventTypes,
 			MinSignals: c.Corroborate.MinSignals,
 			MinTier:    c.Corroborate.MinEvidenceTier,
-			RequiresAI: c.Corroborate.RequiresAIObservation,
+			// One definition of "this clause consumes a Tier C signal", shared with
+			// the validator. They used to be two: semantic.go treated a clause as
+			// AI-consuming on `requiresAIObservation || minEvidenceTier == C` and
+			// demanded an `ifAIAvailable`, while this set RequiresAI from
+			// `requiresAIObservation` alone. A bundle with
+			// `minEvidenceTier: C, ifAIAvailable: {...}` and no
+			// `requiresAIObservation` therefore compiled clean, was handed a
+			// declared UNVERIFIED fallback, and was then evaluated with the AI
+			// veto switched off — the declared fallback was dead configuration.
+			RequiresAI: corroborationConsumesAI(c.Corroborate),
 		}
 		if corr.MinTier == "" {
 			corr.MinTier = TierB

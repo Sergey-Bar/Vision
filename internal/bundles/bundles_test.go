@@ -14,6 +14,7 @@ import (
 	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
 	"github.com/Sergey-Bar/Ai-Captain/internal/migrate"
 	"github.com/Sergey-Bar/Ai-Captain/internal/rules"
+	"github.com/Sergey-Bar/Ai-Captain/internal/simulate"
 	"github.com/Sergey-Bar/Ai-Captain/internal/testutil"
 )
 
@@ -101,9 +102,14 @@ func TestStoreRefusesAnUncompilableBundle(t *testing.T) {
 	}
 }
 
-// The gate. A bundle cannot be activated without a reviewed diff digest, because
+// The gate. A bundle cannot be activated without a reviewed simulation, because
 // a bundle that can be activated in one step is a bundle nobody read.
-func TestActivationRequiresAReviewedDiffDigest(t *testing.T) {
+//
+// The malformed-digest cases are here because they are still refusals the gate
+// owes an operator a clear reason for. The substantive case â€” a well-formed
+// digest that is not the digest of the changes â€” is
+// TestActivationRecomputesTheDigestItIsGiven below.
+func TestActivationRefusesAMalformedDigestWithAReason(t *testing.T) {
 	svc, tenant := service(t)
 	ctx := context.Background()
 	meta, _, err := svc.Store(ctx, tenant, bundleFile(t), "test", "admin", "")
@@ -119,9 +125,11 @@ func TestActivationRequiresAReviewedDiffDigest(t *testing.T) {
 	}
 	for name, digest := range cases {
 		t.Run(name, func(t *testing.T) {
-			err := svc.Activate(ctx, tenant, meta.Version, digest, "admin")
+			rep := reviewed(meta.Version)
+			rep.DiffDigest = digest
+			err := svc.Activate(ctx, tenant, meta.Version, rep, "admin")
 			if err == nil {
-				t.Fatal("activation succeeded without a valid digest")
+				t.Fatal("activation succeeded with a malformed digest")
 			}
 			var gate *bundles.ErrGateNotSatisfied
 			if !asGate(err, &gate) {
@@ -133,10 +141,124 @@ func TestActivationRequiresAReviewedDiffDigest(t *testing.T) {
 			}
 		})
 	}
+}
 
-	// The built-in bundle's simulated digest.
-	if err := svc.Activate(ctx, tenant, meta.Version, strings.Repeat("a", 64), "admin"); err != nil {
-		t.Fatalf("activation with a well-formed digest was refused: %v", err)
+// reviewed builds a report an operator could have produced by reading
+// `securityctl rules simulate --json` and then editing it. Used where the test
+// is about activation rather than about the simulation.
+func reviewed(version string, changes ...simulate.Change) simulate.Report {
+	rep := simulate.Report{BundleVersion: version, FixtureSet: "fixtures-1"}
+	rep.Changes = changes
+	rep.DiffDigest = simulate.DigestFor(rep.BundleVersion, rep.FixtureSet, rep.Changes)
+	return rep
+}
+
+// Activation re-hashes the report it is given.
+//
+// It used to take a digest string and check only that 64 lowercase hex
+// characters had been supplied. `strings.Repeat("a", 64)` activated a bundle â€”
+// and the whole premise of `internal/simulate`, "a bundle whose simulation
+// produced a different digest than the one acknowledged cannot be activated", was
+// a description of a check that did not exist.
+//
+// The check is only as strong as the interface allows: the service does not hold
+// the fixture set and cannot re-run the simulation. What it can do is recompute
+// the digest from the acknowledged change list with the function that produced
+// it, and refuse when the two disagree.
+func TestActivationRecomputesTheDigestItIsGiven(t *testing.T) {
+	svc, tenant := service(t)
+	ctx := context.Background()
+	meta, _, err := svc.Store(ctx, tenant, bundleFile(t), "test", "admin", "")
+	if err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+
+	change := simulate.Change{
+		Kind: simulate.ChangeCreated, ScenarioID: "s-1", SignalID: "sig-1",
+		Before: simulate.Outcome{IncidentRaised: false, Severity: "low"},
+		After: simulate.Outcome{
+			ScenarioID: "s-1", SignalID: "sig-1",
+			IncidentRaised: true, Severity: "high", State: "unverified",
+		},
+	}
+
+	// A digest typed by hand, with a change list that does not produce it.
+	handWritten := reviewed(meta.Version, change)
+	handWritten.DiffDigest = strings.Repeat("a", 64)
+	err = svc.Activate(ctx, tenant, meta.Version, handWritten, "admin")
+	if err == nil {
+		t.Fatal("a hand-written digest activated the bundle. The gate checked only that 64 hex " +
+			"characters had been supplied")
+	}
+	var gate *bundles.ErrGateNotSatisfied
+	if !asGate(err, &gate) {
+		t.Fatalf("error is %v, want a named gate refusal", err)
+	}
+	if !strings.Contains(gate.Reason, "not the digest of the acknowledged changes") {
+		t.Errorf("the refusal does not say the change list and the digest disagree: %q", gate.Reason)
+	}
+
+	// A report for a different bundle says nothing about this one.
+	other := reviewed("9.9.9", change)
+	if err := svc.Activate(ctx, tenant, meta.Version, other, "admin"); err == nil {
+		t.Error("a simulation of a different bundle activated this one")
+	}
+
+	// A report with no digest at all.
+	none := reviewed(meta.Version, change)
+	none.DiffDigest = ""
+	if err := svc.Activate(ctx, tenant, meta.Version, none, "admin"); err == nil {
+		t.Error("a report with no digest activated the bundle")
+	}
+
+	// And the honest one works.
+	if err := svc.Activate(ctx, tenant, meta.Version, reviewed(meta.Version, change), "admin"); err != nil {
+		t.Fatalf("a genuine simulation report was refused: %v", err)
+	}
+}
+
+// A lint status that is a constant is a gate that cannot fire.
+//
+// The loop that set it assigned "passed" in both branches, so `lint_status` was
+// always "passed" and Activate's `lintStatus != "passed"` check never ran. The
+// derivation is now a named function, which is what makes it testable: the
+// fixture bundle lints clean, so storing it cannot tell the two implementations
+// apart, but handing the function an error-level problem can.
+func TestLintStatusIsDerivedFromTheProblemsAndNotAConstant(t *testing.T) {
+	cases := map[string]struct {
+		problems []rules.Problem
+		want     string
+	}{
+		"no problems": {nil, "passed"},
+		"a warning does not fail a bundle": {
+			[]rules.Problem{{Severity: rules.SeverityWarning, Message: "degrade_proceeds"}},
+			"passed",
+		},
+		"an error fails it": {
+			[]rules.Problem{{Severity: rules.SeverityError, Message: "unsupported operator"}},
+			"failed",
+		},
+		"an error after a warning still fails it": {
+			[]rules.Problem{
+				{Severity: rules.SeverityWarning, Message: "degrade_proceeds"},
+				{Severity: rules.SeverityError, Message: "unsupported operator"},
+			},
+			"failed",
+		},
+		"a warning after an error does not rescue it": {
+			[]rules.Problem{
+				{Severity: rules.SeverityError, Message: "unsupported operator"},
+				{Severity: rules.SeverityWarning, Message: "degrade_proceeds"},
+			},
+			"failed",
+		},
+	}
+	for name, tc := range cases {
+		if got := bundles.LintStatusFor(tc.problems); got != tc.want {
+			t.Errorf("%s: lint status is %q, want %q. A status that is the same for every "+
+				"input is a constant, and Activate's `lintStatus != \"passed\"` gate against "+
+				"one can never fire", name, got, tc.want)
+		}
 	}
 }
 
@@ -163,11 +285,11 @@ func TestRollbackReturnsToThePreviousVersion(t *testing.T) {
 		`UPDATE rule_bundles SET created_at = now() + interval '1 minute'
 		  WHERE tenant_id = $1 AND version = $2`, tenant, second.Version)
 
-	digest := strings.Repeat("b", 64)
-	if err := svc.Activate(ctx, tenant, first.Version, digest, "admin"); err != nil {
+	firstReport, secondReport := reviewed(first.Version), reviewed(second.Version)
+	if err := svc.Activate(ctx, tenant, first.Version, firstReport, "admin"); err != nil {
 		t.Fatalf("activate first: %v", err)
 	}
-	if err := svc.Activate(ctx, tenant, second.Version, digest, "admin"); err != nil {
+	if err := svc.Activate(ctx, tenant, second.Version, secondReport, "admin"); err != nil {
 		t.Fatalf("activate second: %v", err)
 	}
 	active, _, err := svc.Active(ctx, tenant)
@@ -200,7 +322,8 @@ func TestActivationIsAudited(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store: %v", err)
 	}
-	if err := svc.Activate(ctx, tenant, meta.Version, strings.Repeat("c", 64), "admin"); err != nil {
+	report := reviewed(meta.Version)
+	if err := svc.Activate(ctx, tenant, meta.Version, report, "admin"); err != nil {
 		t.Fatalf("activate: %v", err)
 	}
 
@@ -221,8 +344,9 @@ func TestActivationIsAudited(t *testing.T) {
 	if err != nil {
 		t.Fatalf("meta: %v", err)
 	}
-	if stored.ActivateDiffDigest != strings.Repeat("c", 64) {
-		t.Errorf("the acknowledged diff digest was not recorded: %q", stored.ActivateDiffDigest)
+	if stored.ActivateDiffDigest != report.DiffDigest {
+		t.Errorf("the acknowledged diff digest was not recorded: got %q, want %q",
+			stored.ActivateDiffDigest, report.DiffDigest)
 	}
 }
 

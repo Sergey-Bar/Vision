@@ -23,6 +23,7 @@ import (
 	"github.com/Sergey-Bar/Ai-Captain/internal/audit"
 	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
 	"github.com/Sergey-Bar/Ai-Captain/internal/rules"
+	"github.com/Sergey-Bar/Ai-Captain/internal/simulate"
 )
 
 // Service stores, activates and rolls back bundles.
@@ -99,12 +100,9 @@ func (s *Service) Store(ctx context.Context, tenantID string, content []byte, so
 	// a re-upload is recognisable rather than looking like a second bundle.
 	bundleID := "rb-" + contentHash[:16]
 
-	lintStatus := "passed"
-	for _, p := range problems {
-		if p.Severity == rules.SeverityWarning {
-			lintStatus = "passed"
-		}
-	}
+	// Lint status is derived from the problems the compiler reported, and a
+	// bundle with any error-level problem is not one that passed lint.
+	lintStatus := LintStatusFor(problems)
 
 	err := s.Pool.InTenant(ctx, dbx.TenantContext{TenantID: tenant, ActorID: createdBy},
 		func(tx pgx.Tx) error {
@@ -227,18 +225,103 @@ func (s *Service) List(ctx context.Context, tenant string) ([]Meta, error) {
 	return out, rows.Err()
 }
 
+// lintStatusFor is the whole of the lint status, as a function.
+//
+// It was inline, and the inline version assigned "passed" in both branches of
+// its loop, so `lint_status` was a constant and Activate's
+// `lintStatus != "passed"` check could never fire. A gate that cannot fire is
+// not a gate, and a constant written as a loop is the most convincing way to
+// hide one â€” so it is a function, with a name that says what it decides, and a
+// test that feeds it the problems it is supposed to react to.
+//
+// A warning does not fail a bundle. Warnings are the endorsed way to write a
+// rule the compiler can see a problem with and an author has decided about â€”
+// `degrade_proceeds` and `if_ai_unavailable_unused` are both warnings, and both
+// are expected in a shipped bundle. Only an error is disqualifying.
+// LintStatusFor reports whether a bundle with these problems passed lint.
+//
+// Exported so the derivation can be tested against the problems it is supposed
+// to react to. A test that stores a bundle which lints clean cannot tell a
+// derivation from a constant, and this is exactly the shape of bug it is.
+func LintStatusFor(problems []rules.Problem) string {
+	for _, p := range problems {
+		if p.Severity != rules.SeverityWarning {
+			return "failed"
+		}
+	}
+	return "passed"
+}
+
+// checkSimulationCovers refuses a report that is not a simulation of the bundle
+// being activated, or whose digest does not match the changes it carries.
+//
+// The three failures are named separately because the operator's remedy is
+// different for each: a report for the wrong bundle means they simulated the
+// wrong thing, a digest that does not recompute means the change list was edited
+// after they read it, and a missing digest means they never ran the simulation.
+func checkSimulationCovers(version string, report simulate.Report) error {
+	if strings.TrimSpace(report.DiffDigest) == "" {
+		return &ErrGateNotSatisfied{Reason: "no simulate diff digest was supplied. Run `rules simulate` and " +
+			"acknowledge the report it prints."}
+	}
+	if strings.TrimSpace(report.BundleVersion) == "" {
+		return &ErrGateNotSatisfied{Reason: "the simulation report names no bundle version, so it " +
+			"cannot be shown to be a simulation of " + version}
+	}
+	if report.BundleVersion != version {
+		return &ErrGateNotSatisfied{Reason: fmt.Sprintf(
+			"the simulation report is for bundle %s, and %s is being activated. A report for one "+
+				"bundle says nothing about another", report.BundleVersion, version)}
+	}
+	if len(report.DiffDigest) != 64 || !isHex(report.DiffDigest) {
+		return &ErrGateNotSatisfied{Reason: "the simulate diff digest is not a SHA-256 hex digest"}
+	}
+	// The recomputation. This is the check the gate existed for.
+	if want := simulate.DigestFor(report.BundleVersion, report.FixtureSet, report.Changes); want != report.DiffDigest {
+		return &ErrGateNotSatisfied{Reason: fmt.Sprintf(
+			"the acknowledged digest %s is not the digest of the acknowledged changes (which "+
+				"hash to %s). Either the change list was edited after it was read, or the digest "+
+				"was supplied by hand. Over the %d change(s) in fixture set %q",
+			shorten(report.DiffDigest), shorten(want), len(report.Changes), report.FixtureSet)}
+	}
+	return nil
+}
+
+func shorten(h string) string {
+	if len(h) <= 16 {
+		return h
+	}
+	return h[:16] + "â€¦"
+}
+
 // Activate turns a stored bundle on.
 //
 // The gate is the reviewed diff digest. A bundle that has not been simulated
 // cannot be activated, and a bundle whose simulation produced a different digest
-// than the one acknowledged cannot either — which is what stops a review from
+// than the one acknowledged cannot either â€” which is what stops a review from
 // being silently invalidated by the fixtures or the active bundle moving
 // afterwards.
-func (s *Service) Activate(ctx context.Context, tenant, version, diffDigest, actor string) error {
-	if strings.TrimSpace(diffDigest) == "" {
-		return &ErrGateNotSatisfied{Reason: "no simulate diff digest was supplied. Run `rules simulate` and " +
-			"acknowledge the digest it prints."}
+// Activate requires a simulation report whose digest is this bundle's.
+//
+// It takes the report rather than a digest string because a digest on its own
+// proves nothing: it only says 64 lowercase hex characters were supplied.
+// `strings.Repeat("a", 64)` activated a bundle. The doc comment above this
+// function and the entire premise of `internal/simulate` â€” "a bundle whose
+// simulation produced a different digest than the one acknowledged cannot be
+// activated" â€” described a check that did not exist.
+//
+// The service cannot re-run the fixture set itself; it does not have the
+// fixtures. What it can do, and now does, is recompute the digest from the
+// changes the operator is acknowledging, with the same function that produced
+// it, and require the bundle version in that report to be the version being
+// activated. So a report for a different bundle, a report whose change list was
+// edited after the operator read it, and a report whose digest was typed by hand
+// are all refused â€” and the refusal names which of the three it was.
+func (s *Service) Activate(ctx context.Context, tenant, version string, report simulate.Report, actor string) error {
+	if err := checkSimulationCovers(version, report); err != nil {
+		return err
 	}
+	diffDigest := report.DiffDigest
 	if len(diffDigest) != 64 || !isHex(diffDigest) {
 		return &ErrGateNotSatisfied{Reason: "the simulate diff digest is not a SHA-256 hex digest"}
 	}

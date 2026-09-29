@@ -244,13 +244,21 @@ func (e *Engine) Resolve(outcomes []Outcome) Decision {
 		}
 	}
 
+	// The winner among rules that create an incident is chosen by priority first
+	// and severity second, which is the contract the AST states: "at different
+	// priorities the higher one wins". Severity used to be the only key, so a
+	// low-priority `critical` rule beat a high-priority `low` one — the author
+	// had said which rule takes precedence and the fold ignored it. The outcomes
+	// arrive in compiled order (priority descending, id ascending), so the
+	// comparison is a strict one and the first rule at the winning priority and
+	// severity keeps the decision.
 	var best *Outcome
 	for i := range outcomes {
 		o := outcomes[i]
 		if !o.Matched || !o.Action.CreateIncident {
 			continue
 		}
-		if best == nil || severityRank(o.Severity) > severityRank(best.Severity) {
+		if best == nil || outcomeOutranks(o, *best) {
 			best = &outcomes[i]
 		}
 	}
@@ -281,11 +289,30 @@ func (e *Engine) Resolve(outcomes []Outcome) Decision {
 		Action:                 best.Action,
 		SupportingEvents:       best.SupportingEvents,
 		SupportingObservations: best.SupportingObservations,
-		DriftExclusions:        append(append([]Exclusion{}, d.DriftExclusions...), best.DriftExclusions...),
-		Degraded:               d.Degraded || best.Degraded,
-		DegradedReason:         firstDegradedReason(d, *best),
-		Escalate:               best.Action.Escalate,
+		// The drift exclusions of every outcome were collected above, including
+		// this one's, so they are not appended a second time. They used to be, and
+		// every exclusion in explain() was counted twice — the one number an
+		// operator reads to decide whether a site has a clock problem.
+		DriftExclusions: append([]Exclusion{}, d.DriftExclusions...),
+		Degraded:        d.Degraded || best.Degraded,
+		DegradedReason:  firstDegradedReason(d, *best),
+		Escalate:        best.Action.Escalate,
 	}
+}
+
+// outcomeOutranks reports whether a should take the decision from b.
+//
+// Priority is the contract: at different priorities the higher one wins, which
+// is a decision the author made explicitly and which `findConflicts` relies on
+// when it declines to call a differing pair a conflict. Severity is the
+// tiebreak, and it is only a tiebreak, because it is the author's description
+// of urgency within one rule and not a statement about which of two rules
+// governs.
+func outcomeOutranks(a, b Outcome) bool {
+	if a.Priority != b.Priority {
+		return a.Priority > b.Priority
+	}
+	return severityRank(a.Severity) > severityRank(b.Severity)
 }
 
 func firstDegradedReason(fallback Decision, o Outcome) DegradedReason {
@@ -341,6 +368,24 @@ func (e *Engine) evaluateRule(rule CompiledRule, trigger Signal, available []Sig
 		return out
 	}
 
+	// then.requireAIObservation is enforced here. It is in the published schema
+	// and printed by the CLI, and until now nothing read it, which is the worst
+	// shape a setting can have: an operator who sets it believes the incident is
+	// held to an AI observation, and it was not held to anything.
+	//
+	// It is enforced rather than refused because the shipped built-in bundle
+	// sets it, and a diagnostic that breaks the bundle that ships with the
+	// product is not a fix. The reading chosen is the strict one: the action
+	// asks for an observation, so an outcome produced without one is UNVERIFIED
+	// rather than CORROBORATED. That is the same consequence invariant 3 draws
+	// for a corroboration clause that consumes Tier C, and the two compose: a
+	// rule carrying both is held to UNVERIFIED either way, and a rule carrying
+	// only the action flag is held to it here.
+	if rule.Then.RequireAIObservation && !usableAIObservation(trigger) {
+		out.Degraded = true
+		out.DegradedReason = degradeReasonOf(trigger)
+	}
+
 	state, reason := e.stateFor(rule, &out)
 	out.State = state
 	out.Reason = reason
@@ -380,6 +425,23 @@ func (e *Engine) stateFor(rule CompiledRule, out *Outcome) (VerificationState, s
 	return StateUnverified, "insufficient_corroboration"
 }
 
+// findCorroboration returns the corroboration clause that governs this rule's
+// verdict, and nil when the rule has none on the path that matched.
+//
+// The governing clause is the one on the path that actually matched. Two shapes
+// are refused, and both were real:
+//
+//   - `not: {corroborate: {...}}`. The rule matched *because* corroboration was
+//     absent, so demanding corroboration of it is a permanent demotion: the rule
+//     could never be corroborated and never would be, by construction.
+//   - `any: [..., {corroborate: {minSignals: 3}}]` where the rule matched on an
+//     earlier arm. The clause was never the thing that fired, so counting
+//     supporting signals against it compares a number the rule never required.
+//
+// The search therefore descends only through `all` — a conjunction, where a
+// nested clause is genuinely part of what had to hold — and never into a `not`
+// or into any `any` arm. Descending into an `any` is not a shortcut problem: an
+// arm that did not fire is not evidence the author required.
 func findCorroboration(c CompiledCondition) *CompiledCorroboration {
 	switch c.Kind {
 	case KindCorroboration:
@@ -389,16 +451,6 @@ func findCorroboration(c CompiledCondition) *CompiledCorroboration {
 			if found := findCorroboration(c.All[i]); found != nil {
 				return found
 			}
-		}
-	case KindAny:
-		for i := range c.Any {
-			if found := findCorroboration(c.Any[i]); found != nil {
-				return found
-			}
-		}
-	case KindNot:
-		if c.Not != nil {
-			return findCorroboration(*c.Not)
 		}
 	}
 	return nil

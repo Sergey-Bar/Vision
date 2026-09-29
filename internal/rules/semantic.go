@@ -132,10 +132,35 @@ func (c *Compiler) checkRules(b *Bundle) []Problem {
 
 		problems = append(problems, c.checkAction(r)...)
 
-		disabled := !r.Enabled
-		problems = append(problems, c.checkCondition(r.ID, r.When, "when", disabled)...)
+		// hasCorroboration is a fact about the whole rule, not about one
+		// condition: a timeWindow bounds which signals a corroboration clause
+		// counts, so a rule with no corroboration clause anywhere has a window
+		// that bounds nothing.
+		hasCorroboration := ruleHasCorroboration(r.When)
+		problems = append(problems, c.checkCondition(r.ID, r.When, "when", hasCorroboration)...)
 	}
 	return problems
+}
+
+// ruleHasCorroboration reports whether the rule requires corroboration anywhere.
+func ruleHasCorroboration(cond Condition) bool {
+	if cond.Corroborate != nil {
+		return true
+	}
+	for _, child := range cond.All {
+		if ruleHasCorroboration(child) {
+			return true
+		}
+	}
+	for _, child := range cond.Any {
+		if ruleHasCorroboration(child) {
+			return true
+		}
+	}
+	if cond.Not != nil && ruleHasCorroboration(*cond.Not) {
+		return true
+	}
+	return false
 }
 
 func (c *Compiler) checkAction(r Rule) []Problem {
@@ -178,7 +203,6 @@ func (c *Compiler) checkAction(r Rule) []Problem {
 			Message: "the rule both escalates and suppresses",
 		})
 	}
-
 	seen := map[string]bool{}
 	for _, d := range t.Dispatch {
 		if !DispatchTypes[d.Type] {
@@ -206,7 +230,7 @@ func (c *Compiler) checkAction(r Rule) []Problem {
 	return problems
 }
 
-func (c *Compiler) checkCondition(ruleID string, cond Condition, path string, disabled bool) []Problem {
+func (c *Compiler) checkCondition(ruleID string, cond Condition, path string, hasCorroboration bool) []Problem {
 	var problems []Problem
 
 	switch {
@@ -233,16 +257,16 @@ func (c *Compiler) checkCondition(ruleID string, cond Condition, path string, di
 
 	if cond.All != nil {
 		for i, child := range cond.All {
-			problems = append(problems, c.checkCondition(ruleID, child, fmt.Sprintf("%s.all[%d]", path, i), disabled)...)
+			problems = append(problems, c.checkCondition(ruleID, child, fmt.Sprintf("%s.all[%d]", path, i), hasCorroboration)...)
 		}
 	}
 	if cond.Any != nil {
 		for i, child := range cond.Any {
-			problems = append(problems, c.checkCondition(ruleID, child, fmt.Sprintf("%s.any[%d]", path, i), disabled)...)
+			problems = append(problems, c.checkCondition(ruleID, child, fmt.Sprintf("%s.any[%d]", path, i), hasCorroboration)...)
 		}
 	}
 	if cond.Not != nil {
-		problems = append(problems, c.checkCondition(ruleID, *cond.Not, path+".not", disabled)...)
+		problems = append(problems, c.checkCondition(ruleID, *cond.Not, path+".not", hasCorroboration)...)
 	}
 
 	for _, t := range cond.EventType {
@@ -323,9 +347,14 @@ func (c *Compiler) checkCondition(ruleID string, cond Condition, path string, di
 				Message: fmt.Sprintf("%s.timeWindow.direction is %q, want before, after or either", path, d),
 			})
 		}
-		if disabled {
+		if !hasCorroboration {
 			// A window on a rule with no corroboration requirement is dead
-			// configuration: nothing reads it.
+			// configuration: nothing reads it, because the only thing a window
+			// bounds is which signals a corroboration clause will count. The check
+			// is whether the rule requires corroboration at all, which is what
+			// the message says; it is deliberately not whether the rule is
+			// enabled, because a disabled rule's window is equally unread and
+			// equally worth telling the author about.
 			problems = append(problems, Problem{
 				Severity: SeverityWarning, Code: "unused_time_window", RuleID: ruleID,
 				Message: fmt.Sprintf("%s.timeWindow has no corroborate clause to bound", path),
@@ -349,6 +378,28 @@ func (c *Compiler) checkCondition(ruleID string, cond Condition, path string, di
 					"service delivered as a YAML file",
 					path, cond.Field.Op, strings.Join(sortedKeys(FieldOperators), "|")),
 			})
+		}
+		if cond.Field.Op == "contains_prefix" {
+			// HasPrefix(s, "") is true for every s, so an empty prefix makes the
+			// condition match every present string: a rule the author believes
+			// narrows to one prefix and in fact filters on nothing but presence.
+			// Refused here as well as at evaluation, and the two are not
+			// redundant — a CompiledBundle can be built without the compiler.
+			prefix, ok := cond.Field.Value.(string)
+			switch {
+			case !ok:
+				problems = append(problems, Problem{
+					Severity: SeverityError, Code: "field_value", RuleID: ruleID,
+					Message: fmt.Sprintf("%s.field.op %q needs a string value to match a prefix of",
+						path, cond.Field.Op),
+				})
+			case prefix == "":
+				problems = append(problems, Problem{
+					Severity: SeverityError, Code: "field_value_empty_prefix", RuleID: ruleID,
+					Message: fmt.Sprintf("%s.field.op %q with an empty value matches every string, "+
+						"so the condition filters on presence only", path, cond.Field.Op),
+				})
+			}
 		}
 		if cond.Field.Op == "in" || cond.Field.Op == "not_in" {
 			values, ok := cond.Field.Value.([]any)
@@ -416,12 +467,7 @@ func (c *Compiler) checkCorroboration(ruleID string, corr *Corroboration, path s
 		})
 	}
 
-	// The invariant the plan states most forcefully: a rule that consumes a Tier C
-	// signal must declare what happens without one. There is no default here,
-	// deliberately — defaulting would make the decision on the operator's behalf
-	// at evaluation time, on a site that has never thought about it.
-	consumesAI := corr.RequiresAIObservation ||
-		(corr.MinEvidenceTier != "" && corr.MinEvidenceTier == TierC)
+	consumesAI := corroborationConsumesAI(corr)
 	if consumesAI && corr.IfAIAvailable == nil {
 		problems = append(problems, Problem{
 			Severity: SeverityError, Code: "if_ai_unavailable_missing", RuleID: ruleID,
@@ -431,6 +477,13 @@ func (c *Compiler) checkCorroboration(ruleID string, corr *Corroboration, path s
 				path),
 		})
 	}
+	// The invariant the plan states most forcefully: a rule that consumes a Tier C
+	// signal must declare what happens without one. There is no default here,
+	// deliberately — defaulting would make the decision on the operator's behalf
+	// at evaluation time, on a site that has never thought about it. The test for
+	// "consumes a Tier C signal" lives in corroborationConsumesAI so the engine
+	// gates degradation on exactly the same clause this check gates the fallback
+	// on.
 	if !consumesAI && corr.IfAIAvailable != nil {
 		problems = append(problems, Problem{
 			Severity: SeverityWarning, Code: "if_ai_unavailable_unused", RuleID: ruleID,

@@ -207,6 +207,24 @@ type IfAIObserved struct {
 	DegradeTo DegradeTo `yaml:"degradeTo" json:"degradeTo"`
 }
 
+// corroborationConsumesAI is the single definition of "this corroboration
+// clause consumes a Tier C signal".
+//
+// It exists because the validator and the engine had drifted apart, and the
+// drift was invisible: the validator required `ifAIAvailable` on a clause whose
+// `minEvidenceTier` was C, while the compiled rule's RequiresAI was set only
+// from `requiresAIObservation`. A bundle could therefore declare a fallback for
+// a clause the evaluator then never consulted, and the operator's declared
+// behaviour without the model would be dead configuration. Both sides now call
+// this, so a clause the validator calls AI-consuming is the clause the engine
+// treats as AI-consuming.
+func corroborationConsumesAI(c *Corroboration) bool {
+	if c == nil {
+		return false
+	}
+	return c.RequiresAIObservation || c.MinEvidenceTier == TierC
+}
+
 // FieldCondition compares a whitelisted payload path.
 type FieldCondition struct {
 	Path  string `yaml:"path" json:"path"`

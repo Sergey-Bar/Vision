@@ -185,29 +185,58 @@ func orNone(s string) string {
 	return s
 }
 
-// runRulesActivate turns a stored bundle on, against a reviewed diff digest.
+// runRulesActivate turns a stored bundle on, against a simulation the operator
+// reviewed.
+//
+// It takes the report, not a digest. A digest on its own proves only that
+// somebody typed 64 hex characters; the report is what the operator actually
+// read, and it is what the gate recomputes the digest from. `--report` takes the
+// file `rules simulate --json > report.json` produced, so the thing acknowledged
+// and the thing verified are the same bytes.
 func runRulesActivate(ctx context.Context, env *command.Env, args []string) error {
 	fs := flag.NewFlagSet("rules activate", flag.ContinueOnError)
 	fs.SetOutput(env.Stderr)
 	version := fs.String("version", "", "Bundle version to activate.")
-	digest := fs.String("diff-digest", "", "Diff digest from `rules simulate`, acknowledged.")
+	reportPath := fs.String("report", "", "Path to the JSON report `rules simulate --json` produced.")
+	fs.Usage = func() {
+		fmt.Fprintln(env.Stderr, "usage: securityctl rules activate --version V --report report.json")
+		fmt.Fprintln(env.Stderr,
+			"The report is re-hashed and compared with the digest it carries, so a report "+
+				"edited after it was read is refused.")
+	}
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *version == "" {
 		return &command.UsageError{Err: errors.New("--version is required")}
 	}
+	if *reportPath == "" {
+		return &command.UsageError{Err: errors.New(
+			"--report is required. A digest on its own cannot be checked, so activation takes the " +
+				"simulation report the operator reviewed; produce it with `rules simulate --json`")}
+	}
+
+	body, err := os.ReadFile(*reportPath)
+	if err != nil {
+		return fmt.Errorf("read the simulation report: %w", err)
+	}
+	var report simulate.Report
+	if err := json.Unmarshal(body, &report); err != nil {
+		return fmt.Errorf("the simulation report is not the JSON `rules simulate --json` "+
+			"produces: %w", err)
+	}
 
 	tenant := configuredTenant()
 	svc := newBundleService(ctx)
-	if err := svc.Activate(ctx, tenant, *version, *digest, "securityctl"); err != nil {
+	if err := svc.Activate(ctx, tenant, *version, report, "securityctl"); err != nil {
 		var gate *bundles.ErrGateNotSatisfied
 		if errors.As(err, &gate) {
 			return command.Refuse("%s", gate.Reason)
 		}
 		return err
 	}
-	fmt.Fprintf(env.Stdout, "activated rule bundle %s for tenant %s\n", *version, tenant)
+	fmt.Fprintf(env.Stdout, "activated rule bundle %s for tenant %s (reviewed diff %s)\n",
+		*version, tenant, report.DiffDigest)
 	return nil
 }
 

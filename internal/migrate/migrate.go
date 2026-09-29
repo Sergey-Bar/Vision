@@ -95,9 +95,16 @@ func (r *Runner) Applied(ctx context.Context) ([]Applied, error) {
 	var out []Applied
 	for rows.Next() {
 		var a Applied
-		if err := rows.Scan(&a.Version, &a.Name, &a.Phase, &a.Checksum, &a.AppliedAt, &a.Duration); err != nil {
+		// duration_ms is milliseconds and time.Duration is nanoseconds. Scanning
+		// the column straight into the Duration read a 1.5s migration back as
+		// 1500ns, which DurationS then rendered as "1.5µs" on the operator-facing
+		// migration status. The conversion belongs here, in the only place that
+		// knows which unit the column is in.
+		var durationMS int64
+		if err := rows.Scan(&a.Version, &a.Name, &a.Phase, &a.Checksum, &a.AppliedAt, &durationMS); err != nil {
 			return nil, fmt.Errorf("migrate: scan ledger: %w", err)
 		}
+		a.Duration = time.Duration(durationMS) * time.Millisecond
 		a.DurationS = a.Duration.String()
 		out = append(out, a)
 	}
