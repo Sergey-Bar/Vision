@@ -2,6 +2,8 @@ package milestone
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -25,6 +27,13 @@ type Adapter struct {
 	// transport-supplied tenant would be a tenant read from a file.
 	siteID        string
 	integrationID string
+	// Logf receives feed-level faults. It never receives event bodies, credentials
+	// or anything the source sent beyond the route that failed.
+	//
+	// It exists because the alternative was a feed outage that produced no inbox
+	// row, no dead letter and no counter: `pipeline.Poll` drops a record with no
+	// source id, and the outage record used to have none.
+	Logf func(format string, args ...any)
 }
 
 // New builds an adapter over a transport.
@@ -210,8 +219,24 @@ func (a *Adapter) Poll(ctx context.Context, since *time.Time) ([]RawRecord, erro
 			// Aborting the whole poll because one endpoint is down would turn a
 			// partial outage into a total ingest outage, and the SLO for ingest
 			// loss counts accepted events, not whole feeds.
+			//
+			// The record carries a SourceEventID and a SiteID. It used to carry
+			// neither, and `pipeline.Poll` drops exactly those — "record with no
+			// source id was not written" — so a feed outage produced no inbox row,
+			// no dead letter and no counter, while the ingest-loss SLO saw a clean
+			// feed. An outage that is invisible to the thing that watches for
+			// outages is not an outage that gets noticed.
+			//
+			// The id is derived from the route and the poll window, so a feed that
+			// stays down produces one dead letter per poll rather than a new row
+			// per attempt, and the operator sees it as a repeating fact rather than
+			// a flood.
+			id := a.feedErrorID(route, since)
+			a.recordFeedError(ctx, route, id, err)
 			recs = []RawRecord{{
+				SourceEventID:   id,
 				EventType:       adapterFeedErrorType,
+				SiteID:          a.siteID,
 				Malformed:       true,
 				MalformedReason: err.Error(),
 			}}
@@ -228,23 +253,108 @@ func (a *Adapter) Poll(ctx context.Context, since *time.Time) ([]RawRecord, erro
 	return all, nil
 }
 
+// maxFeedPages bounds one feed's pagination.
+//
+// A cursor that does not advance is a server bug, and a cursor that never ends
+// is a loop. The bound is generous for a 200-per-page feed — 40,000 events in
+// one poll — and what happens at the bound is the important part: the feed is
+// reported as truncated rather than silently short, because the alternative is
+// the cursor jumping past events that were never read, which is the one failure
+// this whole function exists to prevent.
+const maxFeedPages = 200
+
 func (a *Adapter) readFeed(ctx context.Context, route Route, since *time.Time) ([]RawRecord, error) {
-	resp, err := a.transport.Get(ctx, route, Query{Since: since, Limit: 200})
-	if err != nil {
-		if IsNotFound(err) {
+	// Follow the cursor to the end of the feed.
+	//
+	// This read exactly one page and then stopped. `transport.Get` captures the
+	// `Next-Cursor` header into `Response.Headers` — deliberately, and with a
+	// comment saying so — and nothing ever followed it. The poll then advanced
+	// `integrations.last_success_at` to the newest received_at of the records it
+	// did read, so the next poll asked for `since = now` and items 201..N were
+	// never requested again.
+	//
+	// That is invariant 1: accepted events, silently and permanently, with no
+	// dead letter, because the loop never learned they existed. The cursor is
+	// carried in the query so the server, not the client, decides what "the next
+	// page" means.
+	var (
+		out    []RawRecord
+		cursor string
+		seen   = map[string]bool{}
+	)
+	for page := 0; page < maxFeedPages; page++ {
+		resp, err := a.transport.Get(ctx, route, Query{
+			Since: since, Limit: 200, Cursor: cursor,
+		})
+		if err != nil {
+			return nil, err
+		}
+		// The status is checked here rather than only inside Parse, because "this
+		// feed is not deployed on this site" and "this feed is failing" are very
+		// different states and only the first one is expected. A transport that
+		// returns a 404 response rather than a 404 error must not turn a partial
+		// Milestone installation into a stream of alerts.
+		if resp != nil && resp.Status == 404 {
 			return nil, nil
 		}
-		return nil, err
+		recs, err := a.Parse(route, resp)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, recs...)
+
+		next := ""
+		if resp != nil {
+			next = resp.Headers["Next-Cursor"]
+		}
+		if next == "" {
+			return out, nil
+		}
+		if seen[next] {
+			// The server is handing back a cursor it has already given us, so
+			// following it would loop for ever. Stopping is the only safe answer,
+			// and saying so is what makes it safe.
+			return out, fmt.Errorf("milestone: %s returned the pagination cursor %q twice; "+
+				"the feed was read up to that point and the rest is not readable. Refusing to "+
+				"loop, and refusing to silently skip the remainder",
+				describe(route), next)
+		}
+		seen[next] = true
+		cursor = next
 	}
-	// The status is checked here rather than only inside Parse, because "this
-	// feed is not deployed on this site" and "this feed is failing" are very
-	// different states and only the first one is expected. A transport that
-	// returns a 404 response rather than a 404 error must not turn a partial
-	// Milestone installation into a stream of alerts.
-	if resp != nil && resp.Status == 404 {
-		return nil, nil
+	return out, fmt.Errorf("milestone: %s still had more pages after %d; the feed was truncated "+
+		"and the unread events are NOT lost from Milestone's side — they will be read on the "+
+		"next poll — but this poll's results are incomplete",
+		describe(route), maxFeedPages)
+}
+
+// feedErrorID is the source event id for a feed that could not be read.
+//
+// Derived from the integration, the route and the poll window, so the same
+// failing feed in the same window produces the same id and the inbox dedupes it.
+// An id that changed on every attempt would turn a feed that has been down for
+// an hour into sixty dead letters, and an operator learns to ignore that.
+func (a *Adapter) feedErrorID(route Route, since *time.Time) string {
+	window := "all"
+	if since != nil {
+		window = since.UTC().Format(time.RFC3339)
 	}
-	return a.Parse(route, resp)
+	sum := sha256.Sum256([]byte(a.integrationID + "\x00" + route.Path + "\x00" + window))
+	return "feed-error-" + hex.EncodeToString(sum[:])[:16]
+}
+
+// recordFeedError makes an unreadable feed visible to the audit ledger.
+//
+// The inbox row that carries the failure record is the thing the dead-letter
+// console lists, and this is the line that makes the outage an *event* rather
+// than an absence. A feed that is down and a feed that is quiet are
+// indistinguishable to anything watching accepted events; they are not
+// indistinguishable to an operator reading a log.
+func (a *Adapter) recordFeedError(ctx context.Context, route Route, id string, cause error) {
+	if a.Logf != nil {
+		a.Logf("milestone: feed %s could not be read and is recorded as %s: %v",
+			describe(route), id, cause)
+	}
 }
 
 // Parse converts one response into records. It is the single parsing path, shared
@@ -280,12 +390,22 @@ func (a *Adapter) Parse(route Route, resp *Response) ([]RawRecord, error) {
 			// One unreadable item in a page must not lose the rest of the page.
 			// It becomes a malformed record with its own identity, so the
 			// platform can show the operator that item arrived and was not read.
+			//
+			// The identity is derived from the item's own bytes, not from its
+			// position in the page. The index is the index *within one page*, so
+			// with pagination the unreadable item at position 3 of page 1 and the
+			// unreadable item at position 3 of page 2 were given the same id — and
+			// the inbox deduplicated the second away, which is one silently lost
+			// event per page. Hashing the item means two genuinely distinct
+			// unreadable items get distinct ids, and the same unreadable item
+			// re-read on the next poll gets the same one, which is what makes it a
+			// repeatable fact rather than a flood.
 			out = append(out, RawRecord{
 				TenantID:        a.tenant(),
 				SiteID:          a.siteID,
 				IntegrationID:   a.integrationID,
 				SourceSystemID:  a.integrationID,
-				SourceEventID:   fmt.Sprintf("%s:%s:unparsed:%d", a.integrationID, route.Path, i),
+				SourceEventID:   a.unparsedItemID(route, item),
 				EventType:       adapterUnparsedItemType,
 				ReceivedAt:      now,
 				Envelope:        []byte(`{"unparsed":true}`),
@@ -297,6 +417,31 @@ func (a *Adapter) Parse(route Route, resp *Response) ([]RawRecord, error) {
 		out = append(out, rec)
 	}
 	return out, nil
+}
+
+// unparsedItemID identifies an item that arrived and could not be read, by what
+// it contains rather than by where it sat.
+//
+// Two different unreadable items must not collide, and the same unreadable item
+// read twice must produce the same id so the platform can show it as one
+// outstanding fact instead of a new dead letter per poll.
+func (a *Adapter) unparsedItemID(route Route, item map[string]any) string {
+	sum := sha256.Sum256([]byte(a.integrationID + "\x00" + route.Path + "\x00" + canonicalItemBytes(item)))
+	return a.integrationID + ":" + route.Path + ":unparsed:" + hex.EncodeToString(sum[:])[:16]
+}
+
+// canonicalItemBytes renders an item so that two structurally equal items hash
+// the same and two different ones do not. encoding/json already orders map keys
+// when marshalling, so this is a straight marshal of the decoded value.
+func canonicalItemBytes(item map[string]any) string {
+	body, err := json.Marshal(item)
+	if err != nil {
+		// A value decoded from JSON always marshals back. If one somehow does
+		// not, the item's Go rendering is still a stable identity within this
+		// process, which is better than the position-based id this replaced.
+		return fmt.Sprintf("%v", item)
+	}
+	return string(body)
 }
 
 func (a *Adapter) tenant() string { return "" }
