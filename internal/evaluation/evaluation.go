@@ -154,6 +154,13 @@ type ProfileReport struct {
 	Answered int
 	// Disagreements is how many answered cases the operator contradicted.
 	Disagreements int
+	// OperatorVerdicts is how many cases carried an operator's verdict at all.
+	//
+	// It is the denominator the disagreement rate needs and `Answered` is not: a
+	// case with no verdict contributes to neither the numerator nor the
+	// denominator, and dividing by the larger of the two reports a two-case
+	// measurement as if it were a two-hundred-case one.
+	OperatorVerdicts int
 	// DisagreementMeasurable is false when no case was both answered and
 	// accompanied by an operator's verdict. An un-normalised count left in a rate
 	// field renders as 500% and fails a gate for a reason that has nothing to do
@@ -273,12 +280,13 @@ func Evaluate(cases []Case, observations []Observation, gates Gates) Report {
 					pr.MissedRestricted++
 				}
 			}
-			if obs.OperatorAgreed != nil {
-				pr.DisagreementMeasurable = true
-				if *obs.OperatorAgreed != *restricted {
-					pr.Disagreements++
-				}
+		if obs.OperatorAgreed != nil {
+			pr.DisagreementMeasurable = true
+			pr.OperatorVerdicts++
+			if *obs.OperatorAgreed != *restricted {
+				pr.Disagreements++
 			}
+		}
 		}
 
 		pr.MedianLatencyMS = median(latencies)
@@ -287,8 +295,18 @@ func Evaluate(cases []Case, observations []Observation, gates Gates) Report {
 		// number of cases an operator looked at.
 		pr.FalsePositiveRate = rate(pr.FalsePositives, pr.Answered)
 		pr.Recall = rate(pr.DetectedRestricted, pr.TruePositives)
-		if pr.DisagreementMeasurable {
-			pr.DisagreementRate = rate(pr.Disagreements, pr.Answered)
+		// The disagreement rate's numerator only moves when a case carries an
+		// operator's verdict, so the denominator is the cases that carry one too.
+		// Dividing by `Answered` — every case the profile returned a judgement
+		// for — let a 2-case sample be reported as 0.00 against a 200-case
+		// denominator, and the gate passed on a measurement it had not made.
+		if pr.OperatorVerdicts > 0 {
+			// The numerator only moves on cases that carry a verdict, so the
+			// denominator is the cases that carry one. Dividing by `Answered` —
+			// every case the profile answered — let two verdicts out of two
+			// hundred answered cases produce 0.00 and pass the 0.25 gate, which is
+			// a two-case measurement reported as a two-hundred-case one.
+			pr.DisagreementRate = rate(pr.Disagreements, pr.OperatorVerdicts)
 		}
 
 		pr.Failures = evaluateGates(pr, gates)
@@ -306,23 +324,45 @@ func Evaluate(cases []Case, observations []Observation, gates Gates) Report {
 // Every gate is checked independently. A profile that is precise, slow, and
 // disagreed with constantly has three failures, and averaging them into a score
 // is how a profile nobody should ship gets promoted.
+//
+// Every denominator here is the population the rate was actually computed over,
+// and every gate that cannot be evaluated says so rather than passing. A gate
+// that is skipped is a gate that has approved something.
 func evaluateGates(pr ProfileReport, g Gates) []string {
 	var failures []string
 
-	if pr.Labeled < g.MinLabelledCases {
+	// The floor is checked against `Answered`, not `Labeled`. Every rate divides
+	// by `Answered`, and `Labeled` counts cases that produced no answer at all,
+	// so a floor checked against it is satisfied by 200 degraded observations
+	// while the false-positive rate it is meant to support is decided by five.
+	// This is the whole reason the floor exists: a rate from a handful of cases
+	// is a number, not an estimate.
+	if pr.Answered < g.MinLabelledCases {
 		failures = append(failures, fmt.Sprintf(
-			"only %d labelled case(s), need %d: a rate computed from a handful of cases is a "+
-				"number, not an estimate", pr.Labeled, g.MinLabelledCases))
+			"only %d answered case(s) of %d labelled, need %d: every rate below is computed "+
+				"over the answered cases, and a rate from a handful of cases is a number, not "+
+				"an estimate", pr.Answered, pr.Labeled, g.MinLabelledCases))
 	}
 	if pr.FalsePositiveRate > g.MaxFalsePositiveRate {
 		failures = append(failures, fmt.Sprintf(
 			"false-positive rate %.2f exceeds %.2f: an operator shown noise twice a week "+
 				"learns to dismiss the feed", pr.FalsePositiveRate, g.MaxFalsePositiveRate))
 	}
-	if pr.TruePositives > 0 && pr.Recall < g.MinRecallOnTruePositives {
+	// A profile that never detected a true positive is the worst recall there is.
+	// The gate used to be skipped when there were no true positives at all, which
+	// is precisely the profile that has detected none: a suite with no true
+	// positives in it, or a profile that declines to answer every one of them.
+	switch {
+	case pr.TruePositives == 0:
+		failures = append(failures,
+			"no true positive was ever answered, so recall is not measurable. This is the "+
+				"worst case, not an absent one: a profile that cannot be measured against a "+
+				"real case cannot be promoted")
+	case pr.TruePositives > 0 && pr.Recall < g.MinRecallOnTruePositives:
 		failures = append(failures, fmt.Sprintf(
-			"recall %.2f below %.2f: the profile is precise by being quiet",
-			pr.Recall, g.MinRecallOnTruePositives))
+			"recall %.2f below %.2f over %d answered true positive(s): the profile is precise "+
+				"by being quiet",
+			pr.Recall, g.MinRecallOnTruePositives, pr.TruePositives))
 	}
 	if pr.MedianLatencyMS > g.MaxMedianLatencyMS {
 		failures = append(failures, fmt.Sprintf(
@@ -331,9 +371,10 @@ func evaluateGates(pr ProfileReport, g Gates) []string {
 	}
 	if pr.DisagreementMeasurable && pr.DisagreementRate > g.MaxDisagreementRate {
 		failures = append(failures, fmt.Sprintf(
-			"disagreement rate %.2f exceeds %.2f: either the profile is wrong or its output "+
-				"is not legible, and both are reasons not to promote it",
-			pr.DisagreementRate, g.MaxDisagreementRate))
+			"disagreement rate %.2f over %d operator verdict(s) exceeds %.2f: either the "+
+				"profile is wrong or its output is not legible, and both are reasons not to "+
+				"promote it",
+			pr.DisagreementRate, pr.OperatorVerdicts, g.MaxDisagreementRate))
 	}
 	return failures
 }

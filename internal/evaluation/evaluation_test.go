@@ -1,6 +1,7 @@
 package evaluation_test
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -396,6 +397,123 @@ func TestPromotionNeedsTwoHundredLabelledCases(t *testing.T) {
 		t.Errorf("the shadow case floor is %d, which is not lower than the promotion floor of %d; "+
 			"a shadow run must be able to collect cases without passing a decision",
 			got, evaluation.DefaultGates().MinLabelledCases)
+	}
+}
+
+// A rate whose numerator only moves on a subset must divide by that subset.
+//
+// The disagreement numerator increments only when a case carries an operator's
+// verdict; the denominator was every answered case. One disagreeing verdict out
+// of 200 answered cases produced 0.005 and passed the 0.25 gate — a one-case
+// measurement reported as a two-hundred-case one, and the direction is always the
+// flattering one, because a small denominator inflates the rate but a large one
+// deflates it.
+func TestTheDisagreementRateDividesByTheCasesThatHaveAVerdict(t *testing.T) {
+	cases := buildCases(200)
+	obs := observationsFor(cases)
+	// Every case starts with a verdict, because that is what a fully-reviewed
+	// fixture set looks like. Strip all but one, and make that one disagree.
+	for i := range obs {
+		obs[i].OperatorAgreed = nil
+	}
+	disagree := false
+	obs[0].OperatorAgreed = &disagree
+
+	pr := evaluation.Evaluate(cases, obs, promoteGates()).Reports[0]
+
+	if pr.OperatorVerdicts != 1 {
+		t.Fatalf("the report says %d operator verdicts, want 1", pr.OperatorVerdicts)
+	}
+	if pr.Answered <= 1 {
+		t.Fatalf("the fixture produced only %d answered cases, so it cannot demonstrate the "+
+			"mixed-population case", pr.Answered)
+	}
+	// One disagreement out of one verdict is 1.00, which the 0.25 gate must
+	// catch. Divided by 200 it is 0.005, which it does not — and that is the
+	// entire defect: a profile that disagrees with the only case anybody reviewed
+	// is reported as disagreeing with half a percent of them.
+	if pr.DisagreementRate != 1.0 {
+		t.Errorf("the disagreement rate is %.3f, want 1.00 over one verdict. The rate is being "+
+			"computed over the %d answered cases rather than the %d that carry a verdict, so a "+
+			"one-case measurement is reported as a two-hundred-case one",
+			pr.DisagreementRate, pr.Answered, pr.OperatorVerdicts)
+	}
+	var complained bool
+	for _, f := range pr.Failures {
+		if strings.Contains(f, "disagreement rate") {
+			complained = true
+		}
+	}
+	if !complained {
+		t.Errorf("a profile that disagrees with the only case anybody reviewed passed the gate "+
+			"with %v", pr.Failures)
+	}
+}
+
+// A profile that never detected a true positive is the worst recall there is.
+// The gate used to be skipped when `TruePositives == 0`, which is exactly the
+// profile that has detected none.
+func TestAProfileWithNoTruePositivesFailsRatherThanPassing(t *testing.T) {
+	// 200 answered cases, every one of them a false positive or benign, so the
+	// recall gate has nothing to measure.
+	cases := make([]evaluation.Case, 0, 200)
+	obs := make([]evaluation.Observation, 0, 200)
+	for i := 0; i < 200; i++ {
+		id := "case-" + strconv.Itoa(i)
+		cases = append(cases, evaluation.Case{ID: id, ProfileID: "p", Outcome: evaluation.OutcomeBenign})
+		obs = append(obs, evaluation.Observation{
+			ID: id, ProfileID: "p",
+			Structured: map[string]any{"restrictedZoneBreach": false},
+		})
+	}
+	pr := evaluation.Evaluate(cases, obs, promoteGates()).Reports[0]
+
+	var complained bool
+	for _, f := range pr.Failures {
+		if strings.Contains(f, "recall is not measurable") {
+			complained = true
+		}
+	}
+	if !complained {
+		t.Errorf("a profile with zero true positives passed the gates with %v. Zero true "+
+			"positives is the worst possible recall, not an absent measurement", pr.Failures)
+	}
+	if pr.Passed {
+		t.Error("the report is marked as passed")
+	}
+}
+
+// The sample-size floor is about the population the rates are computed over.
+//
+// It was checked against `Labeled`, which counts cases that produced no answer.
+// Two hundred degraded observations therefore satisfied a floor of 200 while the
+// false-positive rate it exists to support was decided by five cases.
+func TestTheSampleSizeFloorCountsAnsweredCases(t *testing.T) {
+	cases := buildCases(200)
+	obs := observationsFor(cases)
+	// 195 of the 200 are degraded: labelled, but no answer.
+	for i := 0; i < 195; i++ {
+		obs[i].Degraded = true
+		obs[i].Structured = map[string]any{}
+	}
+	pr := evaluation.Evaluate(cases, obs, promoteGates()).Reports[0]
+
+	if pr.Labeled != 200 {
+		t.Fatalf("the fixture produced %d labelled cases, want 200", pr.Labeled)
+	}
+	if pr.Answered != 5 {
+		t.Fatalf("the fixture produced %d answered cases, want 5", pr.Answered)
+	}
+	var complained bool
+	for _, f := range pr.Failures {
+		if strings.Contains(f, "answered case(s)") {
+			complained = true
+		}
+	}
+	if !complained {
+		t.Errorf("200 labelled cases with 195 of them degraded satisfied a floor of 200 while "+
+			"every rate was computed over 5. The floor exists so a rate is not decided by a "+
+			"handful of cases; against Labeled it does not do that. Failures: %v", pr.Failures)
 	}
 }
 
