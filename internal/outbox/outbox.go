@@ -146,6 +146,10 @@ WITH candidate AS (
 		LIMIT $1
 )
 UPDATE outbox_events o
+   -- sqlguard:exempt lease - this is the claim. It grants the lease rather than
+   -- writing under one, it runs under the system worker because a relay serves
+   -- every tenant, and the rows it takes are pinned by FOR UPDATE SKIP LOCKED
+   -- inside the same statement.
    SET status = 'delivering',
        lease_owner = $2,
        lease_expires_at = now() + make_interval(secs => $3),
@@ -242,19 +246,27 @@ func (r *Relay) deliver(ctx context.Context, d Delivery) error {
 	// A claims, its handler is slow past the lease, relay B claims the expired
 	// row, B's handler fails, and B drives the message to dead_letter. A then
 	// returns from its handler successfully and overwrites status with
-	// 'delivered' and clears last_error. The dead letter — the "visible, audited
-	// fact, never a silent drop" this package's own doc promises — is erased by a
+	// 'delivered' and clears last_error. The dead letter â€” the "visible, audited
+	// fact, never a silent drop" this package's own doc promises â€” is erased by a
 	// worker that finished late, and the operator never sees the message at all.
 	// Matching the claim is the whole fix: A's write affects no rows, and A is
 	// told its lease is gone rather than being allowed to assert a terminal state
 	// it does not own.
+	// `tenant_id` is in the WHERE and not only in the pool context.
+	//
+	// RLS filters on `app.tenant_id`, which is set from the same argument, so
+	// today the row cannot be another tenant's: the statement would update zero
+	// rows. The predicate says so rather than leaving it to be inferred. A
+	// `bigserial` primary key is global and predictable, and a statement whose
+	// tenant-safety is a property of a policy three layers down is one refactor
+	// away from being a cross-tenant write.
 	tag, err := r.Pool.For(d.TenantID, "outbox").Exec(ctx, `
 		UPDATE outbox_events
 		   SET status = 'delivered', delivered_at = now(),
 		       lease_owner = NULL, lease_expires_at = NULL, last_error = NULL
-		 WHERE outbox_id = $1
+		 WHERE outbox_id = $1 AND tenant_id = $3
 		   AND status = 'delivering'
-		   AND lease_owner IS NOT DISTINCT FROM $2`, d.OutboxID, d.LeaseOwner)
+		   AND lease_owner IS NOT DISTINCT FROM $2`, d.OutboxID, d.LeaseOwner, d.TenantID)
 	if err != nil {
 		return fmt.Errorf("outbox: mark delivered: %w", err)
 	}
@@ -308,10 +320,10 @@ func (r *Relay) markFailed(ctx context.Context, d Delivery, cause error) error {
 		                   END,
 		       lease_owner = NULL,
 		       lease_expires_at = NULL
-		 WHERE outbox_id = $1
+		 WHERE outbox_id = $1 AND tenant_id = $5
 		   AND status = 'delivering'
 		   AND lease_owner IS NOT DISTINCT FROM $2
-		RETURNING status`, d.OutboxID, d.LeaseOwner, maxAttempts, cause.Error()).Scan(&status); err != nil {
+		RETURNING status`, d.OutboxID, d.LeaseOwner, maxAttempts, cause.Error(), d.TenantID).Scan(&status); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			// The lease is gone, so this attempt's failure is not this relay's to
 			// record. Recording it anyway is how a worker that finished late
@@ -396,9 +408,12 @@ func (r *Relay) DeadLetters(ctx context.Context, tenantID string, limit int) ([]
 func (r *Relay) Replay(ctx context.Context, tenantID string, outboxID int64) error {
 	tag, err := r.Pool.For(tenantID, "outbox").Exec(ctx, `
 		UPDATE outbox_events
+		   -- sqlguard:exempt lease - an operator replaying a dead letter. The row
+		   -- is dead, so no relay holds its lease; the action is what makes it
+		   -- claimable again.
 		   SET status = 'pending', attempt_count = 0, last_error = NULL,
 		       run_after = now(), lease_owner = NULL, lease_expires_at = NULL
-		 WHERE outbox_id = $1 AND status = 'dead_letter'`, outboxID)
+		 WHERE outbox_id = $1 AND tenant_id = $2 AND status = 'dead_letter'`, outboxID, tenantID)
 	if err != nil {
 		return fmt.Errorf("outbox: replay: %w", err)
 	}

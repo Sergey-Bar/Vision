@@ -17,7 +17,7 @@ MIGRATIONS_DIR := migrations
 .PHONY: all bootstrap generate contract-check contract-check-schema \
         contract-check-openapi contract-check-all contract-baseline build test \
         test-race lint fmt vet tidy migrate-up migrate-status rules-lint \
-        recovery-drill ci \
+        recovery-drill sql-guard ci \
         verify clean
 
 all: build test
@@ -114,7 +114,7 @@ contract-sync: contract-check-schema
 		|| (echo "an embedded schema copy has drifted from contracts/json-schema;"; \
 		    echo "copy the published contract over internal/contracts/schemasync/"; exit 1)
 
-ci: contract-check contract-check-schema contract-check-openapi contract-sync vet lint test-race migration-phases rules-lint recovery-drill
+ci: contract-check contract-check-schema contract-check-openapi contract-sync vet lint test-race migration-phases rules-lint recovery-drill sql-guard
 
 # The gate that runs, and the one to trust.
 #
@@ -131,7 +131,14 @@ ci: contract-check contract-check-schema contract-check-openapi contract-sync ve
 #
 # The database-backed suites skip rather than fail without SP_TEST_DATABASE_URL,
 # so a green run here can be a run that tested nothing. See AGENTS.md.
-verify: contract-check contract-check-schema contract-check-openapi contract-sync vet fmt-check lint test-race migration-phases rules-lint recovery-drill
+verify: contract-check contract-check-schema contract-check-openapi contract-sync vet fmt-check lint test-race migration-phases rules-lint recovery-drill sql-guard
+
+# Every SQL statement the repository writes, checked against the schema: a mutation
+# of a tenant-scoped table names its tenant, a write to a leased table names its
+# lease owner, and an append-only table is only inserted into. The table facts are
+# derived from the migrations, so a table added tomorrow is covered today.
+sql-guard:
+	$(GO) test -p 1 -count=1 -timeout 300s ./internal/sqlguard/...
 
 # The whole-recovery drill, as its own target rather than a line in a package
 # count. It is the only thing here that proves a decision still replays after the

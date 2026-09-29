@@ -348,6 +348,10 @@ WITH candidate AS (
      LIMIT $1
 )
 UPDATE inbox_events e
+   -- sqlguard:exempt lease - this is the claim. It grants the lease rather than
+   -- writing under one, it runs under the system worker because a consume loop
+   -- serves every tenant, and the rows it takes are pinned by FOR UPDATE SKIP
+   -- LOCKED inside the same statement.
    SET status = 'processing',
        lease_owner = $2,
        lease_expires_at = now() + make_interval(secs => $3),
@@ -376,6 +380,12 @@ RETURNING e.tenant_id, e.integration_id, e.source_event_id, e.site_id,
 // once the tenant is pinned, because a site's consume loop has no business
 // touching another site's rows and no business paying for their scan either.
 const expireExhaustedSQL = `
+-- sqlguard:exempt lease - this is the reclaim. A row whose worker died is still
+-- status=processing with an expired lease and no live owner, and retiring it is
+-- the entire purpose of this statement: the budget is spent and nothing is left
+-- to hold the lease. It runs under the system worker because a claim must reach
+-- every tenant, and it constrains itself to rows whose lease has actually
+-- lapsed.
 UPDATE inbox_events
    SET status = 'dead_letter',
        last_error = COALESCE(last_error, 'retries exhausted'),
@@ -654,6 +664,9 @@ func (w *Writer) DeadLetters(ctx context.Context, tenantID string, limit int) ([
 func (w *Writer) Replay(ctx context.Context, key Key) error {
 	tag, err := w.Pool.For(key.TenantID, "inbox").Exec(ctx, `
 		UPDATE inbox_events
+		   -- sqlguard:exempt lease - an operator replaying a dead letter. The row
+		   -- is dead, so by definition no worker holds its lease; the point of the
+		   -- action is to make it claimable again.
 		   SET status = 'received', attempt_count = 0, last_error = NULL,
 		       dead_letter_reason = NULL, completed_at = NULL,
 		       lease_owner = NULL, lease_expires_at = NULL

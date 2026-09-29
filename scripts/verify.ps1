@@ -29,6 +29,12 @@
       rules-lint       the built-in bundle compiles as untrusted input
       recovery-drill   the whole-recovery drill: database gone, checkpoint
                        material gone, decision still replayable
+      sql-guard        every SQL statement this repository writes, checked
+                       against the schema: a mutation of a tenant-scoped table
+                       names its tenant, a write to a leased table names its
+                       lease owner, and an append-only table is only inserted
+                       into. Exemptions are allowed but must carry a reason on
+                       the statement and are printed on every run
       rls-canary       the row-level-security canary, which connects as the
                        production role rather than as the test database's
                        owner, because a superuser suite cannot see a missing
@@ -270,6 +276,8 @@ if (-not $protoc) {
         }
     }
 }
+
+Invoke-Gate 'sql-guard' { & $go test -p 1 -count=1 -timeout 300s ./internal/sqlguard/... }
 
 Invoke-Gate 'rules-lint' { & $go run ./cmd/securityctl rules lint --bundle rules/builtin }
 

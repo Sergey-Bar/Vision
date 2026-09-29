@@ -170,6 +170,10 @@ WITH candidate AS (
      LIMIT $3
 )
 UPDATE jobs j
+   -- sqlguard:exempt lease - this is the claim. It is the statement that
+   -- *grants* the lease rather than writing under one, it runs under the system
+   -- worker because a worker serves every tenant, and it constrains the rows it
+   -- takes with FOR UPDATE SKIP LOCKED inside the same statement.
    SET status = 'leased',
        lease_owner = $1,
        lease_expires_at = now() + make_interval(secs => $2),
@@ -298,8 +302,8 @@ func (q *Worker) Renew(ctx context.Context, tenant, id, owner string) error {
 	tag, err := q.Pool.For(tenant, "jobs").Exec(ctx, `
 		UPDATE jobs
 		   SET lease_expires_at = now() + make_interval(secs => $3)
-		 WHERE job_id = $1 AND lease_owner = $2 AND status = 'leased'`,
-		id, owner, seconds)
+		 WHERE job_id = $1 AND tenant_id = $4 AND lease_owner = $2 AND status = 'leased'`,
+		id, owner, seconds, tenant)
 	if err != nil {
 		return fmt.Errorf("jobs: renew: %w", err)
 	}
@@ -315,7 +319,7 @@ func (q *Worker) Complete(ctx context.Context, tenant, id, owner string) error {
 		UPDATE jobs
 		   SET status = 'done', completed_at = now(),
 		       lease_owner = NULL, lease_expires_at = NULL, last_error = NULL
-		 WHERE job_id = $1 AND lease_owner = $2`, id, owner)
+		 WHERE job_id = $1 AND tenant_id = $3 AND lease_owner = $2`, id, owner, tenant)
 	if err != nil {
 		return fmt.Errorf("jobs: complete: %w", err)
 	}
@@ -365,8 +369,8 @@ func (q *Worker) Fail(ctx context.Context, tenant, id, owner string, cause error
 		       run_after = now() + make_interval(secs => (5 * power(2, least(attempt_count, 6)))::int),
 		       lease_owner = NULL,
 		       lease_expires_at = NULL
-		 WHERE job_id = $1 AND lease_owner = $2
-		RETURNING status`, id, owner, cause.Error()).Scan(&status); err != nil {
+		 WHERE job_id = $1 AND tenant_id = $4 AND lease_owner = $2
+		RETURNING status`, id, owner, cause.Error(), tenant).Scan(&status); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", fmt.Errorf("%w: %s", ErrNotClaimed, id)
 		}
@@ -433,10 +437,13 @@ func (q *Worker) DeadLetters(ctx context.Context, tenantID string, limit int) ([
 func (q *Worker) Replay(ctx context.Context, tenant, id string) error {
 	tag, err := q.Pool.For(tenant, "jobs").Exec(ctx, `
 		UPDATE jobs
+		   -- sqlguard:exempt lease - an operator replaying a dead letter. The row
+		   -- is dead, so no worker holds its lease; the action is what makes it
+		   -- claimable again.
 		   SET status = 'pending', attempt_count = 0, last_error = NULL,
 		       dead_letter_reason = NULL, completed_at = NULL, run_after = now(),
 		       lease_owner = NULL, lease_expires_at = NULL
-		 WHERE job_id = $1 AND status = 'dead_letter'`, id)
+		 WHERE job_id = $1 AND tenant_id = $2 AND status = 'dead_letter'`, id, tenant)
 	if err != nil {
 		return fmt.Errorf("jobs: replay: %w", err)
 	}
