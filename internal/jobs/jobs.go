@@ -115,18 +115,25 @@ func (e *Enqueuer) Enqueue(ctx context.Context, tx pgx.Tx, in Enqueue) (created 
 	if in.MaxAttempts <= 0 {
 		in.MaxAttempts = 5
 	}
-	if in.RunAfter.IsZero() {
-		in.RunAfter = time.Now().UTC()
-	}
-
+	// The zero time is left alone so the column's own now() applies. See the
+	// insert below for why the application clock is the wrong one here.
 	var id string
 	err = tx.QueryRow(ctx, `
 		INSERT INTO jobs (tenant_id, site_id, queue, idempotency_key, payload, max_attempts, run_after)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		VALUES ($1, $2, $3, $4, $5, $6,
+		        -- The not-before time comes from the database, not from the
+		        -- application. Every claim predicate compares against now() in
+		        -- Postgres, so an unset run_after written from this host's clock
+		        -- makes a job visible late or early by however far the two clocks
+		        -- disagree, and on a site where they do a retry either never
+		        -- becomes claimable or is claimable immediately. The column
+		        -- already defaults to now(); this makes the intent explicit
+		        -- rather than relying on a default three migrations away.
+		        COALESCE($7::timestamptz, now()))
 		ON CONFLICT (tenant_id, queue, idempotency_key) DO NOTHING
 		RETURNING job_id::text`,
 		in.TenantID, nullString(in.SiteID), string(in.Queue), in.IdempotencyKey,
-		in.Payload, in.MaxAttempts, in.RunAfter.UTC(),
+		in.Payload, in.MaxAttempts, nullTime(in.RunAfter),
 	).Scan(&id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -344,6 +351,17 @@ func (q *Worker) Fail(ctx context.Context, tenant, id, owner string, cause error
 		   SET status = CASE WHEN attempt_count >= max_attempts THEN 'dead_letter' ELSE 'failed' END,
 		       last_error = $3,
 		       dead_letter_reason = CASE WHEN attempt_count >= max_attempts THEN $3 ELSE NULL END,
+		       -- completed_at is stamped on the transition to dead_letter, and
+		       -- nowhere else. It is the instant the job entered the state an
+		       -- operator has to act on, and DeadLetters orders by it.
+		       --
+		       -- Without it the listing ordered by created_at, which is when the
+		       -- job was enqueued: a job retried for a month and dead-lettered
+		       -- yesterday sorted above one that failed this morning, and the SLO
+		       -- is "a dead letter must be visible within 60 seconds of entering
+		       -- the state". The inbox and the outbox both carry the same column
+		       -- and both were wrong in the same way before they were fixed.
+		       completed_at = CASE WHEN attempt_count >= max_attempts THEN now() ELSE completed_at END,
 		       run_after = now() + make_interval(secs => (5 * power(2, least(attempt_count, 6)))::int),
 		       lease_owner = NULL,
 		       lease_expires_at = NULL
@@ -378,10 +396,14 @@ func (q *Worker) DeadLetters(ctx context.Context, tenantID string, limit int) ([
 	}
 	rows, err := q.Pool.For(tenantID, "jobs").Query(ctx, `
 		SELECT job_id::text, tenant_id, site_id, queue, idempotency_key,
-		       attempt_count, max_attempts, COALESCE(dead_letter_reason, last_error, ''), created_at
+		       attempt_count, max_attempts, COALESCE(dead_letter_reason, last_error, ''),
+		       -- completed_at, not created_at: the operator's question is "what
+		       -- failed recently", and a job enqueued a month ago and dead-lettered
+		       -- yesterday is recent.
+		       COALESCE(completed_at, created_at)
 		  FROM jobs
 		 WHERE ($1 = '' OR tenant_id = $1) AND status = 'dead_letter'
-		 ORDER BY created_at DESC
+		 ORDER BY COALESCE(completed_at, created_at) DESC
 		 LIMIT $2`, tenantID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("jobs: list dead letters: %w", err)
@@ -457,4 +479,13 @@ func nullString(s string) any {
 		return nil
 	}
 	return s
+}
+
+// nullTime renders the zero time as SQL NULL, so the column's own `now()`
+// default applies instead of the year one.
+func nullTime(t time.Time) any {
+	if t.IsZero() {
+		return nil
+	}
+	return t.UTC()
 }

@@ -10,7 +10,7 @@ import (
 // id overwrote the node id.
 //
 // Every `Result.Nodes[].ID` was an edge id, and a caller that traversed from a
-// returned node id Ã¢â‚¬â€ which is the obvious thing to do with a traversal result Ã¢â‚¬â€
+// returned node id ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â which is the obvious thing to do with a traversal result ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â
 // got no rows back. The declared `edgeID` stayed empty, so `Result.EdgeIDs` was a
 // list of empty strings, and the dedupe keyed on `type/edgeID`, which is unique
 // per row, so it never fired and the accumulating branch was unreachable.
@@ -48,8 +48,8 @@ func TestWalkReturnsNodeIDsAndEdgeIDsInTheirOwnFields(t *testing.T) {
 	} {
 		n, ok := byID[want.id]
 		if !ok {
-			t.Errorf("the walk did not return node %s/%s. It returned %+v, whose ids look "+
-				"like edge ids Ã¢â‚¬â€ `Walk` scanned node_id and edge_id into one destination",
+			t.Errorf("the walk did not return node %s/%s. It returned %+v, whose ids are the "+
+				"edge ids: Walk scanned node_id and edge_id into one destination",
 				want.typ, want.id, res.Nodes)
 			continue
 		}

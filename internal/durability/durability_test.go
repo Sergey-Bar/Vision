@@ -439,31 +439,34 @@ func TestReNormalizeIsANoOp(t *testing.T) {
 		t.Fatalf("%d canonical events after one normalization, want 1", n1)
 	}
 
-	// Force the key to exist without an event, which is the state a crash between
-	// the key claim and the event insert would leave. A retry must not create a
-	// second event, and must report that it was already done.
+	// A retry of an already-normalized key is a no-op, and it is a no-op that
+	// says so.
+	//
+	// This used to accept either outcome — it counted the events in both arms
+	// and asserted nothing about the error. That is how the replay path went on
+	// always failing: every call died at the key claim with "no rows in result
+	// set", which this test's tolerant arm was shaped to survive. A test that
+	// accepts the failure it is meant to exclude is not a test.
 	second, err := n.Normalize(context.Background(), normalizeInput(tenant, site, "dup-norm"))
 	if err != nil {
-		// Losing the lease is a legitimate outcome here; what matters is that no
-		// second event appeared.
-		if err2 := p.QueryRow(context.Background(),
-			`SELECT count(*) FROM canonical_events WHERE tenant_id = $1`, tenant).Scan(&n2); err2 != nil {
-			t.Fatalf("count: %v", err2)
-		}
-		if n2 != 1 {
-			t.Fatalf("a failed retry produced %d events, want 1", n2)
-		}
-	} else {
-		if !second.AlreadyNormalized {
-			t.Error("a second normalization did not report itself as a repeat")
-		}
-		if err := p.QueryRow(context.Background(),
-			`SELECT count(*) FROM canonical_events WHERE tenant_id = $1`, tenant).Scan(&n2); err != nil {
-			t.Fatalf("count: %v", err)
-		}
-		if n2 != 1 {
-			t.Fatalf("a repeat normalization produced %d events, want 1", n2)
-		}
+		t.Fatalf("re-normalizing an already-normalized key returned %v. A repeat is a no-op, "+
+			"not a second event and not a failure: the package's own doc says crash recovery "+
+			"is a retry rather than a reconciliation, and an error here routes the event to "+
+			"inbox.Fail, which dead-letters a fully processed event", err)
+	}
+	if !second.AlreadyNormalized {
+		t.Error("a second normalization did not report itself as a repeat")
+	}
+	if err := p.QueryRow(context.Background(),
+		`SELECT count(*) FROM canonical_events WHERE tenant_id = $1`, tenant).Scan(&n2); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n2 != 1 {
+		t.Fatalf("a repeat normalization produced %d events, want 1", n2)
+	}
+	if second.EventID != first.EventID {
+		t.Errorf("the repeat produced event %q, the first produced %q. A repeat must name the "+
+			"event the first one made", second.EventID, first.EventID)
 	}
 	if first.EventID == "" {
 		t.Error("the first normalization produced no event id")

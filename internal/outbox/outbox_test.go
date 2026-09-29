@@ -599,7 +599,7 @@ func TestReplayingADeadLetterRetriesIt(t *testing.T) {
 
 	// Replaying something that is not a dead letter is refused rather than
 	// silently resetting a message that is mid-flight.
-	if err := relay.Replay(ctx, tenant, letters2ID(t, pool, tenant)); err == nil {
+	if err := relay.Replay(ctx, tenant, outboxID(t, pool, tenant)); err == nil {
 		t.Error("replaying a delivered message succeeded; an operator action must not reset a " +
 			"row that has already reached a terminal state")
 	}
@@ -707,4 +707,9 @@ func TestAnExplicitDelayIsStillHonoured(t *testing.T) {
 		Pool:    pool,
 		Handler: func(context.Context, outbox.Delivery) error { return nil },
 	}
-	if n, err := relay.DrainOnce(ctx, tenant, "relay-1",
+	if n, err := relay.DrainOnce(ctx, tenant, "relay-1", 10); err != nil {
+		t.Fatalf("drain: %v", err)
+	} else if n != 0 {
+		t.Errorf("a message delayed by 12h was delivered on the first pass")
+	}
+}

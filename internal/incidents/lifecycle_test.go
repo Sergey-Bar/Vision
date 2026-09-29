@@ -45,7 +45,7 @@ func seedIncident(t *testing.T, svc *incidents.Service, tenant, site string, sup
 //
 // The engine resolves such a rule to StateCorroborated with the reason
 // "no_corroboration_required", and the trigger is carried in a *different* field
-// â€” `Create.SupportingEventIDs` â€” which the link loop read only to decide which
+// Ã¢â‚¬â€ `Create.SupportingEventIDs` Ã¢â‚¬â€ which the link loop read only to decide which
 // of the supporting events was the trigger. So the loop iterated an empty list
 // and the incident was inserted with no `incident_events` rows at all.
 //
@@ -186,7 +186,7 @@ func TestAConcurrentCloseAndReviewCannotProduceAHalfClosedIncident(t *testing.T)
 		// state that contradicts the close timestamp: `in_review` alongside a
 		// `closed_at` is an incident that says it is being worked and is finished
 		// at the same time.
-		if string(detail.State) == string(incidents.StateInReview) && (closedAt != nil) {
+		if detail.State == string(incidents.StateInReview) && closedAt != nil {
 			t.Fatalf("attempt %d: the incident is %q and closed at %s. A stale writer "+
 				"overwrote the state after the close and the close timestamp was "+
 				"preserved. The update is guarded on the state it was read from, so the "+

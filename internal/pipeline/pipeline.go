@@ -890,13 +890,12 @@ func (l *Loops) enqueueVLM(ctx context.Context, tenant, site, incidentID, eventI
 // is an outage, and they are handled differently.
 var errNoActiveBundle = errors.New("pipeline: no active rule bundle")
 
-// activeBundle returns the compiled active bundle, cached by (version, hash).
+// InvalidateBundleCache drops the compiled bundle so the next decision
+// recompiles.
 //
-// InvalidateBundleCache drops the compiled bundle so the next decision recompiles.
-//
-// It exists so a test can activate a different bundle and see the change. The product
-// path does not need it: ctiveBundle reloads when the version or the content hash
-// changes, which is when an operator activates one.
+// It exists so a test can activate a different bundle and see the change. The
+// product path does not need it: `activeBundle` reloads when the version or the
+// content hash changes, which is when an operator activates one.
 func (l *Loops) InvalidateBundleCache() {
 	l.bundleMu.Lock()
 	defer l.bundleMu.Unlock()
@@ -907,6 +906,8 @@ func (l *Loops) InvalidateBundleCache() {
 // the hot path, once per event. Recompiling per event would make the rule engine
 // the most expensive thing in the pipeline for no benefit: the bundle changes
 // when an operator activates one, not when an event arrives.
+//
+// The compiled bundle is cached by (version, hash).
 func (l *Loops) activeBundle(ctx context.Context) (*activeBundle, error) {
 	version, hash, content, err := l.Deps.Bundles.ActiveBundle(ctx, l.Deps.Tenant)
 	if err != nil {
