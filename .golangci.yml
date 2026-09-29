@@ -33,9 +33,13 @@ linters:
         linters: [errcheck]
         text: "Error return value of `fmt\\.Fprint"
       # The same, in the suites: a helper whose failure the test itself asserts.
+      # `ExpectError` is not in this list and cannot be — it returns nothing, and
+      # a caller that wants the reason calls `Refusal` instead. The list exists so
+      # the "asserts by panicking" helpers do not need an explicit discard at
+      # every call site; the helper that does return an error is named for it.
       - path: _test\.go$
         linters: [errcheck]
-        text: "testutil\\.(ExpectError|Exec|QueryOne)"
+        text: "testutil\\.(Exec|QueryOne)"
 
       # A test builds a request and the handler reads nothing from its context.
       # The two places where a context matters — the health endpoints — do carry
@@ -137,16 +141,6 @@ linters:
       # carry secrets are 0640, and the private signing key is 0600.
       - linters: [gosec]
         text: "G302"
-
-      # G104, an unhandled error, in a test. Every one of these is a
-      # `testutil.ExpectError` call: the helper returns an error, and the test
-      # asserts on the failure by panicking inside the helper rather than by
-      # branching on the return. The errcheck exclusion below says the same thing
-      # about the same calls; this is gosec reporting the identical finding under
-      # its own name.
-      - path: _test\.go$
-        linters: [gosec]
-        text: "G104"
 
       # G115, a narrowing integer conversion, in a test. The sites are the RFC
       # 6238 step helper, a rune cast in a string-building helper, and the COSE

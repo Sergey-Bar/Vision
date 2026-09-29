@@ -2,6 +2,7 @@ package pipeline_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -40,6 +41,124 @@ func inboxState(t *testing.T, tenant, sourceEventID string) (string, int, string
 // no terminal state, and a dead-letter table that stayed empty while the backlog
 // grew. That is invariant 1 broken, and the dead-letter surface the operator is
 // told to watch was the thing that never filled.
+// A worker that has lost its lease must not write a terminal state.
+//
+// The interleaving: worker A claims and is inside Normalize. Its lease lapses.
+// Worker B claims the row and commits a successful normalize. A's normalize then
+// fails on something downstream and calls Fail. `Fail` used to match on the key
+// alone, so it flipped a fully processed event to `failed` — or to `dead_letter`,
+// where the operator's dead-letter console lists an event whose canonical event,
+// graph edges and incident all exist.
+//
+// The unit under test is the ownership match, so the test stages it directly
+// rather than reproducing the race, which needs a hook in the middle of
+// Normalize that the product does not have and should not grow for a test.
+func TestAWorkerThatLostItsLeaseCannotWriteATerminalState(t *testing.T) {
+	h := setup(t, bundle, `[
+		{"Id":"e1","Type":"Motion","Timestamp":"2026-03-01T09:00:00Z","Source":"Entrance Camera 01 [cam-1]"}
+	]`)
+	ctx := context.Background()
+	h.loops.PollOnce(ctx)
+
+	w := h.loops.Deps.Inbox
+
+	// Worker A holds the lease.
+	first, err := w.ClaimFor(ctx, h.tenant, "worker-a", 10, 50*time.Millisecond)
+	if err != nil || len(first) != 1 {
+		t.Fatalf("worker A claimed %d rows (err %v), want 1", len(first), err)
+	}
+	// The key comes from the lease rather than being written out here: the
+	// integration id is whatever the harness registered, and a test that
+	// reconstructs it is a test with a second, silent failure mode.
+	key := first[0].Key
+
+	// Worker B takes it after the lease lapses.
+	deadline := time.Now().Add(5 * time.Second)
+	var second []inbox.Lease
+	for time.Now().Before(deadline) {
+		second, err = w.ClaimFor(ctx, h.tenant, "worker-b", 10, 30*time.Second)
+		if err != nil {
+			t.Fatalf("worker B: %v", err)
+		}
+		if len(second) == 1 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if len(second) != 1 {
+		t.Fatal("worker B never reclaimed the row; the lease is decorative")
+	}
+
+	// The interleaving that matters is A reporting *while B is still working*,
+	// not after B has finished. Once B completes, the status is `processed` and
+	// the status check alone excludes A — so a test that lets B finish first
+	// passes even with no ownership check at all, and proves nothing. Here the
+	// row is still `processing` and is owned by B, which is exactly the window
+	// in which A's late write lands.
+	statusWhileBWorks, ownerWhileBWorks, err := inboxRow(t, h.tenant, key.SourceEventID)
+	if err != nil {
+		t.Fatalf("read the row: %v", err)
+	}
+	if statusWhileBWorks != string(inbox.StatusProcessing) || ownerWhileBWorks != "worker-b" {
+		t.Fatalf("the row is status=%q owner=%q, want processing/worker-b; the test is not "+
+			"staging the window it claims to", statusWhileBWorks, ownerWhileBWorks)
+	}
+
+	// Worker A, whose lease lapsed, now reports a failure. It must be refused.
+	if status, err := w.Fail(ctx, key, "worker-a",
+		errors.New("A's normalize failed after its lease lapsed"), 2); err == nil {
+		t.Errorf("a worker that had lost its lease recorded status=%q against a row another "+
+			"worker is still processing. The dead-letter console would list an event whose "+
+			"canonical event, edges and incident all exist", status)
+	}
+	// And it must not be able to complete it either.
+	if err := w.Complete(ctx, key, "worker-a", "evt-from-a"); err == nil {
+		t.Error("a worker that had lost its lease overwrote the canonical event id of a row " +
+			"another worker is still processing")
+	}
+
+	// The row is untouched, and worker B can still finish its own work.
+	if status, _, err := inboxRow(t, h.tenant, key.SourceEventID); err != nil {
+		t.Fatalf("read the row: %v", err)
+	} else if status != string(inbox.StatusProcessing) {
+		t.Fatalf("the row is %q after the late writes, want processing", status)
+	}
+	if err := w.Complete(ctx, key, "worker-b", "evt-from-b"); err != nil {
+		t.Fatalf("worker B could not complete its own row: %v", err)
+	}
+
+	status, _, err := inboxRow(t, h.tenant, key.SourceEventID)
+	if err != nil {
+		t.Fatalf("read the inbox row: %v", err)
+	}
+	if status != string(inbox.StatusProcessed) {
+		t.Errorf("the row is %q after the late writes, want processed", status)
+	}
+
+	var canonical string
+	if err := h.loops.Deps.Pool.For(h.tenant, "test").QueryRow(ctx, `
+		SELECT coalesce(canonical_event_id, '') FROM inbox_events
+		 WHERE tenant_id = $1 AND source_event_id = $2`,
+		h.tenant, key.SourceEventID).Scan(&canonical); err != nil {
+		t.Fatalf("read the canonical id: %v", err)
+	}
+	if canonical != "evt-from-b" {
+		t.Errorf("the row's canonical event is %q, want the one worker B wrote", canonical)
+	}
+}
+
+// inboxRow reads one inbox row's status and lease owner.
+func inboxRow(t *testing.T, tenant, sourceEventID string) (string, string, error) {
+	t.Helper()
+	pool := testutil.Pool(t)
+	var status, owner string
+	err := pool.QueryRow(context.Background(),
+		`SELECT status, coalesce(lease_owner, '') FROM inbox_events
+		 WHERE tenant_id = $1 AND source_event_id = $2`, tenant, sourceEventID).
+		Scan(&status, &owner)
+	return status, owner, err
+}
+
 func TestAPermanentlyUnnormalizableEventReachesADeadLetter(t *testing.T) {
 	h := setup(t, bundle, `[
 		{"Id":"e1","Type":"Motion","Timestamp":"2026-03-01T09:00:00Z","Source":"Entrance Camera 01 [cam-1]"}

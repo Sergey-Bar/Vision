@@ -157,6 +157,135 @@ func TestConcurrentAppendsProduceOneChain(t *testing.T) {
 
 // Two tenants writing at once must not serialise against each other, and
 // interleaving must not cross-link their chains.
+// The verifier's whole job is to tell an intact ledger from a tampered one, and
+// `audit_checkpoints` seals ranges — so verifying a sub-range is the ordinary
+// case, not an edge.
+//
+// It reported every sub-range as broken. The running previous-hash was seeded
+// with the genesis hash regardless of `p_from`, so the first row examined was
+// compared against a genesis it does not have: row `p_from`'s prev_hash is the
+// hash of row `p_from - 1`. Every call with p_from > 1 returned
+// `valid = false, broken_at = p_from`, and pointed at the first row of the range
+// rather than at a real break.
+//
+// The tests only ever verified from 1, which is why it shipped.
+func TestVerifyingASubRangeOfAnIntactChainSucceeds(t *testing.T) {
+	pool := migrated(t)
+	tenant, _, _ := testutil.NewTenant(t, pool)
+	ctx := context.Background()
+
+	for i := 0; i < 6; i++ {
+		if err := appendOne(ctx, pool, audit.Entry{
+			TenantID: tenant, Actor: "op", ActorType: audit.ActorOperator,
+			Action: audit.ActionIncidentCreated, Reason: "subrange",
+		}); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+	}
+
+	for from := int64(1); from <= 5; from++ {
+		var valid bool
+		var fromSeq, toSeq, checked int64
+		var brokenAt *int64
+		if err := pool.QueryRow(ctx,
+			`SELECT valid, from_sequence, to_sequence, broken_at, checked
+			   FROM audit_verify_chain($1, $2)`, tenant, from).
+			Scan(&valid, &fromSeq, &toSeq, &brokenAt, &checked); err != nil {
+			t.Fatalf("verify from %d: %v", from, err)
+		}
+		if !valid {
+			t.Errorf("an intact chain reported broken from sequence %d (checked=%d). A verifier "+
+				"that fails closed on an untouched ledger cannot distinguish tampering from its "+
+				"own bug, and an operator told their ledger is broken learns to ignore the output",
+				from, checked)
+		}
+		if fromSeq != from {
+			t.Errorf("verifying from %d reported from_sequence %d", from, fromSeq)
+		}
+		if checked != 7-from {
+			t.Errorf("verifying from %d checked %d rows, want %d", from, checked, 7-from)
+		}
+	}
+}
+
+// And a tampered row inside a sub-range is still caught, and is still reported
+// at the row after the break rather than at the start of the range. A verifier
+// that says "broken" for everything says nothing, so the test has to check both
+// directions: intact is valid, and the break is located.
+func TestVerifyingASubRangeStillFindsATamperedRow(t *testing.T) {
+	pool := migrated(t)
+	tenant, _, _ := testutil.NewTenant(t, pool)
+	ctx := context.Background()
+
+	for i := 0; i < 6; i++ {
+		if err := appendOne(ctx, pool, audit.Entry{
+			TenantID: tenant, Actor: "op", ActorType: audit.ActorOperator,
+			Action: audit.ActionIncidentCreated, Reason: "tamper",
+		}); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+	}
+
+	// Break the hash of row 4, as an attacker with write access would.
+	//
+	// The append-only trigger has to be suspended to do it, which is the point of
+	// the trigger: it stops the application's own code, not somebody with the
+	// ability to disable a trigger. That somebody is exactly the case the
+	// hash-chain exists to detect.
+	testutil.Exec(t, pool, `ALTER TABLE audit_ledger DISABLE TRIGGER audit_ledger_append_only`)
+	testutil.Exec(t, pool, `
+		UPDATE audit_ledger SET hash = repeat('0', 64)
+		 WHERE tenant_id = $1 AND sequence = 4`, tenant)
+	testutil.Exec(t, pool, `ALTER TABLE audit_ledger ENABLE TRIGGER audit_ledger_append_only`)
+
+	var valid bool
+	var brokenAt int64
+	if err := pool.QueryRow(ctx,
+		`SELECT valid, broken_at FROM audit_verify_chain($1, 1)`, tenant).
+		Scan(&valid, &brokenAt); err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if valid {
+		t.Fatal("a tampered ledger verified")
+	}
+	// The row whose stored hash is wrong is row 4; the link from row 5 is what
+	// fails first, so either 4 or 5 is a correct answer and 1 is not.
+	if brokenAt < 4 || brokenAt > 5 {
+		t.Errorf("the break was reported at sequence %d, want 4 or 5. Pointing at the first "+
+			"suspect is the difference between a forensic signal and a wild goose chase",
+			brokenAt)
+	}
+}
+
+// A range that starts after a hole cannot be verified, and saying so is not the
+// same as saying the chain is broken: the operator's response to each is
+// different, and reporting a missing link as a broken chain teaches them to
+// treat both as noise.
+func TestVerifyingARangeThatStartsAfterAGapRefuses(t *testing.T) {
+	pool := migrated(t)
+	tenant, _, _ := testutil.NewTenant(t, pool)
+	ctx := context.Background()
+
+	for i := 0; i < 4; i++ {
+		if err := appendOne(ctx, pool, audit.Entry{
+			TenantID: tenant, Actor: "op", ActorType: audit.ActorOperator,
+			Action: audit.ActionIncidentCreated, Reason: "gap",
+		}); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+	}
+
+	var valid bool
+	err := pool.QueryRow(ctx, `SELECT valid FROM audit_verify_chain($1, 99)`, tenant).Scan(&valid)
+	if err == nil {
+		t.Fatalf("verifying a range beyond the end returned valid=%v. There is no row at "+
+			"sequence 98 to link from, so nothing about that range was established", valid)
+	}
+	if !strings.Contains(err.Error(), "missing") {
+		t.Errorf("the refusal should say the link is missing, got %q", err)
+	}
+}
+
 func TestChainsAreIsolatedPerTenant(t *testing.T) {
 	pool := migrated(t)
 	tenantA, _, _ := testutil.NewTenant(t, pool)

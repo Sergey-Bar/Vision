@@ -577,7 +577,7 @@ func (l *Loops) fail(ctx context.Context, item inbox.Lease, what string, cause e
 	if l.Deps.Inbox == nil {
 		return
 	}
-	status, err := l.Deps.Inbox.Fail(ctx, item.Key, cause, l.Deps.Inbox.MaxAttempts)
+	status, err := l.Deps.Inbox.Fail(ctx, item.Key, item.Owner, cause, l.Deps.Inbox.MaxAttempts)
 	if err != nil {
 		// The failure to record the failure. The lease is still held and will
 		// lapse, so the event is retried rather than lost — and expireExhausted

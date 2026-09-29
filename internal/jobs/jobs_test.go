@@ -2,6 +2,7 @@ package jobs_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -35,13 +36,19 @@ func open(t *testing.T) *dbx.Pool {
 }
 
 func enqueue(t *testing.T, pool *dbx.Pool, tenant, key string) (created bool) {
+	return enqueueAt(t, pool, tenant, key, 0)
+}
+
+// enqueueAt is enqueue with an explicit retry bound, for the test that drives
+// attempt_count past the point where an unclamped backoff used to raise.
+func enqueueAt(t *testing.T, pool *dbx.Pool, tenant, key string, maxAttempts int) (created bool) {
 	t.Helper()
 	err := pool.InTenant(context.Background(), dbx.TenantContext{TenantID: tenant, ActorID: "test"},
 		func(tx pgx.Tx) error {
 			var err error
 			created, _, err = jobs.New(pool).Enqueue(context.Background(), tx, jobs.Enqueue{
 				TenantID: tenant, Queue: jobs.QueueVLM, IdempotencyKey: key,
-				Payload: []byte(`{"evidence":"x"}`),
+				Payload: []byte(`{"evidence":"x"}`), MaxAttempts: maxAttempts,
 			})
 			return err
 		})
@@ -165,6 +172,55 @@ func TestAnIdempotencyKeyIsScopedToItsQueue(t *testing.T) {
 	}
 	if ids[string(jobs.QueueVLM)] == ids[string(jobs.QueueRuleBulk)] {
 		t.Errorf("two queues with the same idempotency key produced one job (%v)", ids)
+	}
+}
+
+// A retry bound with no reachable end.
+//
+// The backoff was `least(900, 5 * power(2, attempt_count)::int)`, which casts
+// an unbounded exponent to int32 *before* clamping: 2^29 × 5 is 2,684,354,560,
+// so the cast raises at attempt_count 29. The UPDATE rolled back, `Fail` returned
+// an error instead of a status, the row stayed leased, the lease expired, the
+// job was reclaimed — and the whole thing repeated. The worker aborted on every
+// pass and the job never reached dead_letter at all.
+//
+// `max_attempts` had only a `>= 0` check, so a bound above 28 was accepted and
+// reached. There is now a ceiling on the column, and the test drives the counter
+// well past where the old expression died rather than trusting the arithmetic.
+func TestARetryBoundAlwaysReachesATerminalState(t *testing.T) {
+	pool := open(t)
+	tenant, _, _ := testutil.NewTenant(t, testutil.Pool(t))
+	ctx := context.Background()
+
+	const maxAttempts = 100
+	created := enqueueAt(t, pool, tenant, "unbounded", maxAttempts)
+	if !created {
+		t.Fatal("the job was not created")
+	}
+
+	w := &jobs.Worker{Enqueuer: jobs.Enqueuer{Pool: pool}}
+	for i := 0; i < 40; i++ {
+		lease, err := w.Claim(ctx, tenant, "worker", 10)
+		if err != nil {
+			t.Fatalf("claim %d: %v", i, err)
+		}
+		if len(lease) == 0 {
+			// The row is waiting on its backoff. That is the bounded behaviour.
+			break
+		}
+		status, err := w.Fail(ctx, tenant, lease[0].ID, "worker", errors.New("the consumer is down"))
+		if err != nil {
+			t.Fatalf("attempt %d: Fail returned %v. A raising backoff on the failure path "+
+				"leaves the row leased for ever, which is the defect this is about", i, err)
+		}
+		if status == jobs.StatusDeadLetter {
+			t.Fatalf("the job dead-lettered after %d attempts against a bound of %d",
+				i+1, maxAttempts)
+		}
+		// Skip the backoff so the loop does not wait out 5, 10, 20 … seconds.
+		// The retry still goes through the claim.
+		testutil.Exec(t, pool.Pool,
+			`UPDATE jobs SET run_after = now() - interval '1 second' WHERE tenant_id = $1`, tenant)
 	}
 }
 

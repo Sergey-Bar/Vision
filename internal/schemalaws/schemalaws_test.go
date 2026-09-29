@@ -90,7 +90,7 @@ func TestAuditChainRejectsDuplicateSequence(t *testing.T) {
 		INSERT INTO audit_ledger (tenant_id, sequence, ts, actor, actor_type, action)
 		VALUES ($1, 1, now(), 'admin', 'admin', 'identity.bootstrap_admin')`, tenant)
 
-	err := testutil.ExpectError(t, pool, `
+	err := testutil.Refusal(t, pool, `
 		INSERT INTO audit_ledger (tenant_id, sequence, ts, actor, actor_type, action)
 		VALUES ($1, 1, now(), 'attacker', 'operator', 'incident.created')`, tenant)
 	if !strings.Contains(err.Error(), "duplicate key") {
@@ -108,7 +108,7 @@ func TestAuditChainRejectsGap(t *testing.T) {
 		INSERT INTO audit_ledger (tenant_id, sequence, ts, actor, actor_type, action)
 		VALUES ($1, 1, now(), 'admin', 'admin', 'identity.bootstrap_admin')`, tenant)
 
-	err := testutil.ExpectError(t, pool, `
+	err := testutil.Refusal(t, pool, `
 		INSERT INTO audit_ledger (tenant_id, sequence, ts, actor, actor_type, action)
 		VALUES ($1, 3, now(), 'op1', 'operator', 'incident.created')`, tenant)
 	if !strings.Contains(err.Error(), "no predecessor") {
@@ -123,13 +123,13 @@ func TestAuditLedgerIsAppendOnly(t *testing.T) {
 		INSERT INTO audit_ledger (tenant_id, sequence, ts, actor, actor_type, action, reason)
 		VALUES ($1, 1, now(), 'admin', 'admin', 'identity.bootstrap_admin', 'original')`, tenant)
 
-	updateErr := testutil.ExpectError(t, pool,
+	updateErr := testutil.Refusal(t, pool,
 		`UPDATE audit_ledger SET reason = 'rewritten' WHERE tenant_id = $1 AND sequence = 1`, tenant)
 	if !strings.Contains(updateErr.Error(), "append-only") {
 		t.Errorf("expected an append-only refusal, got %v", updateErr)
 	}
 
-	deleteErr := testutil.ExpectError(t, pool,
+	deleteErr := testutil.Refusal(t, pool,
 		`DELETE FROM audit_ledger WHERE tenant_id = $1 AND sequence = 1`, tenant)
 	if !strings.Contains(deleteErr.Error(), "append-only") {
 		t.Errorf("expected an append-only refusal, got %v", deleteErr)
@@ -178,7 +178,7 @@ func TestTamperedRowBreaksChainVerification(t *testing.T) {
 // NOT NULL at the storage layer, not merely by convention.
 func TestAuditLedgerRequiresTenant(t *testing.T) {
 	pool := migrated(t)
-	err := testutil.ExpectError(t, pool, `
+	err := testutil.Refusal(t, pool, `
 		INSERT INTO audit_ledger (tenant_id, sequence, ts, actor, actor_type, action)
 		VALUES ('', 1, now(), 'admin', 'admin', 'identity.bootstrap_admin')`)
 	_ = err
@@ -205,7 +205,7 @@ func TestAIObservationIsAppendOnly(t *testing.T) {
 		        1, '{"insufficientEvidence":true}'::jsonb, $5)`,
 		tenant, site, incident, strings.Repeat("b", 64), strings.Repeat("c", 64))
 
-	err := testutil.ExpectError(t, pool,
+	err := testutil.Refusal(t, pool,
 		`UPDATE ai_observations SET structured_output = '{"insufficientEvidence":false}'::jsonb
 		  WHERE tenant_id = $1 AND observation_id = 'obs-1'`, tenant)
 	if !strings.Contains(err.Error(), "append-only") {
@@ -367,7 +367,7 @@ func TestInboxDedupeIsGlobalNotPerPartition(t *testing.T) {
 		INSERT INTO inbox_event_keys (tenant_id, integration_id, source_event_id, inbox_partition)
 		VALUES ($1, 'int-1', 'src-1', 'inbox_events_2026_01')`, tenant)
 
-	err := testutil.ExpectError(t, pool, `
+	err := testutil.Refusal(t, pool, `
 		INSERT INTO inbox_event_keys (tenant_id, integration_id, source_event_id, inbox_partition)
 		VALUES ($1, 'int-1', 'src-1', 'inbox_events_2026_02')`, tenant)
 	if !strings.Contains(err.Error(), "duplicate key") {

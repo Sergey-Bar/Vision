@@ -392,20 +392,32 @@ func (w *Writer) Renew(ctx context.Context, key Key, owner string, lease time.Du
 }
 
 // Complete marks a lease processed and records what it produced.
-func (w *Writer) Complete(ctx context.Context, key Key, canonicalEventID string) error {
+//
+// It matches on the lease owner, not only on the status, and that is the whole
+// control. A worker whose lease expired can still be running — it has no way to
+// know the lease lapsed until it tries to renew — and by the time it finishes,
+// the row may have been reclaimed and be halfway through another worker's
+// normalize. Matching on `status = 'processing'` alone lets the stale worker
+// overwrite `canonical_event_id` with its own, stamp `completed_at`, and clear
+// the `last_error` of a row that is still in flight. `normalize.completeInbox`
+// gets this right and says why; this is the same statement on the other path.
+func (w *Writer) Complete(ctx context.Context, key Key, owner, canonicalEventID string) error {
 	tag, err := w.Pool.For(key.TenantID, "inbox").Exec(ctx, `
 		UPDATE inbox_events
 		   SET status = 'processed', completed_at = now(),
-		       canonical_event_id = $4,
+		       canonical_event_id = $5,
 		       lease_owner = NULL, lease_expires_at = NULL, last_error = NULL
 		 WHERE tenant_id = $1 AND integration_id = $2 AND source_event_id = $3
-		   AND status = 'processing'`,
-		key.TenantID, key.IntegrationID, key.SourceEventID, canonicalEventID)
+		   AND status = 'processing'
+		   AND lease_owner IS NOT DISTINCT FROM $4`,
+		key.TenantID, key.IntegrationID, key.SourceEventID, owner, canonicalEventID)
 	if err != nil {
 		return fmt.Errorf("inbox: complete: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("inbox: %s/%s is not in processing state", key.IntegrationID, key.SourceEventID)
+		return fmt.Errorf("inbox: %s/%s is not being processed by %s: the lease was reclaimed "+
+			"or the event already reached a terminal state",
+			key.IntegrationID, key.SourceEventID, owner)
 	}
 	return nil
 }
@@ -422,7 +434,22 @@ func (w *Writer) Complete(ctx context.Context, key Key, canonicalEventID string)
 // cast, so the expression cannot overflow at a large attempt_count; a raising
 // backoff on the failure path is the one thing that turns a dead letter into a
 // permanently leased row.
-func (w *Writer) Fail(ctx context.Context, key Key, cause error, maxAttempts int) (Status, error) {
+//
+// The lease owner is matched, for the reason given on Complete and with the same
+// consequence. The interleaving this closes is reachable: worker A holds the
+// lease and is inside Normalize, the lease lapses, worker B claims the row and
+// commits a successful normalize, and A's normalize then fails on something
+// downstream. A's `Fail` matches unconditionally and flips a fully processed
+// event to `failed` — or to `dead_letter`, where the operator's dead-letter
+// console now lists an event whose canonical event, graph edges and incident all
+// exist. Fail takes the owner for the same reason Complete does.
+func (w *Writer) Fail(ctx context.Context, key Key, owner string, cause error, maxAttempts int) (Status, error) {
+	if cause == nil {
+		// Not a check on a caller that "should" pass an error: this is the failure
+		// path, and `cause.Error()` below would panic while building the
+		// arguments, before the query is sent.
+		cause = errors.New("inbox: the failure had no cause recorded")
+	}
 	if maxAttempts <= 0 {
 		maxAttempts = 5
 	}
@@ -442,8 +469,10 @@ func (w *Writer) Fail(ctx context.Context, key Key, cause error, maxAttempts int
 			           ELSE now() + make_interval(secs => (5 * power(2, least(attempt_count, 6)))::int)
 			       END
 			 WHERE tenant_id = $1 AND integration_id = $2 AND source_event_id = $3
+			   AND status = 'processing'
+			   AND lease_owner IS NOT DISTINCT FROM $6
 			RETURNING status`,
-			key.TenantID, key.IntegrationID, key.SourceEventID, maxAttempts, cause.Error(),
+			key.TenantID, key.IntegrationID, key.SourceEventID, maxAttempts, cause.Error(), owner,
 		).Scan(&status)
 	})
 	if err != nil {

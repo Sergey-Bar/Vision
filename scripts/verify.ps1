@@ -27,6 +27,8 @@
                        published .proto. Skipped with a visible warning where
                        protoc is absent
       rules-lint       the built-in bundle compiles as untrusted input
+      recovery-drill   the whole-recovery drill: database gone, checkpoint
+                       material gone, decision still replayable
       rls-canary       the row-level-security canary, which connects as the
                        production role rather than as the test database's
                        owner, because a superuser suite cannot see a missing
@@ -270,6 +272,16 @@ if (-not $protoc) {
 }
 
 Invoke-Gate 'rules-lint' { & $go run ./cmd/securityctl rules lint --bundle rules/builtin }
+
+# The whole-recovery drill, as its own step.
+#
+# It is a package test today, which means it runs as part of `go test ./...` and
+# its failure is one line in a list of thirty packages. It is the only thing in
+# this repository that proves a decision still replays after the database and
+# the checkpoint material are both gone — the property the whole append-only,
+# hash-chained design exists for — and burying it in a package count is how a
+# check stops being looked at.
+Invoke-Gate 'recovery-drill' { & $go test -p 1 -count=1 -timeout 900s -v -run TestRecoveryDrill ./internal/dr/... }
 
 # The row-level-security canary is separated from the rest of the suite because
 # it is the one that connects as the production role rather than as the test

@@ -320,14 +320,31 @@ func (q *Worker) Complete(ctx context.Context, tenant, id, owner string) error {
 
 // Fail records a failed attempt and applies exponential backoff with a cap. Past
 // the job's own retry bound it becomes a dead letter with a reason.
+//
+// The backoff exponent is capped *before* the cast, not after. It used to be
+// `least(900, 5 * power(2, attempt_count)::int)`, which casts an unbounded
+// exponent to int32 first: 2^29 × 5 is 2,684,354,560, so the cast raises at
+// attempt_count 29. `max_attempts` is a column with only a `>= 0` check, so a
+// job enqueued with a bound above 28 reaches that. The UPDATE then rolls back,
+// `Fail` returns an error rather than a status, the row stays leased, the lease
+// expires, the job is reclaimed, and the whole thing repeats — the worker
+// aborts on every pass and the job never reaches `dead_letter` at all. A
+// raising backoff on the failure path is the one thing that turns a bounded retry
+// into a permanently stuck row.
 func (q *Worker) Fail(ctx context.Context, tenant, id, owner string, cause error) (Status, error) {
+	if cause == nil {
+		// Not a defensive check about a caller that "should" pass an error: this
+		// is the failure path, and `cause.Error()` below would panic while
+		// building the arguments, before the query is even sent.
+		cause = errors.New("jobs: the failure had no cause recorded")
+	}
 	var status Status
 	if err := q.Pool.For(tenant, "jobs").QueryRow(ctx, `
 		UPDATE jobs
 		   SET status = CASE WHEN attempt_count >= max_attempts THEN 'dead_letter' ELSE 'failed' END,
 		       last_error = $3,
 		       dead_letter_reason = CASE WHEN attempt_count >= max_attempts THEN $3 ELSE NULL END,
-		       run_after = now() + make_interval(secs => least(900, 5 * power(2, attempt_count)::int)),
+		       run_after = now() + make_interval(secs => (5 * power(2, least(attempt_count, 6)))::int),
 		       lease_owner = NULL,
 		       lease_expires_at = NULL
 		 WHERE job_id = $1 AND lease_owner = $2

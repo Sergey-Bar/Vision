@@ -16,7 +16,8 @@ MIGRATIONS_DIR := migrations
 
 .PHONY: all bootstrap generate contract-check contract-check-schema \
         contract-check-openapi contract-check-all contract-baseline build test \
-        test-race lint fmt vet tidy migrate-up migrate-status rules-lint ci \
+        test-race lint fmt vet tidy migrate-up migrate-status rules-lint \
+        recovery-drill ci \
         verify clean
 
 all: build test
@@ -113,7 +114,7 @@ contract-sync: contract-check-schema
 		|| (echo "an embedded schema copy has drifted from contracts/json-schema;"; \
 		    echo "copy the published contract over internal/contracts/schemasync/"; exit 1)
 
-ci: contract-check contract-check-schema contract-check-openapi contract-sync vet lint test-race migration-phases rules-lint
+ci: contract-check contract-check-schema contract-check-openapi contract-sync vet lint test-race migration-phases rules-lint recovery-drill
 
 # The gate that runs, and the one to trust.
 #
@@ -130,7 +131,14 @@ ci: contract-check contract-check-schema contract-check-openapi contract-sync ve
 #
 # The database-backed suites skip rather than fail without SP_TEST_DATABASE_URL,
 # so a green run here can be a run that tested nothing. See AGENTS.md.
-verify: contract-check contract-check-schema contract-check-openapi contract-sync vet fmt-check lint test-race migration-phases rules-lint
+verify: contract-check contract-check-schema contract-check-openapi contract-sync vet fmt-check lint test-race migration-phases rules-lint recovery-drill
+
+# The whole-recovery drill, as its own target rather than a line in a package
+# count. It is the only thing here that proves a decision still replays after the
+# database and the checkpoint material are both gone, which is the property the
+# append-only hash-chained design exists for.
+recovery-drill:
+	$(GO) test -p 1 -count=1 -timeout 900s -v -run TestRecoveryDrill ./internal/dr/...
 
 # Fails if anything is unformatted. Same intent as the CI fmt job, phrased so it
 # does not depend on a shell pipeline.

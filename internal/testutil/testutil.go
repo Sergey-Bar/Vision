@@ -134,8 +134,32 @@ func Exec(t *testing.T, pool *pgxpool.Pool, sql string, args ...any) {
 	}
 }
 
-// ExpectError runs a statement and requires it to fail, returning the error.
-func ExpectError(t *testing.T, pool *pgxpool.Pool, sql string, args ...any) error {
+// ExpectError runs a statement and requires it to fail.
+//
+// It returns nothing, deliberately. The assertion is "this statement must be
+// refused", and it is made by failing the test if the statement succeeds — which
+// happens inside the helper. Returning the error as well gave every call site
+// two ways to do nothing with it, and eight of them took the second: the call
+// read as if the error were being checked when it was being dropped, and a
+// reviewer had to look at the assignment to know which it was. A call site that
+// wants the error asks for it by name; see Refusal.
+func ExpectError(t *testing.T, pool *pgxpool.Pool, sql string, args ...any) {
+	t.Helper()
+	// Discarded on purpose and visibly. This call site exists to make the
+	// statement fail; a caller that needs the reason calls Refusal, which returns
+	// it. A bare `Refusal(...)` here would be the same discard with less
+	// ceremony, and the linter is right that it looks like a dropped error.
+	_ = Refusal(t, pool, sql, args...)
+}
+
+// Refusal is ExpectError for the callers that need to say *why* the statement was
+// refused — a unique violation, an append-only trigger, a check constraint.
+//
+// This matters more than it looks: "the statement failed" and "the statement
+// failed for the reason the product intends" are different claims, and a
+// constraint test that only checks the first will pass the day the statement
+// starts failing for a different reason.
+func Refusal(t *testing.T, pool *pgxpool.Pool, sql string, args ...any) error {
 	t.Helper()
 	_, err := pool.Exec(context.Background(), sql, args...)
 	if err == nil {
