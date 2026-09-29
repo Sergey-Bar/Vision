@@ -1,6 +1,6 @@
 # Status
 
-Last revised 2026-09-29 (Phase 0 closure, trust sweep, two adversarial reviews, the SQL guard, the site-isolation expand).
+Last revised 2026-09-29 (Phase 0 closure, trust sweep, three adversarial reviews, the SQL guard, the site-isolation flip).
 
 Milestone 1. This document is the source of truth for what is built. The README
 is not, and neither is the commit history.
@@ -628,72 +628,123 @@ literal was touched.
   diff is asserted to be a digest rather than the empty string an activation
   would compare equal to anything that failed to produce one.
 
-### Still open, and needing a human
+### Site isolation exists in the database
 
-- **The RLS policies OR, so there is no site isolation at the database layer.**
-  Verified directly:
+For this product's whole life the two RLS policies on every tenant table were
+both PERMISSIVE. PostgreSQL ORs multiple permissive policies for the same
+command, so
 
-  ```sql
-  SELECT polname, polpermissive FROM pg_policy WHERE polrelid = 'evidence'::regclass;
-  --  site_isolation     permissive = true
-  --  tenant_isolation   permissive = true
-  ```
+    tenant_isolation OR site_isolation  ==  tenant_isolation
 
-  PostgreSQL ORs multiple PERMISSIVE policies for the same command, so
-  `tenant_isolation OR site_isolation` is `tenant_isolation`. The comment in
-  migration 0008 says "so the two concerns compose: tenant first, then site",
-  which describes AND. The DDL implements OR.
+There was no site isolation at the row level. Migration 0008's comment says "so
+the two concerns compose: tenant first, then site", which is AND; the DDL
+implemented OR. Confirmed directly against the catalogue rather than inferred
+from the migration text:
 
-  This is why the API handlers check the site themselves, and it is now the only
-  place site isolation happens. Making `site_isolation` RESTRICTIVE would move
-  the check into the database, which is where it belongs, and it is a large
-  behavioural change: every request would have to carry its site scope, and any
-  query that does not would see nothing rather than everything. It needs an ADR
-  and a human.
+```sql
+SELECT polname, polpermissive FROM pg_policy WHERE polrelid = 'evidence'::regclass;
+--  site_isolation      permissive = true
+--  tenant_isolation    permissive = true
+```
 
-  **The expand half has landed.** The API's request-path reads of site-scoped
-  tables now bind the principal's scope (`dbx.Pool.WithSites`) rather than only
-  the tenant, and `internal/rlsrole/site_isolation_test.go` states the three
-  conditions the flip depends on and checks two of them on every run. The third is
-  the blocker and it is a skip that names itself: `inbox`, `jobs`, `outbox` and
-  `correlator` take a `tenant string` and build their own scoped pool, so a
-  handler's scope is lost at the service boundary. Until each has a
-  scope-carrying signature -- and the consume loops have a `Deps.SiteID`-bound
-  pool of their own -- the flip would make every site-scoped read through those
-  services return nothing.
+Every site check in the product was a handler doing it by hand, and a handler
+that forgot one was a cross-site read with no error anywhere. Migration 0021
+recreates every `site_isolation` policy as RESTRICTIVE, so the effective
+predicate is tenant AND site. `ALTER POLICY` only supports `RENAME TO`, so each
+is dropped and recreated carrying its original USING expression and role list
+over verbatim, and a policy whose role list is anything but PUBLIC is refused
+rather than guessed â€” recreating it with different roles would be a privilege
+change disguised as a scope change.
 
-  That is fail-closed and therefore not a security hole, and it is also an
-  ingest outage on a site that looks healthy in every other respect, which is
-  why the two halves are separate changes and why the second one is not done
-  here.
-- `evidence.export` is still enforced nowhere. `evidence.fetch` now gates the route that
-  streams bytes and is audited before the first byte leaves; there is no export route for
-  it to attach to, and removing it from the role table means a migration. Recorded
-  rather than done.
-- `internal/durability`'s `TestReNormalizeIsANoOp` tolerates an error on the second
-  normalize call, in an if/else arm. It passed over a bug where that call always failed,
-  because the test accepted either outcome. It should require a nil error now.
-  - a capability that grants nothing is a role table that lies.
-- **`evidence.export` is still enforced nowhere.** `evidence.fetch` now
-  gates the route that streams bytes and is audited before the first byte
-  leaves; there is no export route for it to attach to, and removing it from
-  the role table means a migration. Recorded rather than done.
-- **`outbox_events` has no `dead_letter_reason` column and no index for the
-  new dead-letter listing.** `last_error` carries the reason and the listing
-  reads it, so an operator is not missing anything today. The column is the
-  right end state and the index belongs with it; both need a migration.
-- **The whole-recovery drill is a gate step, but `securityctl install` and the
-  upgrade path are not**, and are not covered by a test a release is gated on.
-  A drill that restores from backup proves recovery from a data loss; it does
-  not prove that installing the next version over a running site is safe.
+The change is fail-closed, and that shaped how it landed. A statement that
+reaches a site-scoped table without naming a site now sees nothing: right
+direction for a security control, dangerous for availability, because a consume
+loop that forgot its site would ingest nothing and say nothing. The Go side was
+therefore changed first, and the whole suite was run against the flipped policy
+before the migration was considered done.
+
+**The RLS canary found four real gaps that nothing else could.** The inbox write,
+the normalizer's insert, the backlog count, and the lease key not carrying its
+site. Every other test in the tree connects as the superuser, which bypasses RLS
+entirely, so the whole ingest path ran green for as long as the policy did not
+consult the site. That is the argument for a canary: without one, a fail-closed
+policy has no failure to find.
+
+It also surfaced a latent bug that had been invisible and would have broken
+every site-scoped read the moment the policy started consulting `app.site_ids`:
+`encodeSiteIDs` emitted a bare `a,b`, and `app_current_site_ids` casts that to
+`text[]`, so every read would have failed with "malformed array literal". It
+emits a quoted array literal now, and elements containing a comma, a quote or a
+backslash are escaped rather than silently changing the list's length.
+
+The terminal writes in `jobs` and `outbox` run as the system worker rather than
+narrowing to a site, and the reasoning is in the code: they are guarded on
+`lease_owner`, and holding one row's lease is a strictly stronger predicate than
+holding a whole site. A caller without the lease matches zero rows exactly as it
+did before.
+
+`internal/rlsrole/site_isolation_test.go` asserts the policy is RESTRICTIVE, that
+the two compose as AND under the production role (own site sees the row, another
+site in the same tenant sees nothing, no site sees nothing), that every
+request-path read of a site-scoped table binds a scope, and that every service
+that touches one can narrow itself. The last two are static checks over the tree,
+so a path added tomorrow is covered by construction.
+
+### The Ed25519 verifier had a forgery, and it was not the cofactor
+
+`runtime.py` verified `a` using the un-cofactored equation `[S]B == R + [k]A`,
+justified by a comment that misattributed the choice to the RFC's reference
+implementation. It is now cofactored, and it requires BOTH equations â€” which is
+strictly smaller than either, because multiplication by the cofactor is a group
+homomorphism, so the plain equation implies the cofactored one and never the
+reverse, and checking only the cofactored form accepts a superset of what it
+should.
+
+The cofactor was not the hole, and the red-check the plan asked for is
+therefore impossible for the equation change alone: no input exists that the
+cofactored form rejects and the plain one accepts, and the agent building it
+proved the direction rather than asserting it.
+
+The hole was a small-order public key. For an order-8 key, `[k]A` is the
+identity for every `k`, so both equations are satisfied and any signature
+verifies. Two cases are now refused outright â€” the identity element as a public
+key, and an order-8 key with a zero signature â€” and both were confirmed to
+return `True` against the pre-change code. The suite is 61 tests, from 49.
+### Still open
+
+- **A site with a stale `migrations/compat.json` can lie about its own core
+  version.** `lifecycle.Verify` compares the manifest's core window against the
+  build's *declared* window, because nothing in the tree carries the running
+  binary's version. A site whose compat file claims a core version it does not
+  run is not caught by that comparison, and the honest fix is for the build to
+  stamp its own version into the compat file at package time.
+
+- **A rollback onto a version whose window excludes this core is refused by the
+  code and asserted, but is not yet driven end to end through the installer
+  against a real archive.** Install and upgrade themselves are now covered by
+  `cmd/securityctl/install_upgrade_test.go`.
+
+- **Most of the suite connects as the superuser, which bypasses RLS.** Two
+  packages (`rlsrole`, `schemalaws`) run as the production role, and they are
+  what found the four site-isolation gaps. Every security-relevant statement
+  should eventually have a canary in that form, and the order matters: the ones
+  that write, first, because a write that cannot see its site is an ingest
+  outage and a read that cannot is a blank console.
+
+- **The verifier search is not finished.** Three adversarial reviews in one day
+  found ninety defects between them. The two gates added afterwards â€”
+  `internal/sqlguard` for the mutation class, `internal/rlsrole` for the scope
+  class â€” exist because the classes recurred rather than because the instances
+  did. The classes they do not cover (a counter computed in Go from a stale
+  read, a test that accepts the failure it should exclude, an exported symbol
+  with no reader) are still found by reading. A fourth review is not a plan; it
+  is a habit.
+
 - **Migration 0010 drops a column inside a file named `.expand.sql`.** The
-  validator now rejects that shape going forward, and 0010 is applied on
-  deployed databases, so it needs an ADR rather than an edit.
-- **Ed25519 verification in `runtime.py` is the un-cofactored form.** The RFC
-  vectors pass and the tests were mutation-tested six ways, but small-order
-  `R` acceptance is a known weakness of that form. AGENTS.md requires human
-  review of crypto and this has not had one. A third opinion from libsodium or
-  `cryptography`, in a scratch environment, would close it properly.
+  validator rejects that shape going forward and the file is grandfathered by
+  name with a written reason, because 0010 is applied on deployed databases and
+  the rule is forward-only. Correcting it means an ADR and a new migration.
+
 ## Defects the runnable-core work found
 
 Each of these was live, invisible to the suite, and total in production. They are
