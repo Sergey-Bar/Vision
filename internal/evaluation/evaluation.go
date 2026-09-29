@@ -280,13 +280,13 @@ func Evaluate(cases []Case, observations []Observation, gates Gates) Report {
 					pr.MissedRestricted++
 				}
 			}
-		if obs.OperatorAgreed != nil {
-			pr.DisagreementMeasurable = true
-			pr.OperatorVerdicts++
-			if *obs.OperatorAgreed != *restricted {
-				pr.Disagreements++
+			if obs.OperatorAgreed != nil {
+				pr.DisagreementMeasurable = true
+				pr.OperatorVerdicts++
+				if *obs.OperatorAgreed != *restricted {
+					pr.Disagreements++
+				}
 			}
-		}
 		}
 
 		pr.MedianLatencyMS = median(latencies)
