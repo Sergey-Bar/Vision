@@ -129,7 +129,7 @@ func TestBaselineRecordsEveryPublishedSchema(t *testing.T) {
 }
 
 // The plan names thirteen protobuf files for security/v1. A missing one is a
-// contract that was dropped, which the compatibility check alone cannot see —
+// contract that was dropped, which the compatibility check alone cannot see -
 // removing a whole file makes every field look "removed", but only if the
 // baseline still has it, and a baseline regenerated at the same time hides it.
 func TestAllPlannedContractFilesExist(t *testing.T) {

@@ -2,8 +2,8 @@
 //
 // The replay path is the load-bearing part. A decision made months ago must be
 // reproduced from stored facts and the stored AIObservation, never by re-running
-// the model. Re-running the model would answer a different question — what the
-// model says now — and the answer would move with every prompt tweak, every
+// the model. Re-running the model would answer a different question - what the
+// model says now - and the answer would move with every prompt tweak, every
 // model upgrade, and every inference that happened to be non-deterministic. An
 // incident an operator signed off on has to still mean what it meant then.
 //
@@ -262,17 +262,35 @@ type Summary struct {
 
 // List returns a tenant's incident feed, newest first.
 func (s *Service) List(ctx context.Context, tenant, siteID string, limit int) ([]Summary, error) {
+	return s.ListScoped(ctx, tenant, siteID, limit)
+}
+
+// ListScoped returns the incident feed restricted to a set of sites.
+//
+// `siteIDs` is a comma-separated list, or "" for every site in the tenant. The
+// restriction is in the query rather than applied to the rows afterwards,
+// because a caller that asks for fifty rows and then filters them has already
+// been served the incidents it was not meant to see - the count and the
+// pagination were computed over data the principal could not have.
+func (s *Service) ListScoped(ctx context.Context, tenant, siteIDs string, limit int) ([]Summary, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
+	}
+	var sites []string
+	for _, s := range strings.Split(siteIDs, ",") {
+		if s = strings.TrimSpace(s); s != "" {
+			sites = append(sites, s)
+		}
 	}
 	rows, err := s.Pool.For(tenant, "incidents").Query(ctx, `
 		SELECT incident_id, primary_site_id, state, severity, title, rule_id,
 		       created_at, first_event_at, degraded, degraded_reasons,
 		       rule_bundle_version, policy_version
 		  FROM incidents
-		 WHERE tenant_id = $1 AND ($2 = '' OR primary_site_id = $2)
+		 WHERE tenant_id = $1
+		   AND ($2::text[] IS NULL OR primary_site_id = ANY($2::text[]))
 		 ORDER BY created_at DESC
-		 LIMIT $3`, tenant, siteID, limit)
+		 LIMIT $3`, tenant, sites, limit)
 	if err != nil {
 		return nil, fmt.Errorf("incidents: list: %w", err)
 	}

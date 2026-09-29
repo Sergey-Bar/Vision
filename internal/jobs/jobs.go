@@ -236,7 +236,7 @@ func (q *Worker) Claim(ctx context.Context, tenantID, owner string, limit int) (
 //
 // It is the shape a worker loop uses, and the place the handler precondition is
 // enforced: a worker with no handler would claim jobs, do nothing, and leave
-// them to expire — a loop that looks busy and achieves nothing.
+// them to expire - a loop that looks busy and achieves nothing.
 func (q *Worker) Run(ctx context.Context, tenantID, owner string, limit int) (int, error) {
 	if q.Handler == nil {
 		return 0, errors.New("jobs: queue worker has no handler")
@@ -323,11 +323,11 @@ func (q *Worker) Complete(ctx context.Context, tenant, id, owner string) error {
 //
 // The backoff exponent is capped *before* the cast, not after. It used to be
 // `least(900, 5 * power(2, attempt_count)::int)`, which casts an unbounded
-// exponent to int32 first: 2^29 × 5 is 2,684,354,560, so the cast raises at
+// exponent to int32 first: 2^29 - 5 is 2,684,354,560, so the cast raises at
 // attempt_count 29. `max_attempts` is a column with only a `>= 0` check, so a
 // job enqueued with a bound above 28 reaches that. The UPDATE then rolls back,
 // `Fail` returns an error rather than a status, the row stays leased, the lease
-// expires, the job is reclaimed, and the whole thing repeats — the worker
+// expires, the job is reclaimed, and the whole thing repeats - the worker
 // aborts on every pass and the job never reaches `dead_letter` at all. A
 // raising backoff on the failure path is the one thing that turns a bounded retry
 // into a permanently stuck row.

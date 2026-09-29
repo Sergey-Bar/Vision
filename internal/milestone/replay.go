@@ -18,7 +18,7 @@ import (
 type ReplayTransport struct {
 	scenarios []fixture.Scenario
 	// epoch overrides the scenario's own epoch. The replay harness sets it so a
-	// replay in 2027 produces the same relative timing as a capture in 2026 —
+	// replay in 2027 produces the same relative timing as a capture in 2026 -
 	// an absolute timestamp in a fixture is a fixture that quietly stops being
 	// deterministic.
 	epoch         *epochOverride
@@ -53,8 +53,8 @@ func NewReplayTransport(scenarios []fixture.Scenario) *ReplayTransport {
 }
 
 // WithEpoch makes every scenario replay as if it had been captured at a
-// different wall-clock instant. The relative timing inside a scenario — which
-// is what correlation depends on — is untouched.
+// different wall-clock instant. The relative timing inside a scenario - which
+// is what correlation depends on - is untouched.
 func (t *ReplayTransport) WithEpoch(at time.Time) *ReplayTransport {
 	t.epoch = &epochOverride{At: at}
 	return t

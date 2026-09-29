@@ -5,7 +5,7 @@
 // The AI plane is reached over HTTP precisely so a hung inference cannot hang
 // ingest. A library call inside the core cannot give that: a goroutine blocked in
 // a native inference call holds a worker, and a worker holding a lease is a
-// pipeline that stops. Over a socket, a deadline is enforceable — which is why
+// pipeline that stops. Over a socket, a deadline is enforceable - which is why
 // this package has a client-side deadline even though the runtime accepts one
 // and never applies it.
 //
@@ -69,8 +69,8 @@ type Client struct {
 	// runtime is configured and every call returns ErrNoEndpoint.
 	BaseURL string
 	// Timeout is the client-side deadline for one inference. The runtime accepts
-	// deadlineSeconds and never enforces it — there is no socket timeout anywhere
-	// in it — so this is the only bound that exists.
+	// deadlineSeconds and never enforces it - there is no socket timeout anywhere
+	// in it - so this is the only bound that exists.
 	Timeout time.Duration
 	// HTTPClient is the transport. Nil uses a client with sensible timeouts.
 	HTTPClient *http.Client
@@ -145,7 +145,7 @@ type Request struct {
 	Evidence      []Evidence
 	// ProfileSchema declares the output's field set. The runtime validates the
 	// answer against it and degrades the response if the answer names a field the
-	// schema does not declare — so sending it is what makes an undeclared field
+	// schema does not declare - so sending it is what makes an undeclared field
 	// visible rather than silently stored.
 	ProfileSchema map[string]any
 }
@@ -220,7 +220,7 @@ type wireResponse struct {
 //
 // A degraded response is a *success*, not an error: the runtime answered, and the
 // answer is that it could not answer. Returning it as an error would make a
-// caller retry a condition that will not change — and would push the caller
+// caller retry a condition that will not change - and would push the caller
 // towards fabricating an answer, which is the one thing this product must never
 // do. Transport failures are returned as errors carrying a Degradation, so the
 // caller can record a degraded observation either way.
@@ -276,7 +276,7 @@ func (c *Client) Do(ctx context.Context, req Request) (Result, error) {
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		// A 4xx is our fault — a malformed request — and a 5xx is theirs. Neither
+		// A 4xx is our fault - a malformed request - and a 5xx is theirs. Neither
 		// is retryable as-is, and neither is a fabricated answer. The detail is
 		// kept because runtime.py names the apiVersion mismatch explicitly and
 		// that message is the whole diagnosis.

@@ -99,7 +99,7 @@ func (c *Compiler) Compile(raw []byte) (*CompiledBundle, []Problem) {
 	var problems []Problem
 
 	// Stage 1: YAML. Decoded with KnownFields so a typo in a key name is an
-	// error rather than a silently ignored setting — the failure mode being a
+	// error rather than a silently ignored setting - the failure mode being a
 	// rule that does not do what its author believes.
 	var doc Bundle
 	dec := yaml.NewDecoder(strings.NewReader(string(raw)))

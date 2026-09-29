@@ -385,8 +385,8 @@ func TestAbsenceDoesNotLowerTheMeasuredRates(t *testing.T) {
 // for a reason that has nothing to do with the profile.
 // The sample-size floor is a number, and it is a number about arithmetic rather
 // than about this profile. At thirty cases the gates are not decidable, so the
-// floor is 200 and shadow evaluation — which collects cases rather than deciding
-// on them — keeps a lower one and says so.
+// floor is 200 and shadow evaluation - which collects cases rather than deciding
+// on them - keeps a lower one and says so.
 func TestPromotionNeedsTwoHundredLabelledCases(t *testing.T) {
 	if got := evaluation.DefaultGates().MinLabelledCases; got != 200 {
 		t.Errorf("the promotion case floor is %d, want 200; at thirty cases a profile on the "+
@@ -404,7 +404,7 @@ func TestPromotionNeedsTwoHundredLabelledCases(t *testing.T) {
 //
 // The disagreement numerator increments only when a case carries an operator's
 // verdict; the denominator was every answered case. One disagreeing verdict out
-// of 200 answered cases produced 0.005 and passed the 0.25 gate — a one-case
+// of 200 answered cases produced 0.005 and passed the 0.25 gate - a one-case
 // measurement reported as a two-hundred-case one, and the direction is always the
 // flattering one, because a small denominator inflates the rate but a large one
 // deflates it.
@@ -429,7 +429,7 @@ func TestTheDisagreementRateDividesByTheCasesThatHaveAVerdict(t *testing.T) {
 			"mixed-population case", pr.Answered)
 	}
 	// One disagreement out of one verdict is 1.00, which the 0.25 gate must
-	// catch. Divided by 200 it is 0.005, which it does not — and that is the
+	// catch. Divided by 200 it is 0.005, which it does not - and that is the
 	// entire defect: a profile that disagrees with the only case anybody reviewed
 	// is reported as disagreeing with half a percent of them.
 	if pr.DisagreementRate != 1.0 {

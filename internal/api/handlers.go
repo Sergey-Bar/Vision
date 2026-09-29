@@ -179,7 +179,7 @@ func (s *Server) RegisterRoutes(d Deps) func(*http.ServeMux) {
 		mux.HandleFunc("GET /{$}", s.handleConsoleRoot)
 		// The console's incident pages are gated exactly as the API's are. They
 		// render the same rows, so a principal without the capability must not
-		// reach them by asking for HTML instead of JSON — which is a distinction
+		// reach them by asking for HTML instead of JSON - which is a distinction
 		// an attacker does not have to be clever about.
 		mux.Handle("GET /incidents", s.requireCapability(identity.CapIncidentRead,
 			func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
@@ -242,7 +242,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// res.Principal, not res.Session.Principal. Session is nil by construction
-	// on this branch — the early return above is the non-MFA case — so reading
+	// on this branch - the early return above is the non-MFA case - so reading
 	// the principal off it dereferenced nil and turned every MFA login for every
 	// enrolled operator into a 500.
 	WriteJSON(w, http.StatusOK, map[string]any{
@@ -325,14 +325,29 @@ func (s *Server) handleIncidentList(w http.ResponseWriter, r *http.Request, p id
 		return
 	}
 	limit := parseLimit(r.URL.Query().Get("limit"), 50, 200)
-	items, err := d.Incidents.List(r.Context(), p.TenantID, site, limit)
+	// A site the caller may see, or "every site they may see".
+	scope := site
+	if scope == "" {
+		scope = strings.Join(p.SiteScope, ",")
+	}
+	items, err := d.Incidents.ListScoped(r.Context(), p.TenantID, scope, limit)
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, "list_failed", err.Error(), requestID(r))
 		return
 	}
-	// A principal with no site scope sees nothing, whatever the query said.
+	// Defence in depth rather than the mechanism: ListScoped filters in SQL, and
+	// this drops anything whose site is not in the principal's scope, so a bug in
+	// the query cannot become a disclosure.
 	if len(p.SiteScope) == 0 {
 		items = nil
+	} else {
+		visible := items[:0]
+		for _, it := range items {
+			if p.CanSeeSite(it.SiteID) {
+				visible = append(visible, it)
+			}
+		}
+		items = visible
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"items": items})
 }
@@ -476,11 +491,29 @@ func (s *Server) handleIncidentEvidence(w http.ResponseWriter, r *http.Request, 
 // the evidence an incident cited is worse off than being told the file is wrong.
 func (s *Server) handleEvidenceContent(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
 	id := r.PathValue("evidenceId")
-	var ref, wantHash string
+	var ref, wantHash, siteID string
+	// The site is selected and checked, not just the tenant.
+	//
+	// Holding `evidence.read` and being assigned to site A is not being assigned
+	// to site B, and this handler streams raw video out of the filesystem. It
+	// checked only `tenant_id`, and its sibling `handleIncidentEvidence` already
+	// checks `p.CanSeeSite`. RLS does not close the gap: the two policies on
+	// `evidence` are both PERMISSIVE, and PostgreSQL ORs multiple permissive
+	// policies for the same command, so `tenant_isolation OR site_isolation` is
+	// just `tenant_isolation`. There is no site isolation at the database layer
+	// - see docs/status.md - which makes the handler the only place it happens.
 	err := d.Incidents.Pool.For(p.TenantID, "api").QueryRow(r.Context(), `
-		SELECT storage_ref, sha256 FROM evidence WHERE tenant_id = $1 AND evidence_id = $2`,
-		p.TenantID, id).Scan(&ref, &wantHash)
+		SELECT storage_ref, sha256, site_id FROM evidence
+		 WHERE tenant_id = $1 AND evidence_id = $2`,
+		p.TenantID, id).Scan(&ref, &wantHash, &siteID)
 	if err != nil {
+		WriteError(w, http.StatusNotFound, "not_found", "No such evidence.", requestID(r))
+		return
+	}
+	if !p.CanSeeSite(siteID) {
+		// 404, not 403. A 403 says the evidence exists and this operator may not
+		// have it, which is the same information as a 200 would be, for a route
+		// whose response body is a video of somebody's door.
 		WriteError(w, http.StatusNotFound, "not_found", "No such evidence.", requestID(r))
 		return
 	}
@@ -744,17 +777,39 @@ func (s *Server) handleAuditLedger(w http.ResponseWriter, r *http.Request, p ide
 		items = append(items, e)
 	}
 
-	// chainValid is recomputed here rather than asserted, so a reader can tell a
-	// working chain from a page that merely looks intact.
-	chainValid := true
-	for i := 1; i < len(items); i++ {
-		if items[i].PrevHash != items[i-1].Hash {
-			chainValid = false
-			break
+	// chainValid is recomputed, not asserted from the columns on this page.
+	//
+	// The loop this replaced compared `items[i].PrevHash` to `items[i-1].Hash`:
+	// two stored columns, side by side, which is a statement about whether the
+	// page is internally consistent and not about whether the ledger is. It never
+	// recomputed a row's own hash, so an edited row verified fine, and it never
+	// checked the first row, so a single-row page - which is what
+	// `?fromSequence=<n>&limit=1` produces — always reported true. The comment
+	// said it was recomputed; it was not.
+	//
+	// The real verification recomputes every row's digest inside the database,
+	// which is `audit.Writer.Verify` and the same call a checkpoint seal makes.
+	// The page is a window onto a chain; whether the chain is intact is a question
+	// about the whole of it, and a window cannot answer it.
+	chainValid := false
+	var chainChecked int64
+	if from > 0 {
+		// The verification reads the ledger and writes nothing, so it runs on the
+		// tenant-scoped connection directly rather than being wrapped in a
+		// transaction it does not need.
+		var valid bool
+		err := s.Pool.For(p.TenantID, "api").QueryRow(r.Context(),
+			`SELECT valid, checked FROM audit_verify_chain($1, $2)`, p.TenantID, from).
+			Scan(&valid, &chainChecked)
+		if err != nil {
+			WriteError(w, http.StatusInternalServerError, "audit_verify_failed", err.Error(), requestID(r))
+			return
 		}
+		chainValid = valid
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{
-		"items": items, "chainValid": chainValid, "truncated": truncated,
+		"items": items, "chainValid": chainValid, "chainChecked": chainChecked,
+		"truncated": truncated,
 	})
 }
 

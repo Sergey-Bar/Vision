@@ -533,7 +533,7 @@ func verifySignature(m Manifest, trustedKey ed25519.PublicKey) error {
 // That is exactly the gap: the pointer is metadata, and metadata is what an
 // attacker with write access to the manifest repoints. Restating
 // `SBOM.SHA256` under a valid signature is a one-line edit, and the old payload
-// meant Verify never noticed — it only checked that the declared path was
+// meant Verify never noticed - it only checked that the declared path was
 // syntactically safe. A signature that does not cover a field in the document it
 // signs is a signature over a smaller document than the reader thinks.
 //

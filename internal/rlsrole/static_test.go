@@ -35,7 +35,7 @@ var tenantScopedTables = []string{
 //
 // Every query the product makes against a tenant-scoped table must run inside
 // InTenant or InSystemTenant. A bare Pool.Query, Pool.QueryRow or Pool.Exec with
-// SQL naming one of those tables is a finding, always — because the correct form
+// SQL naming one of those tables is a finding, always - because the correct form
 // is always to go through a transaction that already carries the context.
 //
 // This rule exists because the class is invisible to every other check. The unit
@@ -61,7 +61,7 @@ func TestNoBareTenantQueries(t *testing.T) {
 				return filepath.SkipDir
 			}
 			// Another checkout on this machine, and the agent's own worktrees. A
-			// finding in one of those is not a finding here — and a tool that
+			// finding in one of those is not a finding here - and a tool that
 			// reads them will happily rewrite code it does not own, which is how
 			// forty unrelated files were modified in a neighbouring worktree
 			// before this check was given the skip.

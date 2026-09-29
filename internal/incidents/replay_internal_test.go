@@ -10,7 +10,7 @@ import (
 // A drift exclusion is a fact about a device, not a number to be compared
 // against. The per-event flag used to be `event.ClockDriftMS >= inSevereBand(d)`,
 // where the band was the measured drift of the *first* recorded exclusion
-// applied to *every* event in the incident — so one incident with one
+// applied to *every* event in the incident - so one incident with one
 // 200ms-excluded camera marked every unrelated camera with 200ms of drift as
 // excluded too. The consequence is not cosmetic: DriftedExcluded feeds the rule
 // engine, so a fabricated exclusion is a fabricated decision, and invariant 2
@@ -49,7 +49,7 @@ func TestSignalsDoNotFabricateDriftExclusions(t *testing.T) {
 }
 
 // With no exclusions recorded, the field is false because there is nothing to
-// exclude — not because a sentinel threshold happened not to be crossed. The old
+// exclude - not because a sentinel threshold happened not to be crossed. The old
 // code returned 1<<30, which makes the absence of data indistinguishable from a
 // measurement, and it also silently invented a "severe band" out of nothing.
 func TestNoRecordedExclusionsMeansNoExclusions(t *testing.T) {

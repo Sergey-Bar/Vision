@@ -117,7 +117,7 @@ func (r *Runner) Applied(ctx context.Context) ([]Applied, error) {
 // The checksum covers the migration body only, deliberately: changing the digest
 // format would make every already-deployed site refuse to upgrade, and nothing
 // in this repository can UPDATE schema_migrations to re-record it, because the
-// migration is the very thing being blocked. The identity the digest omits — the
+// migration is the very thing being blocked. The identity the digest omits - the
 // file's own name and phase — is already recorded in the ledger, so it is
 // compared here rather than folded into the hash. A rename, a rewritten phase,
 // or a file swapped in under an existing version now fails verification with no
@@ -173,7 +173,7 @@ func embeddedByVersion() (map[int]migrations.Migration, error) {
 
 // VerifyChecksums compares every applied migration against the embedded copy.
 //
-// A mismatch means the SQL on disk — or in the binary — no longer matches what
+// A mismatch means the SQL on disk - or in the binary - no longer matches what
 // this site executed. That is a release integrity failure, and continuing would
 // mean the recorded history is a lie.
 func (r *Runner) VerifyChecksums(ctx context.Context) error {
@@ -368,7 +368,7 @@ type Status struct {
 	Compatible     bool                     `json:"compatible"`
 }
 
-// PendingStatus is the preflight view of a database”s schema: what it is at
+// PendingStatus is the preflight view of a database-s schema: what it is at
 // now, what this build would do, and whether the two are compatible.
 type PendingStatus struct {
 	Version int    `json:"version"`

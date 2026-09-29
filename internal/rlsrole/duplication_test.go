@@ -17,7 +17,7 @@ import (
 //
 // It compares function bodies, normalised so that two functions differ only when
 // they actually do something different. Identifier names are kept, because
-// renaming a function to match another one is not the fix — the two are
+// renaming a function to match another one is not the fix - the two are
 // usually there for different reasons and the names say which.
 //
 // The threshold is deliberately high. A handful of repeated lines is normal and

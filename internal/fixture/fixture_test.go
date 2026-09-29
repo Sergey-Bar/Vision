@@ -74,7 +74,7 @@ func TestSecretKeyMatchingIgnoresCaseAndSeparators(t *testing.T) {
 // badge number puts live site data in a public repository.
 // A capture run against a live site produces a person, a face and a place. None
 // of them is a credential, and a reviewer hunting for a leaked password does not
-// flag any of them — which is exactly how they get into a committed file.
+// flag any of them - which is exactly how they get into a committed file.
 //
 // The list the sanitizer had was a list of things that look like secrets, so it
 // had none of these. A face is a biometric and a commit is permanent; a

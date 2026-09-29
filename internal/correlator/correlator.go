@@ -62,7 +62,7 @@ const (
 	// MaxWindow is the largest candidate window, either side of the trigger.
 	MaxWindow = 5 * time.Minute
 	// MaxCandidates bounds the rows one evaluation may read. A site at the
-	// capacity target — 2,000 cameras, 20 events per second — produces far more
+	// capacity target - 2,000 cameras, 20 events per second - produces far more
 	// than this inside a five-minute window, so this bound will bind, and the
 	// engine's own window check still applies on top of it.
 	MaxCandidates = 2000
@@ -72,7 +72,7 @@ const (
 //
 // The tiers are the ones the plan defines: A is authoritative state reported by
 // the source of truth, B is a deterministic fact the core derived, C is an AI
-// observation. A canonical event is a derived fact — it is a normalization of a
+// observation. A canonical event is a derived fact - it is a normalization of a
 // raw envelope, not the device's own report — so candidates are Tier B. The
 // trigger is Tier A, because it is the fact the rule is being evaluated against
 // rather than corroboration for it.
@@ -104,7 +104,7 @@ type Correlator struct {
 // bundle asked for a wider one than the core will read.
 //
 // This exists because the alternative is silent. A bundle whose timeWindow is
-// twenty minutes, clamped to five, under-counts corroboration — which means
+// twenty minutes, clamped to five, under-counts corroboration - which means
 // incidents that should have been corroborated are raised as UNVERIFIED, which
 // means an operator sees a camera that never corroborates anything and has no
 // way to learn why. Reporting the clamp makes it a configuration finding.
@@ -135,7 +135,7 @@ type Result struct {
 //
 // The trigger is returned separately from the candidates so a caller cannot
 // accidentally pass a slice containing it to the engine, which would then skip
-// it by id — silently costing the rule one of the corroborating signals it asked
+// it by id - silently costing the rule one of the corroborating signals it asked
 // for.
 func (c *Correlator) SignalsFor(
 	ctx context.Context, tenant, site, triggerEventID string, b *rules.CompiledBundle,
@@ -240,7 +240,7 @@ func conditionWindow(c rules.Condition) int {
 //
 // devices has no tags column: `attributes` is a JSONB bag and the tag list lives
 // under its `tags` key. Selecting the whole document and decoding it in Go is
-// deliberate — a site that puts something else in attributes is not a query
+// deliberate - a site that puts something else in attributes is not a query
 // error, and a rule that wants a tag nobody has set simply matches nothing.
 const triggerColumns = `
 	e.event_id, e.source_event_id, e.event_type, e.normalized_at, e.observed_at,

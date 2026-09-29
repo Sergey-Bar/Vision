@@ -18,8 +18,8 @@ var consoleFS embed.FS
 // consoleFuncs are the helpers the templates call.
 //
 // They exist as functions rather than as template literals because the values
-// they transform come from untrusted input — a severity from a rule bundle, a
-// state from a decision — and a closed mapping is what stops a bundle author
+// they transform come from untrusted input - a severity from a rule bundle, a
+// state from a decision - and a closed mapping is what stops a bundle author
 // from closing over a template execution.
 var consoleFuncs = template.FuncMap{
 	"severityClass": severityClass,
@@ -87,7 +87,11 @@ type consoleData struct {
 // arithmetic, and a timestamp without an offset makes that arithmetic a guess.
 func (d consoleData) Time(t time.Time) string {
 	if t.IsZero() {
-		return "—"
+		// An em dash, written as an escape. The literal was once a raw U+2014 in
+		// a file that had been through a lossy encoding round-trip, and it reached
+		// the console as mojibake. An escape is the same character and cannot be
+		// corrupted by whatever touches the file next.
+		return "\u2014"
 	}
 	return t.UTC().Format("2006-01-02 15:04:05Z")
 }
@@ -136,11 +140,21 @@ func (s *Server) handleConsoleRoot(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusFound)
 		return
 	}
-	if _, _, err := s.Identity.Resolve(r.Context(), s.Tenant, cookie.Value, s.clientIP(r)); err != nil {
+	p, rotated, err := s.Identity.Resolve(r.Context(), s.Tenant, cookie.Value, s.clientIP(r))
+	if err != nil {
 		s.clearSessionCookie(w)
 		http.Redirect(w, r, "/login", http.StatusFound)
 		return
 	}
+	// The rotated token has to go back to the browser.
+	//
+	// `Resolve` rotates the session token on every call, and this handler threw
+	// the new one away. The browser kept the old value, which no longer matches
+	// the row, so the very next request failed to resolve and bounced to /login:
+	// visiting the console root logged the operator out. Every other handler that
+	// resolves a session ’ `s.principal` and therefore the whole API ’ does this,
+	// and this one was the exception.
+	s.setSessionCookie(w, rotated, p.CSRFToken)
 	http.Redirect(w, r, "/incidents", http.StatusFound)
 }
 

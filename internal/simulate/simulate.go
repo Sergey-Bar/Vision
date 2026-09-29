@@ -3,7 +3,7 @@
 //
 // The diff digest is the gate. Activation requires the operator to acknowledge the
 // digest of the diff they reviewed, and the digest is computed over the diff
-// itself rather than over the bundle — so if the fixtures or the active bundle
+// itself rather than over the bundle - so if the fixtures or the active bundle
 // move after a review, the simulation produces a different digest and the
 // acknowledgement no longer applies.
 //
@@ -273,7 +273,7 @@ func classify(before, after Outcome) ChangeKind {
 // digestOf is the diff digest.
 //
 // It is over the changes, over the bundle version, and over the fixture set
-// name — but deliberately not over the run timestamp, because a simulation
+// name - but deliberately not over the run timestamp, because a simulation
 // re-run to confirm a review must produce the same digest or the review cannot be
 // reproduced.
 func digestOf(changes []Change) string {

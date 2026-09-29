@@ -18,7 +18,7 @@
 //
 //  1. Stop accepting connections. Nothing new arrives.
 //  2. Stop the loops. In-flight work finishes against a pool that is still open,
-//     so a leased inbox row is either completed or left to expire — never
+//     so a leased inbox row is either completed or left to expire - never
 //     half-written against a closing pool.
 //  3. Drain the outbox, so the side effects a decision produced are delivered
 //     before the process goes away. The decisions themselves are already durable;

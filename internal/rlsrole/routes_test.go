@@ -17,7 +17,7 @@ import (
 // Every authenticated route in the API is registered through requireCapability.
 // That is the only mechanism in the server that checks a capability, and a route
 // registered through requirePrincipal alone is one where somebody remembered to
-// write the check by hand — or forgot. A forgotten check is a read of somebody
+// write the check by hand - or forgot. A forgotten check is a read of somebody
 // else's incidents.
 //
 // The check is deliberately narrow. It finds the two registration helpers and
@@ -137,8 +137,8 @@ func TestEveryRouteDeclaresACapability(t *testing.T) {
 // TestHandlersDoNotReturnRawErrors is a small honesty check on the error surface.
 //
 // A database error names tables, columns, and occasionally a value. Handing one
-// to a browser tells whoever is reading — including an attacker holding a valid
-// session — the shape of the schema behind an endpoint that was supposed to say
+// to a browser tells whoever is reading - including an attacker holding a valid
+// session - the shape of the schema behind an endpoint that was supposed to say
 // "not found". The detail belongs in the log; the client gets a message it can
 // act on.
 func TestHandlersDoNotReturnRawErrors(t *testing.T) {

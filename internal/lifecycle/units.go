@@ -48,12 +48,12 @@ type WrittenUnit struct {
 //
 // It writes every file or none of them. A half-installed unit set is a service
 // that starts and cannot find its configuration, which is a failure that looks
-// like a configuration problem rather than an install problem — so the writes
+// like a configuration problem rather than an install problem - so the writes
 // are staged and only moved into place once every one of them succeeded.
 //
 // The env files are created only if they do not already exist. An operator who
-// has edited theirs — which is the normal case, since it is where the tenant id
-// and the database URL live — must not have their file replaced by a re-install,
+// has edited theirs - which is the normal case, since it is where the tenant id
+// and the database URL live - must not have their file replaced by a re-install,
 // because a re-install is the thing they run when something else has gone wrong.
 func WriteUnits(opts UnitOptions) ([]WrittenUnit, error) {
 	if strings.TrimSpace(opts.ProgramDir) == "" {
@@ -108,7 +108,7 @@ func WriteUnits(opts UnitOptions) ([]WrittenUnit, error) {
 		// mode is the file mode. It is per-target and not a constant because the
 		// two kinds of file here are not the same kind of file.
 		//
-		// A systemd unit is world-readable and has to be — systemd reads it as a
+		// A systemd unit is world-readable and has to be - systemd reads it as a
 		// different account. The environment file is not: it carries
 		// SP_DATABASE_URL and SP_SECRET_KEY, and it was written 0644, so any local
 		// account on the host could read the site's database credentials and its
@@ -173,7 +173,7 @@ func WriteUnits(opts UnitOptions) ([]WrittenUnit, error) {
 // coreUnit renders the core service unit.
 //
 // Every hardening directive in the shipped unit is preserved. This is not a
-// copy of it with a path filled in — it is the same hardening, stated where the
+// copy of it with a path filled in - it is the same hardening, stated where the
 // installer can also see it, so the two can be diffed by a human when the
 // shipped unit changes.
 func coreUnit(opts UnitOptions) string {
@@ -433,7 +433,7 @@ func safeUnitPath(p string) (string, error) {
 	abs, err := filepath.Abs(cleaned)
 	if err != nil {
 		// Both are wrapped. ErrUnsafePath is the sentinel a caller tests for;
-		// the resolution failure underneath is a real cause — a caller that
+		// the resolution failure underneath is a real cause - a caller that
 		// wants to know *why* Abs failed (a deleted working directory, most
 		// often) can unwrap for it rather than parse the message.
 		return "", fmt.Errorf("%w: %q cannot be resolved: %w", ErrUnsafePath, p, err)

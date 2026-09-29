@@ -25,6 +25,7 @@ import (
 	"github.com/Sergey-Bar/Ai-Captain/internal/observability"
 	"github.com/Sergey-Bar/Ai-Captain/internal/pipeline"
 	"github.com/Sergey-Bar/Ai-Captain/internal/rules"
+	"github.com/Sergey-Bar/Ai-Captain/internal/simulate"
 	"github.com/Sergey-Bar/Ai-Captain/internal/testutil"
 )
 
@@ -36,8 +37,8 @@ import (
 // component outside the process.
 //
 // The assertion is invariant 1 in one sentence: an event that reaches the inbox
-// reaches a terminal state. Everything else this test checks â€” the canonical
-// event, the graph edges, the incident, the enqueued second opinion â€” is detail,
+// reaches a terminal state. Everything else this test checks - the canonical
+// event, the graph edges, the incident, the enqueued second opinion - is detail,
 // and detail is only interesting once the invariant holds.
 
 // epoch is the fixture's time. Fixed, so the events fall inside the canonical
@@ -135,8 +136,9 @@ func setup(t *testing.T, bundleYAML string, feed string) harness {
 		// simulated cannot be activated. The test acknowledges a digest rather than
 		// bypassing the check, because a test that bypasses it would still pass the
 		// day the gate stopped existing.
-		if err := svc.Activate(context.Background(), tenant, "0.1.0",
-			strings.Repeat("a", 64), "tester"); err != nil {
+		rep := simulate.Report{BundleVersion: "0.1.0", FixtureSet: "fixtures-1"}
+		rep.DiffDigest = simulate.DigestFor(rep.BundleVersion, rep.FixtureSet, rep.Changes)
+		if err := svc.Activate(context.Background(), tenant, "0.1.0", rep, "tester"); err != nil {
 			t.Fatalf("activate the bundle: %v", err)
 		}
 	}
@@ -184,15 +186,15 @@ func setup(t *testing.T, bundleYAML string, feed string) harness {
 // bundle is one rule: motion in a restricted zone, corroborated by a second
 // independent signal inside the window, with an action that raises an incident.
 //
-// It reads the fields the correlator populates â€” event type, zone path prefix,
-// signal tier â€” which is the point of asserting through it: if the correlator
+// It reads the fields the correlator populates - event type, zone path prefix,
+// signal tier - which is the point of asserting through it: if the correlator
 // stopped filling ZonePath, the rule would stop matching and this test would say
 // so rather than quietly passing on a bundle that matched nothing.
 //
 // No AI observation is required. `requiresAIObservation` with
 // `degradeTo: UNVERIFIED` is the shape a rule that *does* consume a Tier C signal
 // must take, and requiring one here would make the test depend on a model being
-// present â€” which is a site with no AI plane, a supported configuration.
+// present - which is a site with no AI plane, a supported configuration.
 const bundle = `apiVersion: security.io/v1
 kind: RuleBundle
 version: 0.1.0
@@ -376,7 +378,7 @@ func TestAnEventReachesATerminalState(t *testing.T) {
 }
 
 // A second poll of the same feed must produce no new rows. This is what makes
-// the cursor an optimisation rather than a correctness mechanism â€” and the reason
+// the cursor an optimisation rather than a correctness mechanism - and the reason
 // a broken cursor cannot lose an event is that the dedupe key, not the cursor, is
 // what enforces it.
 func TestPollingTwiceIngestsEachEventOnce(t *testing.T) {
@@ -404,7 +406,7 @@ func TestPollingTwiceIngestsEachEventOnce(t *testing.T) {
 
 // A crash between the claim and the normalization is recovered by the lease. The
 // row is left processing with an expired lease, and the next claim takes it and
-// produces the same derived event id â€” a retry, not a duplicate and not a loss.
+// produces the same derived event id - a retry, not a duplicate and not a loss.
 func TestALapsedLeaseIsRecoveredWithoutDuplicating(t *testing.T) {
 	h := setup(t, bundle, `[
 		{"Id":"e1","Type":"Motion","Timestamp":"2026-03-01T09:00:00Z","Source":"Entrance Camera 01 [cam-1]"}
@@ -443,7 +445,7 @@ func TestALapsedLeaseIsRecoveredWithoutDuplicating(t *testing.T) {
 // With no active bundle the core still ingests, still normalizes, and raises
 // nothing. An operator who has not activated a bundle has not asked for
 // decisions yet, and the alternative is a core that refuses events it cannot
-// decide on â€” which is a loss of the events themselves.
+// decide on - which is a loss of the events themselves.
 func TestWithNoActiveBundleEventsAreStillIngestedAndNormalized(t *testing.T) {
 	h := setup(t, "", `[
 		{"Id":"e1","Type":"Motion","Timestamp":"2026-03-01T09:00:00Z","Source":"Entrance Camera 01 [cam-1]"}
@@ -531,7 +533,7 @@ func TestBacklogGaugeIsMeasuredNotLeftAtZero(t *testing.T) {
 			"detect", got)
 	}
 
-	// After the work drains, the same measurement reads zero â€” and it is a
+	// After the work drains, the same measurement reads zero - and it is a
 	// measurement, because it was read again.
 	h.loops.ConsumeOnce(ctx)
 	h.loops.SampleGauges(ctx)

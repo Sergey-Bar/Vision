@@ -140,7 +140,7 @@ func TestApplyDSNWithoutAPortRendersTheConfiguredPort(t *testing.T) {
 }
 
 // A DSN that is not a postgres URL, or that omits the host or the database, is
-// still refused — and refusing it must leave the Config exactly as it was, since
+// still refused - and refusing it must leave the Config exactly as it was, since
 // ApplyDSN is called on a live configuration during startup.
 func TestApplyDSNRejectsABadDSNWithoutMutatingTheConfig(t *testing.T) {
 	for _, dsn := range []string{

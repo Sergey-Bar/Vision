@@ -437,7 +437,7 @@ func TestRLSIsoTenants(t *testing.T) {
 	other, otherSite, _ := testutil.NewTenant(t, pool)
 
 	// Two real tenants, one incident each. If isolation were absent, the
-	// cross-tenant case would read 1 instead of 0 — so the fixture has to contain
+	// cross-tenant case would read 1 instead of 0 - so the fixture has to contain
 	// somebody else's row for the test to mean anything.
 	newIncident(t, pool, "inc-a", tenant, site)
 	newIncident(t, pool, "inc-b", other, otherSite)
@@ -651,7 +651,7 @@ func TestSessionsCarryMFAAndSiteScope(t *testing.T) {
 }
 
 // A break-glass account without a password would be an account that can be
-// recovered but never used — and, worse, an account whose authentication path is
+// recovered but never used - and, worse, an account whose authentication path is
 // ambiguous.
 func TestBreakGlassRequiresAPassword(t *testing.T) {
 	pool := migrated(t)

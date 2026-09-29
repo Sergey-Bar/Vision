@@ -17,7 +17,7 @@ import (
 // file.
 //
 // It exists because SecretStore is an interface precisely so this package never
-// holds a key, and until now nothing implemented it — which meant a running core
+// holds a key, and until now nothing implemented it - which meant a running core
 // could not enrol an operator's TOTP factor at all, and `identity.unwrapTOTP`
 // returned "no secret store is configured" for every login attempt. The tests
 // used a reversible prefix, so the production path had never been written.
@@ -103,7 +103,7 @@ func (s *FileSecretStore) Wrap(plaintext []byte) ([]byte, error) {
 		return nil, fmt.Errorf("identity: read randomness for the secret nonce: %w", err)
 	}
 	// The AAD is empty here and supplied at Unwrap time. Wrap has no row context
-	// — it is called before the row exists — so the binding is applied on the way
+	// - it is called before the row exists - so the binding is applied on the way
 	// out, where the caller always has the tenant, user and factor in hand.
 	sealed := aead.Seal(nonce, nonce, plaintext, nil)
 	return []byte(base64.StdEncoding.EncodeToString(sealed)), nil

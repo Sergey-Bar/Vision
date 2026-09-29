@@ -78,7 +78,7 @@ func TestWebAuthnRelyingPartyValidation(t *testing.T) {
 
 // The relying-party id must be a suffix of the origin's host. A credential for a
 // different site would never be presented here, and the browser refuses it at
-// creation — so catching it at enrolment is the difference between a clear
+// creation - so catching it at enrolment is the difference between a clear
 // message and a silent dead end.
 func TestOriginAndRelyingPartyMustAgree(t *testing.T) {
 	good := []identity.WebAuthnRelyingParty{
@@ -227,7 +227,7 @@ func TestRegistrationStoresTheCredential(t *testing.T) {
 
 // The sign counter is the replay defence. A counter that has not advanced, or
 // that went backwards, is either a replay or a cloned authenticator, and the code
-// cannot tell which — so it refuses both rather than passing one.
+// cannot tell which - so it refuses both rather than passing one.
 func TestSignCounterRefusesReplayAndClone(t *testing.T) {
 	priv, es := es256Key(t)
 	a := assertionSignedBy(t, priv)
@@ -251,8 +251,8 @@ func TestSignCounterRefusesReplayAndClone(t *testing.T) {
 		t.Errorf("the refusal should say why the ambiguity is refused, got %q", err)
 	}
 
-	// And a counter that went backwards — the other way the same ambiguity
-	// shows up — is refused for the same reason.
+	// And a counter that went backwards - the other way the same ambiguity
+	// shows up - is refused for the same reason.
 	if _, err := identity.VerifyAssertion(es, a.SignCount+1, a); err == nil {
 		t.Error("an assertion whose counter went backwards was accepted")
 	}

@@ -19,8 +19,8 @@ import (
 // `x-milestone-session` was on this list and is now off it. The name is a
 // session: it is the vendor's handle on an authenticated session, and a captured
 // value is a bearer of that session, committed to a repository, in a list whose
-// entire justification is deny-by-default. Nothing replays on it — the adapter
-// authenticates with its own bearer token — so it was not carrying its weight
+// entire justification is deny-by-default. Nothing replays on it - the adapter
+// authenticates with its own bearer token - so it was not carrying its weight
 // either. If a fixture genuinely needs it, the answer is to re-capture without a
 // live session, not to widen this list.
 var allowedHeaders = map[string]bool{
@@ -39,7 +39,7 @@ func allowedHeader(k string) bool {
 //
 // It is the single choke point between the network and the repository. Everything
 // a fixture will ever contain passes through here, so this is where a new leak
-// has to be stopped — and where a test asserts that it was.
+// has to be stopped - and where a test asserts that it was.
 func SanitizeResponse(r *http.Response) (json.RawMessage, map[string]string, error) {
 	if r.Body == nil {
 		return nil, nil, fmt.Errorf("fixture: response has no body")
@@ -76,7 +76,7 @@ func SanitizeResponse(r *http.Response) (json.RawMessage, map[string]string, err
 
 // RedactionMarker replaces every value the sanitizer removes. It is a marker
 // rather than a deletion so a reviewer can see that redaction happened and where
-// — a silently shortened fixture looks like a source that simply sent less.
+// - a silently shortened fixture looks like a source that simply sent less.
 const RedactionMarker = "[redacted]"
 
 // secretKeyNames are JSON keys whose value is never safe to commit, whatever the

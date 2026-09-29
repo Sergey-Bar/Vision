@@ -10,7 +10,7 @@ import (
 // DSNParts is a parsed connection string.
 //
 // Parsed rather than handed to a driver because two callers need to read parts
-// of it — the migrator and the operator CLI — and because a password must be
+// of it - the migrator and the operator CLI - and because a password must be
 // re-attached out of band. A parsed DSN with no password is safe to log, print
 // in a preflight report, or include in an error message.
 type DSNParts struct {

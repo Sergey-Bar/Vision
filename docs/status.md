@@ -1,6 +1,6 @@
 # Status
 
-Last revised 2026-09-29 (Phase 0 closure and trust sweep).
+Last revised 2026-09-29 (Phase 0 closure, trust sweep, adversarial review).
 
 Milestone 1. This document is the source of truth for what is built. The README
 is not, and neither is the commit history.
@@ -8,11 +8,11 @@ is not, and neither is the commit history.
 Green means: written, building, and covered by a test that would fail if it broke.
 Everything in the table below is that. Where a thing is not done it says why.
 
-**Verification:** `scripts/verify.ps1` green — contract-check across
+**Verification:** `scripts/verify.ps1` green ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â contract-check across
 all three published contract surfaces, contract-sync, vet, gofmt,
 `golangci-lint` (including gosec), the generated-code check,
 `go test -race -p 1 -count=1 ./...`, migration-phases, rules-lint, the RLS canary
-and the Python runtime suite — against a real Postgres 16, with
+and the Python runtime suite ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â against a real Postgres 16, with
 `SP_TEST_DATABASE_URL` set so the database-backed suites ran rather than
 skipped. `contractcheck` reports 20 messages and 22 enums compatible with the
 baseline, plus 6 JSON Schemas (232 properties) and the OpenAPI document's 20
@@ -25,7 +25,7 @@ repository's second commit and none of them had ever run. The first run of
 golangci-lint found **526 findings**, and among them three real defects:
 
 - **`security-platform.env` was written world-readable (0644)** while carrying
-  `SP_DATABASE_URL` and `SP_SECRET_KEY` — and the template the same function
+  `SP_DATABASE_URL` and `SP_SECRET_KEY` ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â and the template the same function
   emits says in its own text "keep this file mode 0640". A preserved env file is
   chmod'ed on re-install too, so an upgrade fixes a file an older installer left
   open.
@@ -35,8 +35,8 @@ golangci-lint found **526 findings**, and among them three real defects:
   row is left claimed by a worker that has already moved on. A raising backoff
   turns a bounded retry into a lost message.
 - **A seal that failed was logged nowhere.** `Scheduler.Run` discarded the error
-  from every pass, so a sealer that failed every time — a key that would not
-  load, a database that went away — produced no log line, no counter and no
+  from every pass, so a sealer that failed every time ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â a key that would not
+  load, a database that went away ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â produced no log line, no counter and no
   error, and the ledger simply stopped being sealed.
 
 All three tools are now installed (MinGW-w64 for cgo, golangci-lint, protoc)
@@ -76,14 +76,14 @@ whose handlers read no context, and parameters kept for interface conformance.
 
 | Track | Items | State |
 |---|---|---|
-| A — Contracts and substrate | 1–5 | green |
-| B — Adapter and fixtures | 8, 9 | green |
-| C — Durability | 10–13 | green |
-| D — Graph, rules, verification, incidents | 14–20 | green |
-| E — Identity, API, console | 21–24 | green |
-| F — AI observation plane | 25–29 | green except the inference engine (see below) |
-| G — Threat model, release, lifecycle, observability, DR | 30–35 | green |
-| H — The runnable core service | 36–39 | green |
+| A ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â Contracts and substrate | 1ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“5 | green |
+| B ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â Adapter and fixtures | 8, 9 | green |
+| C ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â Durability | 10ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“13 | green |
+| D ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â Graph, rules, verification, incidents | 14ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“20 | green |
+| E ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â Identity, API, console | 21ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“24 | green |
+| F ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â AI observation plane | 25ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“29 | green except the inference engine (see below) |
+| G ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â Threat model, release, lifecycle, observability, DR | 30ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“35 | green |
+| H ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â The runnable core service | 36ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“39 | green |
 
 No command in the tree refuses as unimplemented. The one remaining guard in the
 code is the audit endpoint's answer when no audit writer is configured, which is a
@@ -132,7 +132,7 @@ securityctl preflight | doctor | migrate up | status
 
 Every one of these was exercised by hand against a running database, not only by
 unit test. A full release cycle was built, signed, verified against a trusted key,
-installed, upgraded to a second version, and rolled back — with the pre-upgrade
+installed, upgraded to a second version, and rolled back ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â with the pre-upgrade
 backup verified offline and the wrong signing key refused at every step.
 
 ### The lifecycle commands
@@ -166,8 +166,8 @@ this product can have. The tests assert the degraded path instead, and
 `insufficientEvidence` is true on every degraded response so a consumer that
 ignores the degradation field still fails closed.
 
-**What a model adds:** a `run_inference` body. Everything around it — verification,
-attribution, validation, degradation, the reason vocabulary — is written and
+**What a model adds:** a `run_inference` body. Everything around it ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â verification,
+attribution, validation, degradation, the reason vocabulary ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â is written and
 tested.
 
 ## What is not done, and why
@@ -232,7 +232,7 @@ command says so rather than leaving an operator to assume it.
 3. **Background workers reach other tenants through an explicit
    `app.system_worker` setting**, bounded by grants, not a role exemption.
 4. **`security_core` has no `BYPASSRLS`.** Only the migrator does.
-5. **NUL bytes are not in the `storage_ref` CHECK** — Postgres rejects NUL in
+5. **NUL bytes are not in the `storage_ref` CHECK** ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â Postgres rejects NUL in
    `text` at the type level, so the constraint would be untestable.
 6. **The audit hash chain is trigger-computed** over a length-prefixed encoding.
 7. **The rule schema's `eventType` vocabulary** follows the adapter's normalized
@@ -248,8 +248,8 @@ command says so rather than leaving an operator to assume it.
     security-definer by default in Postgres, so RLS on the underlying tables was
     evaluated for the view's owner and the tenant policies never applied to a
     traversal. The migration also grants `security_core` SELECT on the view at
-    all, which it did not have: every graph read the product performs — `Snapshot`,
-    `Walk`, `CheckRebuild` — was failing with "permission denied for view
+    all, which it did not have: every graph read the product performs ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â `Snapshot`,
+    `Walk`, `CheckRebuild` ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â was failing with "permission denied for view
     edges_active" under the role the product runs as.
 13. **The correlator's candidate window is bounded by a constant, not by the
     bundle.** A bundle is untrusted input; one asking for an hour-long window
@@ -260,7 +260,7 @@ command says so rather than leaving an operator to assume it.
     `SP_AI_ALLOW_REMOTE`.** `runtime.py` has no authentication of any kind, so
     anything that can reach the socket can read the site's evidence.
 
-## Defects found and fixed while building the core
+## Defects the 2026-09-28 and 2026-09-29 sweeps found
 
 These are the Phase 0 and Phase A/B items of the 2026-09-28 sweep. Every one
 shipped with a test that was run once with the control removed and watched go
@@ -278,7 +278,7 @@ red; the red runs are in the plan file.
   and returned, so `inbox.Writer.Fail` had no caller: no attempt ever reached the
   retry bound, and an event that could never normalize was reclaimed every lease
   period for the life of the process. The loop now records the failure, `Fail`
-  applies a backoff, and the claim itself retires a row whose budget is spent —
+  applies a backoff, and the claim itself retires a row whose budget is spent ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â
   which is what covers a worker killed mid-handle, where no cooperating code is
   left to call `Fail`.
 - **Every partition created by 0015 carries the tenant and site policies.**
@@ -291,7 +291,7 @@ red; the red runs are in the plan file.
   which is nil by construction on the MFA branch. The principal is now part of
   the result.
 - **An MFA challenge could be used repeatedly.** The challenge row was never
-  deleted — only a new session row was inserted — so one intercepted challenge id
+  deleted ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â only a new session row was inserted ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â so one intercepted challenge id
   minted sessions for its whole two-minute TTL. It is now consumed in the same
   transaction as the session insert.
 - **The second factor had no brute-force control.** The password step counts
@@ -301,10 +301,10 @@ red; the red runs are in the plan file.
   succeeded, so counting the second factor against the account would lock an
   operator out for mistyping six digits.
 - **A TOTP code could be used twice.** A code is valid for a 30-second step plus
-  the ±1 window, so it stays acceptable for about 90 seconds, and nothing
-  recorded that it had been used. RFC 6238 §5.2 says a verifier must not accept
+  the ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â±1 window, so it stays acceptable for about 90 seconds, and nothing
+  recorded that it had been used. RFC 6238 ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§5.2 says a verifier must not accept
   the same OTP code twice. Migration 0017 adds a per-factor consumed-step cache
-  and the record is the arbiter — an insert that loses the race refuses, so two
+  and the record is the arbiter ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â an insert that loses the race refuses, so two
   concurrent presentations of one code produce one session, not two. The key is
   `(tenant, factor, step, code digest)` rather than the step alone, because this
   codebase accepts both SHA-1 and SHA-256 authenticators and the two produce
@@ -313,7 +313,7 @@ red; the red runs are in the plan file.
   returns the same answer as a wrong code, so it is not an oracle. This was not
   in the sweep's item list; it is a real defect the TOTP work surfaced.
 - **Anyone holding `identity.manage` could re-key an account.** `SetPassword`
-  skipped the current-password check whenever `recovery_required` was set — and
+  skipped the current-password check whenever `recovery_required` was set ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â and
   `EnsureUser` set that flag on every account it ever created, so the bypass was
   the normal state of every provisioned user rather than an edge case. The flag
   now means what its name says: this account has never had a password chosen by
@@ -321,7 +321,7 @@ red; the red runs are in the plan file.
   than a random placeholder nobody keeps, which is the case the flag was
   standing in for. The audit action distinguishes an ordinary password change
   from a recovery, which it used to write as `identity.recovery.performed`
-  either way — one row in a hash-chained ledger for two different events.
+  either way ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â one row in a hash-chained ledger for two different events.
 - **Every bootstrap administrator in every deployment was `admin-e3b0c442`.**
   `sha256.New().Sum(x)` returns `x` plus the digest of nothing, and `e3b0c442` is
   the first eight hex characters of the SHA-256 of no input at all. The inputs are
@@ -335,8 +335,8 @@ red; the red runs are in the plan file.
   believe the *leftmost* `X-Forwarded-For` entry, which is a header the caller
   writes. Every audit row, and any rate limiter keyed on it, was keyed on
   something the caller chose. `SP_TRUSTED_PROXY_CIDRS` is now required whenever
-  `SP_BEHIND_PROXY` is set — empty list plus behind-proxy refuses to start, the
-  same rule as the cookie and TLS refusals — and the address is the rightmost
+  `SP_BEHIND_PROXY` is set ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â empty list plus behind-proxy refuses to start, the
+  same rule as the cookie and TLS refusals ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â and the address is the rightmost
   *untrusted* hop rather than the leftmost, with `X-Forwarded-For` ignored
   entirely when the direct peer is not a trusted proxy.
 - **`SP_SESSION_COOKIE_SECURE` existed but was hardcoded to `true`.** The setting
@@ -353,7 +353,7 @@ red; the red runs are in the plan file.
 
 - **The offline verifiers accepted self-signed forgeries.** With no trusted key
   supplied, `release.Verify` and `checkpoint.VerifySeal` skipped the comparison
-  entirely and printed a warning — on the two commands whose entire purpose is to
+  entirely and printed a warning ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â on the two commands whose entire purpose is to
   detect exactly that. Both now refuse, and both CLI entry points require
   `--trusted-key`.
 - **The manifest signature did not cover the SBOM block.** The pointer to the
@@ -375,7 +375,7 @@ red; the red runs are in the plan file.
   were not covered at all, because the value-level rules never saw a number.
 - **Non-regular tar entries were indexed and extracted as ordinary files.** A
   symlink, hard link or device node was hashed by its own bytes and written with
-  `os.WriteFile`, in both `internal/release` and `internal/lifecycle` — and
+  `os.WriteFile`, in both `internal/release` and `internal/lifecycle` ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â and
   lifecycle is the one that lands bytes during an install. The empty body on a
   link entry meant the hash check would usually catch it, and "usually" is not a
   control.
@@ -389,7 +389,7 @@ red; the red runs are in the plan file.
   operator whose vendor moved gets a message that says so.
 - **`runtime.py` compared a SHA-256 digest against a text file and called it a
   signature.** Anyone who could edit the bundle could regenerate the `.sig`. It
-  is now real Ed25519 verification, pure-Python RFC 8032, standard library only —
+  is now real Ed25519 verification, pure-Python RFC 8032, standard library only ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â
   the air-gap supply-chain decision forbids a dependency. The tests include the
   RFC vectors and were mutation-tested six ways, including a revert to the old
   code.
@@ -401,8 +401,8 @@ red; the red runs are in the plan file.
   every package it names resolves, or that it checks all three contract surfaces.
   Delete it and the suite stayed green. There is now a test that fails if it goes.
 - **A diagnostic on stderr aborted the whole gate.** `verify.ps1` ran with
-  `$ErrorActionPreference = 'Stop'`, so a tool that printed a warning — which
-  PowerShell turns into a terminating error — killed the script before its exit
+  `$ErrorActionPreference = 'Stop'`, so a tool that printed a warning ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â which
+  PowerShell turns into a terminating error ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â killed the script before its exit
   code was read. The first two gates never wrote to stderr, so it went unnoticed
   until the OpenAPI gate had a warning to give.
 - **A metric named a class of thing that does not exist.** `actions_dispatched_total`
@@ -413,7 +413,7 @@ red; the red runs are in the plan file.
 
 - **Recall could not fail.** `DetectedRestricted` counted every case the profile
   flagged, including benign ones, so one true positive and twenty false ones gave
-  a recall of 21.0 — and the gate that decides M1 exit gate 4 is "at least 0.70".
+  a recall of 21.0 ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â and the gate that decides M1 exit gate 4 is "at least 0.70".
   Every rate now divides by `Answered`, so a profile cannot improve its numbers by
   declining to answer, and a rate whose denominator is zero is reported as not
   measurable rather than left as an un-normalised count.
@@ -435,11 +435,88 @@ red; the red runs are in the plan file.
   clear was indistinguishable from a successful one. It now destroys the
   connection.
 - **An uncorroborated decision's log line said the opposite of what happened.**
-  It said "no incident raised" and then raised one, correctly — `unverified` is a
+  It said "no incident raised" and then raised one, correctly ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â `unverified` is a
   first-class verification state, indexed as one. The log line was wrong, not the
   pipeline.
 
+### Two counters that were not counters
+
+- **The password lockout bounded nothing under parallelism.**
+  `PasswordStep` takes `FOR UPDATE` in a transaction that commits ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â the argon2
+  verification has to happen outside it or a deliberately slow hash serialises
+  every login on the site ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â and `registerFailure` then computed
+  `attempts := user.FailedAttempts + 1` in Go from that already-stale value and
+  wrote the result. Red-checked: eight concurrent wrong passwords left the
+  counter at **1** and the account unlocked. It is the named control for the
+  CSRF-exempt login route. The increment is now `failed_attempts + 1` in SQL with
+  the value read back.
+- **The MFA budget bounded nothing under parallelism either.** It was read in the
+  committed transaction, compared, and incremented separately on failure.
+  Red-checked: **8 of 8** concurrent wrong codes reached the factor check against
+  a budget of 5. A challenge id is documented in that package as "a two-minute
+  bearer of 'the password was right'", so this was the only thing bounding a
+  six-digit code. The budget is now *claimed* ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â one statement where the increment
+  and the ceiling are the same predicate.
+
+### Trust, one more time
+
+- **`build-release` generated a signing key when the path did not exist**, with no
+  message, and then printed the matching `--trusted-key` ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â actively telling the
+  operator to adopt it. A release signed by a key nobody holds the offline half
+  of is verifiable by anybody who can read the archive, every archive signed by
+  the real key stops verifying, and a typo in a path on a build host does all of
+  that silently and successfully. It refuses now.
+- **The audit feed's `chainValid` did not verify the chain.** It compared
+  `items[i].PrevHash` to `items[i-1].Hash`: two stored columns side by side, so
+  an edited row verified fine, and the first row was never checked, so a
+  single-row page ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â which is what `?fromSequence=<n>&limit=1` produces ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â always
+  reported true. The comment said it was recomputed. It now calls
+  `audit_verify_chain`, the same function a checkpoint seal makes.
+- **Visiting the console root logged the operator out.** `Resolve` rotates the
+  session token on every call and `handleConsoleRoot` discarded the new value; the
+  browser kept the old one and the next request bounced to `/login`.
+  `s.principal` sends the rotated cookie back, and this one handler was the
+  exception.
+
+### Encoding
+
+335 comment lines carried em-dashes and typographic quotes that had been through
+several lossy encoding round-trips, and one string literal had become a Unicode
+control character that `staticcheck` caught. The unambiguous sequences were
+decoded; the rest, which had been through more than one pass and could not be
+recovered reliably, are now plain hyphens in comments. No operator-facing string
+literal was touched.
+
 ### Migrations
+
+- **`audit_verify_chain` reported every sub-range as broken.** It seeded the
+  running previous-hash with the genesis hash regardless of `p_from`, so the
+  first row it examined was compared against a genesis it does not have. Every
+  call with `p_from > 1` returned `valid = false, broken_at = p_from`, pointing
+  at the start of the range rather than at a real break. The tests only ever
+  verified from 1.
+
+  That is invariant 4's detector, and `audit_checkpoints` seals ranges, so this
+  is the function that verifies a seal. A verifier that fails closed on an
+  untouched ledger cannot distinguish tampering from its own bug; an operator told
+  their ledger is broken learns to ignore the output, which is the same as having
+  no verifier. Migration 0018 seeds from the row before `p_from` and refuses
+  outright when that row is missing, because a missing link and a broken chain
+  call for different responses from the operator.
+- **`Worker.Fail`'s backoff raised on its own failure path**, the defect already
+  fixed in the inbox and the outbox and missed in jobs: the exponent was cast to
+  int32 before the clamp, so it raised at attempt 29, the row stayed leased, and
+  the worker aborted on every pass. Red-checked at attempt 28.
+- **`Migration.IsValid` never looked at the SQL.** It checked that the phase
+  string was one of three known values, so a `DROP COLUMN` in a file named
+  `.expand.sql` passed validation and was applied. It now rejects contract DDL
+  outside a `.contract.sql` file.
+- **`jobs.max_attempts` had no upper bound**, so a bound above 28 was accepted
+  and reached the raising arithmetic. 0018 adds a ceiling.
+- **`inbox.Writer.Fail` and `Complete` matched on the key alone**, so a worker
+  whose lease had lapsed could flip a row another worker was actively processing
+  to `dead_letter`. Both match the lease owner now. Red-checked: without the
+  guard the stale worker dead-letters the in-flight row.
 
 - **`VerifyChecksums` compared only the checksum.** A renamed migration or a
   rewritten phase passed. It now compares the applied row's name and phase as
@@ -449,12 +526,12 @@ red; the red runs are in the plan file.
   could not be delivered. Schema version is now 17.
 
   The gate is real: it caught an edit to an already-applied migration during
-  this sweep, and the correct response — reset the test database — is what was
+  this sweep, and the correct response ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â reset the test database ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â is what was
   done. That is the control working, not the control being inconvenient.
 
 - **`internal/clocksub` had no tests, and the drift measurement it owns is the
   input to every time-windowed corroboration decision.** A device 400 days out
-  wrapped the int32 conversion and was recorded as 200,261,632ms — a positive
+  wrapped the int32 conversion and was recorded as 200,261,632ms ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â a positive
   number, in the severe band, therefore looking entirely plausible while being
   wrong by a factor of 172. Saturating has to work in both directions or a clock
   that is behind is recorded as one that is ahead.
@@ -473,15 +550,57 @@ red; the red runs are in the plan file.
 
 ### Still open, and needing a human
 
-- **The DR drill is not part of the gate.** `internal/dr` runs the whole-recovery
-  drill and passes, but as a package test rather than as a step a release is
-  gated on.
-- **`internal/schemalaws` has eight unhandled errors in its tests** — a
-  `testutil.ExpectError` whose return is discarded. They are excluded rather than
-  fixed, on the grounds that the helper asserts by panicking; if that changes, the
-  exclusion changes with it.
+- **The RLS policies OR, so there is no site isolation at the database layer.**
+  Verified directly:
 
-## Defects found and fixed while building the core
+  ```sql
+  SELECT polname, polpermissive FROM pg_policy WHERE polrelid = 'evidence'::regclass;
+  --  site_isolation     permissive = true
+  --  tenant_isolation   permissive = true
+  ```
+
+  PostgreSQL ORs multiple PERMISSIVE policies for the same command, so
+  `tenant_isolation OR site_isolation` is `tenant_isolation`. The comment in
+  migration 0008 says "so the two concerns compose: tenant first, then site",
+  which describes AND. The DDL implements OR.
+
+  This is why the API handlers check the site themselves, and it is now the only
+  place site isolation happens. Making `site_isolation` RESTRICTIVE would move
+  the check into the database, which is where it belongs, and it is a large
+  behavioural change: every request would have to carry its site scope, and any
+  query that does not would see nothing rather than everything. It needs an ADR
+  and a human.
+- **Two capabilities exist and are enforced nowhere.** `evidence.fetch` and
+  `evidence.export` are declared and granted to roles but read by no route and
+  checked by no handler. The route that streams raw bytes requires
+  `evidence.read`, which `viewer` holds. Either the route should require the
+  fetch capability, or the two capabilities should be removed from the role table
+  ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â a capability that grants nothing is a role table that lies.
+- **The whole-recovery drill is a gate step now, but `securityctl install` and
+  the upgrade path are not** and are not covered by a test that a release is
+  gated on.
+- **`internal/clocksub` measures the VMS skew and nobody applies it.**
+  `MeasureFromSourceTimes` has no caller; a VMS 40 seconds fast produces 40
+  seconds of uncorrected `normalized_at` with no degradation recorded.
+- **`schedule` conditions are never evaluated in production.** The pipeline
+  builds the engine context with a nil `InSchedule` resolver, so every schedule
+  rule in the active bundle is dead at runtime, and the other two consumers of
+  the same field (`simulate`, `replay`) answer differently ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â so a digest an
+  operator acknowledged certifies a schedule behaviour the product does not
+  have.
+- **`MinCoreVersion`, `MaxCoreVersion` and `ContractsVersion` are signed and
+  never compared.** Only the schema window is checked, so a release declaring
+  `maxCoreVersion: "0.x"` installs onto a 1.x core and then records itself as
+  compatible.
+- **Migration 0010 drops a column inside a file named `.expand.sql`.** The
+  validator now rejects that shape going forward, and 0010 is applied on
+  deployed databases, so it needs an ADR rather than an edit.
+- **Ed25519 verification in `runtime.py` is the un-cofactored form.** The RFC
+  vectors pass and the tests were mutation-tested, but small-order `R` acceptance
+  is a known weakness of that form. AGENTS.md requires human review of crypto and
+  this has not had one. A third opinion from libsodium would close it properly.
+
+## Defects the runnable-core work found
 
 Each of these was live, invisible to the suite, and total in production. They are
 listed because the pattern matters more than the list: every one of them is a
@@ -524,7 +643,7 @@ documented field, interface or unit that nothing assigned, granted or read.
   worked in production; the tests used a reversible prefix.
 - **`checkpoint.SealRange` had no caller.** The ledger was append-only and
   hash-chained, and nothing ever sealed it.
-- **The AI runtime endpoint was unwired** — `apiVersion` as an integer is
+- **The AI runtime endpoint was unwired** ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â `apiVersion` as an integer is
   asserted against `runtime.py`'s own `!=` comparison, because a client sending
   the string `"1"` gets a 400 that reads like the runtime is broken.
 - **The client address was the caller-asserted one.** `X-Forwarded-For` was read
@@ -534,7 +653,7 @@ documented field, interface or unit that nothing assigned, granted or read.
   client is now the rightmost entry that is not a configured trusted proxy, and a
   peer outside the trusted list has its header ignored entirely.
 - **`SP_TRUSTED_PROXY_CIDRS` is now required whenever `SP_BEHIND_PROXY=true`**
-  — a comma-separated CIDR list, no default — and the process refuses to start
+  ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â a comma-separated CIDR list, no default ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â and the process refuses to start
   without it. The same refusal applies to `SP_SESSION_COOKIE_SECURE=false` on a
   non-loopback listener, and to a configuration with neither TLS nor a proxy,
   which is a plaintext listener with nothing terminating it. A site that

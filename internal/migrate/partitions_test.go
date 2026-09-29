@@ -45,7 +45,7 @@ func TestInboxAndCanonicalAcceptRowsBeyondTheOldPartitionBoundary(t *testing.T) 
 
 // Every partition carries the tenant and site policies. PostgreSQL applies a
 // partition's own policies and not the parent's, so a partition created without
-// them is an unfiltered relation — the kind of hole that only shows up after an
+// them is an unfiltered relation - the kind of hole that only shows up after an
 // incident. This asserts the isolation is present on the 2027 and DEFAULT
 // partitions, not just on the 2026 ones 0008 happened to see.
 func TestNewPartitionsCarryTenantAndSitePolicies(t *testing.T) {

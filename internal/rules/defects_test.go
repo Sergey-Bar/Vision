@@ -44,7 +44,7 @@ func aiField() string {
 // `not: {aiObservation: {...}}` used to evaluate its child into a throwaway
 // probe and return !matched, discarding the probe. The child set Degraded and
 // returned false on a missing observation, so the negation returned true on
-// every event with no AI observation at all — and threw the degradation away, so
+// every event with no AI observation at all - and threw the degradation away, so
 // the outcome came back CORROBORATED. The rule did the opposite of what its
 // author wrote and the operator was told the incident was fully corroborated.
 func TestNotOverAMissingAIObservationIsNotTrue(t *testing.T) {
@@ -85,7 +85,7 @@ func TestNotOverAPresentAIObservationStillNegates(t *testing.T) {
 `))
 
 	// The model said no: the child is evaluated and returns false, so the
-	// negation holds and the rule fires — un-degraded, because a real negative
+	// negation holds and the rule fires - un-degraded, because a real negative
 	// answer is not a degradation.
 	motion := signal("e1", "motion", 0)
 	motion.AIObservation = &rules.AIObservation{
@@ -108,7 +108,7 @@ func TestNotOverAPresentAIObservationStillNegates(t *testing.T) {
 
 // `any` means "at least one of these held". An arm that could not be evaluated
 // is not an arm that held, and the author cannot know that the satisfied arm is
-// the right one when a sibling was unknowable — so a degraded arm degrades the
+// the right one when a sibling was unknowable - so a degraded arm degrades the
 // `any` whatever fired.
 func TestAnyIsDegradedWhenAnArmItEvaluatedDegraded(t *testing.T) {
 	b, _ := compileRules(t, wrap(`
@@ -248,7 +248,7 @@ func TestMinEvidenceTierCCorroboratesWithAnObservation(t *testing.T) {
 // The window the author wrote is the bound, and the site's skew tolerance widens
 // it by at most the tolerance. A 300-second window at a site with a 5s tolerance
 // used to be silently cut to 5s, so signals a minute apart could never
-// corroborate no matter what the bundle asked for — and the correlator had sized
+// corroborate no matter what the bundle asked for - and the correlator had sized
 // a 300-second database scan to find them.
 func TestALongWindowIsNotSilentlyCutToTheSkewTolerance(t *testing.T) {
 	b, _ := compileRules(t, wrap(`
@@ -756,7 +756,7 @@ func TestResolveRanksByPriorityBeforeSeverity(t *testing.T) {
 
 // Severity is still the tiebreak at equal priority. The compiler refuses such a
 // pair as a conflict, so the tiebreak is only reachable on a bundle assembled
-// without it — which is a shape a caller can produce, and the fold must not
+// without it - which is a shape a caller can produce, and the fold must not
 // then pick by document order.
 func TestResolveUsesSeverityAsTheTiebreak(t *testing.T) {
 	rule := func(id, severity string) rules.CompiledRule {

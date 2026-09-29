@@ -2,7 +2,7 @@
 //
 // An observation is a historical fact: "this model, this prompt, said this, about
 // evidence with these hashes, at this time". It is append-only, it is
-// attributable, and it is never overwritten — a re-evaluation is a new row that
+// attributable, and it is never overwritten - a re-evaluation is a new row that
 // names the one it supersedes, so the delta between them is measurable and a
 // decision that cited the earlier one still replays.
 //
@@ -342,7 +342,7 @@ func (w *Writer) newID(o Observation) string {
 	// observation is a *run* of a model over evidence. Two runs of the same model
 	// on the same event are two observations, and the whole point of supersession
 	// is that both are kept. A derived id would collide them, or force the clock
-	// to be part of the identity — which is worse, because a golden test then
+	// to be part of the identity - which is worse, because a golden test then
 	// cannot pin it.
 	//
 	// The content hash is what identifies an observation's meaning; the id

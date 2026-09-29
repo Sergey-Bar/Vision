@@ -27,7 +27,7 @@ const DefaultInterval = 5 * time.Minute
 //
 // It exists because SealRange is a primitive with no caller: the ledger was
 // append-only and hash-chained, and the thing that made the chain tamper-evident
-// over time — a signed seal every so often — was something an operator had to
+// over time - a signed seal every so often - was something an operator had to
 // run by hand. A guarantee that depends on somebody remembering is not a
 // guarantee.
 //
@@ -72,8 +72,8 @@ type PGXPooler interface {
 // that restarts should not wait a full interval before protecting anything.
 //
 // A failed pass is logged and the loop continues. It used to be discarded
-// entirely, which meant a sealer that failed every time — a key that would not
-// load, a database that went away, a signature that stopped verifying — produced
+// entirely, which meant a sealer that failed every time - a key that would not
+// load, a database that went away, a signature that stopped verifying - produced
 // no log line, no counter and no error, and the ledger simply stopped being
 // sealed. The ledger is append-only and hash-chained precisely so that a gap in
 // its protection is detectable, and a scheduler that cannot report the gap makes
@@ -143,7 +143,7 @@ func (s *Scheduler) sealOnce(ctx context.Context) (bool, error) {
 		// table rather than from the seal files. The files are the evidence; the
 		// table is what the core trusts about its own progress. If the files were
 		// deleted the table would still not re-seal an already-sealed range, which
-		// is correct — re-sealing the same rows produces a second signed artefact
+		// is correct - re-sealing the same rows produces a second signed artefact
 		// claiming the same thing, and two artefacts that must agree is one more
 		// thing that can be made to disagree.
 		if err := tx.QueryRow(ctx,
@@ -219,7 +219,7 @@ func (s *Scheduler) logf(format string, args ...any) {
 // A missing file is refused with the remedy rather than a fresh key being
 // generated: a generated key seals nothing that anybody can verify, because the
 // corresponding public key is not held anywhere the operator knows about. That
-// failure is silent in the worst way — seals are written and every one of them
+// failure is silent in the worst way - seals are written and every one of them
 // fails verification months later.
 func LoadSignerKey(path, keyID string) (*Signer, error) {
 	raw, err := os.ReadFile(path)

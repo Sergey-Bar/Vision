@@ -111,8 +111,8 @@ claims and only the second one names where bytes land.
 		// a thing that can happen.
 		//
 		// A systemd-only install is written only when the installer is running on
-		// a system that has systemd. On a Windows host — which is where this is
-		// developed — the units are printed instead, because an operator needs to
+		// a system that has systemd. On a Windows host - which is where this is
+		// developed - the units are printed instead, because an operator needs to
 		// see what would have been written and writing /etc/systemd/system from a
 		// Windows process would create a directory that does nothing.
 		if unitDir := envOr("SP_UNIT_DIR", ""); unitDir != "" || isLinux() {

@@ -13,8 +13,8 @@
 //     the network. A fixture format with a pre-parsed, "clean" payload would be a
 //     second parser, and the two would drift.
 //   - The envelope is sanitized at capture time, not at read time. Anything that
-//     must never be committed — credentials, MAC addresses, person images,
-//     absolute paths — is removed once, by a code path with its own tests, and
+//     must never be committed - credentials, MAC addresses, person images,
+//     absolute paths - is removed once, by a code path with its own tests, and
 //     the commit is safe by construction rather than by reviewer vigilance.
 //   - Timing is explicit and relative. A fixture stores offsets from a scenario
 //     epoch, never absolute wall-clock timestamps, so replaying a year from now
@@ -145,7 +145,7 @@ func (s Scenario) Validate() error {
 			return fmt.Errorf("fixture: scenario %q event %d has an empty envelope", s.Name, i)
 		case !json.Valid(e.Envelope):
 			// A malformed envelope is a legitimate scenario — "malformed" is one
-			// of the required fixture cases — but it has to be valid JSON that
+			// of the required fixture cases - but it has to be valid JSON that
 			// decodes to something wrong, not a file that will not parse at all.
 			// Otherwise a typo and a deliberate malformation are indistinguishable
 			// and the scenario silently stops testing anything.

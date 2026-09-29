@@ -131,7 +131,7 @@ func (s *Signer) Sign(seal Seal) (Seal, error) {
 //
 // trustedPublic, when non-nil, must match the seal's embedded key. Without
 // that check an attacker with write access to the sink directory can sign a
-// forged chain with a key they generated, and the verification passes — which
+// forged chain with a key they generated, and the verification passes - which
 // is the entire threat this sink exists to defeat.
 func VerifySeal(seal Seal, trustedPublic ed25519.PublicKey) error {
 	if seal.Algorithm != "ed25519" {
@@ -160,7 +160,7 @@ func VerifySeal(seal Seal, trustedPublic ed25519.PublicKey) error {
 	// The comparison below is the whole control: a seal verified against the key
 	// it carries is a seal that proves whoever wrote it signed their own forgery.
 	// Skipping the comparison when no key was supplied made the offline verifier
-	// — the command whose entire job is to detect a forged or re-signed seal —
+	// - the command whose entire job is to detect a forged or re-signed seal -
 	// pass on exactly the input it exists to reject. The caller now refuses
 	// before it gets here; this is the backstop for any other caller.
 	if trustedPublic == nil {
@@ -289,7 +289,7 @@ func (f *FileSink) Refuse(seal Seal) error {
 	// A tenant id reaches this code from configuration and from an install-time
 	// argument. If it is not already a safe file-name fragment, the seal file
 	// name would be built from sanitized input while the recorded tenant id is
-	// not — two seals that collide on disk. Refuse instead of guessing.
+	// not - two seals that collide on disk. Refuse instead of guessing.
 	if !isSafeFragment(seal.TenantID) {
 		return fmt.Errorf("checkpoint: tenant id %q is not a safe file-name fragment", seal.TenantID)
 	}
@@ -366,7 +366,7 @@ func (f *FileSink) Load(path string) (Seal, error) {
 // Gap returns the first unsealed sequence in [1, latest].
 //
 // A gap means a seal was lost or removed. Because the previous seal is signed,
-// a gap is detectable offline by anyone holding the seals — which is the reason
+// a gap is detectable offline by anyone holding the seals - which is the reason
 // the seal set is worth keeping off the database host.
 func (f *FileSink) Gap(latest int64) (int64, error) {
 	seals, err := f.List()

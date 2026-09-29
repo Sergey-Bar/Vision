@@ -74,11 +74,14 @@ Runs from committed fixtures with no Milestone server reachable.`,
 		&command.Command{
 			Name:    "activate",
 			Summary: "Activate a stored bundle version",
-			Usage: `activate --version <v> --diff-digest <sha256>
+			Usage: `activate --version <v> --report <report.json>
 
-Refuses without a diff digest, and refuses a digest that is not a SHA-256. A
-bundle that has not been simulated cannot be activated, so there is no path that
-turns a rule on without someone having read what it changes.`,
+Takes the report ules simulate --json produced, not a digest. The gate
+re-hashes the acknowledged change list and compares it with the digest the report
+carries, so a report edited after it was read, a report for a different
+bundle, and a digest typed by hand are all refused. A bundle that has not been
+simulated cannot be activated, so there is no path that turns a rule on without
+someone having read what it changes.`,
 			Flags: func(fs *flag.FlagSet) {
 				fs.String("version", "", "Bundle version to activate.")
 				fs.String("diff-digest", "", "Diff digest from `rules simulate`.")

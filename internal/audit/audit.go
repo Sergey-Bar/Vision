@@ -156,7 +156,7 @@ RETURNING prev_hash, hash`
 func (w *Writer) Append(ctx context.Context, tx pgx.Tx, e Entry) (string, error) {
 	// Default the timestamp before validating, not after. Validation is what
 	// catches an entry nobody can attribute later, and a caller that did not set
-	// a timestamp has not made the entry unattributable — it has simply left the
+	// a timestamp has not made the entry unattributable - it has simply left the
 	// field for the writer that is about to record it.
 	if e.TS.IsZero() {
 		e.TS = w.now()

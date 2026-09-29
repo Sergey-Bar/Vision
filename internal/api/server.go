@@ -137,7 +137,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 // requireCSRF is applied *after* the layers that decorate a response: a CSRF
 // rejection is an error response like any other and must carry the same
 // security headers and the same X-Request-Id as a success, and must appear in
-// the access log. With requireCSRF outermost it was none of those — four
+// the access log. With requireCSRF outermost it was none of those - four
 // WriteError calls emitting bare 401/403 with no CSP, no nosniff, no
 // frame-deny, no HSTS, no request id, and nothing in the log. A rejected
 // forgery was the one response an attacker could read the shape of for free.
@@ -182,7 +182,7 @@ func (s *Server) assignRequestID(next http.Handler) http.Handler {
 type requestIDKey struct{}
 
 // RequestIDFromContext returns the correlation id assigned to this request, or
-// the inbound header when the context was never populated — which is the case
+// the inbound header when the context was never populated - which is the case
 // for a handler mounted outside the server's own middleware stack.
 func RequestIDFromContext(ctx context.Context) string {
 	if v, ok := ctx.Value(requestIDKey{}).(string); ok && v != "" {
@@ -374,7 +374,7 @@ func (s *Server) requireCapability(needed identity.Capability, h func(http.Respo
 // csrfExempt lists the routes a CSRF token cannot protect.
 //
 // Login and its second step are exempt because a caller has no session yet, and
-// therefore no token to present — requiring one would make authentication
+// therefore no token to present - requiring one would make authentication
 // impossible. A forged login request can only log the attacker in as themselves,
 // which costs them nothing.
 //
@@ -439,7 +439,7 @@ func (s *Server) requireCSRF(next http.Handler) http.Handler {
 		//
 		// The session is found by the token, not by an id derived from it. Resolve
 		// rotates the token on every request, so a session id derived from the
-		// token that just arrived is always one rotation stale — and a check
+		// token that just arrived is always one rotation stale - and a check
 		// against a stale session refuses every correctly-tokened request, which
 		// looks exactly like a CSRF attack.
 		if err := s.Identity.CheckCSRFByToken(r.Context(), s.Tenant, cookie.Value, presented); err != nil {
@@ -658,7 +658,7 @@ func (s *Server) clock() time.Time {
 // the right. Reading leftmost means the value is asserted by the party we are
 // trying to constrain. Reading rightmost-untrusted means we trust only the
 // suffixes appended by hops we have explicitly named, and stop at the first
-// entry we did not — which is exactly the boundary between what the trusted
+// entry we did not - which is exactly the boundary between what the trusted
 // chain can vouch for and what the client chose.
 //
 // The second branch is what makes the first one safe: without it, any client
@@ -696,9 +696,9 @@ func (s *Server) isTrustedProxy(ip net.IP) bool {
 // rightmostUntrusted returns the last X-Forwarded-For entry that is not a
 // trusted proxy.
 //
-// If every entry is trusted — a header that is entirely made of our own proxy
+// If every entry is trusted - a header that is entirely made of our own proxy
 // addresses, which is what a client sends when it wants to be unidentifiable
-// and has to guess addresses — there is no untrusted entry and the answer is
+// and has to guess addresses - there is no untrusted entry and the answer is
 // empty, which the caller treats as "use the peer". Guessing there would put
 // an attacker-chosen value into an audit row.
 func (s *Server) rightmostUntrusted(fwd string) string {

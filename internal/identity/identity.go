@@ -8,7 +8,7 @@
 //
 // A break-glass account is a person, not a backdoor. It needs a real password,
 // it raises a high-priority audit event on every use, and it cannot be created
-// without an audit row — so its existence is a fact somebody knows rather than a
+// without an audit row - so its existence is a fact somebody knows rather than a
 // possibility somebody has.
 //
 // Passwords are Argon2id with parameters held in the code rather than in the

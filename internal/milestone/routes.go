@@ -2,8 +2,8 @@
 //
 // The adapter has exactly one parsing path. A live server and a fixture file
 // differ only in where the bytes come from, so the seam is a Transport and
-// everything above it is shared. That is what makes Definition of Done item 1 —
-// integration mode and replay mode producing the same canonical event — a
+// everything above it is shared. That is what makes Definition of Done item 1 -
+// integration mode and replay mode producing the same canonical event - a
 // structural property rather than a thing to keep in sync by hand.
 //
 // # Confidence in the wire format
@@ -52,7 +52,7 @@ type Route struct {
 // Every entry is Unverified. That is accurate today: no Milestone server has
 // been reachable from this codebase. When `securityctl adapter probe` runs
 // against a real installation, the entries it confirms lose the flag, and the
-// ones it contradicts get fixed here and there — which is the whole point of
+// ones it contradicts get fixed here and there - which is the whole point of
 // keeping them in one file.
 var Routes = []Route{
 	{
@@ -132,7 +132,7 @@ func UnverifiedRoutes() []Route {
 //
 // The interface is deliberately at the byte level rather than the object level.
 // If it returned parsed objects, the fixture path would parse the JSON itself and
-// the two parsers would drift — which is precisely the bug replay-equality is
+// the two parsers would drift - which is precisely the bug replay-equality is
 // supposed to catch and not create.
 type Transport interface {
 	// Get performs a read. path is a route path with placeholders already

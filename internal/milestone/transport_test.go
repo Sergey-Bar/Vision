@@ -14,7 +14,7 @@ import (
 
 // A redirect is a second host, and Go's default client follows up to ten of them
 // while replaying the request headers on each hop. The Authorization bearer goes
-// with it, so anything that can make Milestone answer 302 — a load balancer that
+// with it, so anything that can make Milestone answer 302 - a load balancer that
 // moved, a proxy in the path, a vendor change — receives the site's Milestone
 // credential for a host nobody configured.
 //

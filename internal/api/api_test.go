@@ -18,6 +18,7 @@ import (
 	"github.com/Sergey-Bar/Ai-Captain/internal/audit"
 	"github.com/Sergey-Bar/Ai-Captain/internal/bundles"
 	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
+	"github.com/Sergey-Bar/Ai-Captain/internal/evidence"
 	"github.com/Sergey-Bar/Ai-Captain/internal/identity"
 	"github.com/Sergey-Bar/Ai-Captain/internal/incidents"
 	"github.com/Sergey-Bar/Ai-Captain/internal/migrate"
@@ -25,6 +26,12 @@ import (
 	"github.com/Sergey-Bar/Ai-Captain/internal/rules"
 	"github.com/Sergey-Bar/Ai-Captain/internal/testutil"
 )
+
+// theEvidenceStore is the store the most recently built test server was given.
+//
+// The evidence-content route streams bytes off it, so a test that wants to
+// exercise that route has to put real bytes behind a real evidence row.
+var theEvidenceStore *evidence.Store
 
 var clock = time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC)
 
@@ -98,8 +105,18 @@ func serverWithRegistry(t *testing.T, registry *observability.Registry) (*api.Se
 	// The console reads through the same services the API does, so the test
 	// wires real ones rather than stubs: a nil service behind a route is exactly
 	// the shape of a defect the console would hit in production.
+	// The evidence store is real, over a temp root, because the evidence-content
+	// route streams bytes off it and a nil service behind that route is a nil
+	// dereference rather than a test.
+	evStore, err := evidence.New(evidence.Options{Root: t.TempDir()})
+	if err != nil {
+		t.Fatalf("evidence store: %v", err)
+	}
+	theEvidenceStore = evStore
+
 	deps := api.Deps{
 		Identity:  ident,
+		Evidence:  evStore,
 		Incidents: &incidents.Service{Pool: pool, Audit: writer},
 		Bundles:   &bundles.Service{Pool: pool, Compiler: rules.NewCompiler(), Audit: writer},
 		Metrics:   registry,
@@ -117,6 +134,13 @@ func serverWithRegistry(t *testing.T, registry *observability.Registry) (*api.Se
 		t.Fatalf("bootstrap: %v", err)
 	}
 	return s, tenant, site, registry
+}
+
+// adminStore is the evidence store the test server was built with, for the tests
+// that need to put bytes behind an evidence row.
+func adminStore(t *testing.T) *evidence.Store {
+	t.Helper()
+	return theEvidenceStore
 }
 
 // The security headers are the whole reason the console has no inline script, so

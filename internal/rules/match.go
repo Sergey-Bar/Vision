@@ -382,7 +382,7 @@ func (e *Engine) matchField(f *FieldCondition, s Signal) bool {
 		}
 		if prefix == "" {
 			// HasPrefix(s, "") is true for every s, so an empty prefix would make
-			// the condition match every present string — a rule an operator
+			// the condition match every present string - a rule an operator
 			// believes narrows to one prefix and in fact filters on nothing but
 			// presence. Rejected at compile time as well; this is the runtime
 			// half, and the two are not redundant because a CompiledBundle can be
@@ -561,7 +561,7 @@ func (e *Engine) matchCorroboration(c *CompiledCorroboration, trigger Signal, av
 	//
 	// `requiresAIObservation: true` means this rule asked for a Tier C signal. If
 	// two Tier B signals happen to satisfy minSignals while the model is down,
-	// checking the count first would let the rule report itself corroborated —
+	// checking the count first would let the rule report itself corroborated -
 	// and the rule's author asked for something the run did not have.
 	//
 	// What the declared behaviour changes is the AI veto, not the corroboration
@@ -595,8 +595,8 @@ func (e *Engine) matchCorroboration(c *CompiledCorroboration, trigger Signal, av
 
 // usableAIObservation reports whether a signal carries an AI observation that
 // can answer a question: present, not degraded, and not the model declining to
-// support a determination. All three absences are the same fact to a rule — the
-// Tier C signal is not available — which is invariant 3.
+// support a determination. All three absences are the same fact to a rule - the
+// Tier C signal is not available - which is invariant 3.
 func usableAIObservation(s Signal) bool {
 	return s.AIObservation != nil &&
 		!s.AIObservation.Degraded &&

@@ -16,7 +16,7 @@ import (
 // either side, so it stays acceptable for roughly ninety seconds. Nothing used to
 // record that a code had been spent, which meant a code shoulder-surfed off a
 // screen, photographed, or replayed out of a captured request could be presented
-// a second time inside the window and would be accepted. RFC 6238 §5.2 forbids
+// a second time inside the window and would be accepted. RFC 6238 -5.2 forbids
 // exactly that.
 func TestTheSameTOTPCodeIsAcceptedOnce(t *testing.T) {
 	svc, tenant, site := service(t)
@@ -75,7 +75,7 @@ func TestAReplayedCodeIsRefusedExactlyLikeAWrongOne(t *testing.T) {
 // server's, so the code in their hand is routinely from the previous step, and
 // RFC 6238 asks no monotonicity of the verifier. Refusing every step at or below
 // the highest one already spent would look stricter and would refuse a correct
-// operator — to defend against an attacker who already holds a code they can
+// operator - to defend against an attacker who already holds a code they can
 // present once. An unspent older code is not a replay.
 func TestAnOlderStepIsStillAcceptedAfterANewerOneWasUsed(t *testing.T) {
 	svc, tenant, site := service(t)
@@ -93,7 +93,7 @@ func TestAnOlderStepIsStillAcceptedAfterANewerOneWasUsed(t *testing.T) {
 		t.Fatalf("the newer step was refused: ok=%v err=%v", ok, err)
 	}
 
-	// The same request, a step behind: still inside the ±one-step window, so it
+	// The same request, a step behind: still inside the -one-step window, so it
 	// verifies cryptographically, and it has never been spent.
 	now = clock.Add(-30 * time.Second)
 	if _, _, ok, err := svc.VerifyFactor(ctx, tenant, admin, "totp", older); err != nil || !ok {
@@ -114,7 +114,7 @@ func TestAnOlderStepIsStillAcceptedAfterANewerOneWasUsed(t *testing.T) {
 // ignores the `algorithm` parameter in the enrolment URI falls back to SHA-1.
 // Those produce genuinely different six digits for the same instant, so a
 // one-use-per-step rule would break MFA for whichever client the operator happens
-// to have — the fallback would work right up until the step was spent and then
+// to have - the fallback would work right up until the step was spent and then
 // stop. RFC 6238 §5.2 says "the same code", and this is that.
 func TestTheOtherAlgorithmsCodeForTheSameStepIsNotTreatedAsAReplay(t *testing.T) {
 	svc, tenant, site := service(t)
@@ -146,7 +146,7 @@ func TestTheOtherAlgorithmsCodeForTheSameStepIsNotTreatedAsAReplay(t *testing.T)
 	}
 }
 
-// The cache is per tenant. Two tenants can hold the same six digits — an
+// The cache is per tenant. Two tenants can hold the same six digits - an
 // attacker who watched one operator types a code for another tenant's account —
 // and neither one's use may refuse the other's.
 func TestACodeUsedInOneTenantIsNotRefusedInAnother(t *testing.T) {
@@ -195,7 +195,7 @@ func TestACodeUsedInOneTenantIsNotRefusedInAnother(t *testing.T) {
 // first, and both authenticate. Only a single atomic statement can decide.
 //
 // The identity suite runs with -p 1, because the database-backed suites share one
-// database — but that is package-level. Goroutines inside one test still run
+// database - but that is package-level. Goroutines inside one test still run
 // concurrently, and this test is concurrent on purpose.
 func TestTwoConcurrentUsesOfTheSameCodeProduceExactlyOneSuccess(t *testing.T) {
 	svc, tenant, site := service(t)
@@ -243,7 +243,7 @@ func TestTwoConcurrentUsesOfTheSameCodeProduceExactlyOneSuccess(t *testing.T) {
 
 // One row per spent (tenant, factor, step), and it survives the process that
 // wrote it: the step the operator spent is still recorded when a different
-// Service — a different pool, a different process — checks it.
+// Service - a different pool, a different process - checks it.
 func TestTheSpentStepIsRecordedInTheDatabase(t *testing.T) {
 	svc, tenant, site := service(t)
 	ctx := context.Background()
@@ -267,7 +267,7 @@ func TestTheSpentStepIsRecordedInTheDatabase(t *testing.T) {
 			"something an attacker with partial access to a site can arrange", rows)
 	}
 
-	// A second Service over the same database — the shape of a restarted process.
+	// A second Service over the same database - the shape of a restarted process.
 	restarted := &identity.Service{Pool: svc.Pool, Now: svc.Now, SecretStore: svc.SecretStore}
 	if _, _, ok, err := restarted.VerifyFactor(ctx, tenant, admin, "totp", code); err != nil || ok {
 		t.Errorf("a fresh Service accepted the code (ok=%v err=%v). The cache has to outlive "+

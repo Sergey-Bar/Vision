@@ -38,7 +38,7 @@ const (
 	// The old name said "actions dispatched", and the thing being counted is the
 	// relay acknowledging an outbox message it then logged and discarded. In M1
 	// no action has physical impact, so the name described a class of thing that
-	// does not exist — and a dashboard built on it would show a site taking
+	// does not exist - and a dashboard built on it would show a site taking
 	// physical action when it was doing nothing but counting its own log writes.
 	// The name has to say what is measured; the roadmap's metric table records
 	// what a future real dispatch will be called, and it will be a new name.
@@ -65,7 +65,7 @@ const (
 // The closed set, split by kind.
 //
 // Splitting it is not tidiness. The two sets were one map, and NewCounters
-// seeded *every* name into the counter map — including the gauges. Render then
+// seeded *every* name into the counter map - including the gauges. Render then
 // emitted each gauge twice: once from Gauges with `# TYPE x gauge` and once from
 // Counters with `# TYPE x counter`. Prometheus rejects a metric name carrying
 // two conflicting type declarations, so the whole scrape failed to parse and a

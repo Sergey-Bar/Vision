@@ -76,7 +76,7 @@ func TestAHugeDriftSaturatesRatherThanWrapping(t *testing.T) {
 			"int32 wrapped, and a wrapped drift reads as a small one", state.DriftMs)
 	}
 	// Exactly, not approximately. 400 days is 34,560,000,000ms, which is not a
-	// multiple of 2^32: the narrow conversion lands on 200,261,632 — a positive
+	// multiple of 2^32: the narrow conversion lands on 200,261,632 - a positive
 	// number, in the severe band, and therefore looking entirely plausible while
 	// being wrong by a factor of about 172. A test that only asked "is it
 	// positive and severe" would pass on the broken code, which is the whole
@@ -178,7 +178,7 @@ func TestAnOrdinaryDriftIsMeasuredStoredAndReadBack(t *testing.T) {
 }
 
 // A device that has never reported a time cannot be measured, and saying so is
-// better than storing a drift of zero — which would look like a perfectly good
+// better than storing a drift of zero - which would look like a perfectly good
 // clock and put the device straight back into corroboration.
 func TestADeviceThatHasNotReportedIsRefused(t *testing.T) {
 	pool := open(t)
@@ -197,7 +197,7 @@ func TestADeviceThatHasNotReportedIsRefused(t *testing.T) {
 	}
 }
 
-// A VMS is not a device, and its drift is the drift of every event it produced —
+// A VMS is not a device, and its drift is the drift of every event it produced -
 // which is why it is stored under a reserved id rather than in a second table.
 func TestASourceSystemIsStoredUnderAReservedID(t *testing.T) {
 	pool := open(t)

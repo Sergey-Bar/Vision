@@ -205,8 +205,8 @@ func Verify(archivePath, programDir string, manifest release.Manifest, trustedKe
 	// site in that state is one no rollback can undo: the rollback is to the
 	// same insufficient build.
 	//
-	// The test for the reverse — a build that supports 1..12 installing an
-	// archive needing 1..9 — passes, and is the normal forward case.
+	// The test for the reverse - a build that supports 1..12 installing an
+	// archive needing 1..9 - passes, and is the normal forward case.
 	archiveMin := manifest.Compatibility.MinSchemaVersion
 	archiveMax := manifest.Compatibility.MaxSchemaVersion
 	p.SchemaWindowOverlaps = buildCompatibility.MinSchemaVersion <= archiveMin &&

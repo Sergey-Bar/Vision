@@ -43,13 +43,17 @@ func enrolAdmin(t *testing.T, svc *identity.Service, tenant, site string) (strin
 // different, later step, so a test that verifies more than once does not
 // accidentally assert against the replay cache instead of what it means to
 // test.
-func nextStep(secret string, n int) string {
-	return rfc6238Code(&testing.T{}, secret, clock.Add(time.Duration(n)*30*time.Second), sha256.New)
+// nextStep is the code for the step after enrolment. Each caller asks for the
+// step one interval later than the one the enrolment consumed, because the verifier
+// keeps a cache of consumed steps and a reused one is refused - correctly, and for
+// a reason that has nothing to do with what these tests are about.
+func nextStep(secret string) string {
+	return rfc6238Code(&testing.T{}, secret, clock.Add(30*time.Second), sha256.New)
 }
 
 // A challenge is a two-minute bearer of "the password was right". Consuming it
 // has to be the transaction that issues the session, not something the purge
-// sweep does an hour later — one intercepted challenge id used to mint a session
+// sweep does an hour later - one intercepted challenge id used to mint a session
 // per request for its whole TTL.
 func TestAMFAChallengeIsSingleUse(t *testing.T) {
 	svc, tenant, site := service(t)
@@ -60,7 +64,7 @@ func TestAMFAChallengeIsSingleUse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PasswordStep: %v", err)
 	}
-	code := nextStep(secret, 1)
+	code := nextStep(secret)
 	if _, err := svc.CompleteChallenge(ctx, tenant, res.ChallengeID, "totp", code, "10.0.0.1"); err != nil {
 		t.Fatalf("the first completion failed: %v", err)
 	}
@@ -105,7 +109,7 @@ func TestMFAVerifyIsBoundedByAnAttemptCounter(t *testing.T) {
 
 	// The correct code is now refused, because the challenge has spent its budget.
 	_, err = svc.CompleteChallenge(ctx, tenant, res.ChallengeID, "totp",
-		nextStep(secret, 1), "10.0.0.1")
+		nextStep(secret), "10.0.0.1")
 	if !errors.Is(err, identity.ErrLocked) {
 		t.Errorf("after %d wrong codes the correct one produced %v, want ErrLocked. Without a "+
 			"counter the second factor is brute-forceable unbounded inside its own TTL",
@@ -131,7 +135,7 @@ func TestTheChallengeCounterDoesNotLockTheAccount(t *testing.T) {
 		_, _ = svc.CompleteChallenge(ctx, tenant, res.ChallengeID, "totp", "000000", "10.0.0.1")
 	}
 	if _, err := svc.CompleteChallenge(ctx, tenant, res.ChallengeID, "totp",
-		nextStep(secret, 1), "10.0.0.1"); err != nil {
+		nextStep(secret), "10.0.0.1"); err != nil {
 		t.Errorf("a legitimate operator who mistyped %d times was refused: %v",
 			svc.MaxFailedAttempts-1, err)
 	}
@@ -139,7 +143,7 @@ func TestTheChallengeCounterDoesNotLockTheAccount(t *testing.T) {
 
 // The login response has to name who is being asked for a second factor. It used
 // to read the principal off the session, which is nil by construction whenever
-// MFA is required — so every MFA login for every enrolled operator dereferenced
+// MFA is required - so every MFA login for every enrolled operator dereferenced
 // nil and the primary login path was dead.
 func TestMFARequiredLoginNamesThePrincipal(t *testing.T) {
 	svc, tenant, site := service(t)
@@ -176,7 +180,7 @@ func TestMFARequiredLoginNamesThePrincipal(t *testing.T) {
 // The current password is required whatever the account's recovery flag says.
 //
 // `EnsureUser` inserts every new user with `recovery_required = TRUE`, so the old
-// bypass was not an edge case — it was the normal state of every account an
+// bypass was not an edge case - it was the normal state of every account an
 // administrator ever provisioned. Anybody holding `identity.manage` could
 // re-key one, including one that was already compromised.
 func TestSetPasswordRequiresTheCurrentPasswordInBothModes(t *testing.T) {

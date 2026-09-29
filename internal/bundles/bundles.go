@@ -225,17 +225,17 @@ func (s *Service) List(ctx context.Context, tenant string) ([]Meta, error) {
 	return out, rows.Err()
 }
 
-// lintStatusFor is the whole of the lint status, as a function.
+// LintStatusFor is the whole of the lint status, as a function.
 //
 // It was inline, and the inline version assigned "passed" in both branches of
 // its loop, so `lint_status` was a constant and Activate's
 // `lintStatus != "passed"` check could never fire. A gate that cannot fire is
 // not a gate, and a constant written as a loop is the most convincing way to
-// hide one â€” so it is a function, with a name that says what it decides, and a
+// hide one - so it is a function, with a name that says what it decides, and a
 // test that feeds it the problems it is supposed to react to.
 //
 // A warning does not fail a bundle. Warnings are the endorsed way to write a
-// rule the compiler can see a problem with and an author has decided about â€”
+// rule the compiler can see a problem with and an author has decided about -
 // `degrade_proceeds` and `if_ai_unavailable_unused` are both warnings, and both
 // are expected in a shipped bundle. Only an error is disqualifying.
 // LintStatusFor reports whether a bundle with these problems passed lint.
@@ -291,14 +291,14 @@ func shorten(h string) string {
 	if len(h) <= 16 {
 		return h
 	}
-	return h[:16] + "â€¦"
+	return h[:16] + "…"
 }
 
 // Activate turns a stored bundle on.
 //
 // The gate is the reviewed diff digest. A bundle that has not been simulated
 // cannot be activated, and a bundle whose simulation produced a different digest
-// than the one acknowledged cannot either â€” which is what stops a review from
+// than the one acknowledged cannot either - which is what stops a review from
 // being silently invalidated by the fixtures or the active bundle moving
 // afterwards.
 // Activate requires a simulation report whose digest is this bundle's.
@@ -306,9 +306,9 @@ func shorten(h string) string {
 // It takes the report rather than a digest string because a digest on its own
 // proves nothing: it only says 64 lowercase hex characters were supplied.
 // `strings.Repeat("a", 64)` activated a bundle. The doc comment above this
-// function and the entire premise of `internal/simulate` â€” "a bundle whose
+// function and the entire premise of `internal/simulate` ’ "a bundle whose
 // simulation produced a different digest than the one acknowledged cannot be
-// activated" â€” described a check that did not exist.
+// activated" ’ described a check that did not exist.
 //
 // The service cannot re-run the fixture set itself; it does not have the
 // fixtures. What it can do, and now does, is recompute the digest from the
@@ -316,7 +316,7 @@ func shorten(h string) string {
 // it, and require the bundle version in that report to be the version being
 // activated. So a report for a different bundle, a report whose change list was
 // edited after the operator read it, and a report whose digest was typed by hand
-// are all refused â€” and the refusal names which of the three it was.
+// are all refused - and the refusal names which of the three it was.
 func (s *Service) Activate(ctx context.Context, tenant, version string, report simulate.Report, actor string) error {
 	if err := checkSimulationCovers(version, report); err != nil {
 		return err

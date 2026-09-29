@@ -81,7 +81,7 @@ type Options struct {
 	//
 	// A pointer, because a plain bool cannot say "unset": the zero value of a
 	// bool is false, and false here is the wrong answer. As a plain field, every
-	// caller that wrote Options{Root: dir} — which is every caller — silently
+	// caller that wrote Options{Root: dir} - which is every caller - silently
 	// got a store that acknowledges evidence it has not fsynced, on a store
 	// whose own comment says the fsync is not decoration. Default-on fields need
 	// three states, so they take a pointer.
@@ -166,7 +166,7 @@ func containedIn(root, path string) error {
 }
 
 // Fsync reports whether writes are durable before acknowledgement. Exported so
-// a caller — or a test — can assert that the defaults it claims to apply were
+// a caller - or a test - can assert that the defaults it claims to apply were
 // the ones that got applied.
 func (s *Store) Fsync() bool { return s.fsync }
 
@@ -367,7 +367,7 @@ func (s *Store) Put(tenant string, body io.Reader) (Object, error) {
 	// moved. tmp.Sync() above made the content durable, but a rename is a
 	// directory-entry update, and on ext4 and XFS that entry lives in the
 	// parent directory's journal rather than in the file. A power loss after
-	// this function returned can therefore leave an acknowledged object absent —
+	// this function returned can therefore leave an acknowledged object absent -
 	// which is the exact failure the Fsync option exists to prevent, and the one
 	// an object-addressed store is least able to detect, because a later Put of
 	// the same bytes simply rewrites the file and nothing ever notices the gap.
@@ -379,7 +379,7 @@ func (s *Store) Put(tenant string, body io.Reader) (Object, error) {
 
 // syncDir fsyncs a directory so a rename into it is durable.
 //
-// On Windows the runtime cannot sync a directory handle at all — os.Open on a
+// On Windows the runtime cannot sync a directory handle at all - os.Open on a
 // directory succeeds and Sync on it fails with ERROR_ACCESS_DENIED, because
 // there is no directory fsync in the Win32 model. NTFS metadata journaling and
 // its write-ahead log are what cover the rename there, and a rename on NTFS is
@@ -421,8 +421,8 @@ func (s *Store) syncDir(dir string) error {
 // claims the platform verified those bytes. That is a false claim about evidence,
 // which is the one thing this package exists to prevent.
 //
-// A store built with VerifyHashOnRead(false) does skip the check — that is what
-// the option is for — and marks the returned Object Verified: false so the skip
+// A store built with VerifyHashOnRead(false) does skip the check - that is what
+// the option is for - and marks the returned Object Verified: false so the skip
 // is visible to a caller rather than only to the code that configured it.
 func (s *Store) Open(ref, expectSHA string) (io.ReadCloser, Object, error) {
 	full, err := s.resolve(ref)
@@ -532,7 +532,7 @@ type RetentionPolicy struct {
 	// mode of the other choice is deleting evidence because the query timed out.
 	//
 	// This is required whenever the policy can expire anything. Sweep has no
-	// filesystem fallback, deliberately — see the mtime note on Sweep.
+	// filesystem fallback, deliberately - see the mtime note on Sweep.
 	StoredAt func(ref string) (time.Time, error)
 	// SkipLegalHold is a callback rather than a field, because "is this on legal
 	// hold" is a question only the database can answer and a policy object with a

@@ -199,7 +199,7 @@ func (p *Pool) InTx(ctx context.Context, fn func(pgx.Tx) error) error {
 }
 
 // SystemTenant is the tenant context used by background workers that legitimately
-// operate across the rows they were given explicitly — the inbox normalizer and
+// operate across the rows they were given explicitly - the inbox normalizer and
 // the job runner. It is a named constant rather than an empty string, so that
 // "no context" and "worker context" can never be confused for one another.
 const SystemTenant = "__system__"

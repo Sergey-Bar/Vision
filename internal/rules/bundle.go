@@ -3,22 +3,22 @@
 // A rule bundle is untrusted input. It arrives as YAML, written by whoever
 // configured the site, and it decides which events become incidents that an
 // operator is expected to act on. So the compilation path has no shell, no SQL,
-// no network, no dynamic code and no regular expression — the strongest operator
+// no network, no dynamic code and no regular expression - the strongest operator
 // in the whole language is a fixed prefix match. Everything else about the
 // design follows from that.
 //
 // The pipeline is four stages, and each is a gate:
 //
-//	YAML → JSON Schema → semantic validation → compiled rule
+//	YAML - JSON Schema - semantic validation - compiled rule
 //
 // The stages are separate because they fail differently. A schema violation is a
 // syntax problem with a file location. A semantic violation is a rule that is
-// well-formed but cannot work — it references a zone that does not exist, or two
+// well-formed but cannot work - it references a zone that does not exist, or two
 // rules with the same priority demand opposite outcomes, which is a
 // configuration error that must never be resolved by silently picking one.
 //
 // Evaluation is deterministic and side-effect free. Given the same stored facts
-// and the same stored AI observation, it produces the same outcome — which is
+// and the same stored AI observation, it produces the same outcome - which is
 // what makes a months-old decision replayable rather than merely stored.
 package rules
 

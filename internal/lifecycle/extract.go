@@ -98,7 +98,7 @@ func Extract(archivePath, dest string, files []release.FileEntry) (Extracted, er
 		// Only a regular file or a directory. A symlink, a hard link or a device
 		// node is an instruction rather than content: it says "when this archive is
 		// unpacked, put something else here". Whoever can write the archive chooses
-		// what it points at, so the entry is not a thing to materialise — it is a
+		// what it points at, so the entry is not a thing to materialise - it is a
 		// thing to refuse. This is the code that lands bytes on disk during an
 		// install, which is the moment a hostile entry would matter most.
 		//

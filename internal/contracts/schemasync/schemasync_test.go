@@ -85,7 +85,7 @@ func TestEveryPublishedSchemaHasAnEmbeddedCopy(t *testing.T) {
 }
 
 // The copies are only worth carrying if they are readable as schemas. This does
-// not validate documents against them — it proves the bytes are the JSON the
+// not validate documents against them - it proves the bytes are the JSON the
 // published contract is, and that a truncated copy fails here rather than in a
 // validator at the point an operator uploads something.
 func TestEmbeddedCopiesAreParsableJSON(t *testing.T) {

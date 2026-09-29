@@ -14,9 +14,9 @@ import (
 // The lockout is the named control for the CSRF-exempt login route, and it
 // bounded nothing under parallelism.
 //
-// `PasswordStep` takes `FOR UPDATE` in a transaction that COMMITS ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the argon2
+// `PasswordStep` takes `FOR UPDATE` in a transaction that COMMITS ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â the argon2
 // verification has to happen outside it, because holding a row lock across a
-// deliberately slow hash would serialise every login on the site ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â and
+// deliberately slow hash would serialise every login on the site - and
 // `registerFailure` then computed `attempts := user.FailedAttempts + 1` in Go
 // from that already-stale value and wrote the result. Fifty concurrent wrong
 // passwords for one username all read zero, all wrote one, and the exponential
@@ -149,7 +149,7 @@ func TestAConcurrentSuccessStillSucceedsWithinTheBudget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PasswordStep: %v", err)
 	}
-	code := nextStep(secret, 1)
+	code := nextStep(secret)
 	if _, err := svc.CompleteChallenge(ctx, tenant, res.ChallengeID, "totp", code, "10.0.0.1"); err != nil {
 		t.Fatalf("a correct code inside the budget was refused: %v", err)
 	}

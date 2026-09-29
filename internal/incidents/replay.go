@@ -279,7 +279,7 @@ func detailRuleID(d Detail) string {
 // The observation attached to the trigger is picked by the same function the
 // explanation uses. It used to be `&d.Observations[0]` here and
 // `pickObservation` in the caller, which preferred supporting[0] and otherwise
-// the most recent — so the per-event signals the rule engine evaluated and the
+// the most recent - so the per-event signals the rule engine evaluated and the
 // observation the answer cited could be different records. Two readers of the
 // same replay disagreed, and which one you got depended on which field you read.
 func signalsFrom(d Detail) (rules.Signal, []rules.Signal) {
@@ -371,7 +371,7 @@ func asObservation(o *ObservationView) *rules.AIObservation {
 }
 
 // tierFor classifies a stored event. A device reporting its own state is Tier A
-// — the source of truth about itself. Everything else that reached the core is a
+// - the source of truth about itself. Everything else that reached the core is a
 // derived fact, Tier B.
 func tierFor(clockSource string) rules.Tier {
 	if clockSource == "ntp" || clockSource == "vms" {

@@ -174,7 +174,7 @@ func (c *Command) Execute(ctx context.Context, env *Env, args []string) ExitCode
 	// Both shapes are supported deliberately: the Flags closure is the shape the
 	// tree was designed around, and a handler with its own FlagSet is the shape
 	// most Go command code takes. Parsing in both places is the failure this
-	// branch prevents — a handler whose flags are consumed here sees an empty
+	// branch prevents - a handler whose flags are consumed here sees an empty
 	// argument list, and reports "--flag is required" for a flag it was given.
 	var positional []string
 	if target.Flags != nil {

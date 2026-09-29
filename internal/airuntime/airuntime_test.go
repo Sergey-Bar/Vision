@@ -29,7 +29,7 @@ type captured struct {
 // This is deliberately a hand-written server rather than a mock of the Go
 // client: the wire contract lives in a Python file in another directory, and the
 // only way to catch a drift between the two is to encode the Python's actual
-// shapes here — including the ones that are bugs to reproduce.
+// shapes here - including the ones that are bugs to reproduce.
 //
 // The handler receives the decoded body, so a handler can apply runtime.py's own
 // validation to what actually arrived rather than to what the client intended.

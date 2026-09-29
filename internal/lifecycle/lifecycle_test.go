@@ -182,7 +182,7 @@ func TestUnreadableStateVersionIsRefused(t *testing.T) {
 
 // The rule expand/contract exists to enforce, and it is enforced at both layers:
 // the release verifier refuses a mixed archive, and so does the installer's own
-// gate. The defence is duplicated deliberately — a verifier that is bypassed by
+// gate. The defence is duplicated deliberately - a verifier that is bypassed by
 // an operator who trusts a manifest should not be the only thing standing between
 // a contract step and a site.
 func TestContractStepAlongsideExpandIsRefused(t *testing.T) {
@@ -369,7 +369,7 @@ func TestExtractionRefusesANonRegularEntry(t *testing.T) {
 }
 
 // An unlisted file is refused. The archive is built from one file and then
-// repacked with an extra, because Build lists exactly what it is given — so this
+// repacked with an extra, because Build lists exactly what it is given - so this
 // is the tamper case rather than a build-time one.
 func TestExtractionRefusesAnUnlistedFile(t *testing.T) {
 	key := newKey(t)

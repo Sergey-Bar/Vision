@@ -17,7 +17,7 @@ import (
 //
 // The value is seeded rather than produced by the run, because a migration that
 // applies in under a millisecond records 0 and 0 is indistinguishable from the
-// bug. A seeded 1500ms is not: it is either 1.5s or it is 1.5µs, and only one of
+// bug. A seeded 1500ms is not: it is either 1.5s or it is 1.5-s, and only one of
 // those is a duration.
 func TestAppliedReportsDurationInMillisecondsNotNanoseconds(t *testing.T) {
 	pool := testutil.Pool(t)
@@ -65,7 +65,7 @@ func TestAppliedReportsDurationInMillisecondsNotNanoseconds(t *testing.T) {
 // The unit bug was invisible because nothing asserted the reported durations of a
 // real run against the wall clock that produced them. Every value the ledger
 // reports has to be a whole number of milliseconds, and none of them can exceed
-// the time the run actually took — a sum that overflows the measured wall clock
+// the time the run actually took - a sum that overflows the measured wall clock
 // is a conversion error even when each individual value looks plausible.
 func TestAppliedDurationsAreWholeMillisecondsWithinTheRunItMeasured(t *testing.T) {
 	pool := testutil.Pool(t)

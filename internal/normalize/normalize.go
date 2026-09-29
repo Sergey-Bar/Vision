@@ -295,8 +295,8 @@ func (n *Normalizer) eventID(key inbox.Key) string {
 // DeriveEventID computes an event id from the scoped source key.
 //
 // Derived, not random, and this is load-bearing: two runs over the same source
-// event — a retry after a crash, a replay of a fixture, a rebuild of a derived
-// projection — must land on the same identity. A generated id would make each
+// event - a retry after a crash, a replay of a fixture, a rebuild of a derived
+// projection - must land on the same identity. A generated id would make each
 // attempt a different event, and crash recovery a reconciliation problem rather
 // than a retry.
 func DeriveEventID(key inbox.Key) string {

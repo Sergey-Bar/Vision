@@ -11,7 +11,7 @@ import (
 // AGENTS.md names scripts/verify.ps1 as the gate and docs/status.md says it is
 // the thing to trust. Nothing asserted that it exists, that every `go run` in it
 // names a real package, or that every command it invokes is registered. Delete
-// the file and the suite stays green — which is the failure mode AGENTS.md calls
+// the file and the suite stays green - which is the failure mode AGENTS.md calls
 // out by name: a gate that runs against nothing.
 //
 // The same reasoning as internal/dr's runbook test, pointed at the script instead
@@ -31,7 +31,7 @@ func TestTheGateScriptExists(t *testing.T) {
 
 // Every package the script asks `go` to run or test has to exist. A gate that
 // names a package which has been renamed or deleted fails at run time, with a
-// Go error, hours later — and on a machine where the gate is the only thing
+// Go error, hours later - and on a machine where the gate is the only thing
 // that runs, that is a red gate nobody can interpret.
 func TestEveryPackageTheGateNamesExists(t *testing.T) {
 	root := repoRoot(t)

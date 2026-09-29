@@ -287,7 +287,7 @@ func TestOpenAPIReaderReadsThePublishedDocument(t *testing.T) {
 	}
 	// The published document is well-formed. It was not: /v1/health and
 	// /v1/health/ready put their operation body beside the method rather than
-	// under it, which the specification ignores — so as published, those two
+	// under it, which the specification ignores - so as published, those two
 	// endpoints described themselves as having no responses. That was fixed in
 	// contracts/openapi/v1/openapi.yaml, and this assertion is what holds it
 	// fixed: the warning is about a shape the document must not have, and the
@@ -345,7 +345,7 @@ paths:
 
 // R4: the first run over a surface the tool has never diffed will surface
 // facts, not regressions. A refresh must therefore be a pure addition, and the
-// refusal is the control — this is the test that goes red if the refusal is
+// refusal is the control - this is the test that goes red if the refusal is
 // removed.
 func TestWriteRefusesToBakeInABreakingChange(t *testing.T) {
 	dir := t.TempDir()

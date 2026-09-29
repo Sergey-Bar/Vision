@@ -133,7 +133,7 @@ func CarriedContractViolations() map[string]string {
 // non-word boundary before it, so `dropped_at`, `truncate_date` and
 // `"drop column"` inside a quoted identifier are not matches. The word after
 // DROP is required, so `DROP CONSTRAINT` and `DROP INDEX` — which an expand may
-// legitimately do before re-adding the object under a new name — are not
+// legitimately do before re-adding the object under a new name - are not
 // matches either.
 var contractStatements = []*regexp.Regexp{
 	regexp.MustCompile(`(?is)\bdrop\s+table\b`),
@@ -243,9 +243,9 @@ func stripSQLNoise(sql string) string {
 // expand/contract discipline is a property of what the file does, not of what
 // it is called.
 //
-// Conservative by construction, and the bias is deliberate. A false positive —
-// refusing a valid migration — blocks a release and teaches people to work
-// around the check; a false negative — missing a real violation — is caught the
+// Conservative by construction, and the bias is deliberate. A false positive -
+// refusing a valid migration - blocks a release and teaches people to work
+// around the check; a false negative - missing a real violation - is caught the
 // next time somebody reads the diff, and the ledger's phase column is a lie in
 // the meantime. When the two cannot both be had, this prefers the one that does
 // not break a release.
@@ -323,7 +323,7 @@ func All() ([]Migration, error) {
 			}
 			// A known, already-applied violation, carried on purpose. It is
 			// tolerated rather than refused because refusing it would make this
-			// build unable to describe — let alone upgrade — a database that has
+			// build unable to describe - let alone upgrade - a database that has
 			// already run the file. The debt stays visible in
 			// grandfatheredContractViolations and through
 			// CarriedContractViolations; adding an entry there is a human

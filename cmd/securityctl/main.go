@@ -2,7 +2,7 @@
 //
 // One binary, one command tree, two audiences: an engineer running rules lint
 // during development, and an engineer running upgrade at a site with no
-// network. They share a binary because they share a trust model — anything this
+// network. They share a binary because they share a trust model - anything this
 // tool can do, the tool can be made to do by feeding it a hostile file.
 package main
 

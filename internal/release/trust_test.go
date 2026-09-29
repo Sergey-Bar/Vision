@@ -39,7 +39,7 @@ func TestVerificationRefusesWithoutATrustedKey(t *testing.T) {
 // manifest content, so the pointer did not need signing. That is the gap: the
 // pointer is metadata, and metadata is what somebody with write access to the
 // manifest repoints. Restating `sbom: {path, sha256}` under an otherwise valid
-// signature is a one-line edit, and Verify never noticed — it only checked that
+// signature is a one-line edit, and Verify never noticed - it only checked that
 // the declared path was syntactically safe. A signature that does not cover a
 // field in the document it signs is a signature over a smaller document than the
 // reader believes.
@@ -52,7 +52,7 @@ func TestRepointingTheSBOMBreaksTheSignature(t *testing.T) {
 	// The payload itself is the control. A signature is a statement about bytes;
 	// if changing the SBOM block does not change the bytes, the signature says
 	// nothing about the SBOM block, and no amount of checking downstream repairs
-	// that — every check downstream reads a field the signature never covered.
+	// that - every check downstream reads a field the signature never covered.
 	before := release.SigningPayload(manifest)
 	after := release.SigningPayload(func() release.Manifest {
 		m := manifest
@@ -128,7 +128,7 @@ func TestADeclaredSBOMHashMustMatchTheArchive(t *testing.T) {
 // A tar entry that is not a regular file is an instruction, not content, and
 // whoever writes the archive chooses what it points at. The reader used to skip
 // only directories and treat everything else as a file, so a symlink entry was
-// indexed by its target path and hashed by its own bytes — and an installer that
+// indexed by its target path and hashed by its own bytes - and an installer that
 // unpacked it would write outside the destination.
 func TestNonRegularTarEntriesAreRefused(t *testing.T) {
 	for _, tc := range []struct {

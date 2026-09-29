@@ -26,7 +26,7 @@ import (
 // tenant-scoped table reappears.
 //
 // Use For for anything scoped to one tenant. Use InSystemTenant for work that
-// legitimately spans tenants — a background worker, a migration, the installer
+// legitimately spans tenants - a background worker, a migration, the installer
 // creating a tenant's first principal.
 type Tenant struct {
 	pool *Pool
@@ -77,7 +77,7 @@ func (t *Tenant) Exec(ctx context.Context, sql string, args ...any) (pgconn.Comm
 //
 // The connection is held from here until the caller scans, and released by the
 // scan. That is the same contract pgx's own QueryRow has — a Row is a promise
-// that something will be read — so a call site reads exactly as it did against
+// that something will be read - so a call site reads exactly as it did against
 // the bare pool.
 //
 // It scans at most once. A second Scan is refused rather than returning the first
@@ -216,7 +216,7 @@ func clearTenantOnConn(ctx context.Context, conn *pgxpool.Conn) {
 //
 // Release happens in both cases because pgxpool requires it: a Conn that is
 // never released keeps the pool open for ever. The pool is what actually
-// discards it — by the time it looks, the connection is closed, so it is
+// discards it - by the time it looks, the connection is closed, so it is
 // replaced rather than reissued.
 func releaseConn(ctx context.Context, conn *pgxpool.Conn, clearErr error) {
 	if clearErr != nil {

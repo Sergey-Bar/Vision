@@ -75,7 +75,7 @@ func NewHTTPTransport(baseURL, token string, timeout time.Duration) (Transport, 
 			//
 			// Go's default is to follow up to ten, and it replays the request
 			// headers on each hop. The Authorization bearer is copied to whatever
-			// host the Location names, so a Milestone that answers 302 — because it
+			// host the Location names, so a Milestone that answers 302 - because it
 			// is behind a load balancer that moved, or because anything on the path
 			// can answer — gets the site's Milestone credential sent to a host
 			// nobody configured. A 3xx is a fact about the endpoint, and this

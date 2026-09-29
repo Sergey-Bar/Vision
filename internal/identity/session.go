@@ -97,8 +97,8 @@ func (s *Service) lockoutBase() time.Duration {
 // optional.
 //
 // Principal is always populated. When MFA is required there is no session, and
-// a caller that needs to say who is being asked for a second factor Ã¢â‚¬â€ the login
-// response, the audit line, the console Ã¢â‚¬â€ has to be able to name them. It used
+// a caller that needs to say who is being asked for a second factor - the login
+// response, the audit line, the console - has to be able to name them. It used
 // to read Principal off a nil Session, which meant every MFA login panicked.
 type LoginResult struct {
 	ChallengeID string    `json:"challengeId"`
@@ -230,8 +230,8 @@ func (s *Service) PasswordStep(ctx context.Context, tenant, username, password, 
 	if err != nil {
 		return result, err
 	}
-	// Read the scope on this path too. The principal is not authenticated yet Ã¢â‚¬â€
-	// a second factor is still owed Ã¢â‚¬â€ but it is identified, and the response has
+	// Read the scope on this path too. The principal is not authenticated yet -
+	// a second factor is still owed - but it is identified, and the response has
 	// to name who is being asked.
 	roles, scope, err := s.principalScope(ctx, tenant, user.UserID)
 	if err != nil {
@@ -320,7 +320,7 @@ func (s *Service) CompleteChallenge(ctx context.Context, tenant, challengeID, me
 	// total.
 	//
 	// The budget is CLAIMED, not read. It used to be read in the transaction
-	// above Ã¢â‚¬â€ which commits Ã¢â‚¬â€ compared here, and incremented separately on
+	// above - which commits - compared here, and incremented separately on
 	// failure. Fifty concurrent verifies with different codes all read zero, all
 	// passed the comparison, and all reached the factor check; the limit that the
 	// comment called "the whole control" bounded nothing under parallelism, and
@@ -363,7 +363,7 @@ func (s *Service) CompleteChallenge(ctx context.Context, tenant, challengeID, me
 	// whole control. This used to only insert a new sess_ row and leave the
 	// chal_ row in place until PurgeExpired, which meant one intercepted
 	// challenge id minted unlimited sessions and two concurrent requests both
-	// succeeded Ã¢â‚¬â€ the FOR UPDATE lock committed before verification ran.
+	// succeeded - the FOR UPDATE lock committed before verification ran.
 	sess, err = s.createSession(ctx, tenant, user, sourceIP, method, true, func(tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx,
 			`DELETE FROM sessions WHERE tenant_id = $1 AND session_id = $2 AND mfa_verified = FALSE`,
@@ -670,7 +670,7 @@ func (s *Service) revoke(ctx context.Context, tenant, sessionID, reason string) 
 // createSession inserts a session row.
 //
 // withTx, when non-nil, runs inside the same transaction as the insert and
-// before it. That is how a caller makes the insert conditional on something Ã¢â‚¬â€
+// before it. That is how a caller makes the insert conditional on something -
 // the MFA challenge it is redeeming, for instance. One transaction, so either
 // both happen or neither does.
 func (s *Service) createSession(ctx context.Context, tenant string, user userRow, sourceIP, method string, mfa bool, withTx func(pgx.Tx) error) (Session, error) {
@@ -746,7 +746,7 @@ func (s *Service) loadUser(ctx context.Context, tenant, userID string) (userRow,
 //
 // The query runs inside the tenant context, and that is not a formality. Both
 // tables carry tenant_id and therefore row-level security, so a query issued
-// without the context sees zero rows Ã¢â‚¬â€ not an error, just an empty result. A
+// without the context sees zero rows - not an error, just an empty result. A
 // principal built from that has no roles and no site scope, so every capability
 // check and every site check refuses, and the whole console is unreachable while
 // the login itself keeps returning a session. It fails closed, which is the right
@@ -765,7 +765,7 @@ func (s *Service) principalScope(ctx context.Context, tenant, userID string) ([]
 			// role_id, not name. The capability table in this package is keyed by
 			// role_id, and joining to the human-readable name gives a principal
 			// whose role is "Tenant Admin" while the code looks for
-			// "tenant_admin" Ã¢â‚¬â€ so no capability resolves and every operator is
+			// "tenant_admin" ’ so no capability resolves and every operator is
 			// denied everything. The name is a label for a person; the id is the
 			// thing a program matches on.
 			rows, err := tx.Query(ctx, `
@@ -815,9 +815,9 @@ func (s *Service) principalScope(ctx context.Context, tenant, userID string) ([]
 // computing `attempts := user.FailedAttempts + 1` in Go and writing the result.
 //
 // That computation is the whole defect. `PasswordStep` takes `FOR UPDATE` in a
-// transaction that COMMITS Ã¢â‚¬â€ the password hash is verified outside it, because
+// transaction that COMMITS - the password hash is verified outside it, because
 // argon2 takes long enough that holding a row lock across it would serialise
-// every login on the site Ã¢â‚¬â€ so by the time this runs the row is unlocked and
+// every login on the site - so by the time this runs the row is unlocked and
 // `user.FailedAttempts` is as stale as the read. Fifty concurrent wrong
 // passwords for one username all read 0, all write 1, and the exponential
 // backoff in ShouldLock never engages. The lockout is the named control for the
@@ -876,8 +876,8 @@ func (s *Service) registerFailure(ctx context.Context, tenant string, user userR
 //
 // The ceiling and the increment are the same statement on purpose. Reading the
 // count, comparing it, and incrementing it later is three operations with two
-// gaps between them, and a caller with a challenge id Ã¢â‚¬â€ which is a two-minute
-// bearer of "the password was right" Ã¢â‚¬â€ will find both gaps. `AND mfa_attempts <
+// gaps between them, and a caller with a challenge id - which is a two-minute
+// bearer of "the password was right" ’ will find both gaps. `AND mfa_attempts <
 // $3` is what makes the budget a bound rather than a suggestion: the row lock
 // the UPDATE takes is held only for the statement, and the ceiling is re-tested
 // by the same statement that spends the slot.

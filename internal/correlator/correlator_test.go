@@ -60,7 +60,7 @@ func setup(t *testing.T) fixture {
 		tenant, site)
 	// One device is deliberately in the severe band. Its clock is 40 seconds
 	// fast, which is past any plausible window, so it must be excluded from
-	// corroboration Ã¢â‚¬â€ and must still be returned, because a corroborating signal
+	// corroboration - and must still be returned, because a corroborating signal
 	// that vanishes without explanation is the thing an operator stops trusting
 	// the product over.
 	testutil.Exec(t, raw, `
@@ -82,7 +82,7 @@ func setup(t *testing.T) fixture {
 //
 // normalized_at is set equal to observed_at here. The corrector that makes them
 // differ lives in normalize, not in the correlator, and the drift this package
-// actually asserts on is a *device* clock drift read through device_clocks Ã¢â‚¬â€
+// actually asserts on is a *device* clock drift read through device_clocks -
 // see the cam-drifted fixture. A test that needs a corrected normalized_at
 // inserts the row itself; making this helper take a value no caller passes
 // would only be a parameter that reads as coverage and is not.
@@ -106,8 +106,8 @@ func (f fixture) addEvent(t *testing.T, id, eventType, device string,
 // addObservation writes an AI observation against an event.
 //
 // ai_observations.incident_id is NOT NULL, which is why the observation is always
-// written after the incident that caused it Ã¢â‚¬â€ the ordering the plan fixes in
-// Ã‚Â§Decisions. The incident is created here too so the fixture is legal.
+// written after the incident that caused it - the ordering the plan fixes in
+// -Decisions. The incident is created here too so the fixture is legal.
 //
 // The id and the insufficient-evidence flag are fixed because the correlator
 // reads neither: it matches an observation by event id, and InsufficientEvidence
@@ -286,7 +286,7 @@ func TestSignalsAreAssembledFromStoredFacts(t *testing.T) {
 }
 
 // A degraded observation is still an observation, and it must be carried as one
-// with Degraded set Ã¢â‚¬â€ because a recorded degradation is a fact and an absent
+// with Degraded set - because a recorded degradation is a fact and an absent
 // observation is not. Collapsing the two would make "we could not ask" and "we
 // asked and it said insufficient" indistinguishable at evaluation time.
 func TestDegradedObservationIsCarriedAndFlagged(t *testing.T) {

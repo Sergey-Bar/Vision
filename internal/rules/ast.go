@@ -14,7 +14,7 @@ type CompiledBundle struct {
 	//
 	// The id tiebreak is not cosmetic. Two rules with the same priority that both
 	// match must produce the same outcome, or evaluation depends on the order
-	// they happened to be written in — and a bundle whose behaviour changes when
+	// they happened to be written in - and a bundle whose behaviour changes when
 	// a line is moved is a bundle nobody can review.
 	Compiled []CompiledRule
 	// Conflicts records rule pairs that can both match with incompatible
@@ -193,7 +193,7 @@ func compileCondition(c Condition, path string) CompiledCondition {
 			// `minEvidenceTier: C, ifAIAvailable: {...}` and no
 			// `requiresAIObservation` therefore compiled clean, was handed a
 			// declared UNVERIFIED fallback, and was then evaluated with the AI
-			// veto switched off — the declared fallback was dead configuration.
+			// veto switched off - the declared fallback was dead configuration.
 			RequiresAI: corroborationConsumesAI(c.Corroborate),
 		}
 		if corr.MinTier == "" {

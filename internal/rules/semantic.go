@@ -384,7 +384,7 @@ func (c *Compiler) checkCondition(ruleID string, cond Condition, path string, ha
 			// condition match every present string: a rule the author believes
 			// narrows to one prefix and in fact filters on nothing but presence.
 			// Refused here as well as at evaluation, and the two are not
-			// redundant — a CompiledBundle can be built without the compiler.
+			// redundant - a CompiledBundle can be built without the compiler.
 			prefix, ok := cond.Field.Value.(string)
 			switch {
 			case !ok:
@@ -501,7 +501,7 @@ func (c *Compiler) checkCorroboration(ruleID string, corr *Corroboration, path s
 			})
 		}
 		if d == DegradeToProceedWithout {
-			// Not forbidden — an operator may genuinely want it — but it means an
+			// Not forbidden - an operator may genuinely want it - but it means an
 			// incident is created on less evidence whenever the model is down, and
 			// that should be a conscious choice.
 			problems = append(problems, Problem{

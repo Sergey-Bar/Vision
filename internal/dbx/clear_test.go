@@ -24,8 +24,8 @@ const testDatabaseURLEnv = "SP_TEST_DATABASE_URL"
 // the previous tenant, and every one of those statements succeeds.
 //
 // The failure is injected directly rather than through a faulted database,
-// because the failure that matters is a statement-level one — a timeout, a
-// cancel, a serialisation failure — where the connection is still perfectly
+// because the failure that matters is a statement-level one - a timeout, a
+// cancel, a serialisation failure - where the connection is still perfectly
 // usable and the error is the easiest thing in the function to discard. Losing
 // the backend does not reach that branch: pgx closes a connection whose socket
 // died, with or without our help.

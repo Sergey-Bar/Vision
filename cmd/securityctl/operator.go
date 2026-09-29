@@ -817,7 +817,7 @@ func runIdentityList(ctx context.Context, env *command.Env, args []string) error
 
 	// Roles and sites are aggregated in correlated subqueries rather than with a
 	// GROUP BY. Grouping means either listing every selected user column in the
-	// clause — which breaks the moment somebody adds a field to the output — or
+	// clause - which breaks the moment somebody adds a field to the output - or
 	// quietly folding columns Postgres decides are functionally dependent.
 	rows, err := pool.Query(ctx, `
 		SELECT u.user_id, u.username, u.display_name, u.enabled, u.break_glass,

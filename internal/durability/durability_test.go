@@ -306,7 +306,7 @@ func TestFailReachesDeadLetterWithAReason(t *testing.T) {
 		if len(leases) != 1 {
 			t.Fatalf("claim %d returned %d leases", i, len(leases))
 		}
-		status, err := w.Fail(context.Background(), leases[0].Key, cause, 2)
+		status, err := w.Fail(context.Background(), leases[0].Key, leases[0].Owner, cause, 2)
 		if err != nil {
 			t.Fatalf("fail %d: %v", i, err)
 		}
@@ -418,7 +418,7 @@ func TestReNormalizeIsANoOp(t *testing.T) {
 
 	// The crash: the worker died before it recorded anything externally, so it
 	// re-leases and redoes the work. The inbox event is already processed, so the
-	// lease fails — which is the correct outcome and is what the second pass
+	// lease fails - which is the correct outcome and is what the second pass
 	// below models by going through the key check directly.
 	leases, err := w.ClaimFor(context.Background(), tenant, "worker-2", 10, time.Minute)
 	if err != nil {
@@ -473,7 +473,7 @@ func TestReNormalizeIsANoOp(t *testing.T) {
 // The canonical event and the inbox transition are one transaction, and the key
 // claim is inside it. The failure used here is a real one rather than a contrived
 // one: the lease is stolen mid-flight, so the inbox transition matches no row and
-// the whole transaction must roll back — key included. A surviving key would make
+// the whole transaction must roll back - key included. A surviving key would make
 // every future retry a silent no-op and lose the event for good.
 func TestNormalizeIsAtomicWithTheInboxTransition(t *testing.T) {
 	p := migrated(t)

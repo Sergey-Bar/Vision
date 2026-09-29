@@ -51,8 +51,8 @@ func TestEveryPlannedMetricExists(t *testing.T) {
 
 	// A metric name is a claim about what is being measured, published to a
 	// scraper. "actions_dispatched_total" named a class of thing that does not
-	// exist in M1 — the counter is the relay acknowledging an outbox message it
-	// then logged and discarded — and a dashboard built on it would report a site
+	// exist in M1 - the counter is the relay acknowledging an outbox message it
+	// then logged and discarded - and a dashboard built on it would report a site
 	// taking physical action when it was counting its own log writes. The name
 	// has to survive being read by somebody who is not looking at the code.
 	for _, name := range planned {
@@ -78,7 +78,7 @@ func TestEveryPlannedMetricExists(t *testing.T) {
 	}
 
 	// A gauge must NOT be in the counter set. It used to be, because the closed
-	// set was one map and NewCounters seeded every name into it — so Render
+	// set was one map and NewCounters seeded every name into it - so Render
 	// emitted each gauge twice, once with `# TYPE x gauge` and once with
 	// `# TYPE x counter`, and a metric name carrying two type declarations is a
 	// scrape the parser rejects. The collector reports that as a broken core.

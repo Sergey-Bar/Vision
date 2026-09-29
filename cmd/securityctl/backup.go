@@ -18,7 +18,7 @@ const backupManifestName = "backup-manifest.json"
 // The three things that have to travel together are the database, the evidence
 // directory, and the checkpoint seals. Only the first two are recoverable from a
 // database backup, and the third is the one an attacker who reaches the database
-// would want gone — so a backup that omits any of them records that it did, and
+// would want gone - so a backup that omits any of them records that it did, and
 // a restore reads the record rather than discovering the gap later.
 func runBackup(env *command.Env, outDir string, allowPartial bool) (string, error) {
 	if err := os.MkdirAll(outDir, 0o750); err != nil {

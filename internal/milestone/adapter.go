@@ -13,7 +13,7 @@ import (
 )
 
 // Adapter turns source envelopes into normalized source records. It does not
-// write to the database and does not build canonical events — that is the
+// write to the database and does not build canonical events - that is the
 // inbox normalizer's job, and keeping the two apart is what makes
 // kill -9 mid-pipeline testable: the adapter's whole responsibility is "read,
 // sanitize, hand over", and its output is durable the moment it is written.
@@ -129,10 +129,10 @@ func sourceDeviceRef(item map[string]any) string {
 // PascalCase spellings, which produced two failures at once:
 //
 //   - Twelve of its eighteen keys ("Motion", "RecordingStarted", "GateEvent",
-//     "DeviceState", …) could never be reached, because the check runs against
+//     "DeviceState", â€¦) could never be reached, because the check runs against
 //     the *normalized* type and normalization lowercases everything.
-//   - Five types the normalizer does emit — recording.started, recording.stopped,
-//     access.granted, access.denied, gate — were not keys at all.
+//   - Five types the normalizer does emit - recording.started, recording.stopped,
+//     access.granted, access.denied, gate - were not keys at all.
 //
 // Every real motion, analytics and access event therefore arrived flagged
 // `Malformed` with "unrecognised source event type", which is a source change
@@ -256,8 +256,8 @@ func (a *Adapter) Poll(ctx context.Context, since *time.Time) ([]RawRecord, erro
 // maxFeedPages bounds one feed's pagination.
 //
 // A cursor that does not advance is a server bug, and a cursor that never ends
-// is a loop. The bound is generous for a 200-per-page feed — 40,000 events in
-// one poll — and what happens at the bound is the important part: the feed is
+// is a loop. The bound is generous for a 200-per-page feed - 40,000 events in
+// one poll - and what happens at the bound is the important part: the feed is
 // reported as truncated rather than silently short, because the alternative is
 // the cursor jumping past events that were never read, which is the one failure
 // this whole function exists to prevent.
@@ -268,7 +268,7 @@ func (a *Adapter) readFeed(ctx context.Context, route Route, since *time.Time) (
 	//
 	// This read exactly one page and then stopped. `transport.Get` captures the
 	// `Next-Cursor` header into `Response.Headers` — deliberately, and with a
-	// comment saying so — and nothing ever followed it. The poll then advanced
+	// comment saying so - and nothing ever followed it. The poll then advanced
 	// `integrations.last_success_at` to the newest received_at of the records it
 	// did read, so the next poll asked for `since = now` and items 201..N were
 	// never requested again.
@@ -350,7 +350,7 @@ func (a *Adapter) feedErrorID(route Route, since *time.Time) string {
 // than an absence. A feed that is down and a feed that is quiet are
 // indistinguishable to anything watching accepted events; they are not
 // indistinguishable to an operator reading a log.
-func (a *Adapter) recordFeedError(ctx context.Context, route Route, id string, cause error) {
+func (a *Adapter) recordFeedError(_ context.Context, route Route, id string, cause error) {
 	if a.Logf != nil {
 		a.Logf("milestone: feed %s could not be read and is recorded as %s: %v",
 			describe(route), id, cause)
@@ -394,7 +394,7 @@ func (a *Adapter) Parse(route Route, resp *Response) ([]RawRecord, error) {
 			// The identity is derived from the item's own bytes, not from its
 			// position in the page. The index is the index *within one page*, so
 			// with pagination the unreadable item at position 3 of page 1 and the
-			// unreadable item at position 3 of page 2 were given the same id — and
+			// unreadable item at position 3 of page 2 were given the same id - and
 			// the inbox deduplicated the second away, which is one silently lost
 			// event per page. Hashing the item means two genuinely distinct
 			// unreadable items get distinct ids, and the same unreadable item
@@ -451,7 +451,7 @@ func (a *Adapter) tenant() string { return "" }
 // This exists because the inbox stores the sanitized envelope and nothing else.
 // The consume loop claims a row weeks after the adapter handed it over, and
 // Normalize needs the derived event type, observed time, timezone, clock source
-// and device reference — none of which are columns on the inbox row. Re-deriving
+// and device reference - none of which are columns on the inbox row. Re-deriving
 // them here rather than persisting them has one property worth having: the
 // derivation is a pure function of the stored bytes, so a claim that is retried
 // after a crash produces exactly the same canonical event, and a normalization
@@ -495,8 +495,8 @@ func (a *Adapter) toRecord(item map[string]any, index int, now time.Time) (RawRe
 	observed, tz := parseMilestoneTime(item)
 
 	// The envelope is the sanitized body. It was parsed into a map to redact it,
-	// so it is re-encoded rather than copied: the re-encoding is canonical —
-	// encoding/json sorts map keys — and therefore round-trips, which is what
+	// so it is re-encoded rather than copied: the re-encoding is canonical -
+	// encoding/json sorts map keys - and therefore round-trips, which is what
 	// lets the consume loop re-derive every derived field from the stored bytes
 	// weeks later and get the same answers.
 	envelope, err := json.Marshal(item)
@@ -515,7 +515,7 @@ func (a *Adapter) toRecord(item map[string]any, index int, now time.Time) (RawRe
 		ClockSource:    "vms",
 		ReceivedAt:     now,
 		// Without this the inbox refuses every event with "payload is required",
-		// and the whole ingest path is dead while every unit test passes — which
+		// and the whole ingest path is dead while every unit test passes - which
 		// is what happened: the field was declared, documented and never assigned.
 		Envelope: envelope,
 		// The source names its device in the Source field, conventionally as
@@ -668,15 +668,15 @@ var milestoneTimeLayouts = []string{
 
 // parseMilestoneTime extracts the observed time and the source timezone.
 //
-// A naive timestamp is treated as UTC for storage — the database stores UTC
-// everywhere — but SourceTimezone comes back empty, so a downstream reader can
+// A naive timestamp is treated as UTC for storage - the database stores UTC
+// everywhere - but SourceTimezone comes back empty, so a downstream reader can
 // tell the difference between a source that declared a zone and one that did
 // not. That difference decides how a DST-spanning window is reasoned about.
 //
 // The reported zone is the one the source wrote, not whatever Go infers. A
 // source that says "+02:00" has said nothing about which country it is in, and
 // a host in Israel would otherwise have every foreign timestamp recorded as
-// IST — which looks like a fact and is an assumption.
+// IST - which looks like a fact and is an assumption.
 func parseMilestoneTime(item map[string]any) (time.Time, string) {
 	raw := stringField(item, "Timestamp", "timestamp", "Time", "time",
 		"CreationTime", "EventTime", "ObservedAt", "observedAt")

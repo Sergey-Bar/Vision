@@ -69,7 +69,7 @@ func enqueueAt(t *testing.T, pool *dbx.Pool, tenant, key string, maxAttempts int
 // this test green, because `FOR UPDATE` alone still makes the loser re-evaluate
 // the predicate against the row the winner just updated and take nothing. What
 // `SKIP LOCKED` buys is that the loser does not wait for the winner, and that is
-// a throughput property — a test for it would be a timing assertion, and a
+// a throughput property - a test for it would be a timing assertion, and a
 // timing assertion on a shared database is a test that goes red on a busy
 // machine and teaches its readers to ignore it. Exclusivity is asserted; the
 // cost of losing it is a note.
@@ -178,10 +178,10 @@ func TestAnIdempotencyKeyIsScopedToItsQueue(t *testing.T) {
 // A retry bound with no reachable end.
 //
 // The backoff was `least(900, 5 * power(2, attempt_count)::int)`, which casts
-// an unbounded exponent to int32 *before* clamping: 2^29 × 5 is 2,684,354,560,
+// an unbounded exponent to int32 *before* clamping: 2^29 - 5 is 2,684,354,560,
 // so the cast raises at attempt_count 29. The UPDATE rolled back, `Fail` returned
 // an error instead of a status, the row stayed leased, the lease expired, the
-// job was reclaimed — and the whole thing repeated. The worker aborted on every
+// job was reclaimed - and the whole thing repeated. The worker aborted on every
 // pass and the job never reached dead_letter at all.
 //
 // `max_attempts` had only a `>= 0` check, so a bound above 28 was accepted and
@@ -217,7 +217,7 @@ func TestARetryBoundAlwaysReachesATerminalState(t *testing.T) {
 			t.Fatalf("the job dead-lettered after %d attempts against a bound of %d",
 				i+1, maxAttempts)
 		}
-		// Skip the backoff so the loop does not wait out 5, 10, 20 … seconds.
+		// Skip the backoff so the loop does not wait out 5, 10, 20 - seconds.
 		// The retry still goes through the claim.
 		testutil.Exec(t, pool.Pool,
 			`UPDATE jobs SET run_after = now() - interval '1 second' WHERE tenant_id = $1`, tenant)

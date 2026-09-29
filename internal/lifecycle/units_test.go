@@ -225,7 +225,7 @@ func TestTheAIUnitIsOnlyWrittenWhenTheRuntimeIsInstalled(t *testing.T) {
 // the `..` away, which would test a traversal-free path while claiming to test a
 // traversal. The production check exists for exactly the case this builds.
 // The environment file carries SP_DATABASE_URL and SP_SECRET_KEY. It was written
-// 0644 — world-readable — while the template this same function emits says in
+// 0644 - world-readable - while the template this same function emits says in
 // its own text "keep this file mode 0640 and owned by the service account". Any
 // local account on the host could read the site's database credentials and its
 // secret key.
@@ -236,7 +236,7 @@ func TestTheAIUnitIsOnlyWrittenWhenTheRuntimeIsInstalled(t *testing.T) {
 // asked for. These two assertions are therefore about a Linux install, which is
 // the only place this installer runs, and a Windows run of them would be testing
 // the Go standard library rather than this code. The test is not deleted on
-// Windows — it is skipped, loudly, and it runs on the platform that matters.
+// Windows - it is skipped, loudly, and it runs on the platform that matters.
 func requirePOSIXModes(t *testing.T) {
 	t.Helper()
 	if runtime.GOOS == "windows" {

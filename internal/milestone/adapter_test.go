@@ -283,9 +283,9 @@ func TestEveryTypeTheAdapterProducesIsKnown(t *testing.T) {
 		if reachable[key] {
 			continue
 		}
-		// The two synthetic adapter types have no vendor spelling — they are
+		// The two synthetic adapter types have no vendor spelling - they are
 		// produced by the feed-error and unparsed-item paths, not by
-		// normalisation — so they are covered by their own tests.
+		// normalisation - so they are covered by their own tests.
 		if key == "adapter_feed_error" || key == "adapter_unparsed_item" {
 			continue
 		}

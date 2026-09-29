@@ -314,8 +314,8 @@ func TestUnsetTrustedProxyListIsEmptyNotWildcard(t *testing.T) {
 	}
 }
 
-// No AI runtime is a supported configuration — a site with no model is a real
-// deployment — so it must load rather than refuse. What must not happen is the
+// No AI runtime is a supported configuration - a site with no model is a real
+// deployment - so it must load rather than refuse. What must not happen is the
 // daemon inventing an endpoint.
 func TestUnsetAIEndpointIsSupportedAndNotInvented(t *testing.T) {
 	c := mustLoad(t, valid())

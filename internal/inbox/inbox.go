@@ -34,7 +34,7 @@ import (
 )
 
 // Status is an inbox event's lifecycle state. The only terminal states are
-// processed, dead_letter, and the retention sweep — and the sweep is outside the
+// processed, dead_letter, and the retention sweep - and the sweep is outside the
 // retention window, so within it every accepted event is accounted for.
 type Status string
 
@@ -291,7 +291,7 @@ RETURNING e.tenant_id, e.integration_id, e.source_event_id, e.site_id,
 // every claim, and the consume loop claims on a timer, so an unfiltered version
 // is a statement over every tenant's inbox on every tick. The status IN is
 // carried by inbox_events_pending_idx, which is partial on exactly these three
-// statuses, so the scan is bounded to unclaimed work and nothing else — but only
+// statuses, so the scan is bounded to unclaimed work and nothing else - but only
 // once the tenant is pinned, because a site's consume loop has no business
 // touching another site's rows and no business paying for their scan either.
 const expireExhaustedSQL = `
@@ -394,8 +394,8 @@ func (w *Writer) Renew(ctx context.Context, key Key, owner string, lease time.Du
 // Complete marks a lease processed and records what it produced.
 //
 // It matches on the lease owner, not only on the status, and that is the whole
-// control. A worker whose lease expired can still be running — it has no way to
-// know the lease lapsed until it tries to renew — and by the time it finishes,
+// control. A worker whose lease expired can still be running - it has no way to
+// know the lease lapsed until it tries to renew - and by the time it finishes,
 // the row may have been reclaimed and be halfway through another worker's
 // normalize. Matching on `status = 'processing'` alone lets the stale worker
 // overwrite `canonical_event_id` with its own, stamp `completed_at`, and clear

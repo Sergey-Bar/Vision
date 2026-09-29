@@ -7,8 +7,8 @@
 // empty result rather than an error, the code reads that as "no roles" or "no
 // evidence", and the product misbehaves on a site that is configured correctly.
 //
-// This package connects as security_core — the role the product itself uses, and
-// the one RLS applies to — and drives the flows that matter. It is deliberately
+// This package connects as security_core - the role the product itself uses, and
+// the one RLS applies to - and drives the flows that matter. It is deliberately
 // short: it is a canary, not a second copy of the suite.
 package rlsrole
 
@@ -73,7 +73,7 @@ func productionPool(t *testing.T) *dbx.Pool {
 //
 // Roles and site assignments are read on every session resolve. If the read is
 // issued without a tenant context, RLS returns nothing, the principal is built
-// with no roles and no sites, and every capability and site check refuses — the
+// with no roles and no sites, and every capability and site check refuses - the
 // console is unreachable while the login keeps returning a session. It fails
 // closed, which is the right direction and still an outage.
 func TestRolesAndScopeAreReadableUnderRLS(t *testing.T) {

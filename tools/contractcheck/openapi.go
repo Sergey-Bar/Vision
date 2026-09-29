@@ -90,8 +90,8 @@ func parseOpenAPIFile(path, rel string, out map[string]APIDoc, warnings *[]strin
 			}
 			if !httpMethods[key] {
 				// Not a method, so it cannot change the path/method set this
-				// gate compares. It does mean the document is malformed — an
-				// operation body that is not nested under its method — and that
+				// gate compares. It does mean the document is malformed - an
+				// operation body that is not nested under its method - and that
 				// is worth saying out loud rather than either swallowing or
 				// refusing to check the rest of the file.
 				*warnings = append(*warnings, fmt.Sprintf(

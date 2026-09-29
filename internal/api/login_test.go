@@ -19,7 +19,7 @@ import (
 // The primary login path for every enrolled operator.
 //
 // The handler read the principal off res.Session, and res.Session is nil by
-// construction on the MFA branch — the early return above it is the non-MFA
+// construction on the MFA branch - the early return above it is the non-MFA
 // case. So a nil dereference turned every MFA login for every operator with a
 // second factor into a 500, and the only logins that worked were bootstrap
 // accounts with nothing enrolled. The test drives the route, not the service,

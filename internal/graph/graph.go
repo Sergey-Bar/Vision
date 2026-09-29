@@ -2,21 +2,21 @@
 //
 // The scope is narrow on purpose. M1 builds:
 //
-//	SITE  → contains   → ZONE
-//	ZONE  → contains   → ZONE
-//	ZONE  → contains   → DEVICE
-//	DEVICE→ kind       → camera / door / sensor
-//	EVENT → observed_by→ DEVICE
-//	EVENT → occurred_in→ ZONE
-//	INCIDENT → supported_by → EVENT
-//	INCIDENT → has_evidence → EVIDENCE
-//	OBSERVATION → derived_from → EVIDENCE
-//	OBSERVATION → about → ENTITY
+//	SITE  - contains   - ZONE
+//	ZONE  - contains   - ZONE
+//	ZONE  - contains   - DEVICE
+//	DEVICE- kind       - camera / door / sensor
+//	EVENT - observed_by- DEVICE
+//	EVENT - occurred_in- ZONE
+//	INCIDENT - supported_by - EVENT
+//	INCIDENT - has_evidence - EVIDENCE
+//	OBSERVATION - derived_from - EVIDENCE
+//	OBSERVATION - about - ENTITY
 //
 // What is deliberately absent is a person model. There is no identity
 // resolution, no cross-camera identity, no re-identification, no behavioural
 // graph, no entity aliasing, and no `entity_aliases` table. An entity is a
-// concrete thing a device reported — a plate, a badge, a door — and nothing
+// concrete thing a device reported - a plate, a badge, a door - and nothing
 // further. This is a scope decision, not a missing feature, and the test
 // asserting the absence of `entity_aliases` exists to stop it becoming one by
 // accident.
@@ -307,7 +307,7 @@ func (s *Service) Walk(ctx context.Context, tenant, nodeType, nodeID string, t T
 	// (migration 0014), edges has FORCE ROW LEVEL SECURITY, and the policy is
 	// tenant_id = app_current_tenant() OR app_is_system_worker(). With no
 	// app.tenant_id set, app_current_tenant() is nullif(current_setting(...),'')
-	// — NULL, not false — so the predicate is NULL, every row is filtered, and
+	// - NULL, not false - so the predicate is NULL, every row is filtered, and
 	// the traversal reports an empty graph. Not an error, not a log line, just
 	// nothing. Snapshot and CheckRebuild were already scoped; this was the one
 	// that was not, which is why the tests passed: they connect as a superuser,
@@ -414,7 +414,7 @@ type RebuildReport struct {
 
 // CheckRebuild inspects the graph's internal consistency and reports what a
 // rebuild would need to know. It reports edges whose source event no longer
-// exists and zones with no parent; neither is automatically an error — a retained
+// exists and zones with no parent; neither is automatically an error - a retained
 // incident may outlive its event's partition — but both are facts a rebuild needs.
 func (s *Service) CheckRebuild(ctx context.Context, tenant string) (RebuildReport, error) {
 	var r RebuildReport

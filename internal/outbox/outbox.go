@@ -2,7 +2,7 @@
 //
 // The problem it solves is narrow and specific: a state change and its outbound
 // side effect must commit together or not at all. Notify an operator about an
-// incident, or create the incident — never one without the other, and never both
+// incident, or create the incident - never one without the other, and never both
 // when a crash lands between them.
 //
 // Writing the side effect and the row in one transaction, then letting a

@@ -30,9 +30,9 @@ import (
 // defence.
 //
 // Two things this does not do, both deliberate and both stated at the call site:
-// there is no attestation trust chain — a site that does not inspect
+// there is no attestation trust chain - a site that does not inspect
 // authenticator provenance is protected by the sign counter, not by the
-// certificate — and there is no user-verification requirement, because the
+// certificate - and there is no user-verification requirement, because the
 // console is used by operators on workstations rather than on shared devices.
 // A deployment that needs either should say so rather than have it inferred.
 
@@ -217,7 +217,7 @@ func ValidateCOSEKey(key []byte) error {
 	// Map: label 1, algorithm 3, key material last.
 	//
 	// The conversions below are int32 because the COSE algorithm registry is
-	// signed: ES256 is -7 and EdDSA is -8 (RFC 8152 §10). A credential whose
+	// signed: ES256 is -7 and EdDSA is -8 (RFC 8152 -10). A credential whose
 	// declared algorithm exceeds 2^31 therefore becomes negative here, and lands
 	// in the same "this build does not verify" branch as an algorithm that was
 	// never registered at all. That is the correct outcome, and it is also what
@@ -243,7 +243,7 @@ func ValidateCOSEKey(key []byte) error {
 //
 // This is what the sign counter is for. A counter that has not advanced, or that
 // went backwards, means either the assertion is a replay or the authenticator has
-// been cloned — and this code cannot tell those apart, so it refuses both. That
+// been cloned - and this code cannot tell those apart, so it refuses both. That
 // is the correct answer to an ambiguity an operator must resolve, and the
 // alternative (accepting) is how a cloned key keeps working for ever.
 func VerifyAssertion(publicKey []byte, storedCount int64, assertion Assertion) (int64, error) {
@@ -281,7 +281,7 @@ type Assertion struct {
 // Go has deprecated reading ecdsa.PublicKey's X and Y directly, because raw
 // coordinate access on a public key bypasses the curve's validation and a
 // big.Int is the wrong type for cryptographic values. The supported route is the
-// uncompressed encoding, so that is the one used here — the conversion is a
+// uncompressed encoding, so that is the one used here - the conversion is a
 // round trip through bytes rather than a read of internals, and the key it
 // produces has already been checked to be on P-256 by the ecdh unmarshal.
 func ecdsaKeyFromECDHPublic(key *ecdh.PublicKey) (*ecdsa.PublicKey, error) {

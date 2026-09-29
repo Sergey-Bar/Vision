@@ -2,7 +2,7 @@
 //
 // The harness exists because the alternative is shipping a model because it felt
 // right. It scores a profile against labelled cases and reports, per profile,
-// the numbers a decision to promote or demote it should be made on — and it
+// the numbers a decision to promote or demote it should be made on - and it
 // treats a missing case as a failure rather than as an absence, because a metric
 // that improves when you stop measuring something is not a metric.
 //
@@ -42,7 +42,7 @@ type Case struct {
 	ProfileID string
 	Outcome   Outcome
 	// PredictedRestricted is what the observation asserted. A nil pointer means the
-	// observation carried no answer — absent, degraded, or insufficient — and
+	// observation carried no answer - absent, degraded, or insufficient - and
 	// that is recorded as such rather than as a false.
 	PredictedRestricted *bool
 	// InSufficientEvidence records that the model said it could not tell.
@@ -149,7 +149,7 @@ type ProfileReport struct {
 	// for. It is the denominator every rate below uses, and it is smaller than
 	// Labeled whenever a case was absent, degraded or insufficient. A missing AI
 	// observation is never a negative observation (invariant 3), so folding those
-	// cases into a denominator lowers the measured noise floor by measuring less —
+	// cases into a denominator lowers the measured noise floor by measuring less -
 	// which is the exact failure this package's own doc says it exists to prevent.
 	Answered int
 	// Disagreements is how many answered cases the operator contradicted.
@@ -219,7 +219,7 @@ func Evaluate(cases []Case, observations []Observation, gates Gates) Report {
 			obs, hasObservation := byID[c.ID]
 			// The observation is the authoritative record of what the AI plane
 			// did. The case's flag is what the labelling tool believed, and a
-			// disagreement between the two is itself worth counting — so both are
+			// disagreement between the two is itself worth counting - so both are
 			// read, and the observation wins.
 			degraded := obs.Degraded || c.Degraded
 			insufficient := obs.InsufficientEvidence || c.InSufficientEvidence
@@ -249,7 +249,7 @@ func Evaluate(cases []Case, observations []Observation, gates Gates) Report {
 				// No judgement. Labeled counts it, because an operator did judge the
 				// case; nothing else does, because there was no answer to score. Every
 				// rate below divides by Answered, so a profile cannot improve its
-				// numbers by declining to answer — which is the failure the package doc
+				// numbers by declining to answer - which is the failure the package doc
 				// names, and which the previous denominator (Labeled) invited.
 				continue
 			}
@@ -270,7 +270,7 @@ func Evaluate(cases []Case, observations []Observation, gates Gates) Report {
 
 			// Recall counts only true positives. Counting every case the profile
 			// flagged as restricted — including benign ones, where "restricted" is
-			// simply wrong — put a numerator of 21 on a denominator of 1 and produced
+			// simply wrong - put a numerator of 21 on a denominator of 1 and produced
 			// a recall of 21.0, which passes any gate written as "at least 0.70". The
 			// gate that decides M1 exit gate 4 was not measuring what it said.
 			if c.Outcome == OutcomeTruePositive {
@@ -298,12 +298,12 @@ func Evaluate(cases []Case, observations []Observation, gates Gates) Report {
 		// The disagreement rate's numerator only moves when a case carries an
 		// operator's verdict, so the denominator is the cases that carry one too.
 		// Dividing by `Answered` — every case the profile returned a judgement
-		// for — let a 2-case sample be reported as 0.00 against a 200-case
+		// for - let a 2-case sample be reported as 0.00 against a 200-case
 		// denominator, and the gate passed on a measurement it had not made.
 		if pr.OperatorVerdicts > 0 {
 			// The numerator only moves on cases that carry a verdict, so the
 			// denominator is the cases that carry one. Dividing by `Answered` —
-			// every case the profile answered — let two verdicts out of two
+			// every case the profile answered - let two verdicts out of two
 			// hundred answered cases produce 0.00 and pass the 0.25 gate, which is
 			// a two-case measurement reported as a two-hundred-case one.
 			pr.DisagreementRate = rate(pr.Disagreements, pr.OperatorVerdicts)

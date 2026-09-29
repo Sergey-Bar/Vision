@@ -83,7 +83,7 @@ func (s *Service) verifyFactor(ctx context.Context, tenant, userID, method, code
 	switch storedMethod {
 	case "totp":
 		// A TOTP code is 6 digits at a 30-second step, and this verifier accepts
-		// the previous, current and next step — a ±one-step window, so a code
+		// the previous, current and next step - a -one-step window, so a code
 		// stays acceptable for roughly ninety seconds. The window exists because
 		// an operator whose device clock is a little fast otherwise fails in a way
 		// that looks like a credential problem.
@@ -92,8 +92,8 @@ func (s *Service) verifyFactor(ctx context.Context, tenant, userID, method, code
 		// a record of which codes have been used, an attacker who shoulder-surfs a
 		// code off a screen, photographs it, or replays the request that carried
 		// it gets the whole window to present the same six digits a second time.
-		// RFC 6238 §5.2 forbids exactly that — the verifier must not accept the
-		// same code twice — and consumeTOTPStep below is where it is enforced.
+		// RFC 6238 -5.2 forbids exactly that - the verifier must not accept the
+		// same code twice - and consumeTOTPStep below is where it is enforced.
 		secret, unwrapErr := s.unwrapTOTP(wrapped)
 		if unwrapErr != nil {
 			return "", "", false, unwrapErr
@@ -130,7 +130,7 @@ func (s *Service) verifyFactor(ctx context.Context, tenant, userID, method, code
 				}
 				if !first {
 					// Refused, and refused as a plain "no": the caller cannot tell a
-					// replay from a wrong code, which is the point — a caller that could
+					// replay from a wrong code, which is the point - a caller that could
 					// tell them apart could tell an attacker whether a guessed code was
 					// right.
 					return id, storedMethod, false, nil
@@ -147,7 +147,7 @@ func (s *Service) verifyFactor(ctx context.Context, tenant, userID, method, code
 		//
 		// There is deliberately no query here for the origin or the relying party.
 		// Those live inside the client data, which is hashed into the signed
-		// payload — so a caller that edited the origin would invalidate the
+		// payload - so a caller that edited the origin would invalidate the
 		// signature rather than pass an unchecked check. Reading them from
 		// somewhere else would be a second, unsigned, source of truth about where
 		// an assertion came from.
@@ -179,8 +179,8 @@ func (s *Service) verifyFactor(ctx context.Context, tenant, userID, method, code
 // consumeTOTPStep records that this code at this 30-second step has been spent on
 // this factor, and reports whether this call was the one that spent it.
 //
-// The database is the arbiter, not the process. A read-then-write — SELECT the
-// last used step, then INSERT if it is unspent — is a race: two concurrent
+// The database is the arbiter, not the process. A read-then-write - SELECT the
+// last used step, then INSERT if it is unspent - is a race: two concurrent
 // requests carrying the same code both read the same prior state, both decide they
 // are first, and both authenticate. INSERT ... ON CONFLICT DO NOTHING against the
 // (tenant, factor, step, digest) primary key cannot do that, because exactly one
@@ -332,7 +332,7 @@ func (s *Service) EnrollWebAuthn(ctx context.Context, tenant, userID, credential
 // supply-chain decision somebody has to sign off on.
 //
 // The hash is a parameter because the enrolment URI declares SHA-256 while the
-// RFC 6238 default — and therefore the fallback for an authenticator that
+// RFC 6238 default - and therefore the fallback for an authenticator that
 // ignores the `algorithm` parameter — is SHA-1. The caller tries both.
 func totpCode(secret []byte, h func() hash.Hash, at time.Time) string {
 	// The counter is a T/30 value since the epoch, and T/30 is non-negative for
@@ -430,7 +430,7 @@ func (s *Service) BootstrapAdmin(ctx context.Context, tenant, username, passphra
 	//
 	// Both existence checks run inside the tenant context. tenants and sites
 	// carry tenant_id and therefore row-level security, so a query without the
-	// context returns zero rows rather than an error — and bootstrap would report
+	// context returns zero rows rather than an error - and bootstrap would report
 	// "the tenant does not exist" for a tenant that plainly does.
 	var tenants, sites int
 	if err := s.Pool.InTenant(ctx, dbx.TenantContext{TenantID: tenant, ActorID: "identity"},
@@ -523,7 +523,7 @@ func (s *Service) BootstrapAdmin(ctx context.Context, tenant, username, passphra
 // chosen by its owner. It selects whether a *new* user may be bootstrapped, not
 // whether an existing password may be replaced. An account with no password set
 // at all has nothing to verify, and that is the only case where `current` is not
-// checked — and the caller setting that first password is the provisioning path,
+// checked - and the caller setting that first password is the provisioning path,
 // not this one.
 //
 // The audit action distinguishes the two paths. It used to write
@@ -592,7 +592,7 @@ func (s *Service) SetPassword(ctx context.Context, tenant, userID, current, newP
 // is right and the shape is wrong: the row then looks exactly like an account
 // with a password, so nothing downstream can tell "has never had one" from "has
 // one nobody remembers", and the only way to express the difference was a
-// boolean — which then became the thing that skipped the current-password check
+// boolean - which then became the thing that skipped the current-password check
 // on a *changed* password.
 //
 // A NULL hash says the thing directly. It is a claim the code can act on rather

@@ -117,8 +117,8 @@ func TestVerifyHashOnReadFalseMarksTheObjectUnverified(t *testing.T) {
 		t.Errorf("SHA256 is %q, want the row's %q", got2.SHA256, verified.SHA256)
 	}
 
-	// The tampered bytes are served when verification is off — that is what the
-	// option is for — and refused when it is on. Each store is tampered in its
+	// The tampered bytes are served when verification is off - that is what the
+	// option is for - and refused when it is on. Each store is tampered in its
 	// own root, because the two are separate directories holding the same
 	// content-addressed reference.
 	for _, s := range []*evidence.Store{off, on} {
@@ -141,7 +141,7 @@ func TestVerifyHashOnReadFalseMarksTheObjectUnverified(t *testing.T) {
 // rename wrote into. tmp.Sync() makes the content durable; a rename is a
 // directory-entry update, and on ext4 and XFS that entry lives in the parent
 // directory rather than in the file. A power loss after Put returned can leave an
-// acknowledged object absent — and a content-addressed store is the worst kind of
+// acknowledged object absent - and a content-addressed store is the worst kind of
 // store to lose one in, because a later Put of the same bytes rewrites the file
 // and nothing ever notices the gap.
 //
@@ -229,13 +229,13 @@ func TestSweepUsesStoredAtAndNotTheFilesystemMtime(t *testing.T) {
 	s := newStore(t)
 	table := fakeEvidenceTable{}
 
-	restored := putStored(t, s, table, "tenant-a", "restored from backup")
+	restored := putStored(t, s, table, "restored from backup")
 	table[restored.Ref] = time.Now()
 
-	orphan := putStored(t, s, table, "tenant-a", "no evidence row")
+	orphan := putStored(t, s, table, "no evidence row")
 	delete(table, orphan.Ref)
 
-	genuinelyOld := putStored(t, s, table, "tenant-a", "actually old")
+	genuinelyOld := putStored(t, s, table, "actually old")
 	table[genuinelyOld.Ref] = time.Now().Add(-10 * 365 * 24 * time.Hour)
 
 	// Age the restored object's mtime by a decade, which is what restoring from
@@ -284,12 +284,12 @@ func TestSweepUsesStoredAtAndNotTheFilesystemMtime(t *testing.T) {
 }
 
 // The companion property: mtime must not be able to keep an object alive either.
-// An object touched today, whose row says it is a decade old, is still expired —
+// An object touched today, whose row says it is a decade old, is still expired -
 // otherwise `touch` becomes a way to retain evidence past its policy.
 func TestSweepDoesNotLetAFreshMtimeRetainExpiredEvidence(t *testing.T) {
 	s := newStore(t)
 	table := fakeEvidenceTable{}
-	obj := putStored(t, s, table, "tenant-a", "expired but touched")
+	obj := putStored(t, s, table, "expired but touched")
 	table[obj.Ref] = time.Now().Add(-10 * 365 * 24 * time.Hour)
 
 	// The file was just written, so its mtime is now.
@@ -324,7 +324,7 @@ func TestSweepDoesNotLetAFreshMtimeRetainExpiredEvidence(t *testing.T) {
 func TestSweepFailsClosedWhenStoredAtCannotBeRead(t *testing.T) {
 	s := newStore(t)
 	table := fakeEvidenceTable{}
-	obj := putStored(t, s, table, "tenant-a", "expired")
+	obj := putStored(t, s, table, "expired")
 	table[obj.Ref] = time.Now().Add(-10 * 365 * 24 * time.Hour)
 
 	result, err := s.Sweep("tenant-a", evidence.RetentionPolicy{
@@ -351,7 +351,7 @@ func TestSweepFailsClosedWhenStoredAtCannotBeRead(t *testing.T) {
 func TestSweepRefusesToExpireWithoutAStoredAtLookup(t *testing.T) {
 	s := newStore(t)
 	table := fakeEvidenceTable{}
-	obj := putStored(t, s, table, "tenant-a", "bytes")
+	obj := putStored(t, s, table, "bytes")
 	table[obj.Ref] = time.Now().Add(-10 * 365 * 24 * time.Hour)
 
 	for _, tc := range []struct {

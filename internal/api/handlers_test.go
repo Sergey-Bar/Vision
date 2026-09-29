@@ -14,9 +14,11 @@ import (
 
 	"github.com/Sergey-Bar/Ai-Captain/internal/api"
 	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
+	"github.com/Sergey-Bar/Ai-Captain/internal/identity"
 	"github.com/Sergey-Bar/Ai-Captain/internal/incidents"
 	"github.com/Sergey-Bar/Ai-Captain/internal/observability"
 	"github.com/Sergey-Bar/Ai-Captain/internal/rules"
+	"github.com/Sergey-Bar/Ai-Captain/internal/simulate"
 	"github.com/Sergey-Bar/Ai-Captain/internal/testutil"
 )
 
@@ -49,6 +51,55 @@ func call(t *testing.T, s *api.Server, method, path string, body any) *httptest.
 	req.AddCookie(cookie)
 	req.AddCookie(&http.Cookie{Name: cookieNameOf(s) + "_csrf", Value: csrf})
 	req.Header.Set("X-CSRF-Token", csrf)
+
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	return rec
+}
+
+// callAs issues a request as a specific user, signing in as them for real.
+//
+// It exists because the site-scope tests need a principal whose SiteScope is
+// narrower than the tenant's. That state is reached the way it is reached in
+// production - an administrator assigns the operator to one site - rather than
+// by constructing a Principal and minting a session for it, because a session
+// minted out of band is not a session the product issued and a test that uses one
+// is not exercising the path.
+func callAs(t *testing.T, s *api.Server, username, password string, method, path string, body any) *httptest.ResponseRecorder {
+	t.Helper()
+	var rdr *bytes.Reader
+	if body != nil {
+		raw, err := json.Marshal(body)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		rdr = bytes.NewReader(raw)
+	} else {
+		rdr = bytes.NewReader(nil)
+	}
+	req := httptest.NewRequest(method, path, rdr)
+	req.Header.Set("Content-Type", "application/json")
+
+	login := callAnon(t, s, http.MethodPost, "/v1/auth/login", map[string]any{
+		"username": username, "password": password,
+	})
+	if login.Code != http.StatusOK {
+		t.Fatalf("sign in as %s: %d: %s", username, login.Code, login.Body)
+	}
+	var session, csrf *http.Cookie
+	for _, c := range login.Result().Cookies() {
+		if strings.HasSuffix(c.Name, "_csrf") {
+			csrf = c
+		} else {
+			session = c
+		}
+	}
+	if session == nil || csrf == nil {
+		t.Fatalf("the login response for %s set no cookies", username)
+	}
+	req.AddCookie(session)
+	req.AddCookie(&http.Cookie{Name: session.Name + "_csrf", Value: csrf.Value})
+	req.Header.Set("X-CSRF-Token", csrf.Value)
 
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
@@ -312,7 +363,7 @@ func TestMetricsRefusesWithoutTheAuditCapability(t *testing.T) {
 
 	// The bootstrap administrator holds audit.read, so testing "a principal
 	// without it" against the administrator asserts nothing. Reduce the account
-	// to a viewer, which reads incidents and evidence and nothing else — the
+	// to a viewer, which reads incidents and evidence and nothing else - the
 	// least-privileged principal that can still sign in.
 	reduceToViewer(t, tenant, site)
 
@@ -448,7 +499,7 @@ func grantAuditRead(t *testing.T, tenant string) {
 //
 // It exists because the bootstrap administrator holds audit.read, so "a
 // principal without the capability" cannot be tested by signing in as the
-// administrator — that test would pass for the wrong reason, or fail while the
+// administrator - that test would pass for the wrong reason, or fail while the
 // route is correctly gated.
 func reduceToViewer(t *testing.T, tenant, site string) {
 	t.Helper()
@@ -549,16 +600,81 @@ func adminUserID(t *testing.T, tenant string) string {
 	return id
 }
 
+// Visiting the console root used to log the operator out.
+//
+// `Resolve` rotates the session token on every call, and `handleConsoleRoot`
+// discarded the new value. The browser kept the old one, which no longer matched
+// the row, so the next request bounced to /login. `s.principal` — and therefore
+// every other handler - sends the rotated cookie back; this one was the
+// exception, and it is the first page an operator sees.
+func TestVisitingTheConsoleRootDoesNotLogTheOperatorOut(t *testing.T) {
+	s, _, _ := server(t)
+
+	login := callAnon(t, s, http.MethodPost, "/v1/auth/login", map[string]any{
+		"username": "admin", "password": "a-long-bootstrap-passphrase",
+	})
+	if login.Code != http.StatusOK {
+		t.Fatalf("sign in: %d: %s", login.Code, login.Body)
+	}
+	jar := map[string]*http.Cookie{}
+	for _, c := range login.Result().Cookies() {
+		jar[c.Name] = c
+	}
+
+	follow := func(path string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		for _, c := range jar {
+			req.AddCookie(c)
+		}
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, req)
+		// A browser stores whatever the response sets, and drops what it clears.
+		for _, c := range rec.Result().Cookies() {
+			if c.MaxAge < 0 || c.Value == "" {
+				delete(jar, c.Name)
+				continue
+			}
+			jar[c.Name] = c
+		}
+		return rec
+	}
+
+	first := follow("/")
+	if first.Code != http.StatusFound || first.Header().Get("Location") != "/incidents" {
+		t.Fatalf("the console root returned %d -> %q, want 302 -> /incidents",
+			first.Code, first.Header().Get("Location"))
+	}
+
+	// The second request is the one that used to fail: the browser still held the
+	// pre-rotation token and the feed the root pointed it at bounced to /login.
+	second := follow("/incidents")
+	if second.Code == http.StatusFound && second.Header().Get("Location") == "/login" {
+		t.Error("visiting the console root logged the operator out. Resolve rotates the " +
+			"session token on every call and the rotated value has to go back to the browser")
+	}
+	if second.Code != http.StatusOK {
+		t.Errorf("the incident feed returned %d after the root: %s", second.Code, second.Body)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // The rule routes, including the activation gate.
 // ---------------------------------------------------------------------------
 
-func TestRuleActivationRefusesWithoutADigest(t *testing.T) {
+// The activation gate, end to end.
+//
+// The route used to take `simulateDiffDigest` and the gate checked only that 64
+// lowercase hex characters had arrived, so the interesting case was a *well
+// formed* digest that was not the digest of anything. The route now takes the
+// simulation report, which is what the operator reviewed and what the gate can
+// re-hash.
+func TestRuleActivationRefusesARecordWithNoDigest(t *testing.T) {
 	s, _, _ := server(t)
-	storeBundle(t, s)
+	stored := storeBundle(t, s)
 
-	rec := call(t, s, http.MethodPost, "/v1/rules/bundles/1.0.0/activate", map[string]any{
-		"simulateDiffDigest": "",
+	rec := call(t, s, http.MethodPost, "/v1/rules/bundles/"+stored+"/activate", map[string]any{
+		"simulateReport": map[string]any{"bundleVersion": stored, "fixtureSet": "fixtures-1"},
 	})
 	if rec.Code == http.StatusOK || rec.Code == http.StatusCreated {
 		t.Fatal("a bundle was activated with no reviewed diff digest")
@@ -568,12 +684,57 @@ func TestRuleActivationRefusesWithoutADigest(t *testing.T) {
 	}
 }
 
+// A well-formed digest that is not the digest of the acknowledged changes used
+// to be enough. This is the case the gate existed for and did not have.
+func TestRuleActivationRefusesAHandWrittenDigest(t *testing.T) {
+	s, _, _ := server(t)
+	stored := storeBundle(t, s)
+
+	change := simulate.Change{
+		Kind: simulate.ChangeCreated, ScenarioID: "s-1", SignalID: "sig-1",
+		Before: simulate.Outcome{IncidentRaised: false},
+		After:  simulate.Outcome{IncidentRaised: true, Severity: "high"},
+	}
+	rep := simulate.Report{
+		BundleVersion: stored,
+		FixtureSet:    "fixtures-1",
+		Changes:       []simulate.Change{change},
+		DiffDigest:    strings.Repeat("a", 64), // well formed, and not the digest of anything
+	}
+	rec := call(t, s, http.MethodPost, "/v1/rules/bundles/"+stored+"/activate", map[string]any{
+		"simulateReport": rep,
+	})
+	if rec.Code == http.StatusOK {
+		t.Fatal("a hand-written digest activated the bundle. The route checked only that " +
+			"64 hex characters had arrived")
+	}
+	if !strings.Contains(rec.Body.String(), "not the digest of the acknowledged changes") {
+		t.Errorf("the refusal does not say the change list and the digest disagree: %s", rec.Body)
+	}
+}
+
+// And the honest one works, so the gate is a bound and not a wall.
+func TestRuleActivationAcceptsAGenuineReport(t *testing.T) {
+	s, _, _ := server(t)
+	stored := storeBundle(t, s)
+
+	rep := simulate.Report{BundleVersion: stored, FixtureSet: "fixtures-1"}
+	rep.DiffDigest = simulate.DigestFor(rep.BundleVersion, rep.FixtureSet, rep.Changes)
+	rec := call(t, s, http.MethodPost, "/v1/rules/bundles/"+stored+"/activate", map[string]any{
+		"simulateReport": rep,
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("a genuine simulation report was refused with %d: %s", rec.Code, rec.Body)
+	}
+}
+
 func TestRuleActivationRefusesAMalformedDigest(t *testing.T) {
 	s, _, _ := server(t)
-	storeBundle(t, s)
+	stored := storeBundle(t, s)
 
-	rec := call(t, s, http.MethodPost, "/v1/rules/bundles/1.0.0/activate", map[string]any{
-		"simulateDiffDigest": "not-a-digest",
+	rep := simulate.Report{BundleVersion: stored, FixtureSet: "fixtures-1", DiffDigest: "not-a-digest"}
+	rec := call(t, s, http.MethodPost, "/v1/rules/bundles/"+stored+"/activate", map[string]any{
+		"simulateReport": rep,
 	})
 	if rec.Code == http.StatusOK {
 		t.Error("a bundle was activated with a malformed digest")
@@ -597,7 +758,15 @@ func TestRuleStoreRefusesABundleThatDoesNotCompile(t *testing.T) {
 	}
 }
 
-func storeBundle(t *testing.T, s *api.Server) {
+// builtinVersion is the version rules/builtin/bundle.yaml declares.
+//
+// It is written out here rather than parsed from the file, because a test that
+// reads the value it is testing against is a test that cannot fail: the fixture
+// and the expectation would move together. When the bundle is versioned, this
+// constant is the thing that has to change, and changing it is the point.
+const builtinVersion = "0.1.0"
+
+func storeBundle(t *testing.T, s *api.Server) string {
 	t.Helper()
 	dir, err := os.Getwd()
 	if err != nil {
@@ -620,11 +789,123 @@ func storeBundle(t *testing.T, s *api.Server) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("storing the built-in bundle returned %d: %s", rec.Code, rec.Body)
 	}
+	return builtinVersion
 }
 
-// ---------------------------------------------------------------------------
-// The console.
-// ---------------------------------------------------------------------------
+// seedEvidence records one piece of evidence and the bytes behind it.
+func seedEvidence(t *testing.T, tenant, site, body string) string {
+	t.Helper()
+	obj, err := adminStore(t).Put(tenant, strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("put evidence: %v", err)
+	}
+	if _, err := testutil.Pool(t).Exec(ctx(), `
+		INSERT INTO evidence (evidence_id, tenant_id, site_id, kind, tier, observed_at,
+		                     captured_at, storage_ref, size_bytes, sha256)
+		VALUES ('ev-' || $1, $2, $3, 'snapshot', 'A', now(), now(), $4, $5, $6)`,
+		strings.ToLower(body), tenant, site, obj.Ref, obj.SizeBytes, obj.SHA256,
+	); err != nil {
+		t.Fatalf("insert evidence row: %v", err)
+	}
+	return "ev-" + strings.ToLower(body)
+}
+
+// Holding a capability is not the same as being assigned to a place, and two of
+// these routes treated it as though it were.
+//
+// The evidence-content route streams raw video out of the filesystem and checked
+// only `tenant_id`. The incident list checked only that the principal had *some*
+// site. The database does not close either gap: the two policies on `evidence`
+// are both PERMISSIVE, and PostgreSQL ORs multiple permissive policies for the
+// same command, so `tenant_isolation OR site_isolation` is `tenant_isolation`
+// and there is no site isolation at the row level at all. The handler is the
+// only place it happens.
+func TestHoldingACapabilityIsNotBeingAssignedToThePlace(t *testing.T) {
+	s, tenant, siteA := server(t)
+	// A second, real site in the same tenant. It has to be a row and not a string
+	// the handler is asked about, because the incident's site is a foreign key
+	// and a fabricated id would fail the seed rather than the assertion.
+	siteB := "site-not-mine"
+	if _, err := testutil.Pool(t).Exec(ctx(),
+		`INSERT INTO sites (site_id, tenant_id, name, timezone) VALUES ($1, $2, 'Other', 'UTC')`,
+		siteB, tenant); err != nil {
+		t.Fatalf("create the second site: %v", err)
+	}
+
+	// One incident per site, in the same tenant.
+	incA := seedIncident(t, tenant, siteA)
+	seedIncident(t, tenant, siteB)
+
+	// An operator assigned to site A only. The assignment is the production
+	// path: an administrator scopes the user, and the scope is what the handler
+	// is supposed to honour.
+	siteAdminPool := adminPool(t)
+	if err := s.Identity.EnsureUser(ctx(), tenant, "op-a", "op-a", "Operator A",
+		string(identity.RoleTenantAdmin), []string{siteA}, "admin"); err != nil {
+		t.Fatalf("provision the operator: %v", err)
+	}
+	_ = siteAdminPool
+	if err := s.Identity.SetPassword(ctx(), tenant, "op-a", "",
+		"operator-a-passphrase", "admin"); err != nil {
+		t.Fatalf("set the operator's password: %v", err)
+	}
+
+	t.Run("the incident list is scoped to the principal's sites", func(t *testing.T) {
+		rec := callAs(t, s, "op-a", "operator-a-passphrase", http.MethodGet, "/v1/incidents", nil)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("list returned %d: %s", rec.Code, rec.Body)
+		}
+		var body struct {
+			Items []struct {
+				IncidentID string `json:"incidentId"`
+				SiteID     string `json:"siteId"`
+			} `json:"items"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		for _, it := range body.Items {
+			if it.SiteID == siteB {
+				t.Errorf("the list returned incident %s from unassigned site %q. The query "+
+					"filtered on the tenant only, and the only guard was that the principal "+
+					"had some site at all", it.IncidentID, siteB)
+			}
+		}
+		var sawMine bool
+		for _, it := range body.Items {
+			if it.IncidentID == incA {
+				sawMine = true
+			}
+		}
+		if !sawMine {
+			t.Error("the list did not return the incident at the principal's own site; a scope " +
+				"filter that removes everything is not a filter")
+		}
+	})
+
+	t.Run("evidence content is refused outside the principal's sites", func(t *testing.T) {
+		evA := seedEvidence(t, tenant, siteA, "a")
+		evB := seedEvidence(t, tenant, siteB, "b")
+
+		mine := callAs(t, s, "op-a", "operator-a-passphrase", http.MethodGet, "/v1/evidence/"+evA+"/content", nil)
+		if mine.Code != http.StatusOK {
+			t.Errorf("evidence at the principal's own site returned %d, want 200: %s",
+				mine.Code, mine.Body)
+		}
+
+		theirs := callAs(t, s, "op-a", "operator-a-passphrase", http.MethodGet, "/v1/evidence/"+evB+"/content", nil)
+		if theirs.Code == http.StatusOK {
+			t.Error("evidence from an unassigned site was streamed. This route returns raw " +
+				"video out of the filesystem, and it checked only the tenant")
+		}
+		// 404 rather than 403: a 403 says the evidence exists and this operator
+		// may not have it, which is the information a 200 would have carried.
+		if theirs.Code != http.StatusNotFound {
+			t.Errorf("the refusal returned %d, want 404. A 403 discloses that the evidence "+
+				"exists", theirs.Code)
+		}
+	})
+}
 
 func TestConsoleIncidentPageRendersProvenance(t *testing.T) {
 	s, tenant, site := server(t)

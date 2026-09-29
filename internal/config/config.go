@@ -59,7 +59,7 @@ type Config struct {
 	// It is required whenever BehindProxy is set, and there is no default. The
 	// leftmost X-Forwarded-For entry is asserted by the caller and therefore
 	// chosen by the caller, so a limiter or an audit row keyed on it is keyed on
-	// whatever the caller said — which is why an unconfigured proxy list is a
+	// whatever the caller said - which is why an unconfigured proxy list is a
 	// refusal rather than a fallback to the leftmost entry.
 	TrustedProxyCIDRs []*net.IPNet
 
@@ -327,7 +327,7 @@ func isRootedPath(p string) bool {
 // It exists because a daemon that logs what it started with is worth more than
 // one that does not, and because the temptation to log a struct directly is
 // what eventually puts a password in a log file. Anything whose name suggests a
-// credential is not a field on Config, so nothing here needs redaction — and
+// credential is not a field on Config, so nothing here needs redaction - and
 // this function is the place that would have to grow if one ever did.
 func (c Config) Redacted() map[string]any {
 	ai := "unset (the VLM worker will record degraded observations with reason no_runtime)"

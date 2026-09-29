@@ -88,7 +88,7 @@ type vlmPayload struct {
 // Handle runs one VLM job.
 //
 // It is idempotent on the incident: a redelivery after a crash writes a *second*
-// observation, which is the correct shape — two runs of a model are two
+// observation, which is the correct shape - two runs of a model are two
 // observations and supersession is how the later one wins. What it must not do
 // is write a fabricated answer on the retry, which is why every non-success path
 // here ends in RecordDegraded.
@@ -129,8 +129,8 @@ func (w *VLMWorker) Handle(ctx context.Context, j jobs.Job) error {
 		ProfileID:  profileID,
 	}
 
-	// No runtime configured. This is a supported configuration — a site with no
-	// model is a real deployment — and the honest record is a degraded
+	// No runtime configured. This is a supported configuration - a site with no
+	// model is a real deployment - and the honest record is a degraded
 	// observation saying so, not a connection error and not a fabricated answer.
 	if w.Client == nil {
 		return w.record(ctx, base, nil, nil,
@@ -163,7 +163,7 @@ func (w *VLMWorker) Handle(ctx context.Context, j jobs.Job) error {
 	if callErr != nil {
 		// The call failed. A degraded observation is still written, because "the
 		// plane was unreachable at 03:14" is the fact a pilot is measuring. The
-		// error is returned so the job retries — a retry that also fails writes
+		// error is returned so the job retries - a retry that also fails writes
 		// another observation, which is honest: they were separate attempts.
 		if rerr := w.record(ctx, applied, evidenceList, &result,
 			result.DegradedReason, callErr.Error()); rerr != nil {
@@ -261,7 +261,7 @@ func applyResult(base observations.Observation, r Result) observations.Observati
 }
 
 // record persists a degraded observation. Every failure path in this worker ends
-// here, and it always calls RecordDegraded rather than Record — RecordDegraded
+// here, and it always calls RecordDegraded rather than Record - RecordDegraded
 // forces StructuredOutput to {} and InsufficientEvidence to true, so a consumer
 // that forgets to check the degradation fails closed rather than reading an
 // empty output as a negative answer.

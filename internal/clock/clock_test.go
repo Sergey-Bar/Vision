@@ -128,7 +128,7 @@ func TestNormalizedWithNeitherTime(t *testing.T) {
 	}
 }
 
-// The severe band excludes a device from corroboration, and the reason says so —
+// The severe band excludes a device from corroboration, and the reason says so -
 // because a corroborating signal that vanished without explanation is what makes
 // an operator stop trusting the product.
 func TestCorrelationExclusionCarriesItsReason(t *testing.T) {

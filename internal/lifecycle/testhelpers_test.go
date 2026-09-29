@@ -10,7 +10,7 @@ import (
 
 // emptySHA256 is the hash of zero bytes, which is what a link entry's empty
 // body hashes to. The manifest lists it so the entry is "listed" and the refusal
-// has to come from the type check rather than from the unlisted-file check —
+// has to come from the type check rather than from the unlisted-file check -
 // which is the point: both are refusals, and only one of them is the control
 // under test.
 const emptySHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"

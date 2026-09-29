@@ -106,8 +106,8 @@ func TestStoreRefusesAnUncompilableBundle(t *testing.T) {
 // a bundle that can be activated in one step is a bundle nobody read.
 //
 // The malformed-digest cases are here because they are still refusals the gate
-// owes an operator a clear reason for. The substantive case â€” a well-formed
-// digest that is not the digest of the changes â€” is
+// owes an operator a clear reason for. The substantive case - a well-formed
+// digest that is not the digest of the changes - is
 // TestActivationRecomputesTheDigestItIsGiven below.
 func TestActivationRefusesAMalformedDigestWithAReason(t *testing.T) {
 	svc, tenant := service(t)
@@ -156,7 +156,7 @@ func reviewed(version string, changes ...simulate.Change) simulate.Report {
 // Activation re-hashes the report it is given.
 //
 // It used to take a digest string and check only that 64 lowercase hex
-// characters had been supplied. `strings.Repeat("a", 64)` activated a bundle â€”
+// characters had been supplied. `strings.Repeat("a", 64)` activated a bundle —
 // and the whole premise of `internal/simulate`, "a bundle whose simulation
 // produced a different digest than the one acknowledged cannot be activated", was
 // a description of a check that did not exist.

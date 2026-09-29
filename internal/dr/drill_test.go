@@ -195,7 +195,7 @@ func TestRecoveryDrill(t *testing.T) {
 
 	// 3c. The restored database comes from a backup, and a backup is a snapshot
 	// of some earlier moment. The drill restores exactly what a restore would
-	// put back — the same tenant, site and device ids — and then asks the
+	// put back - the same tenant, site and device ids - and then asks the
 	// question that matters: does the restored ledger cover what the seal says it
 	// covered?
 	//
@@ -259,7 +259,7 @@ func TestRecoveryDrill(t *testing.T) {
 }
 
 // restoreRows puts back what a database restore would: the same tenant, site and
-// device, with the same ids. The identities are preserved deliberately — a
+// device, with the same ids. The identities are preserved deliberately - a
 // restore that renamed the tenant would be a different site, and the drill would
 // prove nothing about the original one.
 func restoreRows(t *testing.T, tenant, site, device string) {

@@ -91,7 +91,7 @@ func TestAWorkerThatLostItsLeaseCannotWriteATerminalState(t *testing.T) {
 
 	// The interleaving that matters is A reporting *while B is still working*,
 	// not after B has finished. Once B completes, the status is `processed` and
-	// the status check alone excludes A — so a test that lets B finish first
+	// the status check alone excludes A - so a test that lets B finish first
 	// passes even with no ownership check at all, and proves nothing. Here the
 	// row is still `processing` and is owned by B, which is exactly the window
 	// in which A's late write lands.
@@ -208,8 +208,8 @@ func TestAPermanentlyUnnormalizableEventReachesADeadLetter(t *testing.T) {
 	}
 }
 
-// The crash path. A worker killed mid-handle never calls Fail — there is no
-// cooperating code left to call it — so the reclaim path is what has to notice
+// The crash path. A worker killed mid-handle never calls Fail - there is no
+// cooperating code left to call it - so the reclaim path is what has to notice
 // that the retry budget is spent. Without the ceiling the row is reclaimed for
 // ever and never dead-letters, which is the same defect reached by a different
 // route, and the more common one on a site that loses power.

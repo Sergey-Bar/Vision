@@ -13,7 +13,7 @@ import (
 // format would make every already-deployed site refuse to upgrade, and nothing
 // can UPDATE schema_migrations to re-record it, because the migration is the
 // thing being blocked. The identity the digest omits — the file's own name and
-// phase — is already recorded in the ledger, and is compared instead.
+// phase - is already recorded in the ledger, and is compared instead.
 //
 // These two tests are the controls for those comparisons. Each removes a
 // comparison and the test fails, which is what makes the comparison live rather

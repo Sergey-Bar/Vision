@@ -27,7 +27,7 @@ type SLO struct {
 // Breaches evaluates the SLOs against the registry.
 //
 // It is a function and not a method on a struct because the SLO list is
-// configuration — a site may tighten the ingest target — and because the
+// configuration - a site may tighten the ingest target - and because the
 // evaluation must be testable without a running system.
 func Breaches(r *Registry, accepted, deadLettered, driftExcluded, correlations, contradictions, aiDegraded, diskFreePercent float64, incidentVisibilities []time.Duration) []SLO {
 	byName := map[string]float64{
@@ -110,7 +110,7 @@ func Breaches(r *Registry, accepted, deadLettered, driftExcluded, correlations, 
 	})
 
 	// SLO 6: correlation behaves under drift. A device past the severe band is
-	// excluded, and that is a configuration fact, not a failure — but too many of
+	// excluded, and that is a configuration fact, not a failure - but too many of
 	// them means the site cannot corroborate anything.
 	out = append(out, SLO{
 		Name:     "correlation_under_drift",

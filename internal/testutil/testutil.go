@@ -153,7 +153,7 @@ func ExpectError(t *testing.T, pool *pgxpool.Pool, sql string, args ...any) {
 }
 
 // Refusal is ExpectError for the callers that need to say *why* the statement was
-// refused — a unique violation, an append-only trigger, a check constraint.
+// refused - a unique violation, an append-only trigger, a check constraint.
 //
 // This matters more than it looks: "the statement failed" and "the statement
 // failed for the reason the product intends" are different claims, and a

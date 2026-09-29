@@ -60,7 +60,7 @@ func adapterOver(tr milestone.Transport) *milestone.Adapter {
 // A feed with more events than fit in one page used to be read one page deep.
 //
 // `transport.Get` captures the `Next-Cursor` header into `Response.Headers` —
-// deliberately, with a comment saying so — and nothing followed it. The poll
+// deliberately, with a comment saying so - and nothing followed it. The poll
 // then advanced `last_success_at` to the newest received_at of the records it
 // did read, so the next poll asked for `since = now` and every event after the
 // first 200 was never requested again.
@@ -207,8 +207,8 @@ func TestAnUnreadableFeedsIdentityIsStableAcrossPolls(t *testing.T) {
 // same id, and the inbox deduplicated the second away: one silently lost event
 // per page. The id is derived from the item's content instead.
 func TestTwoDistinctUnreadableItemsDoNotCollide(t *testing.T) {
-	// The two unreadable items are genuinely different events — different
-	// timestamps, different types — that happen to sit at the same position in
+	// The two unreadable items are genuinely different events - different
+	// timestamps, different types - that happen to sit at the same position in
 	// their pages. The old id was "<integration>:<path>:unparsed:<index within
 	// this page>", so they collided and the second was deduplicated away.
 	tr := &pagedTransport{

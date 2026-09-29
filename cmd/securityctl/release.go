@@ -286,17 +286,25 @@ func loadSigningKey(path string) (ed25519.PrivateKey, ed25519.PublicKey, error) 
 		return nil, nil, fmt.Errorf("read signing key: %w", err)
 	}
 
-	pub, priv, err := ed25519.GenerateKey(nil)
-	if err != nil {
-		return nil, nil, fmt.Errorf("generate signing key: %w", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return nil, nil, fmt.Errorf("create key directory: %w", err)
-	}
-	if err := os.WriteFile(path, []byte(hex.EncodeToString(priv)), 0o600); err != nil {
-		return nil, nil, fmt.Errorf("write signing key: %w", err)
-	}
-	return priv, pub, nil
+	// A missing key is a refusal, not an instruction to mint one.
+	//
+	// It used to generate a key here, with no message at all, and then printed
+	// the matching `--trusted-key` a few lines later — actively telling the
+	// operator to adopt it. A release signed by a key nobody had the offline half
+	// of is verifiable by anybody who reads the archive, the previously issued
+	// archives all become unverifiable, and the real key is orphaned on whatever
+	// host still has it. A typo in `--signing-key` on a build host does all of
+	// that silently and successfully.
+	//
+	// `internal/checkpoint` refuses the same situation in the same words: "a
+	// generated key would verify its own archives, which is the point of the
+	// offline verifier."
+	return nil, nil, fmt.Errorf(
+		"no signing key at %s. Refusing to generate one: a release signed by a key nobody "+
+			"holds the offline half of is verifiable by anybody who can read the archive, and "+
+			"every archive signed by the real key stops verifying. Generate a key deliberately "+
+			"and have it signed by whoever owns the trust anchor, then pass the path to that key",
+		path)
 }
 
 func decodePublicKey(s string) (ed25519PublicKey, error) {

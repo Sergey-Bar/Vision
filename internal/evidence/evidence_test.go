@@ -26,7 +26,7 @@ func newStore(t *testing.T) *evidence.Store {
 
 // storedAgo stands in for the `evidence` table's stored_at column. Sweep reads
 // age from there, never from the filesystem, so a test that wants an object to
-// look old says so here rather than touching the file's mtime — and the whole
+// look old says so here rather than touching the file's mtime ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â and the whole
 // point of D5 is that those two are not the same thing.
 type fakeEvidenceTable map[string]time.Time
 
@@ -39,10 +39,15 @@ func (f fakeEvidenceTable) storedAt(ref string) (time.Time, error) {
 	return t, nil
 }
 
+// testTenant is the tenant the fixtures in this file use. It is a constant rather
+// than a parameter so that a helper cannot quietly be given a different one in
+// one call site and not another.
+const testTenant = "tenant-a"
+
 // putStored stores bytes and records them in the table as stored now.
-func putStored(t *testing.T, s *evidence.Store, table fakeEvidenceTable, tenant, body string) evidence.Object {
+func putStored(t *testing.T, s *evidence.Store, table fakeEvidenceTable, body string) evidence.Object {
 	t.Helper()
-	obj, err := s.Put(tenant, strings.NewReader(body))
+	obj, err := s.Put(testTenant, strings.NewReader(body))
 	if err != nil {
 		t.Fatalf("Put: %v", err)
 	}
@@ -51,7 +56,7 @@ func putStored(t *testing.T, s *evidence.Store, table fakeEvidenceTable, tenant,
 }
 
 // The defaults are load-bearing and both were once wrong: Fsync took a plain
-// bool, so Options{Root: dir} — which is every caller — got a store that
+// bool, so Options{Root: dir} - which is every caller - got a store that
 // acknowledged evidence it had not fsynced, and VerifyHashOnRead was read by
 // nobody at all. A default that is silently the wrong value is worse than no
 // default, because the comment says otherwise and the comment is what people
@@ -252,7 +257,7 @@ func TestAlteredFileIsReportedNotServed(t *testing.T) {
 
 // Sweep deletes files. Its tenant argument builds the directory it walks and the
 // directory it deletes inside, and it used to join that argument onto the root
-// with no validation at all — so a tenant of "../../etc" walked out of the
+// with no validation at all ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â so a tenant of "../../etc" walked out of the
 // evidence root and os.Remove took whatever the policy said was expired with it.
 // Put validates the same argument; Sweep did not, in the one package whose
 // contract is that it is the only code touching that root.
@@ -382,11 +387,11 @@ func TestPutRefusesAnUnusableTenant(t *testing.T) {
 func TestSweepRespectsRetentionAndLegalHold(t *testing.T) {
 	s := newStore(t)
 	table := fakeEvidenceTable{}
-	old := putStored(t, s, table, "tenant-a", "old")
+	old := putStored(t, s, table, "old")
 	// Recorded as stored a hundred days ago, in the table rather than on the
 	// filesystem. That is where the retention law reads age from.
 	table[old.Ref] = time.Now().Add(-100 * 24 * time.Hour)
-	recent := putStored(t, s, table, "tenant-a", "recent")
+	recent := putStored(t, s, table, "recent")
 
 	policy := func(hold func(string) (bool, error)) evidence.RetentionPolicy {
 		return evidence.RetentionPolicy{
@@ -439,7 +444,7 @@ func TestSweepRespectsRetentionAndLegalHold(t *testing.T) {
 func TestSweepFailsClosedWhenLegalHoldCannotBeChecked(t *testing.T) {
 	s := newStore(t)
 	table := fakeEvidenceTable{}
-	obj := putStored(t, s, table, "tenant-a", "held")
+	obj := putStored(t, s, table, "held")
 	table[obj.Ref] = time.Now().Add(-100 * 24 * time.Hour)
 
 	result, err := s.Sweep("tenant-a", evidence.RetentionPolicy{
@@ -465,7 +470,7 @@ func TestSweepFailsClosedWhenLegalHoldCannotBeChecked(t *testing.T) {
 func TestStagingFilesAreNotEvidence(t *testing.T) {
 	s := newStore(t)
 	table := fakeEvidenceTable{}
-	putStored(t, s, table, "tenant-a", "real")
+	putStored(t, s, table, "real")
 	if err := os.WriteFile(filepath.Join(s.Root(), ".incoming-crashed"), []byte("partial"), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -477,7 +482,7 @@ func TestStagingFilesAreNotEvidence(t *testing.T) {
 		t.Fatalf("Sweep: %v", err)
 	}
 	// The staging file is not under the tenant directory, so a tenant sweep does
-	// not see it at all — which is the property that keeps a partial write from
+	// not see it at all - which is the property that keeps a partial write from
 	// being counted as evidence.
 	if result.Scanned == 0 {
 		t.Skip("tenant directory layout changed; this assertion no longer describes it")

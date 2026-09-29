@@ -99,7 +99,7 @@ type Outcome struct {
 	DriftExclusions []Exclusion
 	// Degraded is set when the evaluation had to proceed without a Tier C signal
 	// the rule wanted. It is recorded on the outcome and, by the caller, on the
-	// incident — so a pilot can measure how often the AI path was actually live
+	// incident - so a pilot can measure how often the AI path was actually live
 	// rather than assuming it was.
 	Degraded       bool
 	DegradedReason DegradedReason
@@ -174,7 +174,7 @@ func NewEngine(b *CompiledBundle, ctx Context) *Engine {
 // Evaluate runs every enabled rule against one trigger signal and the other
 // signals available to corroborate it.
 //
-// Rules are evaluated in compiled order — priority descending, id ascending —
+// Rules are evaluated in compiled order - priority descending, id ascending -
 // and the first suppressing rule wins. The order is total and stable, so the
 // result does not depend on how the bundle happened to be written.
 //
@@ -291,7 +291,7 @@ func (e *Engine) Resolve(outcomes []Outcome) Decision {
 		SupportingObservations: best.SupportingObservations,
 		// The drift exclusions of every outcome were collected above, including
 		// this one's, so they are not appended a second time. They used to be, and
-		// every exclusion in explain() was counted twice — the one number an
+		// every exclusion in explain() was counted twice - the one number an
 		// operator reads to decide whether a site has a clock problem.
 		DriftExclusions: append([]Exclusion{}, d.DriftExclusions...),
 		Degraded:        d.Degraded || best.Degraded,
@@ -405,7 +405,7 @@ func (e *Engine) evaluateRule(rule CompiledRule, trigger Signal, available []Sig
 //
 // Degradation is checked first, and deliberately so. If a Tier C signal the rule
 // asked for was absent, the count of the remaining signals says nothing about
-// whether the incident is corroborated — it says how many non-AI signals
+// whether the incident is corroborated - it says how many non-AI signals
 // agreed. Reporting CORROBORATED there would tell an operator the evidence was
 // sufficient when the rule itself said it was not.
 func (e *Engine) stateFor(rule CompiledRule, out *Outcome) (VerificationState, string) {

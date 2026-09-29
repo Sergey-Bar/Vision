@@ -124,7 +124,7 @@ type Loops struct {
 // Exported because "build the pipeline" and "run the pipeline" are different
 // decisions, and a test needs the first without the second. Start is the only
 // thing that spawns goroutines, so a test that builds a pipeline has exactly one
-// caller driving it — which is what makes an assertion about what a pass did
+// caller driving it - which is what makes an assertion about what a pass did
 // attributable to that pass.
 func New(d Deps) *Loops {
 	return &Loops{Deps: d, hostname: hostname()}
@@ -146,7 +146,7 @@ func Start(ctx context.Context, d Deps) *Loops {
 // runGauges samples the backlog every few seconds.
 //
 // A separate loop rather than a sample at the end of a pass, because a gauge
-// that updates only when work happens reads zero on a healthy idle site — and a
+// that updates only when work happens reads zero on a healthy idle site - and a
 // backlog of zero that was never measured is indistinguishable from a backlog of
 // zero that is real. The SLO alerts are evaluated against these numbers, so an
 // alert threshold watching an unmeasured gauge is an alert that never fires.
@@ -419,8 +419,8 @@ func (l *Loops) PollOnce(ctx context.Context) {
 // ---------------------------------------------------------------------------
 
 // integrations has last_success_at; the cursor reuses it rather than adding a
-// column. It is the same fact — the last time this integration got as far as
-// being read — and a new column would be a migration to store a number the table
+// column. It is the same fact - the last time this integration got as far as
+// being read - and a new column would be a migration to store a number the table
 // already has a home for.
 const cursorSQL = `
 UPDATE integrations SET last_success_at = $3
@@ -509,8 +509,8 @@ func (l *Loops) ConsumeOnce(ctx context.Context) {
 // process runs one claimed event through the whole downstream pipeline.
 //
 // Every failure path here calls inbox.Fail, which owns the attempt counter and
-// the dead-letter decision. Letting the lease lapse instead — which is what this
-// used to do on all three paths — meant nothing ever incremented to the retry
+// the dead-letter decision. Letting the lease lapse instead - which is what this
+// used to do on all three paths - meant nothing ever incremented to the retry
 // bound, so an event that could never normalize was reclaimed every lease period
 // for the life of the process: no backoff, no terminal state, and an operator
 // watching a dead-letter table that stayed empty while the backlog grew. That is
@@ -580,7 +580,7 @@ func (l *Loops) fail(ctx context.Context, item inbox.Lease, what string, cause e
 	status, err := l.Deps.Inbox.Fail(ctx, item.Key, item.Owner, cause, l.Deps.Inbox.MaxAttempts)
 	if err != nil {
 		// The failure to record the failure. The lease is still held and will
-		// lapse, so the event is retried rather than lost — and expireExhausted
+		// lapse, so the event is retried rather than lost - and expireExhausted
 		// in the claim is what stops it retrying for ever.
 		l.log("could not record the failed attempt", "source_event_id",
 			item.Key.SourceEventID, "error", err.Error())
@@ -601,7 +601,7 @@ func (l *Loops) fail(ctx context.Context, item inbox.Lease, what string, cause e
 // because a rule that filters on device will then match the wrong camera.
 //
 // The lease is not a parameter. The tenant and site come from Deps, never from
-// the item, so a leased row cannot widen the lookup — and a future caller
+// the item, so a leased row cannot widen the lookup - and a future caller
 // passing a lease from another tenant would get a query that silently ignores it.
 func (l *Loops) resolveDevice(ctx context.Context, ref string) (deviceID, zoneID string, err error) {
 	if ref == "" {
@@ -626,7 +626,7 @@ func (l *Loops) resolveDevice(ctx context.Context, ref string) (deviceID, zoneID
 //
 // Both edges are attributed. An edge with no asserted_by is refused by the
 // schema, because an unattributed edge is exactly the one somebody would want to
-// be able to deny — and both here are things the core derived, so both name it.
+// be able to deny - and both here are things the core derived, so both name it.
 //
 // The normalized record is not a parameter. The edges are built from the device
 // and zone resolveDevice already resolved, and carrying the whole record in
@@ -773,7 +773,7 @@ func (l *Loops) decide(ctx context.Context, item inbox.Lease, result normalize.R
 
 // incidentTitle names the incident after the rule that raised it. A title is
 // what an operator sees in the queue, so it names the cause rather than the
-// effect — but it is derived from stored decision fields, never from model prose.
+// effect - but it is derived from stored decision fields, never from model prose.
 func incidentTitle(d rules.Decision) string {
 	title := d.RuleID
 	if d.Severity != "" {
@@ -828,7 +828,7 @@ var errNoActiveBundle = errors.New("pipeline: no active rule bundle")
 
 // activeBundle returns the compiled active bundle, cached by (version, hash).
 //
-// Compilation is not free — YAML, JSON Schema, and a semantic pass — and this is
+// Compilation is not free - YAML, JSON Schema, and a semantic pass - and this is
 // the hot path, once per event. Recompiling per event would make the rule engine
 // the most expensive thing in the pipeline for no benefit: the bundle changes
 // when an operator activates one, not when an event arrives.
@@ -878,7 +878,7 @@ func (l *Loops) activeBundle(ctx context.Context) (*activeBundle, error) {
 // *store's* columns; the ones inside the compiled bundle are whatever the YAML
 // body declared. An operator can store a body whose `version:` does not match the
 // version it was stored under, and an incident must cite the identity the store
-// knows — otherwise the bundle a reviewer opens is not the one the incident was
+// knows - otherwise the bundle a reviewer opens is not the one the incident was
 // decided under.
 type activeBundle struct {
 	Compiled    *rules.CompiledBundle
@@ -901,8 +901,8 @@ func (l *Loops) runOutbox(ctx context.Context) {
 	if relay == nil {
 		// Named, not silent, and deliberately not given a default handler. A
 		// core with no relay accumulates an outbox nobody reads, and the backlog
-		// gauge stays at zero because nothing is watching it. The alternative —
-		// installing an acknowledge-and-log handler so the queue drains — is
+		// gauge stays at zero because nothing is watching it. The alternative -
+		// installing an acknowledge-and-log handler so the queue drains - is
 		// strictly worse: it converts a visible stall into a silent loss, and the
 		// side effects it discarded are the ones an operator would have to notice
 		// are missing. There is no default handler for that reason.

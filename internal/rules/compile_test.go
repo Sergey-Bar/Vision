@@ -418,7 +418,7 @@ func TestAIDegradationMustBeOneOfTwoValues(t *testing.T) {
 }
 
 func TestProceedWithoutWarns(t *testing.T) {
-	// Not forbidden — an operator may want it — but it means incidents are
+	// Not forbidden - an operator may want it - but it means incidents are
 	// created on less evidence whenever the model is down, and that should be a
 	// conscious choice rather than a silent one.
 	_, problems := compile(t, wrap(`
