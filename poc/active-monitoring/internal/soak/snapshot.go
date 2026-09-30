@@ -1,0 +1,135 @@
+package soak
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"image"
+	"image/draw"
+	"image/jpeg"
+	"os"
+	"path/filepath"
+
+	"github.com/Sergey-Bar/ai-captain-poc/internal/detect"
+	"github.com/Sergey-Bar/ai-captain-poc/internal/evidence"
+	"github.com/Sergey-Bar/ai-captain-poc/internal/overlay"
+	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
+)
+
+// The crossing snapshot. T6.3.
+//
+// It is the picture of the DECISION: the frame the pipeline was looking at when
+// it decided this track had crossed, with the APPROVED boxes and the crossing
+// line drawn on it, stored beside the clip and pointed at by
+// `detections.snapshot_ref`.
+//
+// The clip answers "what happened". This answers "what did the system see, and
+// what did it decide that was a crossing" — which is the question an operator
+// asks three days later when the clip has been rotated away and the run is over.
+//
+// Four things already existed and this wires them together: `overlay.Draw`,
+// `evidence.PutKind`, `store.SetSnapshot` and `LastJPEG`. The drawing code lives
+// in `internal/overlay` and not here because `internal/ui` needs it too and both
+// of them sit above `internal/soak`; `scripts/verify.ps1` has a boundary row for
+// exactly that and would fail the build if the drawing were inlined into either.
+
+// storeSnapshot renders, stores and records the snapshot for one detection.
+//
+// It runs BEFORE `cutAndStore`, and that order is the point: the cut is a
+// synchronous ffmpeg re-encode that blocks the frame loop for as long as the
+// clip takes, and a snapshot written after it would be a snapshot of a LATER
+// frame. The picture of a decision has to be the frame the decision was made on.
+//
+// A failure here is recorded and the run continues. A missing snapshot is
+// visible — the screen renders `no data` — and a run that died because a JPEG
+// could not be encoded would have thrown away a real detection over a
+// convenience.
+func (r *Runner) storeSnapshot(ctx context.Context, id string, c detect.Crossing, aiState string) {
+	if r.opt.Evidence == nil || r.opt.LastJPEG == nil {
+		return
+	}
+	raw := r.opt.LastJPEG()
+	if len(raw) == 0 {
+		// No frame has been read yet. That is the absence of a picture, and the
+		// screen says so; inventing one is the one thing this must not do.
+		return
+	}
+	drawn, err := r.drawSnapshot(raw, aiState)
+	if err != nil {
+		r.noteSnapshotFault(ctx, c, "the crossing snapshot could not be drawn: "+err.Error())
+		return
+	}
+
+	staging := filepath.Join(r.opt.DataRoot, "staging")
+	if err := os.MkdirAll(staging, 0o755); err != nil {
+		r.noteSnapshotFault(ctx, c, "the staging directory for the crossing snapshot could not be created: "+err.Error())
+		return
+	}
+	tmp := filepath.Join(staging, id+"-snapshot.jpg")
+	if err := os.WriteFile(tmp, drawn, 0o644); err != nil {
+		r.noteSnapshotFault(ctx, c, "the crossing snapshot could not be written: "+err.Error())
+		return
+	}
+	// PutKind reads the copy back out of the store and hashes it before it
+	// returns, so a snapshot that exists is a snapshot whose bytes are on the
+	// medium — the same R5 the clip path has always had.
+	stored, err := r.opt.Evidence.PutKind(tmp, evidence.CrossingSnapshot)
+	if err != nil {
+		r.noteSnapshotFault(ctx, c, "the crossing snapshot could not be stored: "+err.Error())
+		return
+	}
+	ref := r.opt.Evidence.StorageRefKind(stored.Hash, stored.Kind)
+	if err := r.opt.Store.SetSnapshot(ctx, id, ref, stored.Kind); err != nil {
+		r.noteSnapshotFault(ctx, c, "the crossing snapshot was stored but not recorded against the detection: "+err.Error())
+		return
+	}
+	r.logf("crossing snapshot %s (%d bytes) recorded as %s", stored.Hash[:12], stored.Bytes, stored.Kind)
+}
+
+func (r *Runner) noteSnapshotFault(ctx context.Context, c detect.Crossing, detail string) {
+	_ = r.opt.Store.RecordFault(ctx, r.opt.RunID, store.Fault{
+		At: c.At, Reason: store.FaultClipRefused, Detail: detail,
+	})
+	r.logf("%s", detail)
+}
+
+// drawSnapshot renders the last frame with the picture the pipeline decided on.
+//
+// The boxes are `Engine.LastSplit().Approved` — the boxes the pipeline ACTED on,
+// not the raw model output. Drawing the raw output would make the snapshot
+// evidence for a decision that was never made, which is the same defect D-6
+// fixed on the live screen and it would be reintroduced in the one artefact that
+// outlives the run.
+func (r *Runner) drawSnapshot(raw []byte, aiState string) ([]byte, error) {
+	src, err := jpeg.Decode(bytes.NewReader(raw))
+	if err != nil {
+		return nil, fmt.Errorf("the last frame is not decodable: %w", err)
+	}
+	b := src.Bounds()
+	canvas := image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
+	draw.Draw(canvas, canvas.Bounds(), src, b.Min, draw.Src)
+
+	spec := overlay.Spec{
+		Provenance:   r.opt.Provenance,
+		AIState:      aiState,
+		AIStateKnown: aiState != "",
+		Note:         "the frame the crossing was decided on, with the boxes the pipeline approved",
+	}
+	for _, l := range r.opt.Zone.Lines {
+		spec.Lines = append(spec.Lines, overlay.Line{Name: l.Name, A: l.A, B: l.B})
+	}
+	if r.opt.Engine != nil {
+		for _, bx := range r.opt.Engine.LastSplit().Approved {
+			spec.Boxes = append(spec.Boxes, overlay.TrackedBox{Box: overlay.Box{
+				Class: bx.Class, Score: bx.Score, X1: bx.X1, Y1: bx.Y1, X2: bx.X2, Y2: bx.Y2,
+			}})
+		}
+	}
+	overlay.Draw(canvas, spec)
+
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, canvas, &jpeg.Options{Quality: 80}); err != nil {
+		return nil, fmt.Errorf("the drawn snapshot could not be encoded: %w", err)
+	}
+	return buf.Bytes(), nil
+}

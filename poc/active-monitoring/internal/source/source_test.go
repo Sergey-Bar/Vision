@@ -173,6 +173,48 @@ func TestRTSPPinsTCPTransport(t *testing.T) {
 	}
 }
 
+// TestARtspSourceCarriesNoOptionFfmpegRejects is the test for a bug that cost a
+// whole run and would have cost it again.
+//
+// `-reconnect`, `-reconnect_streamed` and `-reconnect_delay_max` are HTTP
+// PROTOCOL options. ffmpeg's RTSP demuxer has no such option, answers
+// `Option reconnect not found.` and exits — so the reader exits, the pipeline
+// records nothing, and the report says zero of everything. That report looks
+// exactly like a run over an empty road.
+//
+// The rule is checked HERE, on the shape of the argument list, rather than by
+// running ffmpeg: a test that shells out to a binary is a test that skips itself
+// on a machine without one, and the bug lived in a list of strings.
+func TestARtspSourceCarriesNoOptionFfmpegRejects(t *testing.T) {
+	s, err := Parse("rtsp", "rtsp://127.0.0.1:8554/street")
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := strings.Join(s.InputArgs(), " ")
+	for _, httpOnly := range []string{"-reconnect ", "-reconnect_streamed", "-reconnect_delay_max"} {
+		if strings.Contains(args, httpOnly) {
+			t.Fatalf("the rtsp input carries %q, which the rtsp demuxer does not have: ffmpeg answers `Option reconnect not found` and exits, so the run records nothing and the report reads as an empty road. args: %s", httpOnly, args)
+		}
+	}
+	if !strings.Contains(args, "-rtsp_transport tcp") {
+		t.Fatalf("tcp transport is not pinned: %s", args)
+	}
+	if !strings.Contains(args, "-timeout ") {
+		t.Fatalf("a live source with no socket timeout can stall the run indefinitely rather than ending it with a reason: %s", args)
+	}
+
+	// The mirror image, so the guard is not satisfied by deleting reconnecting
+	// everywhere. HTTP really does have these options and a stream drop there is
+	// recoverable, so they stay.
+	u, err := Parse("url", "http://example.test/stream.m3u8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if uargs := strings.Join(u.InputArgs(), " "); !strings.Contains(uargs, "-reconnect 1") {
+		t.Fatalf("the http source lost its reconnect options, which the http demuxer does have: %s", uargs)
+	}
+}
+
 func TestLabelIsDerivedNotComposed(t *testing.T) {
 	loop, _ := Parse("loop", "f.mp4")
 	if !strings.Contains(loop.Label(), "no live camera") {
@@ -181,6 +223,34 @@ func TestLabelIsDerivedNotComposed(t *testing.T) {
 	rtsp, _ := Parse("rtsp", "rtsp://c/s")
 	if strings.Contains(rtsp.Label(), "no live camera") {
 		t.Fatalf("rtsp label claims no live camera: %q", rtsp.Label())
+	}
+}
+
+// TestARelayIsNeverLabelledACamera is D-5 as a test. The sentence is derived
+// from one flag, so this is the only place that decision can go wrong: an
+// operator relaying a recording through an rtsp server and seeing "live rtsp
+// camera" on the screen has been told there is hardware there, and there is not.
+func TestARelayIsNeverLabelledACamera(t *testing.T) {
+	relay, _ := Parse("rtsp", "rtsp://127.0.0.1:8554/street")
+	relay.Relay = true
+	got := relay.Label()
+	if strings.Contains(got, "live rtsp camera") {
+		t.Fatalf("a relay is labelled as a camera: %q", got)
+	}
+	if !strings.Contains(got, "NOT a camera") || !strings.Contains(got, "relay of recorded material") {
+		t.Fatalf("the relay sentence must say what it is in words, because that is the sentence a viewer reads: %q", got)
+	}
+	// The same claim has to survive LabelRedacted, because the REPORT prints that
+	// one and a screen that says "relay" beside a report that says "camera" is
+	// worse than either being wrong alone.
+	if r := relay.LabelRedacted(); !strings.Contains(r, "NOT a camera") {
+		t.Fatalf("the redacted label dropped the relay claim: %q", r)
+	}
+	// A real camera keeps the camera sentence. The flag is what chooses, and
+	// choosing wrongly in the other direction would make every camera anonymous.
+	cam, _ := Parse("rtsp", "rtsp://camera/stream")
+	if !strings.Contains(cam.Label(), "live rtsp camera") {
+		t.Fatalf("a camera with relay=false lost its label: %q", cam.Label())
 	}
 }
 

@@ -1,0 +1,257 @@
+{
+  "anchors": "models\\yolov8n.anchors.txt",
+  "classes": 0,
+  "decoded_boxes": [
+    {
+      "cls": "traffic light",
+      "score": 0.369852,
+      "x1": 0.612167,
+      "x2": 0.631628,
+      "y1": 0.218799,
+      "y2": 0.279958
+    },
+    {
+      "cls": "traffic light",
+      "score": 0.326137,
+      "x1": 0.088521,
+      "x2": 0.110095,
+      "y1": 0.327589,
+      "y2": 0.37826
+    },
+    {
+      "cls": "traffic light",
+      "score": 0.323243,
+      "x1": 0.051577,
+      "x2": 0.072571,
+      "y1": 0.205326,
+      "y2": 0.241986
+    },
+    {
+      "cls": "traffic light",
+      "score": 0.298098,
+      "x1": 0.033085,
+      "x2": 0.107814,
+      "y1": 0.79502,
+      "y2": 0.930349
+    },
+    {
+      "cls": "traffic light",
+      "score": 0.287858,
+      "x1": 0.299666,
+      "x2": 0.324514,
+      "y1": 0.469546,
+      "y2": 0.550833
+    },
+    {
+      "cls": "traffic light",
+      "score": 0.286379,
+      "x1": 0.091232,
+      "x2": 0.109203,
+      "y1": 0.170362,
+      "y2": 0.231311
+    },
+    {
+      "cls": "car",
+      "score": 0.25507,
+      "x1": 0.398336,
+      "x2": 0.460195,
+      "y1": 0.456273,
+      "y2": 0.527407
+    },
+    {
+      "cls": "traffic light",
+      "score": 0.253014,
+      "x1": 0.00362,
+      "x2": 0.018178,
+      "y1": 0.179881,
+      "y2": 0.225319
+    },
+    {
+      "cls": "traffic light",
+      "score": 0.233437,
+      "x1": 0.7945,
+      "x2": 0.813956,
+      "y1": 0.234992,
+      "y2": 0.280538
+    },
+    {
+      "cls": "traffic light",
+      "score": 0.195748,
+      "x1": 0.712262,
+      "x2": 0.736077,
+      "y1": 0.222281,
+      "y2": 0.279134
+    },
+    {
+      "cls": "traffic light",
+      "score": 0.181093,
+      "x1": 0.89074,
+      "x2": 0.924654,
+      "y1": 0.254905,
+      "y2": 0.320611
+    },
+    {
+      "cls": "traffic light",
+      "score": 0.13478,
+      "x1": 0.103541,
+      "x2": 0.120424,
+      "y1": 0.367061,
+      "y2": 0.473784
+    },
+    {
+      "cls": "traffic light",
+      "score": 0.123815,
+      "x1": 0.00207,
+      "x2": 0.01632,
+      "y1": 0.189187,
+      "y2": 0.24927
+    },
+    {
+      "cls": "parking meter",
+      "score": 0.086736,
+      "x1": 0.047932,
+      "x2": 0.114778,
+      "y1": 0.793454,
+      "y2": 0.932559
+    },
+    {
+      "cls": "traffic light",
+      "score": 0.049965,
+      "x1": 0.110996,
+      "x2": 0.126582,
+      "y1": 0.367708,
+      "y2": 0.470872
+    },
+    {
+      "cls": "traffic light",
+      "score": 0.037308,
+      "x1": 0.638923,
+      "x2": 0.684106,
+      "y1": 0.373441,
+      "y2": 0.45803
+    }
+  ],
+  "decoder_family": "anchored",
+  "decoder_family_note": "ANCHORED: this export publishes one output per stride and its box coordinates are offsets from per-cell anchor boxes. The anchors are in the model's .cfg and are NOT in the ONNX file, so this export cannot be decoded without them. See models/yolov8n.anchors.txt and the --anchors flag.",
+  "frame_source": "one real frame from testdata\\youtube\\sTF-6_xinUU.mp4",
+  "has_objectness": true,
+  "has_objectness_decided_by": "85 fields against the COCO-80 vocabulary (the model carries no names)",
+  "input": {
+    "declared_shape": [
+      "unk__2104",
+      416,
+      416,
+      3
+    ],
+    "input_h": 416,
+    "input_w": 416,
+    "layout": "nhwc",
+    "name": "input_1:0"
+  },
+  "letterbox": {
+    "content_h": 250,
+    "content_w": 416,
+    "frame_h": 384,
+    "frame_w": 640,
+    "pad_x": 0,
+    "pad_y": 83
+  },
+  "measured_by": "pyworker/probe_model.py, through server.Engine's own load path",
+  "model": "yolov8n.onnx",
+  "names_verbatim": "",
+  "observed": {
+    "box_fields": {
+      "max": 3.464284,
+      "min": -4.604989
+    },
+    "row_max": 3.464284,
+    "row_min": -4.604989,
+    "score_fields": {
+      "max": 0.999019,
+      "min": 0.0
+    }
+  },
+  "output": {
+    "count": 3,
+    "declared_shapes": [
+      [
+        "unk__2105",
+        "unk__2106",
+        "unk__2107",
+        3,
+        85
+      ],
+      [
+        "unk__2108",
+        "unk__2109",
+        "unk__2110",
+        3,
+        85
+      ],
+      [
+        "unk__2111",
+        "unk__2112",
+        "unk__2113",
+        3,
+        85
+      ]
+    ],
+    "fields": 85,
+    "name": "Identity:0",
+    "names": [
+      "Identity:0",
+      "Identity_1:0",
+      "Identity_2:0"
+    ],
+    "observed_shapes": [
+      [
+        1,
+        52,
+        52,
+        3,
+        85
+      ],
+      [
+        1,
+        26,
+        26,
+        3,
+        85
+      ],
+      [
+        1,
+        13,
+        13,
+        3,
+        85
+      ]
+    ],
+    "rows": "fields-last"
+  },
+  "providers": [
+    "CPUExecutionProvider"
+  ],
+  "telemetry": {
+    "candidates": 10647,
+    "classes": 0,
+    "coord_space": "pixel",
+    "decoder_family": "anchored",
+    "dropped_degenerate": 0,
+    "dropped_tiny": 2,
+    "fields": 85,
+    "has_objectness": true,
+    "identical_geometry": 0,
+    "input_h": 416,
+    "input_w": 416,
+    "layout": "nhwc",
+    "median_box_area": 0.001481,
+    "median_object_px": 24.36,
+    "nms_class_iou": 0.45,
+    "nms_global_iou": 0.75,
+    "post_nms": 18,
+    "post_nms_class": 18,
+    "pre_nms": 61,
+    "scales": 3
+  },
+  "understood": true
+}

@@ -47,6 +47,9 @@ const (
 	RuleEscape    = "escapes-the-store"
 	RuleLink      = "symlink-or-junction"
 	RuleWindows   = "reserved-or-illegal-character"
+	// RuleKind is T7.3: a file whose kind is not one of the three is a file nobody
+	// can open with confidence about what it is.
+	RuleKind = "not-an-evidence-kind"
 )
 
 // Store is the content-addressed directory.
@@ -81,10 +84,93 @@ func isSHA256(s string) bool {
 	return true
 }
 
+// extFor is declared below, next to the kind vocabulary it belongs to.// The kinds of evidence a detection can point at. T7.3. Closed, and each one
+// answers a different question a reader asks:
+//
+//	CrossingSnapshot  a rendered still of the crossing, for "what did it decide,
+//	                  and on what"
+//	EventClip         a video of the crossing, for "what actually happened"
+//	Frame             one source frame, for "what did the detector see"
+//
+// They live HERE and not in internal/store, and the direction is one way: this
+// package is the lower one, because it owns the bytes and it is what chooses the
+// extension a reader's file manager will show them. A vocabulary defined in the
+// storage layer and imported downward would be a second source of truth for a
+// set of three strings, and the failure mode of that is an extension that says
+// `.mp4` beside a row that says `crossing_snapshot`.
+const (
+	CrossingSnapshot = "crossing_snapshot"
+	EventClip        = "event_clip"
+	Frame            = "frame"
+)
+
+// ValidKind is the closed set. A kind outside it is refused rather than stored: a
+// reader who cannot look the kind up will not know what opening the file means.
+func ValidKind(k string) bool {
+	switch k {
+	case CrossingSnapshot, EventClip, Frame:
+		return true
+	}
+	return false
+}
+
+// extFor is the extension each evidence kind is stored with.
+//
+// It is chosen by the KIND and not by the caller, because a caller that chose it
+// would eventually choose it wrong, and the consequence is a file a reader opens
+// not knowing what it is: a picture where they expected a video, or a video
+// where they expected the picture of the decision. The extension is the cheapest
+// possible kind marker — it needs no database read to interpret, so a directory
+// listing is already readable — and it is why the kind has to agree with the
+// bytes rather than being an attribute bolted on afterwards.
+func extFor(kind string) string {
+	switch kind {
+	case EventClip:
+		return ".mp4"
+	case CrossingSnapshot, Frame:
+		return ".jpg"
+	default:
+		// An unknown kind is stored as `.bin` rather than guessed at. A file
+		// whose extension says nothing is honest about saying nothing.
+		return ".bin"
+	}
+}
+
+// RefKind for a hash and a kind. The hash rules are the whole of the naming rule
+// and live in `refForHash`; the kind only chooses the extension, which is what
+// makes a directory listing readable without a database.
+func (s *Store) RefKind(sum, kind string) (string, error) {
+	if !ValidKind(kind) {
+		return "", &Refused{kind, RuleKind, "the three kinds are " + EventClip + ", " +
+			CrossingSnapshot + " and " + Frame +
+			"; a file whose kind is not one of them is a file nobody can open with confidence"}
+	}
+	full, err := s.refForHash(sum)
+	if err != nil {
+		return "", err
+	}
+	out := strings.TrimSuffix(full, ".mp4") + extFor(kind)
+	if !within(s.Root, out) {
+		return "", &Refused{sum, RuleEscape, "the derived path does not lie inside the store root"}
+	}
+	return out, nil
+}
+
 // Ref for a hash, with every check a supplied path would need. It is exported
 // so the tests can enumerate the refusals, and so a future caller that tries to
 // store under a name it chose is caught by the same rules.
+//
+// The default kind is `event_clip`, which is the kind every pre-T7.3 write was:
+// a clip. Callers that write a picture must say so, because saying so is the
+// entire content of T7.3.
 func (s *Store) Ref(sum string) (string, error) {
+	return s.RefKind(sum, EventClip)
+}
+
+// refForHash is the body both Ref and RefKind share. The hash rules are the whole
+// of the naming rule: 64 lowercase hex characters and nothing else, so a path can
+// never contain a separator. The kind only chooses the extension.
+func (s *Store) refForHash(sum string) (string, error) {
 	if sum == "" {
 		return "", &Refused{sum, RuleEmpty, "an empty content hash names nothing, so the file it would refer to cannot exist"}
 	}
@@ -127,7 +213,6 @@ func (s *Store) Ref(sum string) (string, error) {
 	}
 	return full, nil
 }
-
 func within(root, p string) bool {
 	rel, err := filepath.Rel(root, p)
 	if err != nil {
@@ -141,19 +226,32 @@ func within(root, p string) bool {
 
 // Put stores the file at src under its own hash and verifies the copy by
 // reading it back. It returns the hash and the size.
-func (s *Store) Put(src string) (Stored, error) {
+//
+// The kind defaults to `event_clip`, which is what every pre-T7.3 write was. A
+// caller writing a picture uses `PutKind`, and the reason the default is a clip
+// rather than a refusal is that refusing here would break every existing call
+// site for a rule that has no teeth: the bytes are identical either way and only
+// the extension differs.
+func (s *Store) Put(src string) (Stored, error) { return s.PutKind(src, EventClip) }
+
+// PutKind is `Put` with the kind said out loud. T7.3.
+func (s *Store) PutKind(src, kind string) (Stored, error) {
+	if !ValidKind(kind) {
+		return Stored{}, &Refused{kind, RuleKind, "the three kinds are " + EventClip + ", " +
+			CrossingSnapshot + " and " + Frame + "; storing a file as some other kind is storing it as something a reader cannot open"}
+	}
 	info, err := os.Stat(src)
 	if err != nil {
-		return Stored{}, fmt.Errorf("evidence: cannot read the clip at %s: %w", src, err)
+		return Stored{}, fmt.Errorf("evidence: cannot read the %s at %s: %w", kind, src, err)
 	}
 	if info.Size() == 0 {
-		return Stored{}, fmt.Errorf("evidence: the clip at %s is zero bytes; a clip that shows nothing is not evidence, and storing it would make AC3 count a lie", src)
+		return Stored{}, fmt.Errorf("evidence: the %s at %s is zero bytes; evidence that shows nothing is not evidence, and storing it would make AC3 count a lie", kind, src)
 	}
 	sum, size, err := hashFile(src)
 	if err != nil {
 		return Stored{}, err
 	}
-	dst, err := s.Ref(sum)
+	dst, err := s.RefKind(sum, kind)
 	if err != nil {
 		return Stored{}, err
 	}
@@ -163,7 +261,7 @@ func (s *Store) Put(src string) (Stored, error) {
 	if _, err := os.Stat(dst); err == nil {
 		// Already stored: the content is the same, so there is nothing to do.
 		// Deduplication is the point of a content-addressed store.
-		return Stored{Hash: sum, Path: dst, Bytes: size, Deduplicated: true}, nil
+		return Stored{Hash: sum, Path: dst, Bytes: size, Kind: kind, Deduplicated: true}, nil
 	}
 	if err := copyFile(src, dst); err != nil {
 		return Stored{}, err
@@ -172,29 +270,43 @@ func (s *Store) Put(src string) (Stored, error) {
 	// that the bytes landed.
 	got, gotSize, err := hashFile(dst)
 	if err != nil {
-		return Stored{}, fmt.Errorf("evidence: the stored clip at %s cannot be read back, so it is not stored: %w", dst, err)
+		return Stored{}, fmt.Errorf("evidence: the stored %s at %s cannot be read back, so it is not stored: %w", kind, dst, err)
 	}
 	if got != sum || gotSize != size {
 		_ = os.Remove(dst)
-		return Stored{}, fmt.Errorf("evidence: the stored clip at %s reads back as %s (%d bytes) but was %s (%d bytes); the copy is discarded rather than recorded as evidence",
-			dst, got, gotSize, sum, size)
+		return Stored{}, fmt.Errorf("evidence: the stored %s at %s reads back as %s (%d bytes) but was %s (%d bytes); the copy is discarded rather than recorded as evidence",
+			kind, dst, got, gotSize, sum, size)
 	}
-	return Stored{Hash: sum, Path: dst, Bytes: size}, nil
+	return Stored{Hash: sum, Path: dst, Bytes: size, Kind: kind}, nil
 }
 
 // Stored is the result of a successful Put.
 type Stored struct {
-	Hash         string
-	Path         string
-	Bytes        int64
+	Hash  string
+	Path  string
+	Bytes int64
+	// Kind is what this file IS, and it decided the extension the file was
+	// written with. T7.3. It is on the result rather than inferred from the path
+	// because a caller that has to re-derive it from a string is a caller that
+	// will eventually get it wrong.
+	Kind         string
 	Deduplicated bool
 }
 
 // StorageRef is the value written into the database and into the pushed event.
 // It is relative to the store root, so a data root that moves between machines
 // does not invalidate the references in the audit trail.
-func (s *Store) StorageRef(sum string) string {
-	return filepath.ToSlash(filepath.Join(sum[:2], sum[2:4], sum+".mp4"))
+func (s *Store) StorageRef(sum string) string { return s.StorageRefKind(sum, EventClip) }
+
+// StorageRefKind is `StorageRef` for an evidence kind.
+//
+// It exists because the extension is chosen by the KIND and `StorageRef` used to
+// hardcode `.mp4`. A caller that stored a JPEG and then asked for the reference
+// would have been handed the name of a file that does not exist, which is not a
+// wrong answer that looks right — it is a reference to nothing, and the row
+// pointing at it would look complete.
+func (s *Store) StorageRefKind(sum, kind string) string {
+	return filepath.ToSlash(filepath.Join(sum[:2], sum[2:4], sum+extFor(kind)))
 }
 
 // Get reads a stored object back and returns its hash. It is what AC3 calls.

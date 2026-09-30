@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Sergey-Bar/ai-captain-poc/internal/ai"
+	"github.com/Sergey-Bar/ai-captain-poc/internal/classify"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/detect"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/evidence"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/recorder"
@@ -98,7 +99,16 @@ type RunnerOptions struct {
 	// ffmpeg, a store or a sidecar. The loop's whole job is to keep heartbeats
 	// going while frames arrive, and a real ffmpeg cannot be used to test that:
 	// the moment a real pipe stalls, the thing under test IS the stall.
-	onFrame   func(recorder.Frame, []ai.Box, []byte)
+	//
+	// The hook carries the sidecar's TELEMETRY and the real AI STATE beside the
+	// frame, and those two are the reason it takes five arguments. Both were
+	// previously unreachable from the screen, which is how the screen came to
+	// hardcode `answered`: it had no state to print, so it printed a word that
+	// is not in CONTRACT.md §2.2's vocabulary. Appending them is the whole of
+	// the change — the alternative was a new hook signature and a new hook type,
+	// and a second way to be handed a frame is a second way to be handed an
+	// incomplete one.
+	onFrame   func(recorder.Frame, []ai.Box, []byte, ai.Telemetry, string)
 	heartbeat func(context.Context) error
 
 	// Rehearsals are the fault rehearsals already performed on this build, read
@@ -130,6 +140,68 @@ type Runner struct {
 	pushOnce sync.Once
 	stopPush chan struct{}
 	pushed   int
+	// detectors is the split's arithmetic, observed once per frame, and it is
+	// the only thing in this run that can answer "why zero detections".
+	detectorsMu sync.Mutex
+	detectors   detect.Counters
+}
+
+// DetectorTally is the run's detector arithmetic, as the report needs it.
+//
+// It is a snapshot: every number is copied out under the lock, so a report
+// written while frames are still arriving cannot read a half-updated tally and
+// print a candidate share that disagrees with the approved count beside it.
+func (r *Runner) DetectorTally() DetectorTally {
+	r.detectorsMu.Lock()
+	defer r.detectorsMu.Unlock()
+	c := r.detectors
+	t := DetectorTally{
+		Seen:            c.FramesAsked > 0,
+		FramesAsked:     c.FramesAsked,
+		FramesAnswered:  c.FramesAnswered,
+		FramesNoObjects: c.FramesNoObjects,
+		FramesAbsent:    c.FramesAbsent,
+		BoxCandidates:   c.BoxCandidates,
+		BoxesApproved:   c.BoxesApproved,
+		BoxesRejected:   c.BoxesRejected,
+	}
+	if share, ok := c.CandidateShare(); ok {
+		t.CandidateShareFrac, t.ShareMeasured = share, true
+	}
+	if r.opt.Engine != nil {
+		t.ApprovedByFamily, t.BoxesRejectedBy = r.opt.engineBreakdown()
+	}
+	return t
+}
+
+// EngineTally is a nil-safe read of the engine's own per-family tally, so
+// DetectorTally does not have to carry an engine-nil check of its own. A runner
+// built without an engine has no detector arithmetic to report, and saying so
+// with `Seen: false` is right: nothing was offered to anything.
+func (r *RunnerOptions) EngineTally() *detect.Tally {
+	if r.Engine == nil {
+		return nil
+	}
+	t := r.Engine.Tally()
+	return &t
+}
+
+// engineBreakdown flattens the engine's per-family tally into the two maps the
+// report prints, because a report cannot show four family rows inside a sentence
+// about one number.
+func (r *RunnerOptions) engineBreakdown() (byFamily, byReason map[string]int) {
+	t := r.EngineTally()
+	if t == nil {
+		return nil, nil
+	}
+	byFamily, byReason = map[string]int{}, map[string]int{}
+	for _, row := range t.Rows() {
+		byFamily[string(row.Family)] = row.Approved
+		for _, rc := range row.Reasons {
+			byReason[rc.Reason] += rc.Count
+		}
+	}
+	return byFamily, byReason
 }
 
 // NewRunner builds a runner.
@@ -316,6 +388,11 @@ func (r *Runner) process(ctx context.Context, f recorder.Frame) {
 	r.mu.Unlock()
 
 	boxes := make([]ai.Box, 0, 8)
+	telemetry := ai.Telemetry{}
+	// aiState is the four-word vocabulary state, and it defaults to `not_asked`
+	// — the honest reading when no client is configured at all, rather than an
+	// empty string that the screen would render as "fine".
+	aiState := ai.StateNotAsked
 	if r.opt.Client == nil {
 		// No client means nobody to ask. NewRunner refuses this, so reaching
 		// here means a runner was built by hand; treating it as "nothing was
@@ -324,14 +401,21 @@ func (r *Runner) process(ctx context.Context, f recorder.Frame) {
 	} else {
 		res := r.opt.Client.Detect(ctx, f.Seq, f.RGB, f.Width, f.Height)
 		r.lat.Add(res.Latency)
+		telemetry, aiState = res.Telemetry, res.State
 		r.mu.Lock()
 		r.lastAIState = res.State
 		r.mu.Unlock()
 		switch res.State {
 		case ai.StateDegraded, ai.StateCannotTell:
-			r.mu.Lock()
-			r.unparsedAI++
-			r.mu.Unlock()
+			// Only a reply that ARRIVED and could not be read counts as unparsed.
+			// A `degraded` frame is a deadline, and a tripwire refusal is the
+			// tripwire working; folding either into AC6's "unparsed" clause would
+			// make the clause mean something other than what it says.
+			if res.Unparsed {
+				r.mu.Lock()
+				r.unparsedAI++
+				r.mu.Unlock()
+			}
 			_ = r.opt.Store.RecordFault(ctx, r.opt.RunID, store.Fault{
 				At: f.At, Reason: store.FaultAIUnreadable,
 				Detail: fmt.Sprintf("frame %d at %s: %s", f.Seq, f.At.Format(time.RFC3339), res.Reason),
@@ -346,19 +430,36 @@ func (r *Runner) process(ctx context.Context, f recorder.Frame) {
 	}
 
 	if r.opt.Engine == nil {
-		hook(f, boxes, nil)
+		hook(f, boxes, nil, telemetry, ai.StateNotAsked)
 		return
 	}
-	crossings, tracks, _ := r.opt.Engine.Feed(f.At, toDetect(boxes))
+	crossings, tracks, _ := r.opt.Engine.FeedAnswered(f.At, detect.Answer{
+		Boxes:      toDetect(boxes),
+		AIState:    aiState,
+		Candidates: telemetry.Candidates,
+	})
+	// The split's own arithmetic is observed here and nowhere else, because this
+	// is the only place that has both the split and the frame it came from.
+	//
+	// It was NOT observed anywhere at all before: `detect.Counters` existed, was
+	// tested, and no production code called `Observe`. So a run could report
+	// `detections | 0` and there was no number anywhere in the system that could
+	// say whether the model had seen nothing or the pipeline had thrown
+	// everything away. Those are a fact about a road and a configuration mistake,
+	// and they print identically.
+	r.detectorsMu.Lock()
+	r.detectors.Observe(r.opt.Engine.LastSplit())
+	r.detectorsMu.Unlock()
 	if hook != nil {
-		hook(f, boxes, nil)
+		// The REAL state, from `ai.Interpret` — never a hardcoded `answered`.
+		// The screen used to print `answered` for every frame including the ones
+		// that were never sent, and `answered` is not in CONTRACT.md §2.2's
+		// four-word vocabulary at all: it is a fifth word that reads as
+		// reassurance and means nothing.
+		hook(f, boxes, nil, telemetry, aiState)
 	}
 	// The sidecar's answer is recorded with the detection, so the report can say
 	// whether a crossing came from a frame the model actually answered.
-	aiState := ai.StateNotAsked
-	if r.opt.Client != nil {
-		aiState = r.lastAIState
-	}
 	for _, c := range crossings {
 		r.handleCrossing(ctx, c, aiState)
 	}
@@ -376,15 +477,21 @@ func toDetect(boxes []ai.Box) []detect.Box {
 // handleCrossing is the R2 sequence, in this order and no other:
 //
 //  1. commit the detection row in `accepted`
-//  2. cut the clip and read it back, record clip_ok or clip_refused
-//  3. enqueue the push
+//  2. render and store the snapshot of the frame the decision was made on
+//  3. cut the clip and read it back, record clip_ok or clip_refused
+//  4. enqueue the push
 //
 // Nothing external happens before step 1, and a crash between any two steps
 // leaves a resumable row.
+//
+// The snapshot is step 2 and not step 3.5 because `cutAndStore` is a synchronous
+// ffmpeg re-encode that blocks the frame loop, so anything rendered after it
+// would be a snapshot of a LATER frame — which is the one thing a picture of a
+// decision must not be.
 func (r *Runner) handleCrossing(ctx context.Context, c detect.Crossing, aiState string) {
 	id := DetectionID(c, r.opt.Provenance)
 	det := store.Detection{
-		ID: id, RunID: r.opt.RunID, At: c.At, Class: c.Class, TrackID: c.TrackID, Score: scoreOf(c),
+		ID: id, RunID: r.opt.RunID, At: c.At, Class: c.Class, Family: string(c.Family()), TrackID: c.TrackID, Score: scoreOf(c),
 		BoxTop: int(c.Box.Y1 * 1000), BoxLeft: int(c.Box.X1 * 1000),
 		BoxBottom: int(c.Box.Y2 * 1000), BoxRight: int(c.Box.X2 * 1000),
 		Direction: c.Direction, AIState: aiState, Provenance: r.opt.Provenance,
@@ -413,7 +520,11 @@ func (r *Runner) handleCrossing(ctx context.Context, c detect.Crossing, aiState 
 		return
 	}
 
-	// Step 2: the clip.
+	// Step 2: the picture of the decision. Best-effort and non-fatal — see
+	// storeSnapshot.
+	r.storeSnapshot(ctx, id, c, aiState)
+
+	// Step 3: the clip.
 	ref, clipErr := r.cutAndStore(ctx, c)
 	if clipErr != nil {
 		_ = r.opt.Store.Transition(ctx, id, store.StatusClipRefused, "", clipErr.Error())
@@ -426,7 +537,7 @@ func (r *Runner) handleCrossing(ctx context.Context, c detect.Crossing, aiState 
 		}
 	}
 
-	// Step 3: the push. The payload is built and enqueued; the pump attempts it.
+	// Step 4: the push. The payload is built and enqueued; the pump attempts it.
 	if err := r.enqueueEvent(ctx, c, ref); err != nil {
 		_ = r.opt.Store.Transition(ctx, id, store.StatusPushRefused, "", err.Error())
 		r.finish(ctx, id)
@@ -473,7 +584,23 @@ func (r *Runner) enqueueEvent(ctx context.Context, c detect.Crossing, ev Evidenc
 	tag := EventTag(c, r.opt.Provenance)
 	in := xprotect.EventInput{
 		EventTypeGUID: r.opt.EventTypeGUID, SourceGUID: r.opt.CameraGUID, At: c.At, Tag: tag,
-		Class: c.Class, Value: c.Class, Confidence: scoreOf(c), Box: xprotect.Box{},
+		Class: c.Class, Value: classify.Value(c.Class), Confidence: scoreOf(c),
+		// B2. The box is the REAL box, in the same 0..1000 thousandths
+		// `detections.box_*` already stores, and it is scaled here by exactly the
+		// same expression rather than by a second scale that would drift.
+		//
+		// It used to be `xprotect.Box{}`. Every pushed event therefore carried
+		// top/left/bottom/right all zero while the row in the database beside it
+		// held real numbers, and the bounding box is what makes a VMS draw the
+		// object on the operator's timeline: a demo that shows zeros there is
+		// showing the product does not work, and it does so while the database
+		// says otherwise.
+		Box: xprotect.Box{
+			Top:    int(c.Box.Y1 * 1000),
+			Left:   int(c.Box.X1 * 1000),
+			Bottom: int(c.Box.Y2 * 1000),
+			Right:  int(c.Box.X2 * 1000),
+		},
 		RuleName: c.Line + "-line-cross",
 		Evidence: xprotect.EvidenceRef{StorageRef: ev.StorageRef, SHA256: ev.SHA256, TimeBegin: ev.TimeBegin.UTC().Format(time.RFC3339), TimeEnd: ev.TimeEnd.UTC().Format(time.RFC3339),
 			Note: "POC evidence ref; the bookmark pushed alongside points at no VMS recording in this build"},
@@ -624,11 +751,17 @@ func (r *Runner) finish(ctx context.Context, id string) {
 }
 
 func scoreOf(c detect.Crossing) float64 {
-	// The engine does not carry the score onto the crossing, because the
-	// decision is about geometry. The score is read back off the box, which the
-	// sidecar gave us, and 0 would be a lie, so a missing score is 0 and the
-	// report says the box had no score.
-	return 0
+	// The score the MODEL gave, carried onto the crossing at the instant it
+	// happened.
+	//
+	// It used to return a hardcoded 0 with a comment explaining that a missing
+	// score must not be invented. The comment was right and the implementation
+	// was wrong in the way that matters: `detect.Crossing` now carries the score,
+	// and a hardcoded zero on every pushed event told a VMS operator that the
+	// detector had no opinion about a detection it had just raised. A field that
+	// is always zero is not a conservative default; it is a missing measurement
+	// printed as a real one, and it appeared on the screen as `confidence: 0`.
+	return c.Confidence()
 }
 
 // DetectionID is content-derived. A counter would produce the same id twice
@@ -730,14 +863,20 @@ func (r *Runner) countDetections(ctx context.Context) int {
 // SetFrameHook installs the screen's frame callback after construction, because
 // the screen needs the store and the run id and both of those are known before
 // the runner is.
-func (r *Runner) SetFrameHook(fn func(recorder.Frame, []ai.Box, []byte)) {
+//
+// The telemetry and the AI state are arguments rather than something the
+// callback has to go and ask for. A hook that could fetch them itself would be a
+// hook that can be called with the wrong frame's telemetry attached to it, and a
+// picture labelled with the decoder's numbers from a different moment is a lie
+// that looks like data.
+func (r *Runner) SetFrameHook(fn func(recorder.Frame, []ai.Box, []byte, ai.Telemetry, string)) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.opt.onFrame = func(f recorder.Frame, b []ai.Box, jpg []byte) {
+	r.opt.onFrame = func(f recorder.Frame, b []ai.Box, jpg []byte, tel ai.Telemetry, state string) {
 		if jpg == nil && r.opt.LastJPEG != nil {
 			jpg = r.opt.LastJPEG()
 		}
-		fn(f, b, jpg)
+		fn(f, b, jpg, tel, state)
 	}
 }
 

@@ -269,6 +269,21 @@ CREATE TABLE IF NOT EXISTS detections (
   provenance   TEXT NOT NULL DEFAULT 'synthetic',
   clip_ref     TEXT,
   clip_reason  TEXT,
+  -- T7.1: the family name, beside the class and not inside it. The class column
+  -- is what an Alarm Definition is written against; the family column is the
+  -- product's grouping and is what a report is read by. Nullable here and NOT
+  -- NULL only after the backfill: a row from a build that predates the column has
+  -- no family, and NULL says "not recorded" where an empty string would say
+  -- "recorded as none".
+  family       TEXT,
+  -- T6.3: the rendered snapshot of the crossing, as a reference into the
+  -- evidence store rather than as bytes. A reader asking "what did it see?"
+  -- three days after a run should not have to have had the screen open, and the
+  -- clip may have been rotated away by the disk budget.
+  snapshot_ref TEXT,
+  -- T7.3: what KIND of evidence a file is — event_clip, crossing_snapshot or
+  -- frame. A constant column is a column that cannot be extended.
+  snapshot_kind TEXT,
   created_at   TEXT NOT NULL,
   updated_at   TEXT NOT NULL
 );
@@ -318,6 +333,41 @@ CREATE TABLE IF NOT EXISTS faults (
 );
 CREATE INDEX IF NOT EXISTS faults_run ON faults(run_id, at);
 
+-- The detector's own arithmetic for a run, as one JSON blob.
+--
+-- It is a blob and not eight columns because it is a TALLY: it is written once at
+-- the end of a run, read by 'pocctl report', and has no query written against any
+-- single field of it. The point of putting it here at all is that a regenerated
+-- report must say the same thing as the live one -- and a run reporting zero
+-- detections with no way to say WHY is the sentence this table exists to make
+-- impossible.
+CREATE TABLE IF NOT EXISTS detector_tally (
+  run_id TEXT PRIMARY KEY REFERENCES runs(id),
+  at     TEXT NOT NULL,
+  json   TEXT NOT NULL
+);
+
+-- D-8: a person's verdict about a PUSHED event, keyed by the event's tag.
+--
+-- The key is the tag and not a detection id on purpose. The tag is the string
+-- the Events API read-back matches on, so a mark is attached to the event that
+-- actually left the process rather than to a detection row that happens to
+-- resemble it -- and a mark whose tag is not in this run's outbox is refused at
+-- write time rather than counted, because a verdict about an event nobody pushed
+-- is a verdict about nothing.
+--
+-- by and note are TEXT NOT NULL DEFAULT '' because a mark with no explanation is
+-- a legitimate mark, but a NULL would have to be read as one.
+CREATE TABLE IF NOT EXISTS ground_truth (
+  run_id  TEXT NOT NULL REFERENCES runs(id),
+  tag     TEXT NOT NULL,
+  verdict TEXT NOT NULL,
+  by      TEXT NOT NULL DEFAULT '',
+  note    TEXT NOT NULL DEFAULT '',
+  at      TEXT NOT NULL,
+  PRIMARY KEY (run_id, tag)
+);
+
 CREATE TABLE IF NOT EXISTS samples (
   run_id     TEXT NOT NULL REFERENCES runs(id),
   at         TEXT NOT NULL,
@@ -360,10 +410,32 @@ var addedColumns = []struct {
 }{
 	{"samples", "db_bytes", "INTEGER NOT NULL DEFAULT 0"},
 	{"samples", "cpu_measured", "INTEGER NOT NULL DEFAULT 0"},
+	// T7.1. The family's name, BESIDE the class name and not inside it: `class`
+	// is the model's own word and is what an Alarm Definition matches on, and
+	// `family` is the product's grouping and is what a report is read by. Storing
+	// them as one string would make `WHERE class = 'car'` stop matching the moment
+	// anyone touched the format, and every existing rule would break with no
+	// error.
+	//
+	// NULLABLE, and the null is meaningful: a row written by a build that predates
+	// this column has no family, and NULL says "not recorded" where an empty
+	// string would say "recorded as none". The NOT NULL contract step is a
+	// separate migration and may never be bundled with the expand that makes it
+	// safe.
+	{"detections", "family", "TEXT"},
+	// T6.3. The rendered snapshot of the crossing. The bytes live in the evidence
+	// store and this holds the reference, for the same reason `clip_ref` is a
+	// reference: one file, one copy, and the evidence store is the only place
+	// bytes are written.
+	{"detections", "snapshot_ref", "TEXT"},
+	// T7.3. What KIND of evidence a file is. Without it the kind was a constant
+	// column that always said the same thing, and a column that is always the
+	// same value cannot be extended and cannot be told from an observed one.
+	{"detections", "snapshot_kind", "TEXT"},
 }
 
 // schemaVersion is bumped whenever a migration is added above.
-const schemaVersion = 3
+const schemaVersion = 6
 
 func (s *Store) ensureColumns(ctx context.Context) error {
 	for _, c := range addedColumns {

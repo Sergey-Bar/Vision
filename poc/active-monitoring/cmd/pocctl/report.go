@@ -2,22 +2,158 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/Sergey-Bar/ai-captain-poc/internal/soak"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
 )
 
+// storedDetectorTally is the run's detector arithmetic, read from the store.
+//
+// pocctl report has no runner in memory, so this is the ONLY way it can say
+// why a run produced nothing. A run with no stored tally comes back Seen:
+// false and is printed as NOT RUN with the reason; it is never zeros.
+func storedDetectorTally(st *store.Store, runID string) soak.DetectorTally {
+	raw, found, err := st.DetectorTally(context.Background(), runID)
+	if err != nil || !found {
+		return soak.DetectorTally{}
+	}
+	var t soak.DetectorTally
+	if err := json.Unmarshal(raw, &t); err != nil {
+		return soak.DetectorTally{}
+	}
+	return t
+}
+
 func exec2(name string, args ...string) (string, error) {
 	out, err := exec.Command(name, args...).CombinedOutput()
 	return string(out), err
+}
+
+// groundTruthFile is the review, and where it is expected to be.
+//
+// It lives beside the MATERIAL rather than beside the run, because the marks are
+// judgements about events and the event tags are content-derived from what the
+// detector saw: a run in a scratch data root and a run in the demo data root
+// push the same tags for the same crossings, and one review of the footage
+// should serve both.
+func groundTruthFile() string {
+	return filepath.Join(repoRoot(), "testdata", "groundtruth.json")
+}
+
+// mark is one person's verdict about one pushed event.
+//
+// `schema` is CHECKED and the file's shape is DECLARED, not inferred. A review
+// this build has never heard the shape of is refused rather than read with a
+// best guess, because a review read the wrong way silently marks nothing and
+// then reports NOT RUN for a reason that looks like nobody looked.
+type mark struct {
+	Tag     string `json:"tag"`
+	Verdict string `json:"verdict"`
+	Note    string `json:"note"`
+	By      string `json:"by"`
+}
+
+type review struct {
+	Schema int    `json:"schema"`
+	Marks  []mark `json:"marks"`
+}
+
+// applyGroundTruth loads the review, records it against the run, prints the line,
+// and returns the marking for the report.
+//
+// It returns a `HumanMarking` rather than a number so `Verdict` can put the
+// AUTHOR in the sentence: a rate with no author is a number somebody typed, and
+// `soak` already refuses to print one as a measurement.
+func applyGroundTruth(st *store.Store, runID string, c context.Context) *soak.HumanMarking {
+	path := groundTruthFile()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Printf("false positives: NOT RUN: %s could not be read (%v)\n", path, err)
+		return nil
+	}
+	var rv review
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&rv); err != nil {
+		fmt.Printf("false positives: NOT RUN: %s is not a review this build understands: %v\n", path, err)
+		return nil
+	}
+	if rv.Schema != 1 {
+		fmt.Printf("false positives: NOT RUN: %s declares schema %d and this build reads 1. Refusing rather than guessing at a shape it has never seen.\n", path, rv.Schema)
+		return nil
+	}
+	if len(rv.Marks) == 0 {
+		// An empty list is valid, and it means NOT RUN. It does NOT mean zero
+		// false positives, and the printed sentence says so in full rather than
+		// abbreviated, because this is the one line that keeps the report honest.
+		fmt.Println("false positives: NOT RUN: no human marked any event in testdata/groundtruth.json")
+		return nil
+	}
+
+	// Applied in a stable order, so two reports from the same review are
+	// byte-identical and a refused mark is always the same one.
+	ordered := append([]mark(nil), rv.Marks...)
+	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].Tag < ordered[j].Tag })
+
+	by, note := "", ""
+	applied := 0
+	for _, k := range ordered {
+		if err := st.MarkGroundTruth(c, runID, k.Tag, k.Verdict, k.By, k.Note); err != nil {
+			fmt.Printf("  NOT APPLIED — %v\n", err)
+			continue
+		}
+		applied++
+		if by == "" {
+			by, note = k.By, k.Note
+		}
+	}
+
+	tp, fp, measured, err := st.Precision(c, runID)
+	if err != nil {
+		fmt.Printf("false positives: NOT RUN: the review could not be counted: %v\n", err)
+		return nil
+	}
+	if !measured {
+		fmt.Println("false positives: NOT RUN: no mark in testdata/groundtruth.json matched an event this run pushed")
+		return nil
+	}
+	if applied != tp+fp {
+		// The count has to be the count of what was WRITTEN, not the count of
+		// what was asked for. Silently dropping a mark that matched nothing would
+		// let a precision figure be printed for a smaller review than the file
+		// holds, which is the failure this whole mechanism exists to prevent.
+		fmt.Printf("  %d of %d mark(s) did not match an event this run pushed and were NOT counted\n", len(ordered)-applied, len(ordered))
+	}
+	precision := float64(tp) / float64(tp+fp)
+	fmt.Printf("false positives: %d/%d (precision %.2f), marked by %s\n", fp, tp+fp, precision, orUnstated(by))
+	return &soak.HumanMarking{Examined: tp + fp, False: fp, By: by, When: time.Now().UTC(), Note: note}
+}
+
+func orUnstated(s string) string {
+	if strings.TrimSpace(s) == "" {
+		return "unstated"
+	}
+	return s
 }
 
 // reportFor rebuilds the report from the store. It shares the scoring with the
 // live report, so a regenerated report and the one written at the end of a run
 // cannot disagree.
 func reportFor(st *store.Store, run *store.Run, c context.Context) (soak.Report, error) {
+	// The human review, applied and counted BEFORE the criteria are scored. It is
+	// not a criterion and never becomes one — `soak.Score` does not read it — but
+	// it is part of the report, and a report whose false-positive row says NOT
+	// RUN because nobody loaded the review file is a report that has not been
+	// run, whatever the rest of it says.
+	human := applyGroundTruth(st, run.ID, c)
 	counts, _ := st.CountByStatus(c, run.ID)
 	faults, _ := st.Faults(c, run.ID)
 	beats, _ := st.HeartbeatCount(c, run.ID)
@@ -49,6 +185,7 @@ func reportFor(st *store.Store, run *store.Run, c context.Context) (soak.Report,
 		Provenance:            "see the run row; this report does not guess it",
 		PushTargetIsSimulator: !run.PushIsVMS,
 		SourceKind:            run.SourceKind, SourceLabel: run.SourceKind,
+		FalsePositives: human,
 	}
 	for _, g := range gaps {
 		in.HeartbeatGaps = append(in.HeartbeatGaps, soak.GapMeasurement{From: g.From, To: g.To, Seconds: g.Seconds})
@@ -86,7 +223,7 @@ func reportFor(st *store.Store, run *store.Run, c context.Context) (soak.Report,
 		Peaks: soak.Peaks{RSSBytes: peaks.RSSBytes, DBBytes: peaks.DB, DiskBytes: peaks.DiskBytes,
 			CPUPercent: peaks.CPUPercent, AIP99MS: peaks.AIP99MS, Samples: peaks.Samples},
 		Counters: soak.Counters{ByStatus: counts, PushAttempts: push.Total, DeadLettered: push.DeadLetter,
-			Heartbeats: beats, Faults: len(faults)},
+			Heartbeats: beats, Faults: len(faults), Detector: storedDetectorTally(st, run.ID)},
 		FalsePositives: soak.NewFalsePositiveRow(in.FalsePositives),
 		Truth:          truth,
 		NotProven:      soak.NotProven(in, summary),

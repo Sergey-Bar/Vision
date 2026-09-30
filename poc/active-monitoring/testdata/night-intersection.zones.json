@@ -1,0 +1,42 @@
+{
+  "$comment": [
+    "The line for testdata/youtube/sTF-6_xinUU.mp4 — a public traffic camera at a",
+    "signalised intersection, at night. 1280x720, 91 s.",
+    "",
+    "WHY THIS LINE IS VERTICAL, which is the part that looks wrong until you look",
+    "at the frame: the carriageway runs LEFT TO RIGHT across the picture, so the",
+    "far lane the vehicles use is a horizontal band at y about 0.54, and a line",
+    "ACROSS that carriageway is vertical. A horizontal line here would never be",
+    "crossed by anything, and a run with no events is indistinguishable from a run",
+    "where the model found nothing — which is the most expensive silence there is.",
+    "",
+    "WHERE IT CAME FROM, stated plainly so a reader does not have to guess:",
+    "the frame was LOOKED at, and then the model's own detections on that frame",
+    "were measured with pyworker, one sample per second across the clip. At t=51",
+    "through t=55 the vehicles sit at y 0.51-0.58 and score 0.75-0.93, which is a",
+    "detector working, not one being tuned. The line spans y 0.44 to 0.64 so it",
+    "covers that band with margin on both sides.",
+    "",
+    "Two vehicles cross x=0.65 per pass of that four-second window, which is what",
+    "the demo needs: an event is a crossing, and a zone with no crossing is a demo",
+    "with no event to show.",
+    "",
+    "The clip itself is NOT in git — testdata/youtube*/ is gitignored — and its",
+    "licence is NOT recorded. See testdata/labels.json. This file is in git because",
+    "it is the measurement, and it is useless without the footage; the reverse is",
+    "also true."
+  ],
+
+  "source": "testdata/youtube/sTF-6_xinUU.mp4",
+  "frame": { "width": 1280, "height": 720 },
+  "$provenance": "real — a public traffic camera, NOT a recording with no licence: see testdata/labels.json, where its licence is NOT recorded and it is not cleared to show outside this machine",
+  "lines": [
+    {
+      "name": "approach",
+      "a": [0.65, 0.44],
+      "b": [0.65, 0.64],
+      "direction": "right-to-left",
+      "classes": ["car", "truck", "bus", "person"]
+    }
+  ]
+}

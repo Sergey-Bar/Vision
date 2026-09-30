@@ -34,7 +34,7 @@ func (f *fakeSidecar) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	seq := f.seq.Add(1)
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(Response{Seq: seq, Boxes: []Box{}, Width: 640, Height: 384, Model: "fake"})
+	_ = json.NewEncoder(w).Encode(Response{Seq: seq, Boxes: []Box{}, Width: 640, Height: 384, Model: "fake", Telemetry: healthyTelemetry()})
 }
 
 func newClient(t *testing.T, h func(http.ResponseWriter, *http.Request)) (*Client, *httptest.Server, *fakeSidecar) {
@@ -68,7 +68,7 @@ func TestDetectEmptyAnswerIsNoObjects(t *testing.T) {
 func TestDetectWithBoxesIsAnswered(t *testing.T) {
 	c, _, _ := newClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"seq":1,"boxes":[{"cls":"bird","score":0.87,"x1":0.1,"y1":0.2,"x2":0.3,"y2":0.4}],"width":640,"height":384,"model":"yolov8n","infer_ms":12.5}`))
+		_, _ = w.Write([]byte(`{"seq":1,"boxes":[{"cls":"bird","score":0.87,"x1":0.1,"y1":0.2,"x2":0.3,"y2":0.4}],"width":640,"height":384,"model":"yolov8n","infer_ms":12.5,"telemetry":{"layout":"nchw","decoder_family":"fused","coord_space":"pixel","has_objectness":false,"fields":84,"classes":80,"candidates":1200,"pre_nms":9,"post_nms_class":4,"post_nms":4,"dropped_degenerate":0,"dropped_tiny":0,"nms_class_iou":0.45,"nms_global_iou":0.75,"median_box_area":0.004,"median_object_px":24.5,"identical_geometry":0,"scales":1,"note":""}}`))
 	})
 	r := c.Detect(context.Background(), 1, rgb(2, 2), 2, 2)
 	if r.State != StateAnswered {
@@ -95,22 +95,22 @@ func TestMalformedAnswerIsNeverNoObjects(t *testing.T) {
 			_, _ = w.Write([]byte(`{"seq":1,"boxes":[{"cls":"bird",`))
 		}, StateCannotTell},
 		{"null boxes is not an empty list", func(w http.ResponseWriter, r *http.Request) {
-			_, _ = w.Write([]byte(`{"seq":1,"boxes":null,"width":640,"height":384,"model":"x","infer_ms":1}`))
+			_, _ = w.Write([]byte(`{"seq":1,"boxes":null,"width":640,"height":384,"model":"x","infer_ms":1,"telemetry":{"layout":"nchw","decoder_family":"fused","coord_space":"pixel","has_objectness":false,"fields":84,"classes":80,"candidates":1200,"pre_nms":9,"post_nms_class":4,"post_nms":4,"dropped_degenerate":0,"dropped_tiny":0,"nms_class_iou":0.45,"nms_global_iou":0.75,"median_box_area":0.004,"median_object_px":24.5,"identical_geometry":0,"scales":1,"note":""}}`))
 		}, StateCannotTell},
 		{"unknown field", func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte(`{"seq":1,"boxes":[],"width":640,"height":384,"model":"x","infer_ms":1,"surprise":42}`))
 		}, StateCannotTell},
 		{"score out of range", func(w http.ResponseWriter, r *http.Request) {
-			_, _ = w.Write([]byte(`{"seq":1,"boxes":[{"cls":"bird","score":1.4,"x1":0,"y1":0,"x2":1,"y2":1}],"width":640,"height":384,"model":"x","infer_ms":1}`))
+			_, _ = w.Write([]byte(`{"seq":1,"boxes":[{"cls":"bird","score":1.4,"x1":0,"y1":0,"x2":1,"y2":1}],"width":640,"height":384,"model":"x","infer_ms":1,"telemetry":{"layout":"nchw","decoder_family":"fused","coord_space":"pixel","has_objectness":false,"fields":84,"classes":80,"candidates":1200,"pre_nms":9,"post_nms_class":4,"post_nms":4,"dropped_degenerate":0,"dropped_tiny":0,"nms_class_iou":0.45,"nms_global_iou":0.75,"median_box_area":0.004,"median_object_px":24.5,"identical_geometry":0,"scales":1,"note":""}}`))
 		}, StateCannotTell},
 		{"inverted box", func(w http.ResponseWriter, r *http.Request) {
-			_, _ = w.Write([]byte(`{"seq":1,"boxes":[{"cls":"bird","score":0.5,"x1":0.9,"y1":0.9,"x2":0.1,"y2":0.1}],"width":640,"height":384,"model":"x","infer_ms":1}`))
+			_, _ = w.Write([]byte(`{"seq":1,"boxes":[{"cls":"bird","score":0.5,"x1":0.9,"y1":0.9,"x2":0.1,"y2":0.1}],"width":640,"height":384,"model":"x","infer_ms":1,"telemetry":{"layout":"nchw","decoder_family":"fused","coord_space":"pixel","has_objectness":false,"fields":84,"classes":80,"candidates":1200,"pre_nms":9,"post_nms_class":4,"post_nms":4,"dropped_degenerate":0,"dropped_tiny":0,"nms_class_iou":0.45,"nms_global_iou":0.75,"median_box_area":0.004,"median_object_px":24.5,"identical_geometry":0,"scales":1,"note":""}}`))
 		}, StateCannotTell},
 		{"no class", func(w http.ResponseWriter, r *http.Request) {
-			_, _ = w.Write([]byte(`{"seq":1,"boxes":[{"cls":"","score":0.5,"x1":0,"y1":0,"x2":1,"y2":1}],"width":640,"height":384,"model":"x","infer_ms":1}`))
+			_, _ = w.Write([]byte(`{"seq":1,"boxes":[{"cls":"","score":0.5,"x1":0,"y1":0,"x2":1,"y2":1}],"width":640,"height":384,"model":"x","infer_ms":1,"telemetry":{"layout":"nchw","decoder_family":"fused","coord_space":"pixel","has_objectness":false,"fields":84,"classes":80,"candidates":1200,"pre_nms":9,"post_nms_class":4,"post_nms":4,"dropped_degenerate":0,"dropped_tiny":0,"nms_class_iou":0.45,"nms_global_iou":0.75,"median_box_area":0.004,"median_object_px":24.5,"identical_geometry":0,"scales":1,"note":""}}`))
 		}, StateCannotTell},
 		{"answer for another frame", func(w http.ResponseWriter, r *http.Request) {
-			_, _ = w.Write([]byte(`{"seq":99,"boxes":[],"width":640,"height":384,"model":"x","infer_ms":1}`))
+			_, _ = w.Write([]byte(`{"seq":99,"boxes":[],"width":640,"height":384,"model":"x","infer_ms":1,"telemetry":{"layout":"nchw","decoder_family":"fused","coord_space":"pixel","has_objectness":false,"fields":84,"classes":80,"candidates":1200,"pre_nms":9,"post_nms_class":4,"post_nms":4,"dropped_degenerate":0,"dropped_tiny":0,"nms_class_iou":0.45,"nms_global_iou":0.75,"median_box_area":0.004,"median_object_px":24.5,"identical_geometry":0,"scales":1,"note":""}}`))
 		}, StateCannotTell},
 		{"server error", func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -294,7 +294,7 @@ func TestTheWireFormatIsABareOctetStream(t *testing.T) {
 		if len(buf) > 3 {
 			firstBytes = buf[:3]
 		}
-		_, _ = w.Write([]byte(`{"seq":3,"boxes":[],"width":4,"height":2,"model":"x","infer_ms":1}`))
+		_, _ = w.Write([]byte(`{"seq":3,"boxes":[],"width":4,"height":2,"model":"x","infer_ms":1,"telemetry":{"layout":"nchw","decoder_family":"fused","coord_space":"pixel","has_objectness":false,"fields":84,"classes":80,"candidates":1200,"pre_nms":9,"post_nms_class":4,"post_nms":4,"dropped_degenerate":0,"dropped_tiny":0,"nms_class_iou":0.45,"nms_global_iou":0.75,"median_box_area":0.004,"median_object_px":24.5,"identical_geometry":0,"scales":1,"note":""}}`))
 	})
 	pix := make([]byte, 4*2*3)
 	for i := range pix {

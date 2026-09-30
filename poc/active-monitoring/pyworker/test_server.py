@@ -31,6 +31,12 @@ class StubEngine:
     lands on a picture, and testing a copy of them would test nothing: a decoder
     that passed its own tests while the real one put boxes on the wrong objects
     is precisely the failure this exists to prevent.
+
+    The methods borrowed are the ones that EXIST. `_to_normalised` and
+    `emits_pixels` were deleted: the first divided by the input size instead of
+    the letterboxed content (D4) and the second measured ALREADY-SIGMOIDED values,
+    so it always answered "fractions" and the pixel-to-frame division never ran
+    (D2). A test that borrowed them was a test of a bug.
     """
 
     model_name = "fake.onnx"
@@ -39,15 +45,22 @@ class StubEngine:
     layout = "nchw"
     providers = ["CPUExecutionProvider"]
     classes: dict = {}
+    min_box_area = server.DEFAULT_MIN_BOX_AREA
+    anchors = None
+    anchors_path = ""
+    output_names = ["out"]
+    declared_fields = 0
 
     decode = server.Engine.decode
-    _to_normalised = server.Engine._to_normalised
+    decode_anchored = server.Engine.decode_anchored
+    _finalise = server.Engine._finalise
     class_name = server.Engine.class_name
-    emits_pixels = server.Engine.emits_pixels
+    rows = staticmethod(server.Engine.rows)
 
     def __init__(self, boxes=None):
         self.boxes = boxes or []
         self.calls = 0
+        self.spec = server.ExportSpec("nchw", self.input_w, self.input_h)
 
     def infer(self, seq, rgb):
         self.calls += 1
@@ -58,6 +71,7 @@ class StubEngine:
             "height": int(rgb.shape[0]),
             "model": self.model_name,
             "infer_ms": 1.0,
+            "telemetry": server._empty_telemetry(),
         }
 
 
@@ -93,17 +107,21 @@ class DesignTests(unittest.TestCase):
 
     def test_letterbox_preserves_aspect_ratio_and_returns_chw(self):
         rgb = np.zeros((100, 200, 3), dtype=np.uint8)
-        out = server.letterbox(rgb, 64, "nchw")
+        out, nw, nh, _, _ = server.letterbox(rgb, 64, 64, "nchw")
         self.assertEqual(out.shape, (3, 64, 64))
         self.assertEqual(out.dtype, np.float32)
         self.assertLessEqual(float(out.max()), 1.0)
         # Padding is zero and the content sits in the top-left block, because
         # the scale is width-limited for a 200x100 frame in a 64x64 box.
         self.assertTrue(np.allclose(out[:, 32:, :], 0.0))
+        # And the CONTENT size is reported, because that is what the un-padding
+        # divides by and dividing by the input size is D4.
+        self.assertEqual(nw, 64)
+        self.assertEqual(nh, 32)
 
     def test_letterbox_normalises_to_zero_one(self):
         rgb = np.full((32, 32, 3), 255, dtype=np.uint8)
-        out = server.letterbox(rgb, 16, "nchw")
+        out, _, _, _, _ = server.letterbox(rgb, 16, 16, "nchw")
         self.assertAlmostEqual(float(out.max()), 1.0, places=5)
 
     def test_letterbox_honours_the_models_own_layout(self):
@@ -111,8 +129,8 @@ class DesignTests(unittest.TestCase):
         # tensor produces confident nonsense, and confident nonsense produces
         # line crossings on objects that are not there.
         rgb = np.zeros((100, 200, 3), dtype=np.uint8)
-        nchw = server.letterbox(rgb, 64, "nchw")
-        nhwc = server.letterbox(rgb, 64, "nhwc")
+        nchw, _, _, _, _ = server.letterbox(rgb, 64, 64, "nchw")
+        nhwc, _, _, _, _ = server.letterbox(rgb, 64, 64, "nhwc")
         self.assertEqual(nchw.shape, (3, 64, 64))
         self.assertEqual(nhwc.shape, (64, 64, 3))
         self.assertTrue(np.array_equal(np.transpose(nhwc, (2, 0, 1)), nchw))

@@ -21,16 +21,25 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Sergey-Bar/ai-captain-poc/internal/aistate"
 )
 
-// State is the AI absence vocabulary from CONTRACT.md §2.2. These four strings
-// are the only ones that may appear in detections.ai_state.
+// State is the AI absence vocabulary from CONTRACT.md §2.2. These are the only
+// five strings that may appear in detections.ai_state.
+//
+// They are ALIASES of `internal/aistate` and not literals, because
+// `internal/detect` counts them when it folds a frame into its counters and must
+// not depend on this package to say what they are — see the aistate doc for why
+// two declarations of one vocabulary is a defect rather than a small duplication.
+// Every `ai.State*` reference in this module keeps working and keeps its
+// meaning.
 const (
-	StateAnswered   = "asked_answered"
-	StateNoObjects  = "no_objects"
-	StateDegraded   = "degraded"
-	StateNotAsked   = "not_asked"
-	StateCannotTell = "cannot_tell"
+	StateAnswered   = aistate.Asked
+	StateNoObjects  = aistate.NoObjects
+	StateDegraded   = aistate.Degraded
+	StateNotAsked   = aistate.NotAsked
+	StateCannotTell = aistate.CannotTell
 )
 
 // AbsenceOf reports whether a state means "we do not know whether anything was
@@ -66,6 +75,27 @@ type Result struct {
 	// Seq is the frame sequence number, echoed for correlation. A mismatch
 	// between the sent and received seq is a protocol error, not a detection.
 	Seq uint64
+	// Telemetry is the sidecar's own report about how it decoded, and the run's
+	// report prints it beside every detection rate. A detection rate with no
+	// decoder telemetry beside it is a number nobody can argue with.
+	Telemetry Telemetry
+	// Unparsed says a reply ARRIVED and could not be read as the documented
+	// shape. It is AC6's first clause and nothing else is.
+	//
+	// The distinction is the whole point of the flag. Three things can go wrong
+	// with one inference and AC6's clause is only about the first:
+	//
+	//   - the sidecar sent a field this build has never heard of (a `cannot_tell`
+	//     with a Go json error) — UNPARSED, and the contract has drifted;
+	//   - the answer parsed and the tripwire refused it (`cannot_tell` with a
+	//     reason about the arithmetic) — a working tripwire, not a broken wire;
+	//   - nothing came back at all (`degraded`) — a network or deadline fact.
+	//
+	// They used to be counted as one number, and the consequence was that AC6
+	// reported `0 unparsed` over a run in which every single frame had been
+	// refused. A criterion whose own input is never read is worse than no
+	// criterion, because it is one that reads as a pass.
+	Unparsed bool
 }
 
 // NoObjects is a real answer: the model ran, parsed, and found nothing. It is
@@ -81,6 +111,11 @@ type Response struct {
 	Height  int     `json:"height"`
 	Model   string  `json:"model"`
 	InferMS float64 `json:"infer_ms"`
+	// Telemetry is the sidecar's self-report. It is the reason the four
+	// arithmetic bugs of §4 could not be caught: nothing on the wire before it
+	// said what the decoder had done, so a decode that put every box on the
+	// frame's corner looked exactly like a decode that worked.
+	Telemetry Telemetry `json:"telemetry"`
 }
 
 // Client talks to the sidecar.
@@ -210,14 +245,14 @@ func (c *Client) Detect(ctx context.Context, seq uint64, rgb []byte, w, h int) R
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&out); err != nil {
-		return Result{State: StateCannotTell, Seq: seq, Latency: lat,
+		return Result{State: StateCannotTell, Seq: seq, Latency: lat, Unparsed: true,
 			Reason: fmt.Sprintf("frame %d: the sidecar's answer is not the documented shape (%v); it is not evidence that the frame was empty", seq, err)}
 	}
 	if out.Seq != seq {
 		// Correlation is how a stale answer is caught. A mismatch means the
 		// answer belongs to a different frame, and using it would attribute one
 		// frame's boxes to another frame's instant.
-		return Result{State: StateCannotTell, Seq: seq, Latency: lat,
+		return Result{State: StateCannotTell, Seq: seq, Latency: lat, Unparsed: true,
 			Reason: fmt.Sprintf("frame %d: the sidecar answered for frame %d, so the boxes belong to a different instant", seq, out.Seq)}
 	}
 	if out.Boxes == nil {
@@ -234,15 +269,31 @@ func (c *Client) Detect(ctx context.Context, seq uint64, rgb []byte, w, h int) R
 				Reason: fmt.Sprintf("frame %d box %d has score %v, which is not a probability", seq, i, b.Score)}
 		}
 		if b.X2 < b.X1 || b.Y2 < b.Y1 {
-			return Result{State: StateCannotTell, Seq: seq, Latency: lat,
-				Reason: fmt.Sprintf("frame %d box %d is inverted: (%v,%v)-(%v,%v)", seq, i, b.X1, b.Y1, b.X2, b.Y2)}
+			return Result{State: StateCannotTell, Seq: seq, Latency: lat, Telemetry: out.Telemetry,
+				Reason: fmt.Sprintf("frame %d box %d is inverted: (%v,%v)-(%v,%v). A box with no area is a coordinate-scale problem, and a crossing computed from it would be a crossing that never happened", seq, i, b.X1, b.Y1, b.X2, b.Y2)}
 		}
 	}
 	state := StateAnswered
 	if len(out.Boxes) == 0 {
 		state = StateNoObjects
 	}
-	return Result{State: state, Boxes: out.Boxes, Seq: seq, Latency: lat, Reason: out.Model}
+	// The tripwire, and it is the LAST thing that runs. Everything above checks
+	// that the reply is the documented shape; this checks that the documented
+	// shape carries a meaning. The two are different questions and answering only
+	// the first is what let four arithmetic bugs report themselves as healthy
+	// runs: a reply can be perfectly well formed and still be boxes in
+	// coordinates of unknown units, or eight copies of one box, or every class
+	// shifted by one.
+	//
+	// A refusal here DROPS the boxes on the floor. They are not passed on with a
+	// warning: a crossing computed from coordinates of unknown units is a number
+	// with no meaning, and a number that reaches a VMS is worse than a number
+	// that was never produced.
+	if tripped, why := Interpret(seq, out.Telemetry, out.Boxes); tripped != state {
+		return Result{State: tripped, Seq: seq, Latency: lat, Telemetry: out.Telemetry, Reason: why}
+	}
+	return Result{State: state, Boxes: out.Boxes, Seq: seq, Latency: lat,
+		Telemetry: out.Telemetry, Reason: out.Model}
 }
 
 func firstLine(s string) string {

@@ -46,7 +46,7 @@ func TestTheImportantVariablesHaveFlags(t *testing.T) {
 }
 
 func TestAFlagWinsOverTheEnvironment(t *testing.T) {
-	m := complete()
+	m := complete(t)
 	cfg, err := LoadWithFlags([]string{"--label", "from-the-command-line"}, lookupFrom(m))
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +57,7 @@ func TestAFlagWinsOverTheEnvironment(t *testing.T) {
 }
 
 func TestTheEnvironmentWinsWhenThereIsNoFlag(t *testing.T) {
-	m := complete()
+	m := complete(t)
 	cfg, err := LoadWithFlags(nil, lookupFrom(m))
 	if err != nil {
 		t.Fatal(err)
@@ -68,7 +68,7 @@ func TestTheEnvironmentWinsWhenThereIsNoFlag(t *testing.T) {
 }
 
 func TestFlagsMayBeWrittenWithEquals(t *testing.T) {
-	m := complete()
+	m := complete(t)
 	cfg, err := LoadWithFlags([]string{"--label=equals-form"}, lookupFrom(m))
 	if err != nil {
 		t.Fatal(err)
@@ -82,7 +82,7 @@ func TestFlagsMayBeWrittenWithEquals(t *testing.T) {
 // laxer path into the configuration. A duration flag carrying "five" must fail
 // naming the variable, not naming the flag parser.
 func TestAFlagWithTheWrongTypeStillFailsByVariableName(t *testing.T) {
-	m := complete()
+	m := complete(t)
 	_, err := LoadWithFlags([]string{"--ai-fps", "five"}, lookupFrom(m))
 	if err == nil {
 		t.Fatal("a non-numeric --ai-fps was accepted")
@@ -93,7 +93,7 @@ func TestAFlagWithTheWrongTypeStillFailsByVariableName(t *testing.T) {
 }
 
 func TestAFlagWithNoValueIsRefused(t *testing.T) {
-	if _, err := LoadWithFlags([]string{"--label"}, lookupFrom(complete())); err == nil {
+	if _, err := LoadWithFlags([]string{"--label"}, lookupFrom(complete(t))); err == nil {
 		t.Fatal("a flag with no value was accepted")
 	}
 }
@@ -102,7 +102,7 @@ func TestAFlagWithNoValueIsRefused(t *testing.T) {
 // that did nothing, and a run that did not do what the operator asked is worse
 // than a refusal.
 func TestAnUnknownFlagIsRefused(t *testing.T) {
-	_, err := LoadWithFlags([]string{"--lable", "typo"}, lookupFrom(complete()))
+	_, err := LoadWithFlags([]string{"--lable", "typo"}, lookupFrom(complete(t)))
 	if err == nil {
 		t.Fatal("an unknown flag was accepted")
 	}
@@ -114,7 +114,7 @@ func TestAnUnknownFlagIsRefused(t *testing.T) {
 func TestAFlagCannotSupplyAValueTheSchemaRefuses(t *testing.T) {
 	// The flag path is not a way around Validate. A base URL that is plain http
 	// to a remote host is refused whether it came from a flag or a variable.
-	m := complete()
+	m := complete(t)
 	delete(m, "SP_POC_XPROTECT_BASE_URL")
 	_, err := LoadWithFlags([]string{"--xprotect-base-url", "http://vms.example.com"}, lookupFrom(m))
 	if err == nil || !strings.Contains(err.Error(), "clear text") {
@@ -126,7 +126,7 @@ func TestPositionalArgumentsDoNotBecomeConfiguration(t *testing.T) {
 	// This program has no positional arguments. One that appears is either a
 	// typo or a subcommand, and silently ignoring it is how a run ends up
 	// configured for something nobody asked for.
-	m := complete()
+	m := complete(t)
 	cfg, err := LoadWithFlags([]string{"extra-thing"}, lookupFrom(m))
 	if err != nil {
 		t.Fatal(err)

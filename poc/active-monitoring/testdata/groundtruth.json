@@ -1,0 +1,24 @@
+{
+  "$comment": [
+    "Ground truth for the false-positive number. D-8.",
+    "",
+    "A mark is a PERSON'S judgement about one PUSHED EVENT, made by looking at it.",
+    "The `tag` is the event tag the run pushed — `aicap-car-<24 hex>` — which is",
+    "the same string the read-back matches on, so a mark attaches to the event that",
+    "actually left the process and not to a detection row that merely resembles it.",
+    "",
+    "An EMPTY `marks` list is valid and means NOT RUN. It does not mean zero false",
+    "positives: it means nobody looked. Those are different claims and only one of",
+    "them is ever available.",
+    "",
+    "Two verdicts, and only two:",
+    "  true_positive   the event is a real crossing of a real object",
+    "  false_positive  the event is not — a traffic light at night, a shadow, a",
+    "                  reflection, a lamp post the model calls a car",
+    "",
+    "This file is a REVIEW, not a measurement the machine made. Nothing in this",
+    "repository computes it, infers it, or estimates it."
+  ],
+  "schema": 1,
+  "marks": []
+}

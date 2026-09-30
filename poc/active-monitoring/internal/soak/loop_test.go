@@ -158,7 +158,7 @@ func TestTheHeartbeatIsNotSilencedByASlowFrame(t *testing.T) {
 	// A "frame" that takes 300ms to deal with, which is a fast inference on a
 	// slow machine and a slow one for anything bigger.
 	var inFlight atomic.Int64
-	r.opt.onFrame = func(recorder.Frame, []ai.Box, []byte) {
+	r.opt.onFrame = func(recorder.Frame, []ai.Box, []byte, ai.Telemetry, string) {
 		inFlight.Add(1)
 		time.Sleep(300 * time.Millisecond)
 	}

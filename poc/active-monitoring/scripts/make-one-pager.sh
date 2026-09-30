@@ -115,6 +115,23 @@ MJPEG לניתוח. Python מקבל פריימים גולמיים ומחזיר �
 
 $(sed -n '/^## What this report does not prove/,$p' "$REPORT" | sed -n '3,$p' | grep '^- ' | sed 's/^- /- /' | head -8)
 
+## הדברים שנמדדו, ומה הם מוגבלים ב
+
+These four are not in report.md, because a run does not measure them: they are
+properties of the BUILD and of the FOOTAGE, they are the same for every run, and
+they are the first four questions a room asks. They are read out of the committed
+records rather than retyped, so a one-pager cannot claim a licence or a model
+shape that the record beside it does not.
+
+| | measured | limit |
+|---|---|---|
+| **model shape** | 85 fields, anchored, 416×416 NHWC, CPU only | a YOLOv4-shaped export named \`yolov8n.onnx\`. \`pyworker/fixtures/yolov8n.contract.json\` |
+| **decode** | \`identical_geometry\` 0, \`median_box_area\` 0.0015 | the collapsed-decode fix, on one real frame + 40+ unit cases |
+| **model licence** | **NOT RECORDED** | not cleared for sale, distribution, or anything derived. \`pyworker/fixtures/yolov8n.licence.json\` |
+| **footage licence** | **NOT RECORDED** (\`testdata/labels.json\`, three \`REPLACE-ME\`) | the demo footage may be read here and **may not be shown outside this machine** |
+| **bounding box** | every pushed event carries the real box in 0–1000 thousandths | asserted by a comparison against \`detections.box_*\`, not by eye |
+| **rtsp** | relay of recorded material, \`pocctl demo --rtsp\` | proves the TRANSPORT. **No camera has ever been connected** |
+
 ## איך להריץ שבוע
 
 \`\`\`bash

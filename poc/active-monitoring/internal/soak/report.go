@@ -110,6 +110,125 @@ type Counters struct {
 	Heartbeats     int            `json:"heartbeats"`
 	Faults         int            `json:"faults"`
 	SegmentsOnDisk int            `json:"segments_on_disk"`
+
+	// Detector is the SPLIT's own arithmetic, carried here so a run with zero
+	// detections can say why.
+	//
+	// It is not decoration. "0 detections" has two very different causes — the
+	// model found nothing, or the model found plenty and the pipeline threw it
+	// away — and from the outside they print the same two characters. A report
+	// that cannot distinguish them is the most expensive silence there is: it
+	// reads as a quiet road when it may be a threshold that is wrong.
+	Detector DetectorTally `json:"detector"`
+}
+
+// DetectorTally is `internal/detect.Counters`, as the report needs it.
+//
+// The same shape and not the type itself: `internal/soak` imports
+// `internal/detect` already, but a report struct that holds a live map from a
+// live engine is a report that can change under the writer.
+type DetectorTally struct {
+	// Seen says the split actually ran. `Frames == 0` is NOT "the road was
+	// empty" — it is "nothing was ever offered to it", and those are printed
+	// differently for exactly that reason.
+	Seen               bool           `json:"seen"`
+	FramesAsked        int            `json:"frames_asked"`
+	FramesAnswered     int            `json:"frames_answered"`
+	FramesNoObjects    int            `json:"frames_no_objects"`
+	FramesAbsent       map[string]int `json:"frames_absent,omitempty"`
+	BoxCandidates      int            `json:"box_candidates"`
+	BoxesApproved      int            `json:"boxes_approved"`
+	BoxesRejected      int            `json:"boxes_rejected"`
+	BoxesRejectedBy    map[string]int `json:"boxes_rejected_by_reason,omitempty"`
+	ApprovedByFamily   map[string]int `json:"boxes_approved_by_family,omitempty"`
+	ApprovedByClass    map[string]int `json:"boxes_approved_by_class,omitempty"`
+	CandidateShareFrac float64        `json:"candidate_share,omitempty"`
+	// ShareMeasured says whether CandidateShareFrac is a measurement. A zero
+	// with no candidates is not a rate of nothing-to-nothing.
+	ShareMeasured bool `json:"candidate_share_measured"`
+}
+
+// detectorSection is the paragraph that makes `0 detections` readable.
+//
+// It exists because that number has two causes that look identical from outside
+// this module: the model saw nothing, or the model saw plenty and the pipeline
+// refused it. The second one is a configuration mistake and the first one is a
+// fact about the road, and a report that cannot tell them apart sends somebody
+// to re-tune a threshold that was never wrong.
+//
+// Every number here is a MEASUREMENT or it says so. `NOT RUN` is printed for a
+// frame count of zero, and a candidate share is printed only when there were
+// candidates, because `0 out of 0` is not a rate.
+func detectorSection(d DetectorTally, totalDetections int) string {
+	var b strings.Builder
+	b.WriteString("## What the detector did\n\n")
+	if !d.Seen || d.FramesAsked == 0 {
+		b.WriteString("**NOT RUN.** No frame was ever offered to the detector, so nothing here says\n")
+		b.WriteString("anything about the scene. A run that asked nothing and a run that found\n")
+		b.WriteString("nothing print the same `detections | 0`, and only one of them is a\n")
+		b.WriteString("measurement.\n\n")
+		return b.String()
+	}
+	fmt.Fprintf(&b, "The model was asked about **%d** frame(s) and answered **%d** of them", d.FramesAsked, d.FramesAnswered)
+	if d.FramesNoObjects > 0 {
+		fmt.Fprintf(&b, " (%d answered with an empty array, which is a real answer and not a failure)", d.FramesNoObjects)
+	}
+	b.WriteString(".\n\n")
+	if len(d.FramesAbsent) > 0 {
+		b.WriteString("Frames with no usable answer, by state: ")
+		b.WriteString(joinCounts(d.FramesAbsent))
+		b.WriteString(". **These are not frames with zero objects** — a frame the model never\n")
+		b.WriteString("answered cannot contribute to a detection rate, and folding it in would\n")
+		b.WriteString("make a dead sidecar look like a quiet road.\n\n")
+	}
+	fmt.Fprintf(&b, "| | count |\n|---|---|\n")
+	fmt.Fprintf(&b, "| raw candidates read out of the model | %d |\n", d.BoxCandidates)
+	fmt.Fprintf(&b, "| boxes APPROVED for tracking | %d |\n", d.BoxesApproved)
+	fmt.Fprintf(&b, "| boxes rejected | %d |\n\n", d.BoxesRejected)
+	if d.ShareMeasured {
+		fmt.Fprintf(&b, "The approved share of raw candidates was **%.4f**.\n\n", d.CandidateShareFrac)
+	}
+	if len(d.BoxesRejectedBy) > 0 {
+		b.WriteString("Why boxes were rejected:\n\n| reason | count |\n|---|---|\n")
+		for _, k := range sortedKeys(d.BoxesRejectedBy) {
+			fmt.Fprintf(&b, "| `%s` | %d |\n", k, d.BoxesRejectedBy[k])
+		}
+		b.WriteString("\n")
+	} else if d.BoxCandidates > 0 {
+		b.WriteString("No box was rejected for any reason.\n\n")
+	}
+	if len(d.ApprovedByFamily) > 0 {
+		b.WriteString("Approved boxes by family:\n\n| family | count |\n|---|---|\n")
+		for _, k := range sortedKeys(d.ApprovedByFamily) {
+			fmt.Fprintf(&b, "| %s | %d |\n", k, d.ApprovedByFamily[k])
+		}
+		b.WriteString("\n")
+	}
+	// The one sentence that closes the section, and it is a question rather than
+	// a verdict because this module does not know which of the two causes it is.
+	if d.BoxesApproved == 0 && d.BoxCandidates > 0 {
+		b.WriteString("**The model found objects and the pipeline approved none of them.** That is a\n")
+		b.WriteString("configuration problem — the threshold, the approved classes, or the minimum\n")
+		b.WriteString("box area — and NOT an empty road. Fix the configuration; lowering a threshold\n")
+		b.WriteString("until synthetic material fires is the same mistake with a different number.\n\n")
+	} else if d.BoxCandidates == 0 {
+		b.WriteString("The model produced no candidates at all on any frame. That is either a scene\n")
+		b.WriteString("with nothing in it, or a decode that discarded everything — and the decode\n")
+		b.WriteString("telemetry on the screen is what tells the two apart.\n\n")
+	} else if d.BoxesApproved > 0 && totalDetections == 0 {
+		b.WriteString("Boxes were approved and tracked, and nothing crossed the line. A line in the\n")
+		b.WriteString("wrong place produces zero events with no error at all, so this is the result a\n")
+		b.WriteString("wrong zone file produces — check the line against a still of THIS source.\n\n")
+	}
+	return b.String()
+}
+
+func joinCounts(m map[string]int) string {
+	parts := make([]string, 0, len(m))
+	for _, k := range sortedKeys(m) {
+		parts = append(parts, fmt.Sprintf("`%s` %d", k, m[k]))
+	}
+	return strings.Join(parts, ", ")
 }
 
 // TruthLine is the two sentences that make the report honest, generated from
@@ -230,6 +349,7 @@ func (r Report) Markdown() string {
 	w("| faults | %d |\n", r.Counters.Faults)
 	w("| rolling segments on disk | %d |\n", r.Counters.SegmentsOnDisk)
 	w("\n")
+	w("%s", detectorSection(r.Counters.Detector, r.Counters.Detections))
 
 	w("## Faults\n\n")
 	if len(r.Faults) == 0 {

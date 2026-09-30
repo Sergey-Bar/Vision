@@ -153,8 +153,11 @@ func run() error {
 	// in the URL, they are not in the run row, and they are not in any log line.
 	spec.User = cfg.SourceUser
 	spec.Password = cfg.SourcePassword
+	spec.Relay = cfg.SourceRelay
 	if spec.Live() {
-		logf("source: %s", spec.LabelRedacted())
+		// `Label()` already begins with "source: ", so the prefix is not added
+		// here. It was, and the log read `source: source: live rtsp camera`.
+		logf("%s", spec.LabelRedacted())
 	}
 	zone, err := detect.LoadZone(cfg.ZonesPath)
 	if err != nil {
@@ -163,6 +166,16 @@ func run() error {
 	engine, err := detect.New(zone, detect.Config{
 		ScoreThreshold: cfg.ScoreThreshold, Classes: cfg.Classes, IoU: cfg.TrackIoU,
 		MaxAge: cfg.TrackMaxAge, Cooldown: cfg.Cooldown, Tolerance: cfg.LineTolerance,
+		// The approved/rejected split's four numbers. They arrived with the split
+		// and the family taxonomy, they are REQUIRED by the configuration with no
+		// defaults, and they were being validated and then thrown away: the engine
+		// was built with GhostScore 0, MinArea 0, TrackMinFrames 0 and
+		// MaxBoxesDrawn 0, which means every rejected box above zero was drawn as
+		// a ghost and no track was ever too young to cross. A configuration value
+		// that is read, validated and not used is worse than one that is absent:
+		// the report says the operator set it and the run did not obey it.
+		GhostScore: cfg.GhostMinScore, MinArea: cfg.MinBoxArea,
+		TrackMinFrames: cfg.TrackMinFrames, MaxBoxesDrawn: cfg.MaxBoxesDrawn,
 	})
 	if err != nil {
 		return err
@@ -299,11 +312,21 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		runner.SetFrameHook(func(f recorder.Frame, boxes []ai.Box, jpg []byte) {
+		runner.SetFrameHook(func(f recorder.Frame, boxes []ai.Box, jpg []byte, tel ai.Telemetry, aiState string) {
+			// aiState is whatever `ai.Interpret` returned, from the runner, for
+			// THIS frame. It used to be the literal "answered", which is not one
+			// of the four words in CONTRACT.md §2.2 and which was printed for
+			// frames that were never sent — a screen that says `answered` over a
+			// silent sidecar is the single most reassuring lie this module could
+			// tell.
 			screen.Publish(ui.Live{
 				At: f.At, Frame: jpg, Width: f.Width, Height: f.Height,
 				Boxes: toOverlay(boxes), Lines: toOverlayLines(zone),
-				AIState: "answered", Provenance: provenanceFor(cfg, spec),
+				AIState: aiState, AIStateKnown: aiState != "",
+				Telemetry: tel, Families: familyTally(engine),
+				LiveTracks: len(engine.LiveTracks()), Crossings: crossingsThisRun(st, runID),
+				AIP99:      p99Millis(runner),
+				Provenance: provenanceFor(cfg, spec), MaxBoxesDrawn: cfg.MaxBoxesDrawn,
 				Simulator: !cfg.IsLiveVMS(), Source: spec.Label(), Mode: cfg.Mode,
 				ClockSource: cfg.ClockSource,
 			})
@@ -439,7 +462,21 @@ func run() error {
 	if err := st.EndRun(context.Background(), runID, end, endReason); err != nil {
 		logf("could not close the run: %v", err)
 	}
-	rep, err := buildReport(st, runID, cfg, spec, end.Sub(runStart), endReason)
+	// AC6's first two clauses are read OFF THE RUNNER here. They were never read
+	// anywhere, which meant `0 unparsed, 0 healthy-from-failed` was printed over a
+	// run in which every frame had been refused — the criterion that exists to
+	// catch an invented answer was structurally incapable of failing on one.
+	unparsedAI, healthyFromFailed := runner.AICounters()
+	aiCounters := [2]int{unparsedAI, healthyFromFailed}
+	// The detector's arithmetic is persisted BEFORE the report is built, because
+	// the report reads it back out of the store rather than off the runner. That
+	// indirection is the point: `pocctl report` has no runner to read it from, so
+	// a tally kept in memory only would explain a zero on one path and not the
+	// other.
+	if err := st.SaveDetectorTally(context.Background(), runID, runner.DetectorTally()); err != nil {
+		logf("could not record the detector's tally, so this report cannot say WHY the run produced the number of detections it did: %v", err)
+	}
+	rep, err := buildReport(st, runID, cfg, spec, end.Sub(runStart), endReason, aiCounters)
 	if err != nil {
 		logf("could not build the report: %v", err)
 	} else {
@@ -575,6 +612,28 @@ func pushTargetName(cfg config.Config) string {
 // therefore found nothing, and AC7 was `NOT RUN` in every run that had actually
 // been rehearsed. The gate must read the evidence, not insist the evidence
 // carries a particular label.
+// loadDetectorTally reads the run's detector arithmetic back out of the store.
+//
+// The live report could read it off the runner in memory. This reads it from the
+// STORE, deliberately, because `pocctl report` has no runner to read it from and
+// a report that can explain a zero on one path and not the other is worse than
+// one that never could.
+//
+// A run with no stored tally comes back as `Seen: false`, which the report
+// prints as `NOT RUN` with the reason. It must not come back as zeros: zeros
+// read as a measurement of an empty road.
+func loadDetectorTally(st *store.Store, runID string) soak.DetectorTally {
+	raw, found, err := st.DetectorTally(context.Background(), runID)
+	if err != nil || !found {
+		return soak.DetectorTally{}
+	}
+	var t soak.DetectorTally
+	if err := json.Unmarshal(raw, &t); err != nil {
+		return soak.DetectorTally{}
+	}
+	return t
+}
+
 func loadRehearsals(st *store.Store, _ string) []soak.Rehearsal {
 	faults, err := st.FaultsByReasonPrefix(context.Background(), "rehearsal:")
 	if err != nil {
@@ -590,7 +649,7 @@ func loadRehearsals(st *store.Store, _ string) []soak.Rehearsal {
 	return out
 }
 
-func buildReport(st *store.Store, runID string, cfg config.Config, spec source.Spec, elapsed time.Duration, endReason string) (soak.Report, error) {
+func buildReport(st *store.Store, runID string, cfg config.Config, spec source.Spec, elapsed time.Duration, endReason string, aiCounters [2]int) (soak.Report, error) {
 	ctx := context.Background()
 	run, err := st.RunByID(ctx, runID)
 	if err != nil {
@@ -605,6 +664,7 @@ func buildReport(st *store.Store, runID string, cfg config.Config, spec source.S
 	peaks, _ := st.SamplePeaks(ctx, runID)
 	push, _ := st.Stats(ctx, runID)
 	rehearsals := loadRehearsals(st, runID)
+	detectorTally := loadDetectorTally(st, runID)
 
 	evidenceStats := store.EvidenceStats{}
 	if ev, err := evidence.Open(filepath.Join(cfg.DataRoot, "evidence")); err == nil {
@@ -625,6 +685,7 @@ func buildReport(st *store.Store, runID string, cfg config.Config, spec source.S
 		DeclaredRSS: cfg.RSSLimit, DeclaredDB: cfg.DBLimit, DeclaredMaxDisk: cfg.MaxDisk,
 		DeclaredCPU: cfg.CPULimit, CPUMeasured: peaks.CPUAnyMeasured, AIP99: time.Duration(peaks.AIP99MS) * time.Millisecond,
 		AIP99Samples: peaks.Samples, DeclaredAIBudget: cfg.AIBudget,
+		UnparsedAIResponses: aiCounters[0], HealthyFromFailed: aiCounters[1],
 		RehearsedFaults: rehearsals,
 		Provenance:      provenanceFor(cfg, spec), PushTargetIsSimulator: !cfg.IsLiveVMS(),
 		SourceKind: cfg.SourceKind, SourceLabel: spec.LabelRedacted(),
@@ -667,7 +728,7 @@ func buildReport(st *store.Store, runID string, cfg config.Config, spec source.S
 			DeclaredAIMs: float64(cfg.AIBudget.Milliseconds()), Samples: peaks.Samples},
 		Counters: soak.Counters{Detections: in.TotalDetections, ByStatus: counts,
 			Evidence: evidenceStats.Stored, PushAttempts: push.Total, DeadLettered: push.DeadLetter,
-			Heartbeats: beats, Faults: len(faults)},
+			Heartbeats: beats, Faults: len(faults), Detector: detectorTally},
 		FalsePositives: soak.NewFalsePositiveRow(in.FalsePositives),
 		Truth:          soak.BuildTruth(spec.Label(), cfg.XProtectBaseURL, pushTargetName(cfg), cfg.IsLiveVMS(), provenanceFor(cfg, spec)),
 		NotProven:      soak.NotProven(in, summary),
@@ -725,4 +786,43 @@ func toOverlayLines(z detect.Zone) []ui.OverlayLine {
 		out = append(out, ui.OverlayLine{Name: l.Name, A: l.A, B: l.B})
 	}
 	return out
+}
+
+// familyTally is the run's approved boxes by family, as the screen reads them.
+//
+// It is a function and not a field because the tally is the ENGINE's and the
+// screen is a reader: a counter the screen kept would be a second measurement of
+// the same thing, and the two would disagree the moment one of them was wrong.
+func familyTally(e *detect.Engine) map[string]int {
+	out := map[string]int{}
+	if e == nil {
+		return out
+	}
+	for _, row := range e.Tally().Rows() {
+		out[string(row.Family)] = row.Approved
+	}
+	return out
+}
+
+// crossingsThisRun is read from the store rather than kept in a counter, for the
+// reason every number on this screen is a number from a row: a counter in the
+// publisher process would be lost on a restart and would not agree with the
+// detections table beside it.
+func crossingsThisRun(st *store.Store, runID string) int {
+	n, err := st.Count(context.Background(), runID)
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
+// p99Millis is the AI round-trip reservoir's p99. Zero means no round trip has
+// been measured, and the strip prints NOT RUN for it rather than `0 ms`, which
+// would read as a model that answered instantly.
+func p99Millis(r *soak.Runner) int64 {
+	if r == nil {
+		return 0
+	}
+	_, _, p99, _, _ := r.Latencies().Percentiles()
+	return p99.Milliseconds()
 }

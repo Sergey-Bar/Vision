@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Sergey-Bar/ai-captain-poc/internal/ai"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
 )
 
@@ -29,11 +30,22 @@ type Live struct {
 	Frame  []byte // JPEG, the last frame as it came off the pipe
 	Width  int
 	Height int
-	// Boxes are normalised, and the lines are drawn in normalised coordinates
-	// too, so the overlay matches the pixels at any resolution.
+	// Boxes are the APPROVED boxes, normalised, and the lines are drawn in
+	// normalised coordinates too, so the overlay matches the pixels at any
+	// resolution. This is D-6's other half: the screen used to carry the raw
+	// model output, so the operator saw what the detector produced and never what
+	// the pipeline decided.
 	Boxes []OverlayBox
-	Lines []OverlayLine
-	// Tracks is the pulse list: one row per live object.
+	// Ghosts are the rejects: below the score threshold but above the ghost
+	// floor, or of a class outside the approved list. They are drawn 1 px and
+	// dimmed so "what was considered and refused" is visible without flooding the
+	// frame. They are never counted as detections anywhere else.
+	Ghosts []OverlayBox
+	// MaxBoxesDrawn is the cap, from SP_POC_MAX_BOXES_DRAWN. Zero means the
+	// overlay's documented default.
+	MaxBoxesDrawn int
+	Lines         []OverlayLine
+	// Tracks is the pulse list: one live object.
 	Tracks []TrackRow
 	// AIState is the last sidecar state, printed so the reader can see when the
 	// model was not answering.
@@ -41,6 +53,32 @@ type Live struct {
 	// identical-looking pictures apart.
 	Seq     uint64
 	AIState string
+	// AIStateKnown distinguishes "the pipeline told us" from "no state has been
+	// published yet". An empty AIState printed as an empty cell reads as "fine",
+	// and "fine" is a claim nobody made.
+	AIStateKnown bool
+	// Telemetry is the sidecar's own report about how it decoded THIS frame, and
+	// it is the last thing that was missing from the screen.
+	//
+	// A detection rate with no decoder telemetry beside it is a number nobody can
+	// argue with: `candidates -> post_nms` is what separates "the model found
+	// nothing" from "the decoder threw everything away", and `identical_geometry`
+	// is the signature of the collapsed decode that this module's four-bug
+	// history was all about. It is one frame's numbers, not a run's.
+	Telemetry ai.Telemetry
+	// Families is the run's approved-box tally by family, which is what a viewer
+	// counts by: "vehicles" and "people" are the product's grouping and are what
+	// the picture's colours already use.
+	Families map[string]int
+	// LiveTracks is the number of objects the tracker currently holds, and
+	// Crossings is how many crossings this run has committed. Both are counts
+	// from the pipeline, not counters the screen keeps.
+	LiveTracks int
+	Crossings  int
+	// AIP99 is the AI round-trip p99 in milliseconds as the run has measured it,
+	// or zero when no round trip has been measured at all — and the strip prints
+	// NOT RUN for a zero rather than a confident 0 ms.
+	AIP99 int64
 	// Provenance is printed on the frame itself.
 	Provenance string
 	// Simulator is whether the push target is a simulator. It is rendered in the
@@ -71,12 +109,38 @@ type OverlayLine struct {
 	Count     int
 }
 
-// TrackRow is one live object.
+// TrackRow is one live object: the screen's table and the overlay's track ids
+// both come from it, so the picture and the table cannot disagree about which
+// object is which.
 type TrackRow struct {
 	ID    int
 	Class string
 	Seen  int
 	Age   time.Duration
+	// Box is where the track is now, so the overlay can pair a box with its track
+	// and draw the marker. Without it the label plate could not name a track id and
+	// the velocity arrow had no origin.
+	Box OverlayBox
+	// Family is the class's family, carried so the table does not recompute the
+	// taxonomy per row and so a reader can see the grouping that the colours are
+	// using.
+	Family string
+	// PrevX and PrevY are the previous frame's centre, and HasPrev says whether
+	// there WAS one. A track on its first frame has no velocity and the overlay
+	// draws no arrow rather than one from the corner of the frame.
+	PrevX, PrevY float64
+	HasPrev      bool
+	// Direction is the last crossing direction recorded for this track, or empty.
+	// It is on the table because a track that has crossed and one that has not are
+	// different objects to an operator watching a crossing line.
+	Direction string
+	// State is the object's state in words: `tracked`, or `below the
+	// SP_POC_TRACK_MIN_FRAMES threshold` when the track has not yet been seen
+	// enough times to be able to emit a crossing at all. A track with one frame
+	// behind it is NOT an object the pipeline can report, and saying so is the
+	// difference between an honest screen and one that implies every box on it is
+	// an event in waiting.
+	State string
 }
 
 // Server is the screen.
@@ -153,6 +217,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/", readOnly(handleLive(s)))
 	mux.HandleFunc("/board", readOnly(handleBoard(s)))
 	mux.HandleFunc("/frame.jpg", readOnly(s.handleFrame))
+	mux.HandleFunc("/snapshot.jpg", readOnly(s.serveSnapshot))
 	mux.HandleFunc("/still.jpg", readOnly(s.stillHandler))
 	mux.HandleFunc("/live.mjpeg", readOnly(s.streamHandler))
 	mux.HandleFunc("/api/summary", readOnly(s.handleJSON))

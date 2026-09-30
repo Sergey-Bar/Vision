@@ -10,24 +10,37 @@
   "clips": [
     {
       "file": "car-crossing.mp4",
-      "provenance": "real",
-      "subject": "a vehicle crossing a frame",
-      "source_url": "REPLACE-ME",
-      "licence": "REPLACE-ME â€” record the exact licence, not 'free'",
-      "retrieved": "REPLACE-ME â€” the date it was downloaded",
-      "attribution": "REPLACE-ME â€” required by the licence if the licence requires it",
-      "contains_people": "REPLACE-ME â€” true/false/unknown",
+      "provenance": "synthetic",
+      "subject": "a coloured rectangle crossing a testsrc frame",
+      "source_url": "generated locally",
+      "licence": "NOT RECORDED — three fields below are still REPLACE-ME",
+      "retrieved": "REPLACE-ME — the date it was obtained",
+      "attribution": "REPLACE-ME — required by the licence if the licence requires it",
+      "contains_people": "REPLACE-ME — true/false/unknown",
       "notes": [
-        "This slot exists so the real-motion case has a home with its licence recorded next",
-        "to it. Until the three REPLACE-ME fields are filled in, treat this clip as",
-        "unusable: a clip with no licence is a clip that cannot be shown to anyone.",
+        "PROVENANCE CORRECTED. This entry used to say `real`. It does not, and the",
+        "correction is not editorial: `testdata/README.md` records a MEASURED run",
+        "of this exact clip against a real COCO export, and the model returned ZERO",
+        "boxes at all three instants it was pointed at it. A flat coloured",
+        "rectangle on a `testsrc` background is not a photograph, and a detector",
+        "trained on photographs is right to see nothing in it.",
         "",
-        "Requirements before this may be used in a run:",
-        "  - the URL resolves and is not behind a login",
-        "  - the licence permits redistribution of the derivative clip in a repository",
-        "  - if people are visible, the licence permits it, and the retention period is",
-        "    recorded here so the sweep knows when it may delete it",
-        "  - the retrieval date is recorded, because a licence can change"
+        "So a row saying `real` beside a clip the model cannot see anything in is",
+        "a false label on a measurement, which is the one thing every other rule in",
+        "this directory exists to prevent. It is `synthetic` now, and the report",
+        "prints `provenance: synthetic` beside every number derived from it.",
+        "",
+        "THE LICENCE IS STILL NOT RECORDED, and that is the blocker, not the",
+        "provenance. This clip may be read on the machine that has it and may NOT",
+        "be shown to anyone outside it. Three fields above are still `REPLACE-ME`",
+        "and until they are filled in a clip with no licence is a clip that cannot",
+        "be shown to anyone.",
+        "",
+        "The intended replacement is `testdata/street.mp4`: 60-90 seconds of",
+        "daylight footage of a real car or pedestrian crossing a drawn line,",
+        "recorded on a phone for this project, with no third-party rights at all.",
+        "A detector actually sees daylight footage, which is the whole reason for",
+        "the recording."
       ]
     },
     {
@@ -88,7 +101,7 @@
       "a": [0.0, 0.52],
       "b": [1.0, 0.52],
       "expected_direction": "left-to-right",
-      "note": "The zones file next to the clip is the authority for the geometry. This entry records what a human saw, so a mismatch is detectable."
+      "note": "The zones file next to the clip is the authority for the geometry. This entry records what a human saw, so a mismatch is detectable. WARNING: the object in this clip is not a vehicle, so a crossing here is a crossing of a RECTANGLE, and it exercises the line-cross machine rather than the detector."
     },
     "bird-synthetic.mp4": {
       "line": "midline",

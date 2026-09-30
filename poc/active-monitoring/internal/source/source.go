@@ -11,6 +11,7 @@ package source
 import (
 	"encoding/base64"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -21,8 +22,10 @@ const (
 	// KindLoop plays a file in a loop. This is the measured source: a real
 	// stream of frames from recorded material, at a rate the operator chooses.
 	KindLoop Kind = "loop"
-	// KindRTSP reads a live camera. Nothing in this repository has ever had one
-	// reachable, so this path is documented, not proven.
+	// KindRTSP reads a live camera. No real camera has ever been reachable from
+	// this repository; the path IS exercised, by relaying a recording through an
+	// rtsp server, and a relayed recording proves the transport and proves
+	// nothing about a camera. See Spec.Relay.
 	KindRTSP Kind = "rtsp"
 	// KindURL reads an http(s) stream, for example an m3u8 or an MJPEG feed.
 	KindURL Kind = "url"
@@ -47,6 +50,20 @@ type Spec struct {
 	// The password is a secret and is redacted wherever a secret is redacted.
 	User     string
 	Password string
+
+	// Relay says this live source is a RECORDING re-published over the network
+	// and not a camera.
+	//
+	// It is a field on the Spec rather than a label the caller supplies because
+	// the label is DERIVED. `Label()` said "live rtsp camera" for every rtsp
+	// source, which is false for an ffmpeg publisher on loopback, and a derived
+	// sentence cannot be wrong in a caller's hand: it is either the camera
+	// sentence or the relay sentence, chosen by this one flag.
+	//
+	// The distinction is not pedantry. A relay proves the rtsp PATH and proves
+	// nothing about a camera, and a report that says "camera" over a relay is
+	// claiming a piece of hardware nobody has.
+	Relay bool
 }
 
 // Live reports whether the source is a real-time one, as against recorded
@@ -133,31 +150,55 @@ func hasInlineCredentials(arg string) bool {
 // rtsp_transport, because the default sometimes picks UDP and a corporate
 // network silently drops it, and reconnect for a live camera, which is
 // recorded rather than silent (see Recorder's reconnect watcher).
+// socketTimeoutSeconds bounds ffmpeg's network reads on a LIVE source.
+//
+// It is a socket timeout, not the pipeline's frame budget: it answers "has the
+// far end stopped talking", which is the only question the reader can ask while
+// nothing is arriving. The pipeline's own `SP_POC_GAP_THRESHOLD` answers "how
+// long may a run have no frames before it is a gap", and the two are different
+// questions with different answers, so the reader is bounded well below the
+// threshold rather than at it.
+const socketTimeoutSeconds = 10
+
 func (s Spec) InputArgs() []string {
 	switch s.Kind {
 	case KindLoop:
 		return []string{"-re", "-stream_loop", "-1", "-i", s.Arg}
 	case KindRTSP:
+		// RTSP is over TCP because UDP loses packets on exactly the networks a
+		// camera is on, and ffmpeg will silently produce a green run over a
+		// dropped stream.
+		//
+		// There are deliberately NO `-reconnect` flags. `-reconnect`,
+		// `-reconnect_streamed` and `-reconnect_delay_max` are HTTP PROTOCOL
+		// options; the RTSP demuxer has no such option, and ffmpeg answers
+		// `Option reconnect not found.` and exits. Because the reader exits, the
+		// pipeline records nothing at all: the run ends in twenty milliseconds and
+		// the report says zero of everything, which is what a reader would take
+		// for "the road was empty".
+		//
+		// They used to be here, on the strength of "RTSP really does reconnect".
+		// It does — at the SERVER. ffmpeg's rtsp CLIENT does not, and the two are
+		// not the same thing. What the demuxer does have is `-timeout`, which
+		// bounds a hung socket so a stalled camera ends the run with a recorded
+		// reason instead of an indefinite stall.
+		//
+		// The consequence, stated rather than papered over: a run over RTSP does
+		// NOT survive the publisher being killed. `Recorder.watchReconnects` still
+		// records a `stream_gap` whenever ffmpeg's log reports one, and the RTSP
+		// client reports none. A camera drop is a RUN ENDING, and the durability
+		// AC1 claims over a seven-day run does not extend to a transport whose
+		// client cannot reconnect. That is a real limit of this build, and it is
+		// written where a reader of `InputArgs` will find it.
 		return append(
 			append(
-				[]string{
-					"-rtsp_transport", "tcp",
-					// ffmpeg's own reconnect, on the SAME process.
-					//
-					// A public camera reboots, loses WiFi and takes a new DHCP
-					// lease. Without this a seven-day run ends on the first blip.
-					//
-					// It is NOT silent: Recorder watches ffmpeg's own log for the
-					// reconnect line and records a `stream_gap` fault each time, so
-					// AC1 counts every one. A reconnect that is not counted would
-					// turn a dropout into a success in the report, which is the
-					// thing the plan forbids.
-					"-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5",
-				},
+				[]string{"-rtsp_transport", "tcp", "-timeout", strconv.Itoa(socketTimeoutSeconds)},
 				s.authArgs()...,
 			),
 			"-i", s.Arg)
 	case KindURL:
+		// HTTP, where the reconnect options DO exist and do what the comment above
+		// used to claim for RTSP.
 		return append(
 			append([]string{"-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5"}, s.authArgs()...),
 			"-i", s.Arg)
@@ -218,8 +259,19 @@ func (s Spec) Label() string {
 	case KindLoop:
 		return "source: recorded loop (no live camera)"
 	case KindRTSP:
+		if s.Relay {
+			// D-5, in words, on every surface that prints a source. The
+			// parenthetical is the whole sentence and it is deliberately blunt:
+			// "relay of recorded material, NOT a camera" cannot be misread as a
+			// camera that happens to be relayed, which is the misreading that
+			// matters.
+			return "source: live rtsp (relay of recorded material, NOT a camera)"
+		}
 		return "source: live rtsp camera"
 	case KindURL:
+		if s.Relay {
+			return "source: live http stream (relay of recorded material, NOT a camera)"
+		}
 		return "source: live http stream"
 	default:
 		return "source: unknown"

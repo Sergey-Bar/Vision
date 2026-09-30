@@ -4,21 +4,37 @@ import (
 	"bytes"
 	"fmt"
 	"image"
-	"image/color"
 	"image/draw"
 	"image/jpeg"
-	"sort"
-	"strings"
+	"net/http"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
 	"time"
 
+	"github.com/Sergey-Bar/ai-captain-poc/internal/overlay"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/soak"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
 )
 
-// DrawOverlay draws the boxes and lines onto the last frame and encodes a JPEG.
-// The drawing happens here, on the server, in Go: the pixels already exist in
-// this process and a browser drawing them back would be a second reader of the
-// video.
+// DrawOverlay draws the approved boxes, the tracked markers and the lines onto the
+// last frame and encodes a JPEG.
+//
+// The drawing itself is `internal/overlay`, which is a leaf package. It is not
+// here any more and that is the fix for two defects at once:
+//
+//   - D6. This used to draw the RAW model boxes — below threshold, outside the
+//     approved class list — so the operator saw what the detector produced and
+//     never what the pipeline decided. Now `Live.Boxes` carries the APPROVED boxes
+//     and `Live.Ghosts` the dimmed rejects, and the picture and the decision
+//     agree.
+//   - D7. The font lived in `font_windows.go` under `//go:build windows`, so this
+//     package did not compile on Linux at all. The face is now in
+//     `internal/overlay/font.go` with no build tag.
+//
+// The JPEG encode stays here because the screen owns the HTTP response; the
+// overlay owns the pixels.
 func DrawOverlay(l Live) ([]byte, error) {
 	if len(l.Frame) == 0 {
 		return nil, fmt.Errorf("ui: no frame to draw on")
@@ -31,60 +47,15 @@ func DrawOverlay(l Live) ([]byte, error) {
 	canvas := image.NewRGBA(image.Rect(0, 0, bounds.Dx(), bounds.Dy()))
 	draw.Draw(canvas, canvas.Bounds(), src, bounds.Min, draw.Src)
 
-	// A header bar, so the provenance and the AI state are on the picture and
-	// not only in the page's margin: a screenshot of the frame is still honest.
-	barHeight := 22
-	if canvas.Bounds().Dy() > barHeight*2 {
-		draw.Draw(canvas, image.Rect(0, 0, canvas.Bounds().Dx(), barHeight), &image.Uniform{color.RGBA{20, 20, 20, 200}}, image.Point{}, draw.Src)
+	spec := l.OverlaySpec()
+	// The note line is composed here rather than in the overlay because it needs
+	// the count of what the cap left off, which is the overlay's decision and this
+	// is where the text about it is written.
+	if note := overlay.SuppressionText(spec.Suppressed); note != "" {
+		spec.Note = note
 	}
+	overlay.Draw(canvas, spec)
 
-	// The lines first, so the boxes sit on top of them.
-	for _, ln := range l.Lines {
-		drawLine(canvas, ln, color.RGBA{90, 200, 255, 255})
-	}
-	// The boxes.
-	//
-	// A thirty-vehicle frame is thirty boxes, and thirty unfilled outlines over a
-	// road is a picture nobody can read: every line crosses every other and the
-	// image reads as noise. Three things make it legible, and all three are
-	// about restraint rather than about drawing more:
-	//
-	//   - a TRANSLUCENT FILL, so the pixels inside the box are still visible.
-	//     An outline says "somewhere in here"; a fill says "this is the object".
-	//   - ONE label per box, carrying the class and the score, on a solid bar.
-	//     A bare label over a road is unreadable, and two labels is worse.
-	//   - a CAP, highest score first. A viewer needs the strongest detections,
-	//     not all of them, and the count of what was suppressed is printed rather
-	//     than silently dropped.
-	const maxBoxes = 8
-	boxes := append([]OverlayBox(nil), l.Boxes...)
-	sort.SliceStable(boxes, func(i, j int) bool { return boxes[i].Score > boxes[j].Score })
-	drawn := boxes
-	suppressed := 0
-	if len(drawn) > maxBoxes {
-		suppressed = len(drawn) - maxBoxes
-		drawn = drawn[:maxBoxes]
-	}
-	seen := map[OverlayBox]bool{}
-	for _, b := range drawn {
-		rect := image.Rect(
-			scale(b.X1, canvas.Bounds().Dx()),
-			scale(b.Y1, canvas.Bounds().Dy()),
-			scale(b.X2, canvas.Bounds().Dx()),
-			scale(b.Y2, canvas.Bounds().Dy()),
-		)
-		if rect.Dx() < 2 || rect.Dy() < 2 || seen[b] {
-			continue
-		}
-		seen[b] = true
-		c := boxColour(b)
-		fillRect(canvas, rect, c)
-		drawOutline(canvas, rect, c)
-		labelBar(canvas, rect.Min.X, rect.Min.Y, fmt.Sprintf("%s %.2f", b.Class, b.Score), c)
-	}
-	if suppressed > 0 {
-		drawNote(canvas, fmt.Sprintf("+%d lower-scoring detections not drawn", suppressed))
-	}
 	var buf bytes.Buffer
 	if err := jpeg.Encode(&buf, canvas, &jpeg.Options{Quality: 80}); err != nil {
 		return nil, fmt.Errorf("ui: the drawn frame could not be encoded: %w", err)
@@ -92,156 +63,125 @@ func DrawOverlay(l Live) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func scale(norm float64, extent int) int {
-	if norm < 0 {
-		norm = 0
+// OverlaySpec converts the screen's live state into the leaf package's drawing
+// description. It is the ONLY place the two shapes meet, so a field added to one
+// and not the other is a compile error rather than a silently missing picture
+// element.
+func (l Live) OverlaySpec() overlay.Spec {
+	chosen, suppressed := overlay.Select(overlay.Spec{Boxes: l.TrackedBoxes(), MaxBoxes: l.MaxBoxesDrawn})
+	var lines []overlay.Line
+	for _, ln := range l.Lines {
+		lines = append(lines, overlay.Line{Name: ln.Name, A: ln.A, B: ln.B})
 	}
-	if norm > 1.5 {
-		norm = 1.5
+	var ghosts []overlay.Box
+	for _, g := range l.Ghosts {
+		ghosts = append(ghosts, g.Box())
 	}
-	return int(norm * float64(extent))
+	return overlay.Spec{
+		Lines:        lines,
+		Boxes:        chosen,
+		Ghosts:       ghosts,
+		MaxBoxes:     l.MaxBoxesDrawn,
+		Suppressed:   suppressed,
+		Provenance:   l.Provenance,
+		AIState:      l.AIState,
+		At:           l.AtLabel(),
+		AIStateKnown: l.AIState != "",
+	}
 }
 
-// boxColour is a FAMILY colour, not a per-class one. Thirty shades of orange are
-// noise; a few strong hues let a viewer see "these are people, these are
-// vehicles" at a glance, which is the only thing the colour is for.
-func boxColour(b OverlayBox) color.RGBA {
-	switch strings.ToLower(b.Class) {
-	case "person", "pedestrian":
-		return color.RGBA{90, 200, 255, 255}
-	case "bicycle", "motorcycle":
-		return color.RGBA{180, 140, 255, 255}
-	case "bus", "truck":
-		return color.RGBA{255, 140, 90, 255}
-	case "traffic light", "stop sign", "fire hydrant":
-		return color.RGBA{255, 110, 200, 255}
-	default:
-		return color.RGBA{255, 215, 70, 255}
+// TrackedBoxes pairs each approved box with the track that owns it, so the label
+// plate can name the track id (T8.2) and the velocity arrow has an origin (T8.3).
+//
+// A box with no track is drawn with no `T` at all rather than `T0`: T0 is a track
+// that does not exist, and printing it would put a number on the picture that
+// matches no row in the table.
+func (l Live) TrackedBoxes() []overlay.TrackedBox {
+	byGeometry := make(map[OverlayBox]int, len(l.Tracks))
+	rows := make(map[int]TrackRow, len(l.Tracks))
+	for _, t := range l.Tracks {
+		byGeometry[t.Box] = t.ID
+		rows[t.ID] = t
 	}
-}
-
-// fillRect is a translucent wash. alphaBlend is not available on every path and
-// is slower than it looks on a 640x360 frame at six frames a second, so the
-// blend is done by hand over the box's own pixels.
-func fillRect(img *image.RGBA, r image.Rectangle, c color.RGBA) {
-	b := img.Bounds()
-	x0, y0 := clamp(r.Min.X, b.Min.X, b.Max.X), clamp(r.Min.Y, b.Min.Y, b.Max.Y)
-	x1, y1 := clamp(r.Max.X, b.Min.X, b.Max.X), clamp(r.Max.Y, b.Min.Y, b.Max.Y)
-	const a = 20
-	for y := y0; y < y1; y++ {
-		for x := x0; x < x1; x++ {
-			o := img.PixOffset(x, y)
-			img.Pix[o+0] = uint8((int(img.Pix[o+0])*(255-a) + int(c.R)*a) / 255)
-			img.Pix[o+1] = uint8((int(img.Pix[o+1])*(255-a) + int(c.G)*a) / 255)
-			img.Pix[o+2] = uint8((int(img.Pix[o+2])*(255-a) + int(c.B)*a) / 255)
+	out := make([]overlay.TrackedBox, 0, len(l.Boxes))
+	for _, b := range l.Boxes {
+		tb := overlay.TrackedBox{Box: b.Box()}
+		if id, ok := byGeometry[b]; ok {
+			tb.Track = overlay.TrackID(id)
+			tb.Seen = rows[id].Seen
+			if rows[id].HasPrev {
+				tb.HasPrev, tb.PrevX, tb.PrevY = true, rows[id].PrevX, rows[id].PrevY
+			}
 		}
+		out = append(out, tb)
 	}
+	return out
 }
 
-func clamp(v, lo, hi int) int {
-	if v < lo {
-		return lo
+// Box converts a screen box into the leaf package's.
+func (b OverlayBox) Box() overlay.Box {
+	return overlay.Box{Class: b.Class, Score: b.Score, X1: b.X1, Y1: b.Y1, X2: b.X2, Y2: b.Y2}
+}
+
+// AtLabel is the frame's instant, printed on the picture so a screenshot is
+// self-describing. It is the frame's own clock — the one Go stamped when it read
+// the frame — and never a second reading of time taken at render time.
+func (l Live) AtLabel() string {
+	if l.At.IsZero() {
+		return ""
 	}
-	if v > hi {
-		return hi
-	}
-	return v
+	return l.At.UTC().Format("2006-01-02T15:04:05Z")
 }
 
-// drawNote puts a line at the bottom left, for anything the picture is choosing
-// not to show. A viewer who can see that 12 boxes were left off is being told;
-// one who cannot is being misled by an omission.
-func drawNote(img *image.RGBA, text string) {
-	labelBar(img, 4, img.Bounds().Dy()-4, text, color.RGBA{200, 210, 225, 255})
+// evidenceRoot is the content-addressed store beside the database, which is
+// where `evidence.Store` writes. It is derived from the store's own path rather
+// than configured, so the screen cannot be pointed at a different directory than
+// the one the pipeline stored into.
+func (s *Server) evidenceRoot() string {
+	return filepath.Join(filepath.Dir(s.Store.Path()), "evidence")
 }
 
-func drawOutline(img *image.RGBA, r image.Rectangle, c color.RGBA) {
-	drawHLine(img, r.Min.X, r.Max.X, r.Min.Y, c)
-	drawHLine(img, r.Min.X, r.Max.X, r.Max.Y, c)
-	drawVLine(img, r.Min.Y, r.Max.Y, r.Min.X, c)
-	drawVLine(img, r.Min.Y, r.Max.Y, r.Max.X, c)
-}
+// snapshotRefShape is the ONLY shape a storage reference may have: two levels of
+// directory, a 64-character lowercase hex hash, and the extension the evidence
+// kind chose.
+//
+// This is a guard, not a validation of niceness. The reference arrives in a
+// query string, and a screen that joins a query string onto a path is one
+// `?ref=../../poc.db` away from serving the database — so the shape is checked
+// against a pattern here rather than trusted because the value came out of a
+// column this process wrote.
+//
+// A reference that does not match is REFUSED, and the message says the shape,
+// because a refusal nobody can act on is a refusal nobody will act on.
+var snapshotRefShape = regexp.MustCompile(`^[0-9a-f]{2}/[0-9a-f]{2}/[0-9a-f]{64}\.(jpg|mp4|bin)$`)
 
-func drawHLine(img *image.RGBA, x0, x1, y int, c color.RGBA) {
-	if y < 0 || y >= img.Bounds().Dy() {
+// serveSnapshot returns the rendered crossing snapshot for a detection.
+//
+// It is the picture of the DECISION and it is read-only, from the evidence
+// store, by a reference that has already been checked against the store's own
+// naming rule. A reference with no file behind it is `404` with the phrase the
+// screen uses everywhere else for "not recorded" — not a grey placeholder,
+// which reads as "there was no object there".
+func (s *Server) serveSnapshot(w http.ResponseWriter, r *http.Request) {
+	ref := r.URL.Query().Get("ref")
+	if !snapshotRefShape.MatchString(ref) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte("no data — a snapshot reference is " + snapshotRefShape.String() +
+			", and " + strconv.Quote(ref) + " is not one. The reference is content-derived and is never chosen by a caller."))
 		return
 	}
-	for x := x0; x <= x1; x++ {
-		if x >= 0 && x < img.Bounds().Dx() {
-			img.SetRGBA(x, y, c)
-		}
-	}
-}
-
-func drawVLine(img *image.RGBA, y0, y1, x int, c color.RGBA) {
-	if x < 0 || x >= img.Bounds().Dx() {
+	body, err := os.ReadFile(filepath.Join(s.evidenceRoot(), filepath.FromSlash(ref)))
+	if err != nil {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte("no data — this detection has a snapshot reference but the file is not in the evidence store. " +
+			"The disk sweep is age-based and may have taken it; the row records the reference, not a promise the bytes are still here."))
 		return
 	}
-	for y := y0; y <= y1; y++ {
-		if y >= 0 && y < img.Bounds().Dy() {
-			img.SetRGBA(x, y, c)
-		}
-	}
-}
-
-func drawLine(img *image.RGBA, l OverlayLine, c color.RGBA) {
-	b := img.Bounds()
-	x0, y0 := scale(l.A[0], b.Dx()), scale(l.A[1], b.Dy())
-	x1, y1 := scale(l.B[0], b.Dx()), scale(l.B[1], b.Dy())
-	// Bresenham: the lines are a handful of pixels wide and there is no
-	// dependency for a line.
-	dx := abs(x1 - x0)
-	dy := -abs(y1 - y0)
-	sx, sy := -1, -1
-	if x0 < x1 {
-		sx = 1
-	}
-	if y0 < y1 {
-		sy = 1
-	}
-	err := dx + dy
-	for {
-		img.SetRGBA(clampX(x0, b.Dx()), clampY(y0, b.Dy()), c)
-		if x0 == x1 && y0 == y1 {
-			return
-		}
-		e2 := 2 * err
-		if e2 >= dy {
-			err += dy
-			x0 += sx
-		}
-		if e2 <= dx {
-			err += dx
-			y0 += sy
-		}
-	}
-}
-
-func abs(v int) int {
-	if v < 0 {
-		return -v
-	}
-	return v
-}
-
-func clampX(x, w int) int {
-	if x < 0 {
-		return 0
-	}
-	if x >= w {
-		return w - 1
-	}
-	return x
-}
-
-func clampY(y, h int) int {
-	if y < 0 {
-		return 0
-	}
-	if y >= h {
-		return h - 1
-	}
-	return y
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(body)
 }
 
 func inputsFrom(d Data) soak.Inputs {

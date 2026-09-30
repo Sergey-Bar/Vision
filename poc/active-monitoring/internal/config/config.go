@@ -15,8 +15,29 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/Sergey-Bar/ai-captain-poc/internal/classify"
 )
+
+// NoAnchorsSentinel is the value SP_POC_AI_ANCHORS takes when the model is a
+// FUSED export and needs no anchor boxes.
+//
+// It is a word rather than an empty string because of this module's own rule: a
+// variable set to whitespace is NOT set. That rule exists so a half-typed line is
+// caught, and it applies here too — so "this model needs no anchors" has to be
+// something an operator typed, not something they failed to. `pocctl model-probe`
+// prints which kind of export the model is, so the operator is answering a
+// question the tool has already answered for them.
+const NoAnchorsSentinel = "none"
+
+// NeedsAnchors reports whether the run declared anchor boxes. A FUSED export
+// declares `none`; an ANCHORED one declares a file path. The sidecar is given
+// the path either way, and reads this to decide whether to pass it.
+func (c Config) NeedsAnchors() bool {
+	return !strings.EqualFold(strings.TrimSpace(c.AIAnchors), NoAnchorsSentinel)
+}
 
 // EnvPrefix is prepended to every variable this package reads. The root
 // platform uses SP_; the POC must not shadow a platform variable by accident,
@@ -93,6 +114,18 @@ var schema = []field{
 	{Name: "SP_POC_SOURCE_PASSWORD", kind: kindString,
 		Consequence: "a camera that needs a password cannot be read, and a camera password that reaches a log, a run row or a process table is a public camera anybody on the network can watch",
 		Remedy:      "set SP_POC_SOURCE_PASSWORD from the environment, never from a file in the repository"},
+	// D-5. `source.Label()` said "live rtsp camera" for every RTSP source, and a
+	// relay of RECORDED material is not a camera. This variable is how the run
+	// says so, on the screen, in the log and in the report, in one derived
+	// sentence that no caller composes by hand.
+	//
+	// It is REQUIRED rather than defaulted to false because the default is the
+	// dangerous one: an operator who relays a recording and forgets this line
+	// gets "live rtsp camera" printed beside real numbers, and the whole point of
+	// this module is not making a claim it cannot back.
+	{Name: "SP_POC_SOURCE_RELAY", kind: kindBool,
+		Consequence: "the source line says `live rtsp camera` for a feed that is a recording being relayed, so a viewer is told a camera is connected when nothing is. The relay is what proves the rtsp PATH; it is not evidence of a camera",
+		Remedy:      "set SP_POC_SOURCE_RELAY=true for a recording re-published over rtsp, or SP_POC_SOURCE_RELAY=false for an actual camera"},
 
 	// --- AI sidecar ---
 	{Name: "SP_POC_AI_ADDR", kind: kindString,
@@ -126,7 +159,25 @@ var schema = []field{
 		Remedy:      "set SP_POC_SCORE_THRESHOLD=0.45"},
 	{Name: "SP_POC_CLASSES", kind: kindString,
 		Consequence: "an unapproved class could reach the line-cross machine, and the class list in the report would be whatever the model happened to emit",
-		Remedy:      "set SP_POC_CLASSES=bird,car,person"},
+		Remedy:      "set SP_POC_CLASSES=vehicle,person — a family name or a raw class name; both are accepted, and an entry that is neither is refused by name"},
+	{Name: "SP_POC_AI_ANCHORS", kind: kindString,
+		Consequence: "an ANCHORED export — one that publishes an output per stride — cannot be decoded without its anchor boxes, and they are in the model's .cfg rather than in the ONNX file. Without them the sidecar refuses the model by name rather than answering 'no objects' for every frame of the run",
+		Remedy:      "set SP_POC_AI_ANCHORS=models\\yolov8n.anchors.txt for an anchored export, or SP_POC_AI_ANCHORS=none to STATE that this model is a fused export and needs none. 'none' rather than an empty value, because a variable set to nothing has said nothing and this module treats it as unset"},
+	{Name: "SP_POC_MIN_BOX_AREA", kind: kindFloat,
+		Consequence: "a box smaller than this fraction of the frame is a speck, a shadow edge or a letterbox band, and a line-crossing machine that counts specks produces crossings that never happened",
+		Remedy:      "set SP_POC_MIN_BOX_AREA=0.0005"},
+	{Name: "SP_POC_GHOST_MIN_SCORE", kind: kindFloat,
+		Consequence: "below this nothing is drawn at all, and between it and SP_POC_SCORE_THRESHOLD a box is drawn dimmed. Without the band a picture showing only approved boxes cannot answer 'why is the road empty?', and a screen that cannot answer that is a screen nobody trusts",
+		Remedy:      "set SP_POC_GHOST_MIN_SCORE=0.10"},
+	{Name: "SP_POC_TRACK_MIN_FRAMES", kind: kindInt,
+		Consequence: "one frame of a vehicle at a line is not a crossing, and a shadow, a reflection or a compression artefact is; only time tells them apart, so without this every one of them becomes an event",
+		Remedy:      "set SP_POC_TRACK_MIN_FRAMES=3"},
+	{Name: "SP_POC_MAX_BOXES_DRAWN", kind: kindInt,
+		Consequence: "a thirty-vehicle frame is thirty boxes, and thirty unfilled outlines over a road is a picture nobody can read. What the cap left off is counted per family and printed, because a cap that silently drops is a cap that lies",
+		Remedy:      "set SP_POC_MAX_BOXES_DRAWN=12"},
+	{Name: "SP_POC_REPORT_METRICS", kind: kindString,
+		Consequence: "the classifier's detection quality and the pipeline's event quality are different measurements, and a report written against both at once is comparable with neither",
+		Remedy:      "set SP_POC_REPORT_METRICS=detectors or SP_POC_REPORT_METRICS=events — exactly one, and no default, because a report whose metric set was inferred would be comparable with a report that chose"},
 	{Name: "SP_POC_ZONES", kind: kindString,
 		Consequence: "there is no line to cross, so the line-cross machine can never reach done and every detection is lost",
 		Remedy:      "set SP_POC_ZONES=testdata\\zones.json"},
@@ -292,6 +343,15 @@ type Config struct {
 	SourceLicence  string
 	SourceUser     string
 	SourcePassword string
+	// SourceRelay says the "live" source is a RECORDING re-published over a
+	// network protocol, and not a camera. D-5.
+	//
+	// The distinction is the whole of the field. `kind=rtsp` alone cannot tell a
+	// Milestone site camera from an ffmpeg publisher on loopback, and the source
+	// line the screen and the report print is derived from this: a relay is
+	// labelled "live rtsp (relay of recorded material, NOT a camera)" and a camera
+	// is labelled "live rtsp camera".
+	SourceRelay bool
 
 	AIAddr         string
 	AIModel        string
@@ -303,12 +363,61 @@ type Config struct {
 	AIInputWidth   int
 
 	ScoreThreshold float64
-	Classes        []string
-	ZonesPath      string
-	Cooldown       time.Duration
-	TrackMaxAge    time.Duration
-	TrackIoU       float64
-	LineTolerance  float64
+	// Classes is SP_POC_CLASSES as written: a list of family names and class
+	// names, both accepted. `ApprovedClasses` is the resolved set and is what the
+	// run filters on.
+	Classes []string
+	// AIAnchors is the darknet anchor file for an ANCHORED export: empty for a
+	// fused export, required for an anchored one, and the rule is the model's own
+	// rather than a configuration choice. An export that publishes one output per
+	// stride needs anchors and one that publishes a single fused output does not.
+	// The anchors live in the model's `.cfg` and are NOT in the ONNX file, so
+	// there is nothing to infer them from and the sidecar refuses the model
+	// without this. See `models/yolov8n.anchors.txt` and `pocctl model-probe`.
+	AIAnchors string
+	// MinBoxArea is SP_POC_MIN_BOX_AREA: the smallest box, as a fraction of the
+	// frame area, treated as an object at all. Below it a box is a speck, a
+	// shadow edge or a letterbox band, and a line-crossing machine that counts
+	// specks produces crossings that never happened.
+	MinBoxArea float64
+	// GhostMinScore is SP_POC_GHOST_MIN_SCORE: the floor below which nothing is
+	// drawn at all. Between it and ScoreThreshold a box is drawn as a GHOST —
+	// visible, counted nowhere, never an event. The band exists because a picture
+	// showing only approved boxes cannot answer "why is the road empty?", and a
+	// screen that cannot answer that is a screen nobody trusts.
+	GhostMinScore float64
+	// TrackMinFrames is SP_POC_TRACK_MIN_FRAMES: how many consecutive frames a
+	// track must be seen before it may emit a crossing at all. One frame of a
+	// vehicle at a line is not a crossing; a shadow, a reflection or a
+	// compression artefact is, and only time tells them apart.
+	TrackMinFrames int
+	// MaxBoxesDrawn is SP_POC_MAX_BOXES_DRAWN, the cap on boxes on the picture.
+	// What the cap left off is COUNTED per family and printed, because a cap that
+	// silently drops is a cap that lies.
+	MaxBoxesDrawn int
+	// ReportMetrics is SP_POC_REPORT_METRICS: `detectors` or `events`, exactly
+	// one, with no default. A report whose metric set was inferred would be
+	// comparable with a report that chose, and the whole point of the split is
+	// that they are different measurements.
+	ReportMetrics string
+	ZonesPath     string
+	Cooldown      time.Duration
+
+	// approved guards the resolved class set. See ApprovedClasses.
+	//
+	// It is a POINTER to the cache and the cache is behind it, because Config is
+	// passed by value to every reader in this module — `watch` alone hands it to
+	// seven of them — and a value holding a sync.Once makes each of those a
+	// `copylocks` finding under `go vet`. The gate runs vet, so the choice was
+	// between the two: a cache that survives being copied, or a Config nobody can
+	// pass. The cache is behind a pointer precisely so the copy carries the cache
+	// with it instead of copying the lock.
+	approvedOnce  *sync.Once
+	approvedSet   map[string]bool
+	approvedErr   error
+	TrackMaxAge   time.Duration
+	TrackIoU      float64
+	LineTolerance float64
 
 	ClipBefore     time.Duration
 	ClipAfter      time.Duration
@@ -423,6 +532,41 @@ func Load(lookup Lookup) (Config, error) {
 		}
 		*dst = v
 	}
+	// boolean is a plain bool parse with the same refusal as every other reader.
+	// Only SP_POC_SOURCE_RELAY uses it, and it uses it because a relay declared as
+	// a free-text string would have three spellings and two of them would mean
+	// nothing to a reader of `watch --config`.
+	boolean := func(dst *bool, name string) {
+		raw, ok := get(name)
+		if !ok {
+			return
+		}
+		v, err := strconv.ParseBool(strings.TrimSpace(raw))
+		if err != nil {
+			f := schemaByName[name]
+			errs = append(errs, &MissingError{Var: name, Raw: raw, ParseErr: err, Consequence: f.Consequence, Remedy: f.Remedy})
+			return
+		}
+		*dst = v
+	}
+	// integer is a plain decimal parse. It is a named helper rather than a call to
+	// `strconv.Atoi` at the call site because there are now several of these and
+	// they all have to produce the same refusal — one that names the variable and
+	// prints the schema's consequence and remedy, which is what a reader of a
+	// failed run actually reads.
+	integer := func(dst *int, name string) {
+		raw, ok := get(name)
+		if !ok {
+			return
+		}
+		v, err := strconv.Atoi(strings.TrimSpace(raw))
+		if err != nil {
+			f := schemaByName[name]
+			errs = append(errs, &MissingError{Var: name, Raw: raw, ParseErr: err, Consequence: f.Consequence, Remedy: f.Remedy})
+			return
+		}
+		*dst = v
+	}
 	i64 := func(dst *int64, name string) {
 		raw, ok := get(name)
 		if !ok {
@@ -462,6 +606,7 @@ func Load(lookup Lookup) (Config, error) {
 	str(&cfg.SourceLicence, "SP_POC_SOURCE_LICENCE")
 	str(&cfg.SourceUser, "SP_POC_SOURCE_USER")
 	str(&cfg.SourcePassword, "SP_POC_SOURCE_PASSWORD")
+	boolean(&cfg.SourceRelay, "SP_POC_SOURCE_RELAY")
 	str(&cfg.AIAddr, "SP_POC_AI_ADDR")
 	str(&cfg.AIModel, "SP_POC_AI_MODEL")
 	str(&cfg.SidecarScript, "SP_POC_SIDECAR_SCRIPT")
@@ -471,6 +616,12 @@ func Load(lookup Lookup) (Config, error) {
 	dur(&cfg.AIBackpressure, "SP_POC_AI_BACKPRESSURE_MS")
 	num(&cfg.AIInputWidth, "SP_POC_AI_INPUT_WIDTH")
 	flt(&cfg.ScoreThreshold, "SP_POC_SCORE_THRESHOLD")
+	flt(&cfg.MinBoxArea, "SP_POC_MIN_BOX_AREA")
+	flt(&cfg.GhostMinScore, "SP_POC_GHOST_MIN_SCORE")
+	integer(&cfg.TrackMinFrames, "SP_POC_TRACK_MIN_FRAMES")
+	integer(&cfg.MaxBoxesDrawn, "SP_POC_MAX_BOXES_DRAWN")
+	str(&cfg.AIAnchors, "SP_POC_AI_ANCHORS")
+	str(&cfg.ReportMetrics, "SP_POC_REPORT_METRICS")
 	str(&cfg.ZonesPath, "SP_POC_ZONES")
 	dur(&cfg.Cooldown, "SP_POC_COOLDOWN_MS")
 	dur(&cfg.TrackMaxAge, "SP_POC_TRACK_MAX_AGE_MS")
@@ -644,6 +795,15 @@ func (c Config) Validate() error {
 			"a camera password was given with no user. ffmpeg would be sent a `Basic OnBhc3N3b3Jk:` header and the camera would answer 401 forever, with the reason in a line of ffmpeg's log that nobody reading the report will ever see")
 	}
 
+	// A relay is a live source by construction, so the two settings cannot be
+	// combined the other way round. This is a refusal and not a normalisation
+	// because the combination has no meaning to state: there is nothing to relay
+	// in a file the run already has.
+	if c.SourceRelay && !c.isLiveSource() {
+		add("SP_POC_SOURCE_RELAY",
+			"the run says it is relaying recorded material, and the source is %q, which reads a local file or nothing at all. A relay is a LIVE source by construction — a recording re-published over rtsp — so this pair of settings describes a thing that does not exist. Set SP_POC_SOURCE_KIND=rtsp, or set SP_POC_SOURCE_RELAY=false", c.SourceKind)
+	}
+
 	// A LIVE source needs a recorded permission basis, and nothing else can supply
 	// one.
 	//
@@ -679,6 +839,52 @@ func (c Config) Validate() error {
 	}
 	if len(c.Classes) == 0 {
 		add("SP_POC_CLASSES", "an empty class list means no box is approved, and the run would be a measurement of nothing")
+	}
+	// The class list is RESOLVED, not merely present. An entry that is neither a
+	// family nor a class is a refusal here rather than at the first frame,
+	// because a run that starts and then approves nothing produces zero events
+	// and no error at all.
+	if _, err := c.ApprovedClasses(); err != nil {
+		add("SP_POC_CLASSES", err.Error())
+	}
+	if c.MinBoxArea <= 0 || c.MinBoxArea > 0.5 {
+		add("SP_POC_MIN_BOX_AREA", "%v is not a fraction of the frame between 0 and 0.5; a larger one would reject every object a camera can see", c.MinBoxArea)
+	}
+	if c.GhostMinScore < 0 || c.GhostMinScore > 1 {
+		add("SP_POC_GHOST_MIN_SCORE", "%v is not a probability", c.GhostMinScore)
+	}
+	// The ghost band is an ORDERING, and a band with the wrong order is not a
+	// band: a ghost floor ABOVE the approval threshold means everything between
+	// them is drawn dimmed AND approved, which is a contradiction the picture
+	// cannot express and the reader cannot see.
+	if c.GhostMinScore > c.ScoreThreshold {
+		add("SP_POC_GHOST_MIN_SCORE", "%v is above SP_POC_SCORE_THRESHOLD (%v), so the rejected band is upside down: everything between them would be drawn dimmed and approved at once. The ghost floor must be at or below the approval threshold", c.GhostMinScore, c.ScoreThreshold)
+	}
+	if c.TrackMinFrames < 1 {
+		add("SP_POC_TRACK_MIN_FRAMES", "%v frames; at least one is required, because a track that has been seen zero times is not an object", c.TrackMinFrames)
+	}
+	if c.MaxBoxesDrawn < 1 {
+		add("SP_POC_MAX_BOXES_DRAWN", "%v; a cap of zero draws nothing and a picture with nothing on it is indistinguishable from a camera pointing at a wall", c.MaxBoxesDrawn)
+	}
+	// EXACTLY ONE, and no default. The split between classifier-detection metrics
+	// and pipeline-event metrics is the point of the report, and a run that
+	// quietly picked one would produce a number that reads like the other.
+	switch c.ReportMetrics {
+	case "detectors", "events":
+	default:
+		add("SP_POC_REPORT_METRICS", "%q is neither `detectors` nor `events`. Choose one and say which: the classifier's detection quality and the pipeline's event quality are different measurements, and a report written against both at once is comparable with neither", c.ReportMetrics)
+	}
+	if c.AIAnchors != "" {
+		if strings.EqualFold(strings.TrimSpace(c.AIAnchors), NoAnchorsSentinel) {
+			// An EXPLICIT declaration, not an absence. This module's convention is
+			// that a variable set to whitespace is not set, and that convention is
+			// right: an operator who typed nothing has said nothing. So a fused
+			// export — which genuinely needs no anchors — has to SAY so, and the
+			// word it says it with is a checked value rather than an empty string
+			// that a reader cannot tell from a forgotten line.
+		} else if _, err := os.Stat(c.AIAnchors); err != nil {
+			add("SP_POC_AI_ANCHORS", "the anchors file %s could not be read: %v. The anchors are part of the model's .cfg and are not in the ONNX file, so there is nothing to infer them from and the sidecar will not guess them. Set it to %q if this model is a FUSED export, which needs no anchors", c.AIAnchors, err, NoAnchorsSentinel)
+		}
 	}
 	if c.ScoreThreshold < 0 || c.ScoreThreshold > 1 {
 		add("SP_POC_SCORE_THRESHOLD", "%v is not a probability", c.ScoreThreshold)
@@ -781,6 +987,63 @@ func Secrets() []string {
 // reached a VMS, and it requires an explicit non-simulator base URL.
 func (c Config) IsLiveVMS() bool {
 	return !IsSimulatorURL(c.XProtectBaseURL)
+}
+
+// ApprovedClasses is the resolved, lower-cased set of classes this run will turn
+// into a crossing event, with families expanded to their members.
+//
+// It is resolved ONCE and cached on the Config, because the answer has to be the
+// same on every frame: a run whose approved set could change mid-run would emit
+// an event for a class it had already decided against. `sync.Once` rather than a
+// field set in `Load`, because `Config` is a value and is copied around, and a
+// cache field set in a copy is a cache that is set in a copy of the copy.
+//
+// The resolution is a REFUSAL for an entry that is neither a family nor a class,
+// by name, and the reason is spelled out in `Resolve`'s error. A typo in the
+// approved list that silently approved nothing would produce a run with zero
+// events and no error, and that is the most expensive silence in this module.
+func (c Config) ApprovedClasses() (map[string]bool, error) {
+	// A Config built by hand rather than by Load has no cache. Building one here
+	// gives it the shared cache and costs a copy of a pointer; NOT building one
+	// would make the set resolve on every call, which is the thing the cache
+	// exists to prevent.
+	once := c.approvedOnce
+	if once == nil {
+		once = &sync.Once{}
+	}
+	once.Do(func() {
+		resolved, err := classify.Resolve(c.Classes)
+		if err != nil {
+			c.approvedErr = err
+			return
+		}
+		set := make(map[string]bool, len(resolved))
+		for _, k := range resolved {
+			set[k] = true
+		}
+		c.approvedSet, c.approvedErr = set, nil
+	})
+	if c.approvedErr != nil {
+		return nil, c.approvedErr
+	}
+	out := make(map[string]bool, len(c.approvedSet))
+	for k, v := range c.approvedSet {
+		out[k] = v
+	}
+	return out, nil
+}
+
+// IsApproved reports whether a class may produce a crossing event.
+func (c Config) IsApproved(class string) bool {
+	set, err := c.ApprovedClasses()
+	if err != nil {
+		// An unresolvable class list approves NOTHING, and Load refuses such a
+		// configuration before a run starts. Reaching here means something built
+		// a Config without loading one; approving everything would be the
+		// dangerous answer, so this refuses.
+		return false
+	}
+	return set[strings.ToLower(strings.TrimSpace(class))]
 }
 
 // isLiveSource reports whether the source is real-time. It is the boundary at

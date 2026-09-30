@@ -4,10 +4,13 @@ import (
 	"fmt"
 	"html"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/Sergey-Bar/ai-captain-poc/internal/ai"
+	"github.com/Sergey-Bar/ai-captain-poc/internal/classify"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/soak"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
 )
@@ -94,7 +97,13 @@ func kpiRow(d Data, verdict string, provisional bool) string {
 	b.WriteString(`<div class="kpis">`)
 	b.WriteString(kpi("verdict", vd, provisionalSuffix(provisional), vclass))
 	b.WriteString(kpi("detections", totalTxt, fmt.Sprintf("%d terminal · %d not", done, notDone), ""))
+	b.WriteString(kpi("crossings this run", itoa(d.Live.Crossings), "committed to the store", ""))
+	b.WriteString(kpi("objects now", familyText(d.Live.Families), "approved boxes, by family", ""))
+	b.WriteString(kpi("live tracks", itoa(d.Live.LiveTracks), "the tracker holds", ""))
 	b.WriteString(kpi("clips verified", itoa(d.Evidence.Verified), fmt.Sprintf("%d stored · %d mismatched", d.Evidence.Stored, d.Evidence.Mismatched), ""))
+	b.WriteString(kpi("ai state", aiStateCell(d.Live), aiStateSub(d.Live), aiStateClass(d.Live)))
+	b.WriteString(kpi("decode", decodeCell(d.Live.Telemetry), "sidecar self-report, this frame", ""))
+	b.WriteString(kpi("ai p99", aiP99Cell(d.Live.AIP99), "round trip, AC6's clause", ""))
 	b.WriteString(kpi("pushes", itoa(d.Push.WithResult), fmt.Sprintf("%d attempts · %d unattributed", d.Push.Total, d.Push.Unattributed), ""))
 	b.WriteString(kpi("heartbeats", itoa(d.Heartbeats), fmt.Sprintf("%d gap(s) over 30s", len(d.Gaps)), ""))
 	b.WriteString(kpi("faults", itoa(len(d.Faults)), "recorded", ""))
@@ -102,6 +111,82 @@ func kpiRow(d Data, verdict string, provisional bool) string {
 	b.WriteString(kpi("rss peak", humanBytes(d.Peaks.RSSBytes), "process", ""))
 	b.WriteString(`</div>`)
 	return b.String()
+}
+
+// familyText renders the approved-box tally in the taxonomy's FIXED order.
+//
+// All four families are printed, including the zeros. A family that has never
+// been seen is a family with a zero, and that is a measurement: hiding it would
+// make a road with no animals and a road whose animals the model missed look
+// identical, which is the question an operator watching an empty picture asks.
+func familyText(f map[string]int) string {
+	if len(f) == 0 {
+		return "NOT RUN"
+	}
+	parts := make([]string, 0, len(classify.Families))
+	for _, fam := range classify.Families {
+		parts = append(parts, string(fam)+" "+itoa(f[string(fam)]))
+	}
+	return strings.Join(parts, " · ")
+}
+
+// aiStateCell is the REAL state from `ai.Interpret`, and never the literal
+// `answered`.
+//
+// An empty cell here would read as "fine" beside a live picture, and `fine` is
+// a claim nobody made. The five words are CONTRACT.md §2.2's and there is no
+// sixth: asked_answered, no_objects, degraded, not_asked, cannot_tell.
+func aiStateCell(l Live) string {
+	if !l.AIStateKnown || strings.TrimSpace(l.AIState) == "" {
+		return "NOT RUN"
+	}
+	return l.AIState
+}
+
+func aiStateSub(l Live) string {
+	if !l.AIStateKnown {
+		return "the sidecar has not been asked yet"
+	}
+	return "sidecar state, this frame"
+}
+
+// aiStateClass colours the two states that are NOT a healthy answer, so the
+// strip is readable from across a room: `degraded` and `cannot_tell` are the
+// ones an operator has to act on.
+func aiStateClass(l Live) string {
+	switch strings.TrimSpace(l.AIState) {
+	case "asked_answered", "no_objects":
+		return "pass"
+	case "degraded", "cannot_tell":
+		return "fail"
+	default:
+		return "notrun"
+	}
+}
+
+// decodeCell is the sidecar's own arithmetic, on one line.
+//
+// These four are the numbers that made the four decode bugs invisible: a
+// candidate count with a pre-NMS of 0 means the model did not fire, a pre-NMS of
+// 41 with a post-NMS of 0 means the decoder did, `identical_geometry` is the
+// signature of the collapsed decode, and `median_object_px` is the one a person
+// can check against the picture without a ruler.
+func decodeCell(t ai.Telemetry) string {
+	if !t.Seen() {
+		return "NOT RUN"
+	}
+	return fmt.Sprintf("%d → %d cand·nms · %d identical · area %.4f · %.0f px",
+		t.Candidates, t.PostNms, t.IdenticalGeometry, t.MedianBoxArea, t.MedianObjectPx)
+}
+
+// aiP99Cell prints NOT RUN for a p99 nobody measured. A confident `0 ms` beside
+// a live picture is a model that answered instantly, and it is what a run in
+// which the sidecar was never reachable looks like.
+func aiP99Cell(ms int64) string {
+	if ms <= 0 {
+		return "NOT RUN"
+	}
+	return fmt.Sprintf("%d ms", ms)
 }
 
 func targetText(d Data) string {
@@ -218,20 +303,27 @@ func handleLive(s *Server) http.HandlerFunc {
 
 		// ---- evidence ------------------------------------------------------
 		var clips strings.Builder
-		if d.Evidence.Stored == 0 {
-			clips.WriteString(noData("no clip has been stored"))
+		if len(d.Recent) == 0 || snapshots(d) == 0 {
+			clips.WriteString(noData("no crossing snapshot has been rendered yet"))
 		} else {
 			clips.WriteString(`<div class="clips">`)
-			for _, ev := range d.Recent {
-				if ev.ClipRef == "" {
+			for _, det := range d.Recent {
+				if det.SnapshotRef == "" {
 					continue
 				}
-				sum := strings.SplitN(ev.ClipRef, "/", 2)
-				clips.WriteString(`<div class="clip"><div class="m"><b>verified</b> ` + esc(sum[0]) + `</div></div>`)
+				cls := "clip"
+				if det.SnapshotKind != store.EvidenceCrossingSnapshot {
+					cls += " fail"
+				}
+				fmt.Fprintf(&clips, `<div class="%s"><img src="/snapshot.jpg?ref=%s" alt="the frame the crossing was decided on, with the approved boxes drawn on it">`+
+					`<div class="m"><b>%s</b> · %s · %s<br><span class="k">%s · %s</span></div></div>`,
+					cls, url.QueryEscape(det.SnapshotRef), det.At.Local().Format("15:04:05"),
+					esc(det.Class), esc(det.Family), esc(det.SnapshotKind),
+					esc(clip(det.SnapshotRef, 22)))
 			}
 			clips.WriteString(`</div>`)
 		}
-		b.WriteString(panel("evidence", fmt.Sprintf("%d stored · %d verified", d.Evidence.Stored, d.Evidence.Verified), clips.String()))
+		b.WriteString(panel("crossing snapshots", fmt.Sprintf("%d rendered · the picture of the DECISION", snapshots(d)), clips.String()))
 
 		b.WriteString(`</div><div>`) // end the live column
 
@@ -284,12 +376,33 @@ func ageText(l Live) string {
 	}
 }
 
+// snapshots is how many of the recent detections carry a rendered snapshot. It
+// is counted rather than derived from `Evidence.Stored`, because the clip count
+// and the snapshot count are different measurements: a run can have every clip
+// stored and no snapshots at all, and a panel that said "0 of 6" under the
+// heading "6 stored" would read as six things that went missing.
+func snapshots(d Data) int {
+	n := 0
+	for _, det := range d.Recent {
+		if det.SnapshotRef != "" {
+			n++
+		}
+	}
+	return n
+}
+
+// detectionTable carries the family and a link to the snapshot.
+//
+// `family` is beside `class` and not inside it for the reason T7.1 gives: the
+// class is the model's own word and is what an Alarm Definition matches, and the
+// family is what a human counts by. A table that showed only one of them would
+// force a reader to hold a lookup table in their head.
 func detectionTable(d Data) string {
 	if len(d.Recent) == 0 {
 		return noData("no detection has been recorded")
 	}
 	var b strings.Builder
-	b.WriteString(`<table><thead><tr><th>time</th><th>class</th><th>dir</th><th>status</th><th>clip</th><th>provenance</th></tr></thead><tbody>`)
+	b.WriteString(`<table><thead><tr><th>time</th><th>class</th><th>family</th><th>dir</th><th>status</th><th>snapshot</th><th>clip</th><th>provenance</th></tr></thead><tbody>`)
 	for i, det := range d.Recent {
 		if i >= 14 {
 			break
@@ -303,9 +416,13 @@ func detectionTable(d Data) string {
 		default:
 			cls = "fail"
 		}
-		fmt.Fprintf(&b, `<tr><td>%s</td><td>%s</td><td>%s</td><td class="%s">%s</td><td>%s</td><td>%s</td></tr>`,
-			det.At.Local().Format("15:04:05"), esc(det.Class), esc(det.Direction), cls, esc(det.Status),
-			esc(clip(orNone(det.ClipRef, "—"), 20)), esc(det.Provenance))
+		snap := `<span style="color:var(--notrun)">no data</span>`
+		if det.SnapshotRef != "" {
+			snap = `<a href="/snapshot.jpg?ref=` + url.QueryEscape(det.SnapshotRef) + `">` + esc(det.SnapshotKind) + `</a>`
+		}
+		fmt.Fprintf(&b, `<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td class="%s">%s</td><td>%s</td><td>%s</td><td>%s</td></tr>`,
+			det.At.Local().Format("15:04:05"), esc(det.Class), esc(orNone(det.Family, "—")), esc(det.Direction),
+			cls, esc(det.Status), snap, esc(clip(orNone(det.ClipRef, "—"), 20)), esc(det.Provenance))
 	}
 	b.WriteString(`</tbody></table>`)
 	return b.String()

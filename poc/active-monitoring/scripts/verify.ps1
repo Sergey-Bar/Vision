@@ -86,6 +86,17 @@ if ($gcc) {
   Pass "gcc at $gcc and CGO_ENABLED=1 (the race detector needs both)"
 } else { Skip "gcc was not found, so the race detector cannot run. Install MSYS2 (C:\msys64) or MinGW. The -race step below is SKIPPED, not passed." }
 
+$mediamtx = Find-Tool 'mediamtx' @()
+if ($mediamtx) { Pass "mediamtx at $mediamtx (`pocctl demo --rtsp` can publish an rtsp relay)" }
+else {
+  # A SKIP and never a Fail, and the distinction is load-bearing. `pocctl demo`
+  # without --rtsp loops a file and is a complete gate on its own; D-4 made the
+  # relay opt-in for exactly this reason. A missing OPTIONAL tool that turned the
+  # gate red would train everyone to ignore the gate, which is the exact failure
+  # this module treats as a defect everywhere else.
+  Skip "mediamtx is not on PATH, so `pocctl demo --rtsp` will refuse by name. Install it with `winget install --id Bluenviron.MediaMTX -e` (MIT) from https://github.com/bluenviron/mediamtx/releases. This is a SKIP, not a pass: the loop demo is still a full gate, and nothing below measured the rtsp path."
+}
+
 $ffmpeg = Get-Command ffmpeg -ErrorAction SilentlyContinue
 if ($ffmpeg) { Pass "ffmpeg at $($ffmpeg.Source)" }
 else { Fail "ffmpeg is not on PATH. D2 makes it a hard runtime dependency: without it there is no source, no recording and no frames. The tests that need it FAIL rather than skip, on purpose." }
@@ -174,6 +185,31 @@ $boundaries = @(
                'github.com/Sergey-Bar/ai-captain-poc/internal/detect',
                'github.com/Sergey-Bar/ai-captain-poc/internal/xprotect')
     why = 'the simulator must know nothing about the pipeline: it is a server, not a participant'
+  },
+  @{
+    # The leaf that both the screen and the runner draw with. internal/ui imports
+    # internal/soak and internal/store, and T6.3 asks internal/soak to render a
+    # crossing snapshot — so the drawing code cannot live in either one without an
+    # import cycle. It lives here, below both, and this row is what stops it from
+    # quietly growing a dependency on the packages that depend on it. That is the
+    # cycle, and Go would refuse to build it: the point is to refuse it here with a
+    # sentence about why, rather than as a compiler error a week later.
+    pkg = './internal/overlay'
+    forbid = @('github.com/Sergey-Bar/ai-captain-poc/internal/soak',
+               'github.com/Sergey-Bar/ai-captain-poc/internal/store',
+               'github.com/Sergey-Bar/ai-captain-poc/internal/ai',
+               'github.com/Sergey-Bar/ai-captain-poc/internal/detect',
+               'github.com/Sergey-Bar/ai-captain-poc/internal/ui',
+               'modernc.org/sqlite')
+    why = 'internal/overlay is the leaf the screen and the runner BOTH draw with, so it may import only the standard library and internal/classify. Anything else is the import cycle this package exists to avoid, and a package that has begun to be a dumping ground is a package whose boundary has stopped being enforced.'
+  },
+  @{
+    # The taxonomy is a leaf too, and for the opposite reason: it is the vocabulary
+    # every other package agrees on, so a classify that reached for the store or
+    # the wire would make the vocabulary depend on the thing it describes.
+    pkg = './internal/classify'
+    forbid = @('modernc.org/sqlite')
+    why = 'internal/classify is the family vocabulary and must stay a leaf; a taxonomy that imports the store is a taxonomy that can be wrong in a way no table can show'
   }
 )
 foreach ($b in $boundaries) {
@@ -208,9 +244,21 @@ if ($LASTEXITCODE -ne 0) { Fail "go test exited $LASTEXITCODE" } else { Pass "go
 # --- 7. python --------------------------------------------------------------
 Step "sidecar tests"
 if ($py) {
+  # $ErrorActionPreference is 'Stop' for this whole script, and PowerShell 5.1
+  # turns ANY native command's stderr into a NativeCommandError record. So a
+  # suite that PASSED aborted the gate with a red stack: `unittest` writes its
+  # progress dots to stderr BY DESIGN, which means this step could never get
+  # past a green run on this shell.
+  #
+  # The preference is relaxed for exactly this invocation and restored on the
+  # line after, so nothing else in the gate is softened — and the verdict still
+  # comes from $LASTEXITCODE, not from whether stderr said anything.
+  $ErrorActionPreference = 'Continue'
   if ($py.Name -eq 'py.exe') { & $py -3 -m unittest discover -s pyworker -p 'test_*.py' }
   else { & $py -m unittest discover -s pyworker -p 'test_*.py' }
-  if ($LASTEXITCODE -ne 0) { Fail "the sidecar's Python tests exited $LASTEXITCODE" } else { Pass "pyworker tests" }
+  $pyExit = $LASTEXITCODE
+  $ErrorActionPreference = 'Stop'
+  if ($pyExit -ne 0) { Fail "the sidecar's Python tests exited $pyExit" } else { Pass "pyworker tests" }
 } else { Skip "no Python interpreter, so the sidecar's tests did not run" }
 
 # --- 8. red check -----------------------------------------------------------

@@ -8,10 +8,11 @@ This directory is not decoration: an unlabelled measurement is a claim.
 
 | File | Provenance | What it is |
 |---|---|---|
-| `car-crossing.mp4` | **`real`** — licence to be recorded | the real-motion case: a vehicle crossing a frame |
+| `car-crossing.mp4` | **`synthetic`** — licence **not recorded** | a coloured rectangle crossing a `testsrc` frame. It exercises the line-cross machine; a COCO model sees nothing in it (measured, below) |
 | `bird-synthetic.mp4` | **`synthetic`** | a bright rectangle travelling left to right, built by `scripts/make-bird-clip.sh` |
+| `groundtruth.json` | — | the human review: which pushed events were false. Empty `marks` means **NOT RUN**, not zero |
 | `labels.json` | — | the provenance record: source, licence, retention, expected windows |
-| `car-crossing.zones.json` | — | **PROPOSED** line for the real-motion case |
+| `car-crossing.zones.json` | — | **PROPOSED** line for the `testsrc` case |
 | `bird-synthetic.zones.json` | — | **known-correct** line for the synthetic case |
 
 ## The two honest statements
@@ -22,12 +23,29 @@ end on material whose every property is known and reproducible. It is **not**
 evidence that the system detects birds, and `CONTRACT.md` §12 and the report both
 say so. If this material is ever quoted as a detection claim, that is a defect.
 
-**The real-motion slot is empty until its licence is filled in.** The three
-`REPLACE-ME` fields in `labels.json` are the licence, the URL and the retrieval
-date. Until they are filled in, a clip with no licence may not be used in a run,
-shown at a demonstration, or committed. A clip with no licence is a clip that
-cannot be shown to anyone, and finding that out at the demonstration is the worst
-possible time.
+**The real-motion slot is empty, and the licence is a second, separate hole.**
+`labels.json` has three `REPLACE-ME` fields on `car-crossing.mp4` and the YouTube
+clip is labelled *NOT cleared for redistribution, publication or demonstration to
+anyone outside this machine*. Until the licence fields are filled in, a clip may be
+read on the machine that has it and **may not be shown to anyone else** — not in a
+demonstration, not in a screenshot, not committed.
+
+These are two different problems and fixing one does not fix the other:
+
+| | what is missing | what fixes it |
+|---|---|---|
+| **licence** | three fields, on both clips | a licence recorded verbatim. No code fixes this. |
+| **real motion** | there is no real footage at all | record `testdata/street.mp4`: 60–90 s, **daylight**, phone fixed or on a tripod, one real car or pedestrian crossing a horizontal line, 1080p |
+
+The intended replacement is a hand-recorded clip, because it is the shortest path
+to footage that is legally clear, carries no third-party rights, and that a COCO
+model actually detects. Every other source has a licence attached to it.
+
+**Do not lower the threshold to make this footage detect.** If a daytime street
+recording produces nothing, the recording is wrong — too dark, nothing on the line,
+the camera too far up — and the remedy is a new recording. A threshold lowered far
+enough to fire on synthetic material fires on noise, and the false-positive number
+becomes the first thing a reviewer reads.
 
 ## Why a line has to be drawn, not guessed
 
@@ -71,7 +89,9 @@ change what a run of this material is worth:
 returned **zero boxes at every one**. A flat coloured rectangle on a `testsrc`
 background is not a photograph, and a detector trained on photographs is right to
 see nothing in it. This is not a bug and it is not a tuning failure: it is the
-reason the `real` slot above is empty.
+reason the `real` slot above is empty — and it is why `labels.json` now records
+this clip's provenance as **`synthetic`** rather than `real`. It used to say
+`real`, and that was a false label on a measurement.
 
 **What that means for the POC:** a run over this material produces **zero
 detections**, and the report says so — AC2, AC3 and AC4 come out `NOT RUN` with

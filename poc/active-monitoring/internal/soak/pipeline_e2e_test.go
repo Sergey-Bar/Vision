@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Sergey-Bar/ai-captain-poc/internal/ai"
+	"github.com/Sergey-Bar/ai-captain-poc/internal/classify"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/detect"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/evidence"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/recorder"
@@ -102,6 +103,20 @@ func (s *stubSidecar) handler(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"seq": seq, "boxes": []any{box},
 		"width": n, "height": m, "model": "stub", "infer_ms": 1.0,
+		// The telemetry every sidecar must now send. Without it the tripwire
+		// refuses the frame as `cannot_tell` — correctly: a sidecar that cannot
+		// describe how it decoded has not earned the right to have its boxes
+		// counted as objects. That is the four-bug collapse's lesson turned into
+		// a wire requirement, and this stub has to obey it like the real one.
+		"telemetry": map[string]any{
+			"layout": "nchw", "decoder_family": "fused", "coord_space": "pixel",
+			"has_objectness": false, "fields": 84, "classes": 80,
+			"candidates": 1200, "pre_nms": 4, "post_nms_class": 2, "post_nms": 2,
+			"dropped_degenerate": 0, "dropped_tiny": 1,
+			"nms_class_iou": 0.45, "nms_global_iou": 0.75,
+			"median_box_area": 0.01, "median_object_px": 40,
+			"identical_geometry": 0, "scales": 1, "note": "",
+		},
 	})
 }
 
@@ -236,8 +251,13 @@ func TestTheWholePipelineFromAFrameToAnEventIsProven(t *testing.T) {
 	runner, err := soak.NewRunner(soak.RunnerOptions{
 		RunID: runID, DataRoot: work, Store: st, Evidence: ev,
 		Client: client, XProtect: push, Engine: engine, Recorder: rec,
-		Clipper:    recorder.Clipper{FFmpeg: "ffmpeg", RollingDir: rolling},
-		Zone:       zone,
+		Clipper: recorder.Clipper{FFmpeg: "ffmpeg", RollingDir: rolling},
+		Zone:    zone,
+		// The snapshot is rendered from the newest frame off the pipe, so the
+		// runner is given the same reader `watch` gives it. Without this the
+		// crossing-snapshot path is skipped for the whole run and the assertions
+		// below would be assertions about nothing.
+		LastJPEG:   rec.LastFrameJPEG,
 		Provenance: store.ProvenanceSynthetic,
 		ClipBefore: 1 * time.Second, ClipAfter: 1 * time.Second,
 		Target: 16 * time.Second, Heartbeat: 2 * time.Second,
@@ -312,6 +332,92 @@ func TestTheWholePipelineFromAFrameToAnEventIsProven(t *testing.T) {
 		}
 	}
 	t.Logf("evidence: %d stored, %d verified, %d mismatched", stats.Stored, stats.Verified, stats.Mismatched)
+
+	// B2: the pushed payload's boundingBox is the REAL box, and it is the same
+	// box the row holds. This is a COMPARISON and not an eyeball, because the
+	// defect it closes was invisible: the row carried real numbers, the event on
+	// the wire carried zeros, and every test in the module was green while it
+	// lasted.
+	//
+	// The outbox row holds the exact bytes that were meant to be sent, so
+	// comparing it against `detections.box_*` compares what left the process with
+	// what the database says about the same detection. There is no third place
+	// the numbers could have come from.
+	checkedPayloads := 0
+	for _, d := range recent {
+		rows, err := st.OutboxFor(testCtx(), d.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, row := range rows {
+			var body xprotect.EventRequest
+			if err := json.Unmarshal([]byte(row.Payload), &body); err != nil {
+				t.Fatalf("the outbox payload for %s is not a readable event body: %v\n%s", d.ID, err, row.Payload)
+			}
+			got := body.Data.Object.BoundingBox
+			if got == (xprotect.Box{}) {
+				t.Fatalf("detection %s pushed an ALL-ZERO boundingBox while its row holds top=%d left=%d bottom=%d right=%d. "+
+					"A bounding box is what makes a VMS draw the object on the operator's timeline, and zeros are how this module "+
+					"showed a working detector as a broken product", d.ID, d.BoxTop, d.BoxLeft, d.BoxBottom, d.BoxRight)
+			}
+			want := xprotect.Box{Top: d.BoxTop, Left: d.BoxLeft, Bottom: d.BoxBottom, Right: d.BoxRight}
+			if got != want {
+				t.Fatalf("detection %s pushed boundingBox %+v but its row holds %+v; the wire and the database disagree about the same object", d.ID, got, want)
+			}
+			if got.Top >= got.Bottom || got.Left >= got.Right {
+				t.Fatalf("detection %s pushed an inverted boundingBox %+v", d.ID, got)
+			}
+			// F2.2: `value` carries the family, `type` still carries the bare class
+			// so every existing Alarm Definition keeps matching.
+			if body.Data.Object.Type != d.Class {
+				t.Fatalf("detection %s pushed object.type %q; an Alarm Definition matches on the class, so changing it breaks every existing rule", d.ID, body.Data.Object.Type)
+			}
+			if want := d.Class + " (" + d.Family + ")"; body.Data.Object.Value != want {
+				t.Fatalf("detection %s pushed object.value %q, want %q", d.ID, body.Data.Object.Value, want)
+			}
+			if d.Family != string(classify.FamilyOf(d.Class)) {
+				t.Fatalf("detection %s stored family %q for class %q; the taxonomy says %q",
+					d.ID, d.Family, d.Class, classify.FamilyOf(d.Class))
+			}
+			checkedPayloads++
+		}
+	}
+	if checkedPayloads == 0 {
+		t.Fatalf("no pushed payload could be compared against a detection row, so B2 is UNPROVEN rather than fixed. A gate that passes vacuously is not a gate")
+	}
+	t.Logf("pushed payloads compared against their detection rows: %d", checkedPayloads)
+
+	// T6.3: a snapshot exists on disk for every crossing that had a frame, it is
+	// a JPEG, and its extension says so.
+	snapshots := 0
+	for _, d := range recent {
+		if d.SnapshotRef == "" {
+			continue
+		}
+		if d.SnapshotKind != store.EvidenceCrossingSnapshot {
+			t.Fatalf("detection %s has snapshot_kind %q; a reader who cannot look the kind up does not know what opening the file means", d.ID, d.SnapshotKind)
+		}
+		if !strings.HasSuffix(d.SnapshotRef, ".jpg") {
+			t.Fatalf("detection %s has snapshot_ref %q, which does not end in the extension its kind chose", d.ID, d.SnapshotRef)
+		}
+		p := filepath.Join(work, "evidence", filepath.FromSlash(d.SnapshotRef))
+		info, err := os.Stat(p)
+		if err != nil {
+			t.Fatalf("detection %s points at %s and the file is not there: %v", d.ID, p, err)
+		}
+		if info.Size() == 0 {
+			t.Fatalf("the snapshot for detection %s is zero bytes", d.ID)
+		}
+		head, err := os.ReadFile(p)
+		if err != nil || len(head) < 3 || head[0] != 0xFF || head[1] != 0xD8 {
+			t.Fatalf("the snapshot for detection %s is not a JPEG; a reader opening it as a picture would get an error", d.ID)
+		}
+		snapshots++
+	}
+	if snapshots == 0 {
+		t.Fatalf("no crossing snapshot was rendered, so T6.3 is UNPROVEN. The runner was given the same LastJPEG reader `watch` gives it")
+	}
+	t.Logf("crossing snapshots on disk: %d", snapshots)
 	//
 	// What this test does NOT prove, said here rather than left to be assumed:
 	//

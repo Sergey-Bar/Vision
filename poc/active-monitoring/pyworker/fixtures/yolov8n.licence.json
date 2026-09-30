@@ -1,0 +1,86 @@
+{
+  "$comment": [
+    "Provenance and LICENCE for the model this repository ships a binary of.",
+    "",
+    "It is the same kind of record as testdata/labels.json, for the same reason: a",
+    "measurement whose input nobody can account for is a number that may not be",
+    "quoted. This one exists because the FILENAME is wrong.",
+    "",
+    "It is written beside the measured contract and not beside the weights because",
+    "`models/` is gitignored. `/models/` holds 257 MB of weights that are not in",
+    "this repository, and a licence note inside a gitignored directory is a note",
+    "nobody reviewing the repository will ever read. The contract this file points",
+    "at IS committed, so this is the committed half of the same record."
+  ],
+
+  "file": "models/yolov8n.onnx",
+  "bytes": 257470589,
+  "sha256": "NOT RECORDED - compute it with `certutil -hashfile models\\yolov8n.onnx SHA256` and put it here before this weights file is shown to anyone outside this machine",
+  "shape_measured_by": "pyworker/probe_model.py",
+  "shape_record": "pyworker/fixtures/yolov8n.contract.json",
+
+  "filename_says": "yolov8n",
+  "measurement_says": "a YOLOv4-shaped darknet export",
+  "why_the_filename_is_wrong": [
+    "The measured export has 85 fields per detection, which means there is an",
+    "objectness at column 4. A YOLOv8 export has 84 (4 box + 80 class) and no",
+    "objectness column at all.",
+    "It publishes THREE outputs at strides 52, 26 and 13 over a 416x416 NHWC",
+    "input. That is one output per stride, i.e. anchored. A YOLOv8 export is",
+    "fused: one output, no anchor boxes.",
+    "decoder_family is `anchored` in the contract and the file needs",
+    "`models/yolov8n.anchors.txt`, which lives in the model's .cfg and is not in",
+    "the ONNX file. A YOLOv8 needs no anchors at all.",
+    "names_verbatim is EMPTY. The export carries no class metadata, so the",
+    "decoder falls back to the COCO-80 vocabulary by index."
+  ],
+
+  "licence": "NOT RECORDED. This is the open item, and it is the one that matters.",
+  "licence_consequence": [
+    "The weights were NOT obtained through Ultralytics' published download page,",
+    "and this repository has no record of where they came from at all. Nothing in",
+    "the commit history or in `pocctl fetch-model`'s default URL names an origin.",
+    "",
+    "IF the weights are Ultralytics', the licence is AGPL-3.0, and Ultralytics'",
+    "own licensing page states that commercial use and internal use require an",
+    "Enterprise licence. That would put a licence obligation on the DEMONSTRATION",
+    "and a much larger one on anything derived from it.",
+    "",
+    "IF the weights are from the ONNX Model Zoo under a permissive licence, the",
+    "obligation is an attribution notice.",
+    "",
+    "The two are not distinguishable from anything in this repository, so no claim",
+    "is made either way. The record says NOT RECORDED because NOT RECORDED is",
+    "what is true."
+  ],
+
+  "cleared_for": [
+    "measurement, on this machine, for the POC's own evaluation"
+  ],
+  "NOT_cleared_for": [
+    "sale",
+    "any distribution outside this machine",
+    "any product derived from these weights",
+    "a claim that the POC may be shipped commercially"
+  ],
+
+  "measured_with": {
+    "providers": ["CPUExecutionProvider"],
+    "input": "416x416 NHWC, dynamic batch",
+    "input_width_the_sidecar_is_given": 640,
+    "measured_on": "one frame from a night traffic camera, on a CPU-only machine",
+    "note": "the decode telemetry in the contract was measured on that one frame, not over a corpus. The collapsed-decode fix is proven by the shape (identical_geometry 0, median_box_area 0.0015) and by 40+ cases in pyworker/test_decode.py, not by this frame alone."
+  },
+
+  "decisions": {
+    "rename": "NO. F5.2: a rename without a licence change moves the problem. Renaming the file to yolov4 would make the filename honest and leave the licence unrecorded, which is the same defect with a nicer label.",
+    "replacement_model": "a separate, named decision, once the licence of what ships today is known"
+  },
+
+  "actions_before_this_weight_is_used_outside_this_machine": [
+    "record the sha256 above, so the file is identified by its content and not by a name",
+    "record the true origin URL and the retrieval date",
+    "record the licence, verbatim, from the licence file or page the weights came with",
+    "if it is Ultralytics, either obtain an Enterprise licence or replace the weights"
+  ]
+}
