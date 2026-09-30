@@ -1,0 +1,22 @@
+{
+  "$comment": [
+    "The zone for the SYNTHETIC bird material. The line is placed on the path the script",
+    "draws, so this file is known-correct rather than proposed: the object's trajectory is",
+    "arithmetic in scripts/make-bird-clip.sh and the line sits on it.",
+    "",
+    "provenance: synthetic. Numbers derived from this material are labelled synthetic in the",
+    "report and are not evidence that the system detects birds."
+  ],
+  "source": "testdata/bird-synthetic.mp4",
+  "frame": {"width": 640, "height": 360},
+  "note": "Known-correct for the generated material: the line is on the object's path by construction.",
+  "lines": [
+    {
+      "name": "midline",
+      "a": [0.0, 0.41],
+      "b": [1.0, 0.41],
+      "direction": "left-to-right",
+      "classes": ["bird", "cat", "dog", "kite", "sports ball"]
+    }
+  ]
+}

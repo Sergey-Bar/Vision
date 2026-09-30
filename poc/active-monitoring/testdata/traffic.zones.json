@@ -1,0 +1,28 @@
+{
+  "$comment": [
+    "The zone for the traffic-camera footage, drawn from the frames rather than guessed.",
+    "",
+    "The cars cross the LOWER third of the frame, left to right, at about y=0.72 of the",
+    "height. The line runs horizontally across the carriageway just above them, so a car",
+    "crossing it is a car that has entered the junction.",
+    "",
+    "Measured, not assumed: detections at t=53s land at x1=0.37 y1=0.69 x2=0.91 y2=1.00, and at",
+    "t=81s at x1=0.01 y1=0.23 x2=0.47 y2=0.71. The line is placed on the near carriageway.",
+    "",
+    "provenance: real. The footage is a public traffic camera. Every number the report",
+    "derives from it is labelled real, and the false-positive rate is still NOT RUN until a",
+    "person marks which of the model's 'cars' are really traffic lights."
+  ],
+  "source": "testdata/youtube/sTF-6_xinUU.mp4",
+  "frame": {"width": 640, "height": 360},
+  "note": "Drawn from the measured detections. A wrong line produces zero events and no error, so this is verified by a run that is expected to produce one.",
+  "lines": [
+    {
+      "name": "carriageway",
+      "a": [0.0, 0.66],
+      "b": [1.0, 0.66],
+      "direction": "left-to-right",
+      "classes": ["car", "truck", "bus", "motorcycle", "bicycle"]
+    }
+  ]
+}

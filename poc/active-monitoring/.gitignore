@@ -1,0 +1,46 @@
+# Build output. `pocctl`, `watch` and `poc` are built by `scripts/verify.ps1`
+# and by `pocctl demo`; they are not sources and are not committed.
+/bin/
+/.demo-data/
+/.poc-data/
+
+# A run's data root. It holds the rolling recording, the evidence store and the
+# SQLite database, and it is the operator's to choose where it goes. The default
+# the demo uses is inside the module, and a run's output is never a source.
+/.poc-final/
+*.db
+*.db-wal
+*.db-shm
+/poc.db*
+
+# The model. Not in git: it is 250 MB, it is downloaded, and a model with no
+# recorded provenance is a model nobody checked. `pocctl fetch-model` puts it
+# here and the README says where it came from.
+/models/
+
+# Downloaded video, in ANY directory under testdata/.
+#
+# The committed clips are the ones named in testdata/labels.json with their
+# provenance, licence and retrieval date. Footage pulled off somebody else's site
+# is NOT one of them: a downloaded clip is not a source, and committing one would
+# republish material the camera operator never agreed to give away.
+#
+# This pattern is deliberately broad. It was `youtube/` only, and a second
+# download into `youtube2/` was about to be committed — which is exactly the
+# accident this rule exists to prevent.
+testdata/youtube*/
+*.mp4.part
+*.replaced
+*.pick.png
+*.pick.jpg
+
+# The staged report and one-pager are generated artefacts. They are produced by
+# `pocctl report` and by `scripts/make-one-pager.sh` from a run's own store, so
+# committing one means committing a measurement that nobody can reproduce from
+# the tree.
+/testdata/.demo-report.md
+/docs/one-pager.md
+
+# __pycache__ from the sidecar's tests.
+__pycache__/
+*.pyc

@@ -1,0 +1,29 @@
+{
+  "$comment": [
+    "The zone for the highway footage, PLACED FROM MEASUREMENT, not guessed.",
+    "",
+    "Measured by running the real model over four frames of this footage at 00:00:04,",
+    "00:00:10, 00:00:16 and 00:00:22. Each frame yielded 21-32 vehicles with confidence",
+    "0.81-0.96, and their box centres ran from y=0.19 to y=0.83 of the frame height.",
+    "",
+    "A horizontal line at y=0.50 therefore sits inside the band the traffic occupies, and",
+    "is crossed by vehicles in BOTH directions: the near carriageway runs toward the",
+    "camera (top to bottom) and the far one away from it (bottom to top). The engine calls",
+    "those two directions apart, so one line produces events that are not duplicates of",
+    "each other.",
+    "",
+    "provenance: real. Every number the report derives from this footage is labelled real."
+  ],
+  "source": "testdata/youtube2/eO19UTm93GQ.mp4",
+  "frame": {"width": 640, "height": 360},
+  "note": "The line is at the middle of the band the measured traffic occupies. A line placed by eye on a single frame would be a guess, and a wrong line produces zero events and no error.",
+  "lines": [
+    {
+      "name": "midway",
+      "a": [0.0, 0.50],
+      "b": [1.0, 0.50],
+      "direction": "toward-or-away",
+      "classes": ["car", "truck", "bus", "motorcycle", "bicycle"]
+    }
+  ]
+}

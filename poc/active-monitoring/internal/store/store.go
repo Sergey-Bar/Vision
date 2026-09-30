@@ -1,0 +1,480 @@
+// Package store is the POC's durable state: a SQLite database in WAL mode
+// holding runs, heartbeats, detections, evidence, the outbox and faults.
+//
+// The rule it exists to enforce is R2 from CONTRACT.md: a detection is recorded
+// in a committed transaction BEFORE any external effect, and every push attempt
+// is an outbox row. A kill -9 at any point must leave a resumable state, not a
+// lost one.
+package store
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	_ "modernc.org/sqlite" // cgo-free SQLite; the POC must build without a C toolchain
+)
+
+// Detection statuses. These are the only values ever written to
+// detections.status, and they are the closed set defined in CONTRACT.md §2.1.
+// Worker labels such as "pending" or "clipping" are never written here.
+const (
+	StatusAccepted    = "accepted"
+	StatusClipOK      = "clip_ok"
+	StatusClipRefused = "clip_refused"
+	StatusPushSent    = "push_sent"
+	StatusPushRefused = "push_refused"
+	StatusPushDead    = "push_dead"
+	StatusDone        = "done"
+)
+
+// Terminal reports whether a status ends the detection's life. AC2 is computed
+// entirely from this: a row that is not terminal after five minutes is a lost
+// event.
+func Terminal(status string) bool {
+	switch status {
+	case StatusDone:
+		return true
+	}
+	return false
+}
+
+// ValidStatus is the closed set. A status outside it is a programming error and
+// is refused rather than stored, because a stray status would silently become a
+// non-terminal detection and would fail AC2 for a reason nobody can see.
+func ValidStatus(status string) bool {
+	switch status {
+	case StatusAccepted, StatusClipOK, StatusClipRefused, StatusPushSent, StatusPushRefused, StatusPushDead, StatusDone:
+		return true
+	}
+	return false
+}
+
+// Store wraps the database.
+type Store struct {
+	db   *sql.DB
+	path string
+	// writeTimeout bounds a single write. It exists so a frozen database is
+	// REPORTED as a fault rather than stalling the frame loop for the driver's
+	// full busy timeout, which on a week-long run is the difference between a
+	// named fault and a run that silently stops recording events.
+	writeTimeout time.Duration
+}
+
+// DefaultWriteTimeout bounds one write when nothing else says otherwise. It is
+// shorter than the driver's busy timeout on purpose.
+const DefaultWriteTimeout = 5 * time.Second
+
+// SetWriteTimeout bounds a single write. Zero restores the default.
+func (s *Store) SetWriteTimeout(d time.Duration) {
+	if d <= 0 {
+		d = DefaultWriteTimeout
+	}
+	s.writeTimeout = d
+}
+
+func (s *Store) writeCtx(ctx context.Context) (context.Context, context.CancelFunc) {
+	d := s.writeTimeout
+	if d <= 0 {
+		d = DefaultWriteTimeout
+	}
+	return context.WithTimeout(ctx, d)
+}
+
+// busyTimeoutMS is the driver's own wait. It is short on purpose: the driver
+// blocks INSIDE the call and does not observe a Go context, so a long driver
+// timeout would make a frozen database a silent ten-second stall in the frame
+// loop. The store's own writeTimeout, applied by exec, is what bounds the wait.
+const busyTimeoutMS = 250
+
+// Open creates or opens the database. WAL is set because a reader (the screen)
+// must be able to read while the writer (the pipeline) writes, and because a
+// commit that returned means the bytes are on the medium.
+func Open(dataRoot string) (*Store, error) {
+	if err := os.MkdirAll(dataRoot, 0o755); err != nil {
+		return nil, fmt.Errorf("store: cannot create the data root %s: %w", dataRoot, err)
+	}
+	path := filepath.Join(dataRoot, "poc.db")
+	s, err := OpenPath(path)
+	if err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// exec performs a write with the store's own deadline and a retry loop.
+//
+// The retry is what makes a frozen database a NAMED FAULT rather than a stall.
+// The driver returns BUSY quickly, the store retries on a short interval, and
+// when the store's writeTimeout is reached it gives up and says so by name. The
+// event is refused at that point and nothing external has happened for it, which
+// is what R1 requires: a refusal is visible, and a stall is not.
+func (s *Store) exec(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	deadline := s.writeTimeout
+	if deadline <= 0 {
+		deadline = DefaultWriteTimeout
+	}
+	until := time.Now().Add(deadline)
+	var last error
+	for {
+		res, err := s.db.ExecContext(ctx, query, args...)
+		if err == nil {
+			return res, nil
+		}
+		last = err
+		if !isBusy(err) {
+			return nil, err
+		}
+		if time.Now().After(until) {
+			return nil, fmt.Errorf("store: the write could not be completed within %s because the database is locked (%v). "+
+				"The event is REFUSED, not queued and not lost: nothing external happened for it, and the fault names the database "+
+				"so an operator looks at the process holding the lock rather than at the video", deadline, last)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("store: the write was abandoned because the run ended while the database was locked (%v). "+
+				"The event is REFUSED, not queued and not lost", ctx.Err())
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+}
+
+func isBusy(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "database is locked") ||
+		strings.Contains(s, "database table is locked") ||
+		strings.Contains(s, "sqlite_busy") ||
+		strings.Contains(s, "is busy")
+}
+
+// OpenPath opens a database at an explicit path. Used by the tests and by the
+// screen, which may open the same file read-only.
+func OpenPath(path string) (*Store, error) {
+	dsn := "file:" + path + "?_pragma=journal_mode(WAL)&_pragma=synchronous(FULL)&_pragma=busy_timeout(" +
+		itoa(busyTimeoutMS) + ")&_pragma=foreign_keys(1)"
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("store: cannot open %s: %w", path, err)
+	}
+	// One writer. The pipeline is single-threaded at the database boundary and
+	// a second writer would only buy SQLITE_BUSY under WAL.
+	db.SetMaxOpenConns(1)
+	s := &Store{db: db, path: path, writeTimeout: DefaultWriteTimeout}
+	if err := s.migrate(context.Background()); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return s, nil
+}
+
+func itoa(n int) string { return strconv.Itoa(n) }
+
+// Close releases the database.
+func (s *Store) Close() error { return s.db.Close() }
+
+// DB exposes the handle for the packages that need to read rows directly (the
+// screen). Writes always go through the methods here.
+func (s *Store) DB() *sql.DB { return s.db }
+
+// Path is the database file.
+func (s *Store) Path() string { return s.path }
+
+// Size is the on-disk size including the WAL, which is the number AC5 scores.
+func (s *Store) Size() (int64, error) {
+	var total int64
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		info, err := os.Stat(s.path + suffix)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return 0, err
+		}
+		total += info.Size()
+	}
+	return total, nil
+}
+
+// journalMode reports the mode actually in effect, so preflight can prove the
+// database is in WAL rather than assume it.
+func (s *Store) journalMode() (string, error) {
+	var mode string
+	if err := s.db.QueryRow("PRAGMA journal_mode").Scan(&mode); err != nil {
+		return "", err
+	}
+	return mode, nil
+}
+
+// ErrTerminal is returned when a detection has already reached a terminal state
+// and is asked to move again. There is no "un-accept after commit" and no
+// "amend a finished event": a detection row is a fact, and the transition
+// history lives in the outbox.
+var ErrTerminal = errors.New("store: detection is already terminal")
+
+const schema = `
+CREATE TABLE IF NOT EXISTS runs (
+  id            TEXT PRIMARY KEY,
+  label         TEXT NOT NULL,
+  mode          TEXT NOT NULL,
+  source_kind   TEXT NOT NULL,
+  source_arg    TEXT NOT NULL,
+  push_base_url TEXT NOT NULL,
+  push_is_vms   INTEGER NOT NULL,
+  clock_source  TEXT NOT NULL,
+  started_at    TEXT NOT NULL,
+  target_seconds REAL NOT NULL,
+  ended_at      TEXT,
+  note          TEXT
+);
+
+CREATE TABLE IF NOT EXISTS sections (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id     TEXT NOT NULL REFERENCES runs(id),
+  started_at TEXT NOT NULL,
+  ended_at   TEXT,
+  reason     TEXT
+);
+
+CREATE TABLE IF NOT EXISTS heartbeats (
+  run_id     TEXT NOT NULL REFERENCES runs(id),
+  at         TEXT NOT NULL,
+  frames     INTEGER NOT NULL DEFAULT 0,
+  detections INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (run_id, at)
+);
+
+CREATE TABLE IF NOT EXISTS detections (
+  id           TEXT PRIMARY KEY,
+  run_id       TEXT NOT NULL REFERENCES runs(id),
+  at           TEXT NOT NULL,
+  class        TEXT NOT NULL,
+  track_id     INTEGER NOT NULL,
+  score        REAL NOT NULL,
+  box_top      INTEGER NOT NULL,
+  box_left     INTEGER NOT NULL,
+  box_bottom   INTEGER NOT NULL,
+  box_right    INTEGER NOT NULL,
+  direction    TEXT NOT NULL,
+  status       TEXT NOT NULL,
+  ai_state     TEXT NOT NULL,
+  provenance   TEXT NOT NULL DEFAULT 'synthetic',
+  clip_ref     TEXT,
+  clip_reason  TEXT,
+  created_at   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS detections_run_at ON detections(run_id, at);
+CREATE INDEX IF NOT EXISTS detections_status ON detections(status);
+
+CREATE TABLE IF NOT EXISTS evidence (
+  id           TEXT PRIMARY KEY,
+  detection_id TEXT NOT NULL REFERENCES detections(id),
+  sha256       TEXT NOT NULL,
+  storage_ref  TEXT NOT NULL,
+  bytes        INTEGER NOT NULL,
+  trim         TEXT NOT NULL,
+  time_begin   TEXT NOT NULL,
+  time_end     TEXT NOT NULL,
+  readback_ok  INTEGER NOT NULL DEFAULT 0,
+  created_at   TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS evidence_sha ON evidence(sha256);
+
+CREATE TABLE IF NOT EXISTS outbox (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  detection_id TEXT NOT NULL REFERENCES detections(id),
+  kind         TEXT NOT NULL,
+  payload      TEXT NOT NULL,
+  tag          TEXT NOT NULL,
+  attempts     INTEGER NOT NULL DEFAULT 0,
+  next_attempt TEXT,
+  result       TEXT,
+  detail       TEXT,
+  remote_id    TEXT,
+  dead_letter  INTEGER NOT NULL DEFAULT 0,
+  created_at   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS outbox_detection_kind ON outbox(detection_id, kind);
+CREATE INDEX IF NOT EXISTS outbox_pending ON outbox(dead_letter, next_attempt);
+
+CREATE TABLE IF NOT EXISTS faults (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id     TEXT NOT NULL REFERENCES runs(id),
+  at         TEXT NOT NULL,
+  reason     TEXT NOT NULL,
+  detail     TEXT NOT NULL,
+  expected   TEXT,
+  observed   TEXT
+);
+CREATE INDEX IF NOT EXISTS faults_run ON faults(run_id, at);
+
+CREATE TABLE IF NOT EXISTS samples (
+  run_id     TEXT NOT NULL REFERENCES runs(id),
+  at         TEXT NOT NULL,
+  rss_bytes  INTEGER NOT NULL,
+  cpu_percent REAL NOT NULL,
+  ai_p99_ms  REAL NOT NULL,
+  pipe_depth INTEGER NOT NULL,
+  disk_bytes INTEGER NOT NULL,
+  PRIMARY KEY (run_id, at)
+);
+`
+
+func (s *Store) migrate(ctx context.Context) error {
+	if _, err := s.db.ExecContext(ctx, schema); err != nil {
+		return fmt.Errorf("store: cannot create the schema in %s: %w", s.path, err)
+	}
+	// A data root that predates a column must keep working. `CREATE TABLE IF NOT
+	// EXISTS` does not add a column, so a new release against an old database
+	// failed with "table samples has no column named db_bytes" — a message that
+	// reads like a bug and costs an hour. Columns are added here, once, and the
+	// version is recorded so the state of a data root is knowable.
+	if err := s.ensureColumns(ctx); err != nil {
+		return err
+	}
+	mode, err := s.journalMode()
+	if err != nil {
+		return fmt.Errorf("store: cannot read the journal mode: %w", err)
+	}
+	if !strings.EqualFold(mode, "wal") {
+		return fmt.Errorf("store: %s is in %q journal mode, not WAL; without WAL the screen cannot read while the pipeline writes, and a commit that returned might not be on the medium", s.path, mode)
+	}
+	return s.recordVersion(ctx)
+}
+
+// addedColumns is every column this module has added to an existing table
+// after v1, in order. Each is applied only when the table does not already have
+// it, so running it twice is free.
+var addedColumns = []struct {
+	table, column, decl string
+}{
+	{"samples", "db_bytes", "INTEGER NOT NULL DEFAULT 0"},
+	{"samples", "cpu_measured", "INTEGER NOT NULL DEFAULT 0"},
+}
+
+// schemaVersion is bumped whenever a migration is added above.
+const schemaVersion = 3
+
+func (s *Store) ensureColumns(ctx context.Context) error {
+	for _, c := range addedColumns {
+		has, err := s.hasColumn(ctx, c.table, c.column)
+		if err != nil {
+			return err
+		}
+		if has {
+			continue
+		}
+		stmt := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", c.table, c.column, c.decl)
+		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
+			// Two processes migrating at once is a real possibility on a
+			// restart, and the second one losing the race is not an error.
+			if has2, err2 := s.hasColumn(ctx, c.table, c.column); err2 == nil && has2 {
+				continue
+			}
+			return fmt.Errorf("store: cannot add %s.%s to %s: %w", c.table, c.column, s.path, err)
+		}
+	}
+	return nil
+}
+
+func (s *Store) hasColumn(ctx context.Context, table, column string) (bool, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT name FROM pragma_table_info(?)", table)
+	if err != nil {
+		return false, fmt.Errorf("store: cannot read the columns of %s: %w", table, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
+}
+
+func (s *Store) recordVersion(ctx context.Context) error {
+	if _, err := s.db.ExecContext(ctx,
+		`CREATE TABLE IF NOT EXISTS schema_meta (id INTEGER PRIMARY KEY CHECK (id = 1), version INTEGER NOT NULL, applied_at TEXT NOT NULL)`); err != nil {
+		return fmt.Errorf("store: cannot record the schema version in %s: %w", s.path, err)
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`INSERT INTO schema_meta (id, version, applied_at) VALUES (1, ?, ?)
+		 ON CONFLICT(id) DO UPDATE SET version = excluded.version, applied_at = excluded.applied_at`,
+		schemaVersion, nowUTC(time.Now())); err != nil {
+		return fmt.Errorf("store: cannot record the schema version in %s: %w", s.path, err)
+	}
+	return nil
+}
+
+// SchemaVersion is the version this build expects, and the version the data
+// root records. They differ when someone opens an old data root with a new
+// build, and the difference is printed rather than repaired silently.
+func (s *Store) SchemaVersion(ctx context.Context) (want, have int, err error) {
+	var v int
+	e := s.db.QueryRowContext(ctx, `SELECT version FROM schema_meta WHERE id = 1`).Scan(&v)
+	if e != nil {
+		return schemaVersion, 0, e
+	}
+	return schemaVersion, v, nil
+}
+
+// Exclusive is a second connection used only to hold a write lock on the same
+// file. It exists so the database-freeze fault can be rehearsed for real rather
+// than mocked: a mocked lock proves nothing about whether the writer's error is
+// recognisable, and that recognisability is the whole point.
+type Exclusive struct {
+	db *sql.DB
+}
+
+// OpenExclusive opens a second connection to the same file. It does not run the
+// schema: it exists to block.
+func OpenExclusive(ctx context.Context, path string) (*Exclusive, error) {
+	dsn := "file:" + path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(0)"
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("store: cannot open %s for locking: %w", path, err)
+	}
+	db.SetMaxOpenConns(1)
+	if _, err := db.ExecContext(ctx, `SELECT 1`); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return &Exclusive{db: db}, nil
+}
+
+// Hold takes an EXCLUSIVE write lock and returns the function that releases it.
+// It blocks until the lock is taken or the context ends, so a caller can hold it
+// for a measured interval and no longer.
+func (e *Exclusive) Hold(ctx context.Context, forDur time.Duration) (func(), error) {
+	conn, err := e.db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := conn.ExecContext(ctx, `BEGIN EXCLUSIVE`); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("store: cannot take the exclusive lock: %w", err)
+	}
+	release := func() {
+		_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
+		_ = conn.Close()
+	}
+	return release, nil
+}
+
+// Close releases the connection.
+func (e *Exclusive) Close() error { return e.db.Close() }
+
+func nowUTC(t time.Time) string { return t.UTC().Format(time.RFC3339Nano) }

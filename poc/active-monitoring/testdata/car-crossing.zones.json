@@ -1,0 +1,36 @@
+{
+  "$comment": [
+    "The line for testdata/car-crossing.mp4.",
+    "",
+    "A wrong line produces ZERO events and NO error: the report looks clean and a reader",
+    "concludes nothing was there. That is why this file is hand-drawn from a grid still",
+    "and then verified with a short run that is expected to produce one event.",
+    "",
+    "Draw it with:  pocctl zone --pick testdata/car-crossing.mp4 --out <somewhere-new>",
+    "The picker PROPOSES and never overwrites, so running it cannot destroy a line that",
+    "already works.",
+    "",
+    "provenance of the material this line is drawn for: synthetic. The numbers derived",
+    "from it are labelled synthetic in the report and are not evidence that the system",
+    "detects anything in the world."
+  ],
+  "source": "testdata/car-crossing.mp4",
+  "frame": {"width": 1280, "height": 720},
+  "note": "A 45-second clip: a 170x110 box travels left to right at about 22 px/s, crossing the middle of the frame at about t=23s. The line below is where a human read it off the grid still.",
+  "lines": [
+    {
+      "name": "kerb",
+      "a": [0.0, 0.5],
+      "b": [1.0, 0.5],
+      "direction": "left-to-right",
+      "classes": ["car", "truck", "bus"]
+    }
+  ],
+  "polygons": [
+    {
+      "name": "roadway",
+      "points": [[0, 0.5], [1, 0.5], [1, 1], [0, 1]],
+      "classes": ["car", "truck", "bus", "bird", "person"]
+    }
+  ]
+}

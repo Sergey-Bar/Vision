@@ -1,0 +1,511 @@
+openapi: 3.0.1
+info:
+  title: MIP VMS RESTful Bookmarks API
+  version: 1.0.0
+  x-logo:
+    url: ./images/milestone-logo.png
+    backgroundColor: '#ffffff'
+    href: https://doc.developer.milestonesys.com/mipvmsapi/
+    altText: Milestone Systems logo
+  contact:
+    name: MIP SDK Forum
+    url: https://developer.milestonesys.com
+  license:
+    name: MIT License
+    url: https://opensource.org/licenses/MIT
+  description: >+
+    <!-- markdownlint-disable MD029 MD033 MD034 MD041 -->
+
+    # Introduction
+
+
+    Video sequences can be tagged with **bookmarks**. Bookmarks improve the
+    sharing of video sequences because additional information can be added to a
+    tagged sequence. The information in bookmarks can be used when searching for
+    relevant video sequences, helping handle incidents and investigations.
+
+
+    ## Download OpenAPI specification
+
+
+    Download the OpenAPI specification for the Bookmarks API from <a
+    href="openapi.yaml" download="openapi.yaml"
+    target="_blank">https://doc.developer.milestonesys.com/mipvmsapi/api/bookmarks-rest/v1/openapi.yaml</a>.
+
+
+servers:
+  - url: https://localhost/API/rest/v1
+    description: API Gateway entry point
+tags:
+  - name: Bookmarks
+    description: >
+      A bookmark is a tag on a video sequence. Each bookmark has a number of
+      fields that can be searched for.
+
+      - Note: Bookmarks cannot be retrieved by use a GET .../bookmarks request.
+      Please use one of the search tasks under the POST requests.
+             
+    x-displayName: Bookmarks
+paths:
+  /bookmarks/{id}:
+    get:
+      description: Get the bookmark identified by {id}.
+      operationId: bookmarks_Get
+      summary: Get a bookmark
+      tags:
+        - Bookmarks
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/bookmarkDataBody'
+        '400':
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error400'
+        '403':
+          description: Unauthorized
+        '404':
+          description: Not found
+      security:
+        - bearerAuth: []
+    patch:
+      description: Update specific fields in the bookmark identified by {id}.
+      operationId: bookmarks_Patch
+      summary: Update a bookmark
+      tags:
+        - Bookmarks
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/bookmarkPatchBody'
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error400'
+        '403':
+          description: Unauthorized
+        '404':
+          description: Not found
+      security:
+        - bearerAuth: []
+    delete:
+      description: Delete the bookmark identified by {id}.
+      operationId: bookmarks_Delete
+      summary: Delete a bookmark
+      tags:
+        - Bookmarks
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Bad request.
+        '403':
+          description: Unauthorized
+        '404':
+          description: Not found
+      security:
+        - bearerAuth: []
+  /bookmarks:
+    post:
+      description: >
+        Perform one of 4 tasks: 
+
+        * no `task` parameter: a new bookmark is created from the body
+
+        * `newReference`: create a new reference and trigger rules 
+
+        * `searchTime`: search based on time and text parameters 
+
+        * `searchFromBookmark`: get bookmarks after the specific one
+
+
+        Notes 
+
+        * The newReference task will be used to execute configured rules, to
+        ensure actions like Start-Recording is performed in real time. The
+        newRefernce task does not create the bookmark in the database.
+
+        * When no `task` is POSTed, the bookmark is created, but the rule system
+        is not triggered. 
+      operationId: bookmarks_Post
+      summary: Bookmark-related tasks
+      tags:
+        - Bookmarks
+      parameters:
+        - name: task
+          in: query
+          description: >-
+            Name of the task to perform: `newReference`, `searchTime`,
+            `searchFromBookmark` or no `task` defined
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              oneOf:
+                - $ref: '#/components/schemas/newBookmarkBody'
+                - $ref: '#/components/schemas/searchTimeBody'
+                - $ref: '#/components/schemas/newReferenceBody'
+                - $ref: '#/components/schemas/searchFromBookmarkBody'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                oneOf:
+                  - $ref: '#/components/schemas/bookmarkArrayBody'
+                  - $ref: '#/components/schemas/newReferenceResponseBody'
+        '400':
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/error400'
+        '403':
+          description: Unauthorized
+      security:
+        - bearerAuth: []
+components:
+  schemas:
+    newReferenceBody:
+      type: object
+      properties:
+        devicePath:
+          $ref: '#/components/schemas/devicePath'
+    newReferenceResponseBody:
+      type: object
+      description: The properties returned from a POST with task=newReference
+      properties:
+        result:
+          type: object
+          properties:
+            reference:
+              type: string
+              description: A VMS generated reference id
+            time:
+              type: string
+              format: date-time
+    devicePath:
+      type: object
+      description: >-
+        Object containing the type and ID of the device referenced by this
+        bookmark
+      properties:
+        type:
+          type: string
+          example: cameras
+        id:
+          type: string
+          format: uuid
+    selfPath:
+      type: object
+      properties:
+        type:
+          type: string
+          example: bookmarks
+        id:
+          type: string
+          format: uuid
+    searchFromBookmarkBody:
+      type: object
+      properties:
+        fromBookmarkId:
+          type: string
+          format: uuid
+          description: >-
+            ID of a bookmark from which to search for newer bookmarks. The
+            bookmark specified will not be included in the result.
+        resourceTypes:
+          type: array
+          description: >-
+            Can be one or more of `cameras`, `microphones`, `speakers`. Either
+            resourceTypes or devicePaths must be specified.
+          items:
+            type: string
+        devicePaths:
+          type: array
+          description: >-
+            List of devices to search for bookmarks from. Either resourceTypes
+            or devicePaths must be specified.
+          items:
+            $ref: '#/components/schemas/devicePath'
+        timeLimit:
+          type: string
+          description: >-
+            Defines a timespan to search within, relative to `time`. Like
+            `00:30:00` for half an hour. Default is 60 minutes.
+        countLimit:
+          type: integer
+          description: The max number of bookmarks to return
+        searchUser:
+          type: boolean
+          description: Defines if search should match on user names
+        searchHeader:
+          type: boolean
+          description: Defines if search should match on header text
+        searchDescription:
+          type: boolean
+          description: Defines if search should match on description text
+        searchReference:
+          type: boolean
+          description: Defines if search should match on the reference id
+        searchText:
+          type: string
+          description: Defines the text to search for (for any enabled field type)
+        headerContains:
+          type: string
+          description: Defines the text to search for specifically in headers
+        definitionContains:
+          type: string
+          description: Defines the text to search for specifically in definitions
+        users:
+          type: array
+          description: Defines the list of bookmark authors to search for
+          items:
+            type: string
+      required:
+        - fromBookmarkId
+        - countLimit
+    searchTimeBody:
+      type: object
+      properties:
+        time:
+          type: string
+          format: date-time
+          description: >-
+            Defines the start time to search from. Only bookmarks with
+            timeTriggered within the time range, will be returned. The time
+            range is defined as either between time and time+timeLimit, or
+            between time and endTime.
+          example: '2018-03-20T09:12:28Z'
+        resourceTypes:
+          type: array
+          description: >-
+            Can be one or more of `cameras`, `microphones`, `speakers`. Either
+            resourceTypes or devicePaths must be specified.
+          items:
+            type: string
+        devicePaths:
+          type: array
+          description: >-
+            List of devices to search for bookmarks from. Either resourceTypes
+            or devicePaths must be specified.
+          items:
+            $ref: '#/components/schemas/devicePath'
+        endTime:
+          type: string
+          format: date-time
+          description: >-
+            Defines the end time to search to. If not specified, the timeLimit
+            must be specified.
+        timeLimit:
+          type: string
+          description: >-
+            Defines a timespan to search within, relative to `time`, such as
+            `00:30:00` for half an hour. Default is 60 minutes. (Ignored if
+            endTime is defined)
+        countLimit:
+          type: integer
+          description: The max number of bookmarks to return
+        searchUser:
+          type: boolean
+          description: Defines if search should match on user names
+        searchHeader:
+          type: boolean
+          description: Defines if search should match on header text
+        searchDescription:
+          type: boolean
+          description: Defines if search should match on description text
+        searchReference:
+          type: boolean
+          description: Defines if search should match on the reference id
+        searchText:
+          type: string
+          description: Defines the text to search for (for any enabled field type)
+        headerContains:
+          type: string
+          description: Defines the text to search for specifically in headers
+        definitionContains:
+          type: string
+          description: Defines the text to search for specifically in definitions
+        users:
+          type: array
+          description: Defines the list of bookmark authors to search for
+          items:
+            type: string
+      required:
+        - time
+        - countLimit
+    bookmarkDataBody:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/bookmarkBody'
+    bookmarkArrayBody:
+      type: object
+      properties:
+        array:
+          type: array
+          items:
+            $ref: '#/components/schemas/bookmarkBody'
+    bookmarkBody:
+      type: object
+      properties:
+        header:
+          type: string
+          description: The header text for the bookmark
+        description:
+          type: string
+          description: The description text for the bookmark
+        timeBegin:
+          type: string
+          format: date-time
+          description: Begin time for the bookmark interval
+        timeEnd:
+          type: string
+          format: date-time
+          description: End time for the bookmark interval
+        timeTriggered:
+          type: string
+          format: date-time
+          description: Trigger time for the bookmark interval
+        reference:
+          type: string
+          description: Bookmark ID
+        user:
+          type: string
+          description: Author of the bookmark
+        devicePath:
+          $ref: '#/components/schemas/devicePath'
+        deviceName:
+          type: string
+          description: The name of the device
+        relations:
+          type: object
+          properties:
+            self:
+              $ref: '#/components/schemas/selfPath'
+    newBookmarkBody:
+      type: object
+      description: >
+        Fields to create a new bookmark. The header and devicePath are required
+        fields.  If timeTriggered is not provided, current time is used. If
+        timeBegin or timeEnd is not provided, the timeTriggered is used for
+        these fields.
+      properties:
+        header:
+          type: string
+          description: The header text for the bookmark
+        description:
+          type: string
+          description: The description text for the bookmark
+        timeBegin:
+          type: string
+          format: date-time
+          description: Begin time for the bookmark interval
+        timeEnd:
+          type: string
+          format: date-time
+          description: End time for the bookmark interval
+        timeTriggered:
+          type: string
+          format: date-time
+          description: Trigger time for the bookmark interval
+        reference:
+          type: string
+          description: Bookmark ID
+        devicePath:
+          $ref: '#/components/schemas/devicePath'
+      required:
+        - header
+        - devicePath
+    bookmarkPatchBody:
+      type: object
+      properties:
+        header:
+          type: string
+          description: The header text for the bookmark
+        description:
+          type: string
+          description: The description text for the bookmark
+        timeBegin:
+          type: string
+          format: date-time
+          description: Begin time for the bookmark interval
+        timeEnd:
+          type: string
+          format: date-time
+          description: End time for the bookmark interval
+        timeTriggered:
+          type: string
+          format: date-time
+          description: Trigger time for the bookmark interval
+        reference:
+          type: string
+          description: Bookmark ID
+        devicePath:
+          $ref: '#/components/schemas/devicePath'
+      required:
+        - devicePath
+    error400:
+      type: object
+      properties:
+        httpCode:
+          type: integer
+          example: '400'
+        details:
+          type: array
+          items:
+            type: object
+            properties:
+              errorText:
+                type: string
+                example: Incorrect formatted JSON
+              property:
+                type: string
+              errorTextId:
+                type: string
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+x-tagGroups:
+  - name: MIP VMS RESTful Bookmarks API
+    tags:
+      - Bookmarks

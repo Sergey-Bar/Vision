@@ -1,0 +1,120 @@
+{
+  "$comment": [
+    "Provenance record for every piece of video material in this directory.",
+    "",
+    "Every clip carries `provenance: real | synthetic`. The report prints it next to every",
+    "number derived from the material, and the one-pager prints it next to every claim.",
+    "",
+    "A material with no provenance here is a material whose numbers may not be quoted."
+  ],
+  "clips": [
+    {
+      "file": "car-crossing.mp4",
+      "provenance": "real",
+      "subject": "a vehicle crossing a frame",
+      "source_url": "REPLACE-ME",
+      "licence": "REPLACE-ME â€” record the exact licence, not 'free'",
+      "retrieved": "REPLACE-ME â€” the date it was downloaded",
+      "attribution": "REPLACE-ME â€” required by the licence if the licence requires it",
+      "contains_people": "REPLACE-ME â€” true/false/unknown",
+      "notes": [
+        "This slot exists so the real-motion case has a home with its licence recorded next",
+        "to it. Until the three REPLACE-ME fields are filled in, treat this clip as",
+        "unusable: a clip with no licence is a clip that cannot be shown to anyone.",
+        "",
+        "Requirements before this may be used in a run:",
+        "  - the URL resolves and is not behind a login",
+        "  - the licence permits redistribution of the derivative clip in a repository",
+        "  - if people are visible, the licence permits it, and the retention period is",
+        "    recorded here so the sweep knows when it may delete it",
+        "  - the retrieval date is recorded, because a licence can change"
+      ]
+    },
+    {
+      "file": "bird-synthetic.mp4",
+      "provenance": "synthetic",
+      "subject": "a bright rectangle travelling left to right",
+      "source_url": "generated locally",
+      "licence": "the same licence as this repository",
+      "retrieved": "2026-09-30",
+      "contains_people": "false",
+      "built_by": "scripts/make-bird-clip.sh",
+      "reproducible": true,
+      "notes": [
+        "The moving object is a RECTANGLE, not a bird. It has bird-like motion and",
+        "bird-like proportions and nothing else.",
+        "",
+        "This clip exists so the pipeline can be exercised end to end on material whose",
+        "every property is known. It is NOT evidence that the system detects birds. The",
+        "report prints `provenance: synthetic` next to every number derived from it, and",
+        "the one-pager says so in words.",
+        "",
+        "The script rebuilds it bit for bit, which is what makes the label checkable rather",
+        "than decorative."
+      ]
+    }
+    ,
+    {
+      "file": "youtube/sTF-6_xinUU.mp4",
+      "provenance": "real",
+      "subject": "a public traffic camera at an intersection, at night, with vehicles crossing",
+      "source_url": "https://www.youtube.com/watch?v=sTF-6_xinUU",
+      "licence": "REPLACE-ME — the rights holder is the camera operator, not the uploader, and neither has been asked. This file is NOT committed and is NOT cleared for any use outside this machine.",
+      "retrieved": "2026-09-30",
+      "contains_people": "unknown — a night road camera; no pedestrian was observed in the frames examined, and no claim is made that none is present",
+      "local_copy": "testdata/youtube/sTF-6_xinUU.mp4, 90 seconds, gitignored",
+      "notes": [
+        "Downloaded with yt-dlp at operator request. NOT cleared for redistribution, publication",
+        "or demonstration to anyone outside this machine, because no permission basis exists:",
+        "the camera belongs to a public body, the footage is theirs, and watching it live and",
+        "storing clips of it are different acts.",
+        "",
+        "It is used here for ONE reason and it is a good one: it is real footage with real",
+        "moving objects, and the committed synthetic material proved nothing about the detector",
+        "because a COCO model correctly sees nothing in a coloured rectangle on a testsrc",
+        "background. The decoder had a rank bug and a logit bug that this footage exposed",
+        "immediately and the synthetic material never could.",
+        "",
+        "provenance: real. Every number the report derives from it is labelled real, and the",
+        "false-positive rate is still NOT RUN until a person marks which of the model's 'cars'",
+        "are really traffic lights — which, on a night scene with red lights, is very likely",
+        "to be several."
+      ]
+    }
+  ],
+  "lines": {
+    "car-crossing.mp4": {
+      "line": "kerb",
+      "a": [0.0, 0.52],
+      "b": [1.0, 0.52],
+      "expected_direction": "left-to-right",
+      "note": "The zones file next to the clip is the authority for the geometry. This entry records what a human saw, so a mismatch is detectable."
+    },
+    "bird-synthetic.mp4": {
+      "line": "midline",
+      "a": [0.0, 0.41],
+      "b": [1.0, 0.41],
+      "expected_direction": "left-to-right",
+      "note": "The synthetic object travels on a horizontal path at about 0.41 of the frame height, so a horizontal line there is crossed exactly once per pass."
+    }
+  },
+  "time_windows": {
+    "$comment": [
+      "The intervals in which a crossing is expected, per clip. A run that produces an",
+      "event outside every window is a detection the labels did not predict, and the",
+      "report should be read with that in mind: an unexpected event is either a",
+      "false positive or a mis-drawn line, and only a human can say which."
+    ],
+    "car-crossing.mp4": [{"from": "00:00:02", "to": "00:00:08", "expect": "one crossing, left-to-right"}],
+    "bird-synthetic.mp4": [{"from": "00:00:01", "to": "00:00:07", "expect": "one crossing, left-to-right"}]
+  },
+  "retention": {
+    "$comment": [
+      "How long a stored clip may live. The store's sweep is age-based and this is the",
+      "age: it never deletes a clip to satisfy a byte target, and it never touches stored",
+      "evidence to satisfy the rolling disk ceiling."
+    ],
+    "car-crossing.mp4": "P7D",
+    "bird-synthetic.mp4": "P7D"
+  }
+}
