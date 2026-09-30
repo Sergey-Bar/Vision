@@ -1,5 +1,6 @@
 {
   "$comment": [
+    "THIS ZONE FILE POINTS AT FOOTAGE THAT IS NOT COMMITTED. testdata/youtube/sTF-6_xinUU.mp4 is deliberately gitignored: it is video pulled off somebody else's site and nobody has been asked, so it is not republished here.\nIt is kept because the line was MEASURED against that footage — the line is inside the band the detector actually saw the traffic occupy, which is why it works. A line measured against material you no longer have is worse than no line at all.\nThe committed demo runs testdata/car-crossing.mp4 with testdata/car-crossing.zones.json, and both of those ARE in git.",
     "The zone for the traffic-camera footage, drawn from the frames rather than guessed.",
     "",
     "The cars cross the LOWER third of the frame, left to right, at about y=0.72 of the",
@@ -14,15 +15,30 @@
     "person marks which of the model's 'cars' are really traffic lights."
   ],
   "source": "testdata/youtube/sTF-6_xinUU.mp4",
-  "frame": {"width": 640, "height": 360},
+  "frame": {
+    "width": 640,
+    "height": 360
+  },
   "note": "Drawn from the measured detections. A wrong line produces zero events and no error, so this is verified by a run that is expected to produce one.",
   "lines": [
     {
       "name": "carriageway",
-      "a": [0.0, 0.66],
-      "b": [1.0, 0.66],
+      "a": [
+        0.0,
+        0.66
+      ],
+      "b": [
+        1.0,
+        0.66
+      ],
       "direction": "left-to-right",
-      "classes": ["car", "truck", "bus", "motorcycle", "bicycle"]
+      "classes": [
+        "car",
+        "truck",
+        "bus",
+        "motorcycle",
+        "bicycle"
+      ]
     }
   ]
 }

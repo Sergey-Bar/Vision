@@ -20,10 +20,22 @@ py -3 --version       # required
 `gcc` is optional and only for the race detector. Without it the gate prints
 **SKIPPED** for that step and is otherwise green — a skip is not a pass.
 
-## 1. The gate
+## 1. Build
 
 ```powershell
 cd poc\active-monitoring
+go build -o bin\pocctl.exe ./cmd/pocctl
+go build -o bin\watch.exe   ./cmd/watch
+go build -o bin\poc.exe     ./cmd/poc
+```
+
+**This comes before everything, because the binaries are not in git.** `bin/` is
+gitignored, so on a fresh clone `.\bin\pocctl.exe` does not exist yet. A document
+that opens with a command from `bin\` is a document whose first line fails.
+
+## 2. The gate
+
+```powershell
 .\scripts\verify.ps1
 ```
 
@@ -35,7 +47,7 @@ It is the only gate. The repository root's `verify.ps1` does not build this
 module — the root's `go build ./...` skips a nested module — which is why the
 gate lives here and why it checks that the root really does skip it.
 
-## 2. The model
+## 3. The model
 
 Not in git. It is 250 MB and downloaded, and a model with no recorded
 provenance is a model nobody checked.
