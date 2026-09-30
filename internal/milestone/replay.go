@@ -98,10 +98,24 @@ func (t *ReplayTransport) Get(_ context.Context, route Route, query Query) (*Res
 			if ev.Kind != key && ev.Method+" "+ev.Kind != key {
 				continue
 			}
-			// A fixture with no explicit timing still replays, in file order,
-			// so an authoring mistake produces a wrong time rather than a
-			// silently dropped event.
-			_ = epoch
+			// A fixture's timing is its Epoch plus the event's OffsetMS, and the
+			// envelope is rebased onto it before the adapter sees it. The
+			// envelope is where the timestamp actually lives, so a rebase that did
+			// not happen here left every fixture carrying the wall-clock instant it
+			// happened to be captured at - which means every time-window test in
+			// the tree was measuring the capture date, not the window, and passing
+			// for the wrong reason. `epoch` used to be computed and then thrown
+			// away on this line, and nothing failed.
+			rebased, err := rebaseEnvelope(ev.Envelope, epoch.Add(time.Duration(ev.OffsetMS)*time.Millisecond))
+			if err != nil {
+				// A malformed envelope is the fixture's problem, and a fixture that will
+				// not re-encode is one whose bytes the adapter cannot read.
+				// Returning it is the refusal; skipping it would deliver a
+				// scenario with a hole in it, which is the one failure a replay
+				// must not have.
+				return nil, fmt.Errorf("milestone: replay %s %s: %w", sc.Name, ev.Kind, err)
+			}
+			ev.Envelope = rebased
 			matched = append(matched, ev)
 		}
 	}
@@ -124,6 +138,70 @@ func (t *ReplayTransport) Get(_ context.Context, route Route, query Query) (*Res
 		return nil, fmt.Errorf("milestone: replay %s: %w", key, err)
 	}
 	return &Response{Status: 200, Body: body, Route: route}, nil
+}
+
+// rebaseEnvelope moves an envelope's timestamp onto the instant the replay is
+// running at, preserving the shape the source wrote it in.
+//
+// Preserving the shape is the point. If the captured value said "+02:00", the
+// rebased value says "+02:00" too, because SourceTimezone is derived from the
+// string the source sent and re-rendering it in UTC would turn a declared zone
+// into an absent one. A naive value stays naive, and keeps being read as UTC with
+// an empty zone - which is what it was when it was captured.
+//
+// A value that does not parse is left exactly as it is. The normalizer already
+// has a documented path for that: it records a zero time, falls back to
+// received_at, and marks the record as lacking a trustworthy observation. This
+// code does not get a second, quieter opinion about what the timestamp meant.
+func rebaseEnvelope(envelope json.RawMessage, at time.Time) (json.RawMessage, error) {
+	if len(envelope) == 0 {
+		return envelope, nil
+	}
+	var item map[string]any
+	if err := json.Unmarshal(envelope, &item); err != nil {
+		// Not a JSON object. The adapter will reject it on its own terms, and
+		// rewriting bytes this code does not understand would only lose the
+		// original envelope that a failing test needs to see.
+		//
+		//nolint:nilerr // deliberately not an error: see above
+		return envelope, nil
+	}
+	changed := false
+	for _, key := range milestoneTimestampKeys {
+		raw, ok := item[key].(string)
+		if !ok || raw == "" {
+			continue
+		}
+		for _, layout := range milestoneTimeLayouts {
+			parsed, err := time.Parse(layout, raw)
+			if err != nil {
+				continue
+			}
+			// The source's own numeric offset, rebuilt as a fixed zone.
+			//
+			// It is tempting to write `at.In(parsed.Location())`, and that is a
+			// trap: for a timestamp like "…+02:00", Go's parser hands back a
+			// Location that shares the *host's* zone rules under the name "IST",
+			// and `In` then re-resolves it for the new instant. On a host at
+			// UTC+3 in July that turns a source that declared +02:00 into a
+			// string declaring +03:00 - a different fact, silently, and a different
+			// one on a different machine. FixedZone with the parsed offset cannot
+			// consult any database, so the rendered offset is the source's and
+			// only the source's.
+			_, offset := parsed.Zone()
+			item[key] = at.In(time.FixedZone("", offset)).Format(layout)
+			changed = true
+			break
+		}
+	}
+	if !changed {
+		return envelope, nil
+	}
+	out, err := json.Marshal(item)
+	if err != nil {
+		return nil, fmt.Errorf("re-encode the envelope: %w", err)
+	}
+	return out, nil
 }
 
 // ExposedScenarioNames lists the scenarios this transport will serve, for a

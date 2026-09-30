@@ -1940,6 +1940,63 @@
         }
       }
     },
+    "ai-observations/general-monitoring.schema.json": {
+      "properties": {
+        "abnormalEvent": {
+          "type": "boolean"
+        },
+        "confidence": {
+          "type": "number"
+        },
+        "entities": {
+          "type": "array"
+        },
+        "entities[]": {
+          "type": "object"
+        },
+        "entities[].count": {
+          "type": "integer"
+        },
+        "entities[].kind": {
+          "type": "string",
+          "required": true
+        },
+        "entities[].moving": {
+          "type": "boolean"
+        },
+        "entities[].present": {
+          "type": "boolean",
+          "required": true
+        },
+        "entities[].region": {
+          "type": "string"
+        },
+        "hazardVisible": {
+          "type": "boolean"
+        },
+        "insufficientEvidence": {
+          "type": "boolean",
+          "required": true
+        },
+        "profileId": {
+          "type": "const:\"general-monitoring\""
+        },
+        "recommendedAction": {
+          "type": "string"
+        },
+        "sceneDescription": {
+          "type": "string"
+        },
+        "schemaVersion": {
+          "type": "const:1",
+          "required": true
+        },
+        "summary": {
+          "type": "string",
+          "required": true
+        }
+      }
+    },
     "ai-observations/restricted-person.schema.json": {
       "properties": {
         "accessState": {

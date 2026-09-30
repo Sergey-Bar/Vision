@@ -1,6 +1,10 @@
 # Status
 
-Last revised 2026-09-29 (Phase 0 closure, trust sweep, three adversarial reviews, the SQL guard, the site-isolation flip).
+Last revised 2026-09-29 (hackathon Phases 1, 3, 4 and 5: the second AI
+provider behind a shared interface, the vendor write-back and clock seam, the
+vendor-neutrality invariant, the general profile, the fail-closed rule for a
+degradation with no reason, the soak and chaos harness, the adapter probe, the
+acceptance report, and a repo-wide encoding repair).
 
 Milestone 1. This document is the source of truth for what is built. The README
 is not, and neither is the commit history.
@@ -84,10 +88,199 @@ whose handlers read no context, and parameters kept for interface conformance.
 | F - AI observation plane | 25-29 | green except the inference engine (see below) |
 | G - Threat model, release, lifecycle, observability, DR | 30-35 | green |
 | H - The runnable core service | 36-39 | green |
+| I - Camera capture and proof | POC 1-8 | green, with a named detector and a named gap (see below) |
 
 No command in the tree refuses as unimplemented. The one remaining guard in the
 code is the audit endpoint's answer when no audit writer is configured, which is a
 defence rather than a stub.
+
+### The camera capture path, and `securityctl poc`
+
+Four packages and one command, all pure Go with no cgo, no system dependency and
+no new module requirement. The whole thing builds and runs on a machine with no
+CUDA and no GStreamer, which is the point: it installs into air-gapped sites.
+
+| Package | What it is | State |
+|---|---|---|
+| `internal/rtsp` | RTSP 1.0 receiver, TCP interleaved, RFC 6184 depacketisation | green |
+| `internal/mp4` | Annex-B reader, avcC builder, fragmented-MP4 muxer, GOP pre-roll ring | green |
+| `internal/detector` | always-on trigger: a score and a reason, never a verdict | green |
+| `securityctl poc` | stream to stored hashed clip to raised incident, on one machine | green |
+
+What one command does, and what it prints:
+
+```
+securityctl poc --camera rtsp://CAMERA/stream --record capture.h264
+```
+
+It prints a banner naming the camera, the transport, the resolution, the frame
+rate, the clock, the detector and its threshold, and the clip caps - with no
+blanks, because every field is either a value or a labelled absence. It then
+prints a live novelty score per picture. On the first trigger it assembles a
+bounded clip with lead-in, stores it by content hash, reads it back to prove the
+bytes match, and raises an incident.
+
+**The clip contains the cause.** A trigger does not begin recording; it arms the
+recorder, and recording begins at the next IDR, by which point the ring holds
+every complete group since the last eviction - including the group the trigger
+fired inside. `TestPreRollContainsTheEventThatTriggeredIt` and
+`TestPocTakesAStreamToAStoredHashedClipAndARaisedIncident` are the assertions, and
+the second one red-checks the first.
+
+**There is no AI plane in this build.** Every incident `poc` raises is therefore
+decided *without* an observation, and says so on the banner, in the output, and in
+the artefact it writes. The three absences - no observation, degraded observation,
+insufficient evidence - are three named booleans with a reason each, not one
+nullable field, and `TestPocNeverPrintsAMissingObservationAsNothingHappened`
+red-checks that the command's output contains none of the phrases a reader scans
+for ("nothing happened", "all clear", "no activity"). It is the behaviour under
+the three-absences rule, exercised on every run.
+
+#### What is built and what is not, stated plainly
+
+| Plan item | State |
+|---|---|
+| RTSP handshake, TCP interleaved, Annex-B out | done |
+| NVDEC decode behind a build tag | **not done** - out of Stage 1, and the AI plane is not needed to prove the capture path |
+| CPU frame differencing as the reference detector | done, tested, and the better of the two detectors |
+| The detector the live path actually runs | `coded-size`, not frame differencing - see below |
+| GOP pre-roll ring, =5 s | done |
+| Annex-B to AVCC, avcC, fragmented MP4 | done, validated with `ffprobe` |
+| `internal/evidence` store, `storage_ref`, SHA-256 | done, with a read-back proof |
+| A degraded observation, `no_runtime` | done, shaped by the same call the writer makes |
+| `securityctl poc`, no database | done |
+| `poc --record`, committed fixture corpus | done; `testdata/poc/testsrc.h264` is a synthetic lavfi pattern, so it carries no licence and nobody's likeness |
+
+**The detector is named, and it is not the one the plan preferred.** The plan
+calls for frame differencing over decoded frames. Nothing here decodes H.264, and
+the live path therefore runs the compressed-domain reference: it measures each
+picture's size against a running baseline of its own recent sizes. It is a real
+motion signal, it costs no GPU, and it is not the same thing - it cannot tell a
+person from a shadow, and its threshold will not suit a camera with analogue
+noise in the dark. `internal/detector` has both implementations behind one
+interface so that a site which can decode swaps them without touching anything
+upstream, and both carry the name of the implementation that produced a score on
+every reading. Nothing in the product presents them as equivalent.
+
+**What the public camera is remains open.** The plan's question - which camera,
+reachable from this network, genuinely RTSP, and under what licence - is still
+unanswered here, and `poc --camera` is written against it. What is not open is
+whether the client works: `TestCaptureReproducesTheStreamByteForByte` drives the
+real client over a real socket against a server that repacketises the committed
+fixture into RTP, and recovers every NAL unit byte for byte. A build that only
+works against a live camera cannot have its failures told apart from the
+camera's, so the fixture is the development path and the camera is the
+demonstration.
+
+**Verified here:** `scripts/verify.ps1` exit 0 with `-race`, `golangci-lint` at
+0 issues, and the muxer tests additionally run `ffprobe` against every clip they
+produce - reading each one back with a decoder that shares no code with the
+writer. Six fuzz targets cover the Annex-B reader, the picture builder, the SPS
+parser, the RTSP response parser, the RFC 6184 depacketiser and the URL parser.
+The SPS fuzzer found a real defect during development: H.264 sets no maximum
+frame size, and a six-byte parameter set can legitimately describe a 32x16400
+picture that no decoder will size. The muxer now refuses one, by name, where the
+number is still a number.
+
+### The second AI provider, and the seam around it
+
+`airuntime.Provider` is a two-method interface over the `Request`/`Result`
+vocabulary that already existed, and `internal/hafnia` implements it. The plan's
+own criterion for the refactor - "the existing tests must pass untouched, and
+that is the evidence the refactor was honest" - is met: `internal/airuntime`'s
+suite passes with no change to it.
+
+The client is fully built and fully tested **without a key**, which is the plan's
+�0b point rather than a workaround:
+
+| Item | State |
+|---|---|
+| `POST /assets`, `POST /chat/completions`, `DELETE /assets/{id}` | built, fixture-tested |
+| Region pinning, EU and US, closed set, no cross-region failover | built, red-checked |
+| Egress hardening: redirects refused, TLS 1.2 floor, closed host allow-list | built |
+| Per-site daily query cap, exhaustion a recorded first-class state | built, red-checked |
+| Asset deletion on every path after upload, plus a sweep for the residue | built, red-checked |
+| Strict output parser: parse, never guess; a malformed answer degrades | built |
+| Fault matrix: 429, 500, 401, malformed body, two choices, prose, empty content | built |
+| Region and cap as *distinct* Degradations | **not done - see below** |
+
+#### The attribution fix, and the one part of it that is blocked
+
+`observations.Validate` accepted an observation without a `ModelHash`, and its own
+comment said *"a default here is a silent downgrade."* A hosted VLM gives a model
+identifier, a response and no weights to hash, so filling that column would mean
+either a lie about the schema or a fabricated hash.
+
+It now carries three honest fields - `model_identity` (what the API reported, as
+a claim), `model_contract_version` (this build's content hash over prompt, prompt
+version, output schema version and API model name) and `temperature` - and
+`Validate` accepts an empty `ModelHash` **only** when the first two are present.
+`TestTheAttributionNamesTheModelWithoutInventingAHash` red-checks the
+fabricated-hash variant.
+
+**The blocked half:** `ai_observations.model_hash` is `NOT NULL` in the schema and
+in migration `0004`. Storing a Hafnia observation honestly therefore needs a
+migration making the column nullable and adding the three new columns, plus the
+protobuf and JSON Schema surfaces. That is a contract and migration change, which
+`AGENTS.md` reserves for a human to read before it lands, and it is not made here.
+Until it is, the Go layer is correct and the storage cannot yet hold the honest
+record - which is a stated gap, not a working around one.
+
+#### The Degradation vocabulary is closed, and that cost something
+
+`observations.Degradations` is a **closed set pinned by a schema CHECK**. The
+plan's P3.2 (the pinned region was refused) and P3.4 (the cap was reached) are two
+first-class states the plan wants to be *distinguishable*, and neither is in the
+vocabulary. Extending it is the same contract change as above.
+
+So the *category* is shared and the *cause* is not: every degraded result carries
+a `reason=<code>` field in a fixed key=value shape, with the vocabulary the
+repository's own rule demands. The codes are `cap_reached`, `region_refused`,
+`region_unavailable`, `answer_malformed`, `asset_missing`, `redirect_refused`,
+`timeout`, `error`. The matrix test asserts the categories differ, and it is the
+assertion that goes red the day someone extends the vocabulary.
+
+#### The neutrality invariant, in three tests
+
+- **Only the composition root imports the vendor package.** The plan says "no
+  package outside internal/milestone imports it", and taken literally that is
+  wrong in a way that would force the wiring to be impossible: the binaries
+  construct the adapter and the pipeline is handed one. The exemption is a named
+  list, so adding a fourth caller is a deliberate edit to a test.
+- **The four new packages name no vendor.** Matched against source text with
+  comments stripped, so a package may explain *why* it is vendor-neutral and may
+  not put a vendor's name in a string literal or an import.
+- **The vendor surface is at most five methods.** "Three small methods" is an
+  adjective until something counts them.
+
+All three are red-checked. The second is red-checked against a string literal
+specifically, not a comment, because that is the case that would actually be a
+dependency.
+
+### Defects this work found, and what each one would have cost
+
+Named because a defect with a name gets looked for again, and one without gets
+rediscovered as a mystery.
+
+| Found | Cost had it shipped |
+|---|---|
+| `rules simulate` declared its flags twice — the tree parsed them and the Run got an empty list | `--bundle` was silently ignored, so the **activation digest was computed for the default bundle** while the operator reviewed a candidate. The gate agreed, because the report was internally consistent about the wrong file. |
+| The evidence store's containment check read `ModeSymlink`, which Windows does not set for a directory junction | `Open` **read files outside the evidence root** on Windows. The one test that would have caught it skipped on Windows. |
+| `ReplayTransport` computed the scenario epoch and discarded it on `_ = epoch` | `observed_at` stayed at the capture instant, so **every fixture test of a time window was measuring the capture date** and passing for the wrong reason. |
+| The rebase's `at.In(parsed.Location())` resolved through the host's zone database | A vendor clock declaring `+02:00` was recorded as `+03:00` — a fact about the capture that depended on the machine doing the replay. |
+| FU-A reassembly read the indicator's *type* instead of `nal_ref_idc` | Every keyframe stopped being a keyframe. Nothing failed; the muxer wrote the file, ffprobe read it, and it was a clip that could not be seeked or pre-rolled. |
+| `AlreadyQueried` compared an empty `Degraded` against `"none"` | Every observation looked like a failure, so nothing ever counted as asked and the product **paid for every window on every event**, silently. |
+| The detector's baseline absorbed keyframes | The change that started a motion sequence was normalised away and the trigger stayed quiet through the event it exists to catch. |
+| The soak's stub deadlocked calling a locked helper | The harness hung; a soak that hangs proves nothing and is not re-run. |
+| A path check said the verdict was unreachable when nothing was reachable, a contradiction, and a 404, all the same | An operator is sent to look at a base URL that is fine, or to file a vendor bug that is a typo in a config file. |
+
+**And a repo-wide encoding repair.** Thirty-two files carried double-encoded
+UTF-8 in their comments and user-facing strings, which is how this tree had
+`a`-accented mojibake standing in for an em dash. It is repaired, and the gate
+runs after the repair to prove 32 files still build, vet, lint and pass. The
+cause was a build script using the platform's default encoding rather than
+stating UTF-8, and the fix is that the files are now clean rather than that the
+symptom was hidden.
 
 ### The core service
 
@@ -171,6 +364,155 @@ attribution, validation, degradation, the reason vocabulary - is written and
 tested.
 
 ## What is not done, and why
+
+### The hackathon plan, and where it stands
+
+Stated plainly, because a plan that reads as complete when it is not costs the
+entry more than one that does not.
+
+| Phase | State |
+|---|---|
+| **Stage 1 - the POC** | **green.** RTSP, detector, pre-roll, muxer, evidence, degraded observation, `poc`, `--record` |
+| **Phase 0 - unblock** | P0.1, P0.3, P0.5 (the probe), P0.6, P0.7 (already fixed), P0.9 done. P0.2, P0.4 need a key and an instance. P0.8 (the clock *caller*) and P0.10 (labelled footage) not done |
+| **Phase 1 - the seams** | **green.** P1.1 bookmark + clock + capabilities, P1.2 the provider interface, P1.3 the neutrality invariant |
+| **Phase 2 - capture** | P2.1 (TCP interleaved; **UDP not done**), P2.2, P2.3 (CPU reference), P2.4, P2.5 (gaps named, drift widened or refused), P2.6, P2.7 (a real hard-killed child), P2.8 (idempotency, no column) done |
+| **Phase 3 - the VLM** | Client **green** and key-free. P3.2 and P3.4 degrade to a shared category - see above. P3.1 unverified against a live endpoint |
+| **Phase 4 - spine and consoles** | P4.1, P4.2, P4.3 done. P4.4 the bookmark decision, pre-roll, drift correction and idempotency **built and tested; not yet dispatched from a live incident**. P4.5 shadow run, P4.6 console, P4.7 systemd not done |
+| **Phase 5 - soak and acceptance** | P5.1 the harness and its eight criteria **done**, P5.4 the fault-injection cases **done**, P5.3 the acceptance report **done** and runnable. No 7-day run, no 24-hour rehearsal, no measured false-positive rate |
+
+### The vendor seam, and the three additions
+
+P1.1 is **optional interfaces**, not three more methods on `Transport`, and that
+is the whole of the plan's "optional so `ReplayTransport` does not break": a
+fixture transport has no clock to sample and no bookmark to place, and making
+those methods mandatory would force every fixture to grow a fake implementation
+of a system it stands in for.
+
+| Surface | What it does | State |
+|---|---|---|
+| `BookmarkWriter` | places a pointer into the vendor's own recording | built, tested |
+| `ClockProbe` | samples the vendor's clock with its round trip | built, tested |
+| `CapabilityReporter` / `Probe` | reports what a deployment can do | built, tested |
+
+Three properties the tests pin rather than the code assuming:
+
+- **A bookmark is a pointer, not a copy of the footage.** The test asserts the
+  body carries a time, a label and a device reference and nothing that looks like
+  video, because "we do not duplicate an archive" is a claim about the wire and
+  this is where it is made.
+- **A 200 with no bookmark id is not a success.** "The call returned 200" and "a
+  bookmark exists" are different claims, and a bookmark that silently did not
+  land is an operator who follows the incident and finds nothing.
+- **The drift correction's sign.** Half the round trip is added to the reading
+  and subtracted from our own later instant. Getting the sign wrong reports a
+  healthy link as drifting by half its own latency; the test is red-checked in
+  all three directions.
+
+The clock and bookmark routes stay `Unverified`. A passing unit test is not the
+plan's P0.5 probe, and a test asserts they have not been quietly promoted.
+
+### The general profile, and the rule that must fail closed
+
+P4.1 is one general profile, `general-monitoring`, v1, **shadow** - one profile
+whose only structured claims are "something departed from normal" and "a hazard is
+visible", with the concept itself carried by the operator's question in the
+prompt. A profile with a field per concept is a schema per concept, which is the
+rule engineering the plan set out to eliminate, so the test asserts the field set
+is small *and* that none of its fields names a detection concept.
+
+It is shadow because it has never been measured against the 200 labelled cases
+the plan requires, and a profile allowed to create incidents before that has a
+false-positive rate that is a guess.
+
+**P4.3 is now enforced in the schema, and it is the plan's red-check.**
+`observations.Validate` accepts a degraded observation **only** when it carries
+its reason:
+
+```go
+case o.Degraded != DegradationNone && strings.TrimSpace(o.DegradedDetail) == "":
+    return fmt.Errorf("%w: a degraded observation must carry its reason; without it a reader "+
+        "cannot tell 'the model was never asked' from 'the model answered and the answer was unusable', "+
+        "which is the difference between an absence and a negative", ErrInvalid)
+```
+
+The mirror case is enforced too: a non-degraded observation carrying a reason is
+refused, because a reason attached to a row that claims to be fine is either a
+field that was not cleared or a reason attached to the wrong row.
+
+Remove the check and `TestADegradedObservationWithNoReasonIsRefused` is the only
+assertion in the tree that fails. That is the definition of a control that works.
+
+### Video frames are untrusted input, and what bounds an injection
+
+`docs/threat-model.md` has a new section, because the capture path made the
+boundary exist. The control is **not a filter** - nothing strips what an injection
+asked for, because a client that quietly dropped the undeclared fields would
+validate a *different* answer from the one the model gave, and the writer's
+refusal would never see what it exists to refuse. The bounds are:
+
+| | |
+|---|---|
+| The model holds no tools | Red-checked: adding `CallTool` to `airuntime.Provider` is a **compile error**, not a silent capability |
+| Output is validated at the storage boundary | `observations.Writer` refuses any field the profile's schema does not declare |
+| Nothing matches prose | The profile schema documents this on `summary` itself; a test rejects a reason that names a conclusion |
+| The profile cannot interrupt an operator | Shadow until measured, asserted in the registry |
+
+The residual is stated plainly rather than left in the gap list: a determined
+attacker holding a printed page can still cause false positives. The blast
+radius is bounded at "a human gets interrupted", and that is a decision with an
+owner rather than an unrecorded one.
+
+**The two things that block the most, and neither is ordinary work.** The
+observation schema's `model_hash NOT NULL` and the closed `Degradation` CHECK both
+need a contract and migration change. `AGENTS.md` reserves those for a human, so
+they are **written up and not applied**: `docs/proposals/hosted-model-attribution.md`
+carries the exact SQL, the exact `CHECK` that makes an invented hash impossible
+rather than discouraged, and the one naming question worth deciding before the
+SQL. The Go layer is written and tested against the shape they propose; only the
+storage cannot yet hold it.
+
+**The rest of the list is ordinary work that has not been done yet**, and nothing
+on it is blocked by a decision: P0.8 (the clock *caller* — the probe samples the
+clock, but nothing invokes it from a running service), P0.10 (labelled footage),
+P2.1's UDP half, P4.4's dispatch from a live incident, P4.5's shadow run, P4.6's
+console, and the 7-day and 24-hour runs — which are time, not engineering.
+
+### `securityctl acceptance` — the criteria, runnable
+
+The thirteen criteria are in the plan as a list, and a list is checked by hand or
+not at all. `securityctl acceptance` checks what this build can check and reports
+the rest as **NOT RUN** with what each one needs:
+
+```
+criteria: 7 pass, 0 fail, 6 not runnable in this build
+```
+
+Three states, never two. A criterion that cannot be evidenced here is reported
+as not-run rather than omitted, because an omitted criterion reads as a passed
+one, and the six that need a key, a live VMS or a camera are exactly the six a
+judge would otherwise have to take on trust. A test asserts the count is
+thirteen, that no number appears twice, and that every not-run says both what
+would be needed and what *is* built.
+
+### The soak, the chaos rehearsal, and the probe
+
+`securityctl soak` runs the eight published criteria against a stub provider and
+reports them in order, failures first. The harness **records** and `Criteria`
+**reads**: nothing in it decides whether it passed, and every criterion is proven
+capable of failing by a test that constructs a run violating it. The cost
+criterion is the one that matters most, and it is exact — 200 events at three
+attempts each make 200 provider calls, because a retry must not pay.
+
+`securityctl soak --chaos` runs four fault-injection cases plus a fifth for the
+evidence volume. The kill case is the one worth reading: seven events completed,
+thirteen are visibly pending, and none of them is claimed handled.
+
+`securityctl adapter-probe` reaches every route and reports
+confirmed / contradicted / unreachable / skipped, with the field names the vendor
+actually returned. It **never** promotes a route's `Unverified` flag — a probe
+that marked its own homework would make the flag a claim the tool makes about
+itself — and it prints how many routes a human could promote and why that is
+their decision.
 
 **The systemd unit still says `Type=notify`.** Nothing in the tree implements an
 `sd_notify` handshake, so a unit written by `securityctl install` waits out
@@ -653,7 +995,7 @@ recreates every `site_isolation` policy as RESTRICTIVE, so the effective
 predicate is tenant AND site. `ALTER POLICY` only supports `RENAME TO`, so each
 is dropped and recreated carrying its original USING expression and role list
 over verbatim, and a policy whose role list is anything but PUBLIC is refused
-rather than guessed â€” recreating it with different roles would be a privilege
+rather than guessed — recreating it with different roles would be a privilege
 change disguised as a scope change.
 
 The change is fail-closed, and that shaped how it landed. A statement that
@@ -694,7 +1036,7 @@ so a path added tomorrow is covered by construction.
 
 `runtime.py` verified `a` using the un-cofactored equation `[S]B == R + [k]A`,
 justified by a comment that misattributed the choice to the RFC's reference
-implementation. It is now cofactored, and it requires BOTH equations â€” which is
+implementation. It is now cofactored, and it requires BOTH equations — which is
 strictly smaller than either, because multiplication by the cofactor is a group
 homomorphism, so the plain equation implies the cofactored one and never the
 reverse, and checking only the cofactored form accepts a superset of what it
@@ -707,8 +1049,8 @@ proved the direction rather than asserting it.
 
 The hole was a small-order public key. For an order-8 key, `[k]A` is the
 identity for every `k`, so both equations are satisfied and any signature
-verifies. Two cases are now refused outright â€” the identity element as a public
-key, and an order-8 key with a zero signature â€” and both were confirmed to
+verifies. Two cases are now refused outright — the identity element as a public
+key, and an order-8 key with a zero signature — and both were confirmed to
 return `True` against the pre-change code. The suite is 61 tests, from 49.
 ### Still open
 
@@ -732,9 +1074,9 @@ return `True` against the pre-change code. The suite is 61 tests, from 49.
   outage and a read that cannot is a blank console.
 
 - **The verifier search is not finished.** Three adversarial reviews in one day
-  found ninety defects between them. The two gates added afterwards â€”
+  found ninety defects between them. The two gates added afterwards —
   `internal/sqlguard` for the mutation class, `internal/rlsrole` for the scope
-  class â€” exist because the classes recurred rather than because the instances
+  class — exist because the classes recurred rather than because the instances
   did. The classes they do not cover (a counter computed in Go from a stale
   read, a test that accepts the failure it should exclude, an exported symbol
   with no reader) are still found by reading. A fourth review is not a plan; it

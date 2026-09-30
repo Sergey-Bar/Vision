@@ -291,12 +291,15 @@ and mean nothing to Windows.
 
 ### What a real installation still has to decide
 
-- **The service binary does not exist yet.** There is no `cmd/security-core`.
-  `internal/api.Server.ListenAndServe` exists and nothing calls it from a
-  `main`; `make build` produces `securityctl` and `security-migrate`. Every
-  `ExecStart` and `security-core.exe` reference above names a binary the tree
-  does not build. `internal/dbx` still sets the Postgres `application_name` to
-  `"security-core"`, which is the naming remnant.
+- **The capture path is not in the service.** `cmd/security-core` exists,
+  builds, and runs: it reads and validates configuration, serves the API, runs
+  the job loops, and shuts them down in a defined order. What it does not do is
+  capture video. The RTSP receiver, the muxer and the detector live in
+  `internal/rtsp`, `internal/mp4` and `internal/detector`, and today only
+  `securityctl poc` drives them. Every `ExecStart` names a binary that is real
+  and resident; the question the install still has to answer is where the camera
+  loop runs - in this process, or beside it. `internal/dbx` still sets the
+  Postgres `application_name` to `"security-core"`, which is the naming remnant.
 - **`Type=notify` has no notifier.** There is no `sd_notify` call and no
   `NOTIFY_SOCKET` handling anywhere in the tree. A unit declaring `Type=notify`
   whose process never sends `READY=1` waits out systemd's start timeout, is

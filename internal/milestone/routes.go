@@ -43,6 +43,15 @@ type Route struct {
 	// are still a hypothesis, and so a test can assert the list shrinks over
 	// time rather than rotting silently.
 	Unverified bool
+	// WriteBack marks a route the adapter posts to rather than reads from. It is
+	// a field because the direction of a call changes what has to be true of it:
+	// a write is not idempotent unless its key is, and a read that fails is
+	// retried while a write that fails may already have happened.
+	WriteBack bool
+	// ClockProbe marks a route whose answer is a timestamp. It is a field for the
+	// same reason: a clock reading has an uncertainty attached and a list item
+	// does not.
+	ClockProbe bool
 	// Notes says what is being assumed.
 	Notes string
 }

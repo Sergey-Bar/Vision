@@ -242,7 +242,7 @@ func (s *Service) reevaluate(in ReplayInputs, detail Detail) (rules.Decision, bo
 		skew = in.Bundle.Settings.Clock.SkewToleranceMS
 	}
 	// The evaluation location. `in.Policy` is a clock policy, not a location, and
-	// passing one to a `*time.Location` is a type error the compiler caught Ã¢â‚¬â€ which
+	// passing one to a `*time.Location` is a type error the compiler caught — which
 	// is why the site timezone was never actually threaded through here and a
 	// replay evaluated every schedule in UTC. Defaulted to UTC until the incident
 	// carries one.
@@ -257,7 +257,7 @@ func (s *Service) reevaluate(in ReplayInputs, detail Detail) (rules.Decision, bo
 		// the caller supplied its own.
 		//
 		// It used to answer only from `in.InSchedule`, and the production pipeline
-		// supplied nothing at all Ã¢â‚¬â€ so three callers read a schedule and each gave
+		// supplied nothing at all — so three callers read a schedule and each gave
 		// a different answer, one of which was "false, always". A digest an
 		// operator acknowledged certified a behaviour the product did not have.
 		InSchedule: func(id string, at time.Time) bool {

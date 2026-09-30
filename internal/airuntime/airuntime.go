@@ -174,6 +174,28 @@ type Result struct {
 	LatencyMS            int64
 	Hardware             string
 	OutputHash           string
+
+	// ModelIdentity is what the provider *said* it used, for a provider that will
+	// not give us weights to hash.
+	//
+	// It is a claim, not a verification, and it is stored as a claim. A hosted
+	// VLM returns a model name and a response; its weights are not ours, are not
+	// addressable, and change on the provider's schedule. So the honest record of
+	// that answer names the model the API reported and leaves ModelHash empty,
+	// rather than inventing a hash that would satisfy a column check and defeat
+	// the one thing the column is for.
+	//
+	// Empty for a provider that does have a hashable bundle, where ModelHash is
+	// the better answer and this stays empty.
+	ModelIdentity string
+	// ModelContractVersion is this build's content hash over everything it
+	// controls about the call: the prompt template, the prompt version, the
+	// output schema version and the API model name. It is reproducible from the
+	// repository, which is what makes it worth having.
+	ModelContractVersion string
+	// Temperature is the sampling temperature that was requested. It is part of
+	// attribution: an answer produced at 0.9 is not the answer produced at 0.01.
+	Temperature float64
 }
 
 // wireRequest is the exact shape runtime.py decodes.

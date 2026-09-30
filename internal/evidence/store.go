@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -69,6 +70,10 @@ type Store struct {
 	maxBytes int64
 	// hashOnRead verifies bytes against the row on every read.
 	hashOnRead bool
+	// lastStagingSweep is what the start-up sweep collected. Carried rather than
+	// logged, because a caller that wants it in a health check should not have to
+	// read a log line to find it.
+	lastStagingSweep SweepResult
 }
 
 // Options configures a store.
@@ -120,6 +125,21 @@ func New(opts Options) (*Store, error) {
 	if err := os.MkdirAll(abs, 0o750); err != nil {
 		return nil, fmt.Errorf("evidence: create root: %w", err)
 	}
+	// A process killed mid-Put leaves its staging file behind, because a defer
+	// does not run when the process is terminated. The object itself is safe -
+	// the ref only exists once the rename has happened, so a half-written clip
+	// is never addressable - but the bytes are on the disk, and a 100 MB clip
+	// killed at ninety megabytes is ninety megabytes nobody will ever collect.
+	//
+	// So the store collects its own residue when it opens. Doing it here rather
+	// than on a ticker is deliberate: a sweep on start-up is bounded, happens
+	// once, and cannot race a concurrent Put from a process that is already
+	// running, whereas a ticker has to decide what to do about a staging file
+	// belonging to a Put that is happening right now.
+	staging, err := sweepStaging(abs, stagingResidueAge)
+	if err != nil {
+		return nil, fmt.Errorf("evidence: collect staging residue: %w", err)
+	}
 	if opts.MaxBytes <= 0 {
 		opts.MaxBytes = DefaultMaxBytes
 	}
@@ -132,10 +152,11 @@ func New(opts Options) (*Store, error) {
 		verify = *opts.VerifyHashOnRead
 	}
 	return &Store{
-		root:       abs,
-		fsync:      fsync,
-		maxBytes:   opts.MaxBytes,
-		hashOnRead: verify,
+		root:             abs,
+		fsync:            fsync,
+		maxBytes:         opts.MaxBytes,
+		hashOnRead:       verify,
+		lastStagingSweep: staging,
 	}, nil
 }
 
@@ -229,20 +250,57 @@ func ValidateRef(ref string) error {
 // reference looks relative; it does not prove the file it names is inside the
 // root, because a symlink planted earlier by anyone with write access to the
 // evidence directory can point anywhere.
+// resolve turns a reference into an absolute path, or refuses it.
+//
+// # The mechanism, and why it is not the obvious one
+//
+// The first version walked the path and refused any segment whose `os.Lstat`
+// mode had `ModeSymlink`. That is the obvious implementation and it is **wrong
+// on Windows**: a directory junction - created by `mklink /J`, needing no
+// elevation, and used routinely - is a reparse point that `Lstat` reports as
+// `ModeIrregular`, not `ModeSymlink`, and `filepath.EvalSymlinks` does not
+// follow it either. So the check passed and `Open` read a file outside the
+// evidence root. The only test that would have caught it was the symlink test,
+// which skipped on Windows.
+//
+// So the walk refuses **both** link shapes, and the reason it can be that blunt
+// is that the store only ever creates plain directories. Nothing on the write
+// path makes a link, so a link anywhere under the root is either an attack or an
+// accident, and following it is right in neither case.
+//
+// On POSIX the stronger signal is kept as well: where `EvalSymlinks` *can*
+// resolve a path, the resolved location is compared against the root, so a link
+// that points *inside* the root is still usable and one that points outside is
+// caught even if a future platform reports it with a mode bit we did not think of.
 func (s *Store) resolve(ref string) (string, error) {
 	if err := ValidateRef(ref); err != nil {
 		return "", err
 	}
 	full := filepath.Join(s.root, filepath.FromSlash(ref))
-	if !strings.HasPrefix(full, s.root+string(os.PathSeparator)) && full != s.root {
+	if !withinRoot(s.root, full) {
 		return "", fmt.Errorf("%w: %q escapes the evidence root", ErrPathRejected, ref)
 	}
+	if err := s.refuseLinksBelow(ref, full); err != nil {
+		return "", err
+	}
+	// Belt and braces, where the platform can resolve at all.
+	resolved, err := resolveExisting(full)
+	if err == nil && !withinRoot(s.root, resolved) {
+		return "", fmt.Errorf("%w: %q resolves outside the evidence root", ErrPathRejected, ref)
+	}
+	return full, nil
+}
 
-	// Walk each ancestor and refuse any that is a symlink pointing elsewhere.
-	// Checking only the final path would miss an intermediate link.
+// refuseLinksBelow walks the ancestors of full and refuses any that is a link.
+//
+// The walk stops at the first segment that does not exist, because the write
+// path creates directories as it goes and a leaf that does not exist yet is
+// ordinary. Everything above that point exists, and everything above that point
+// is what a link would have to hide behind.
+func (s *Store) refuseLinksBelow(ref, full string) error {
 	rel, err := filepath.Rel(s.root, full)
 	if err != nil {
-		return "", fmt.Errorf("%w: %q is not under the evidence root", ErrPathRejected, ref)
+		return fmt.Errorf("%w: %q is not under the evidence root", ErrPathRejected, ref)
 	}
 	current := s.root
 	for _, segment := range strings.Split(filepath.ToSlash(rel), "/") {
@@ -252,23 +310,88 @@ func (s *Store) resolve(ref string) (string, error) {
 		current = filepath.Join(current, segment)
 		info, err := os.Lstat(current)
 		if err != nil {
-			if os.IsNotExist(err) {
-				// Nothing to resolve; the write path will create it.
-				return full, nil
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil
 			}
-			return "", fmt.Errorf("%w: cannot inspect %q: %w", ErrPathRejected, ref, err)
+			return fmt.Errorf("%w: cannot inspect %q: %w", ErrPathRejected, ref, err)
 		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			target, err := filepath.EvalSymlinks(current)
-			if err != nil {
-				return "", fmt.Errorf("%w: %q traverses an unresolvable symlink at %q", ErrPathRejected, ref, segment)
+		switch {
+		case info.Mode()&os.ModeSymlink != 0:
+			target, rerr := filepath.EvalSymlinks(current)
+			if rerr != nil || !withinRoot(s.root, target) {
+				return fmt.Errorf("%w: %q traverses a symlink at %q pointing outside the evidence root",
+					ErrPathRejected, ref, segment)
 			}
-			if !strings.HasPrefix(target, s.root+string(os.PathSeparator)) && target != s.root {
-				return "", fmt.Errorf("%w: %q traverses a symlink at %q pointing outside the evidence root", ErrPathRejected, ref, segment)
-			}
+		case info.Mode()&os.ModeIrregular != 0:
+			// A reparse point Go could not classify: a Windows junction, a mount
+			// point, an AppExecLink. Nothing the store writes produces one.
+			return fmt.Errorf("%w: %q traverses a reparse point at %q (%s); the store creates only "+
+				"plain directories, so a link under the evidence root is never legitimate",
+				ErrPathRejected, ref, segment, linkKind(current))
 		}
 	}
-	return full, nil
+	return nil
+}
+
+// linkKind names what a reparse point reports itself as, for a message an
+// operator can act on. It is best-effort and never fails the check: the check
+// has already refused by the time this is called.
+func linkKind(path string) string {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return "unreadable"
+	}
+	if fi.IsDir() {
+		return "a directory junction or mount point"
+	}
+	return "an unclassified filesystem reparse point"
+}
+
+// withinRoot reports whether path is the root or below it.
+//
+// Case-insensitive on Windows, because `EvalSymlinks` can return a differently
+// cased path than the one that went in, and a containment check that can be
+// defeated by a letter case is not a containment check.
+func withinRoot(root, path string) bool {
+	if filepath.Clean(path) == filepath.Clean(root) {
+		return true
+	}
+	prefix := root + string(os.PathSeparator)
+	if runtime.GOOS == "windows" {
+		return strings.HasPrefix(strings.ToLower(path), strings.ToLower(prefix))
+	}
+	return strings.HasPrefix(path, prefix)
+}
+
+// resolveExisting resolves the deepest existing ancestor of path and re-appends
+// the segments that do not exist yet.
+//
+// The write path creates directories as it goes, so the leaf legitimately does
+// not exist, and a check that simply failed on a missing file would refuse every
+// first write. Resolving the nearest existing ancestor and extending from there
+// is the part that is load-bearing: the ancestor is where a link would have to
+// live, and the extension cannot introduce one.
+func resolveExisting(path string) (string, error) {
+	var suffix []string
+	current := path
+	for {
+		resolved, err := filepath.EvalSymlinks(current)
+		if err == nil {
+			for i := len(suffix) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, suffix[i])
+			}
+			return resolved, nil
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			return "", err
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", err
+		}
+		suffix = append(suffix, filepath.Base(current))
+		current = parent
+	}
 }
 
 // Object is a stored evidence object.
@@ -315,7 +438,7 @@ func (s *Store) Put(tenant string, body io.Reader) (Object, error) {
 	// Write to a temporary file inside the root, hash while copying, then rename
 	// into place. Renaming is atomic, so a reader never sees a half-written
 	// object and a crash never leaves one that looks complete.
-	tmp, err := os.CreateTemp(s.root, ".incoming-*")
+	tmp, err := os.CreateTemp(s.root, stagingPrefix+"*")
 	if err != nil {
 		return Object{}, fmt.Errorf("evidence: create staging file: %w", err)
 	}

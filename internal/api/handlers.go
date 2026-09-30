@@ -535,8 +535,8 @@ func (s *Server) handleEvidenceContent(w http.ResponseWriter, r *http.Request, p
 	//
 	// `For` binds the tenant and nothing else, so the query runs with an empty
 	// `app.site_ids`. That is invisible today because both policies on `evidence`
-	// are PERMISSIVE and PostgreSQL ORs them â€” `tenant_isolation OR
-	// site_isolation` is `tenant_isolation` â€” so there is no site isolation at the
+	// are PERMISSIVE and PostgreSQL ORs them — `tenant_isolation OR
+	// site_isolation` is `tenant_isolation` — so there is no site isolation at the
 	// database layer at all and the handler's own `p.CanSeeSite` check is the
 	// only one. Binding the scope as well means the statement is correct on its
 	// own terms, and the day `site_isolation` becomes RESTRICTIVE this path
@@ -602,7 +602,7 @@ func (s *Server) handleEvidenceContent(w http.ResponseWriter, r *http.Request, p
 // account of it.
 //
 // A server with no audit writer configured is left alone rather than failing the
-// fetch: the same nil check `auditDenied` makes, and for the same reason â€” a
+// fetch: the same nil check `auditDenied` makes, and for the same reason — a
 // deployment that has not wired the ledger is already broken, and turning every
 // evidence read into a 500 hides that behind a different symptom.
 func (s *Server) auditEvidenceFetched(r *http.Request, p identity.Principal, evidenceID, siteID string, obj evidence.Object) error {
@@ -866,7 +866,7 @@ func (s *Server) handleAuditLedger(w http.ResponseWriter, r *http.Request, p ide
 	// page is internally consistent and not about whether the ledger is. It never
 	// recomputed a row's own hash, so an edited row verified fine, and it never
 	// checked the first row, so a single-row page - which is what
-	// `?fromSequence=<n>&limit=1` produces â€” always reported true. The comment
+	// `?fromSequence=<n>&limit=1` produces — always reported true. The comment
 	// said it was recomputed; it was not.
 	//
 	// The real verification recomputes every row's digest inside the database,

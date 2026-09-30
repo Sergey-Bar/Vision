@@ -301,7 +301,7 @@ func (q *Worker) lease() time.Duration {
 // `jobs` naming only its tenant is refused by a policy the worker cannot see.
 // Every terminal write here is guarded on `lease_owner`: only the worker that
 // claimed this specific job may write it, which is a strictly stronger predicate
-// than site scope â€” a worker does not hold every job of its site, it holds one
+// than site scope — a worker does not hold every job of its site, it holds one
 // job of one site.
 //
 // Running as the system worker is therefore not a bypass dressed up as a

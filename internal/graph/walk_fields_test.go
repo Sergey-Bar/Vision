@@ -10,7 +10,7 @@ import (
 // id overwrote the node id.
 //
 // Every `Result.Nodes[].ID` was an edge id, and a caller that traversed from a
-// returned node id ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â which is the obvious thing to do with a traversal result ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â
+// returned node id — which is the obvious thing to do with a traversal result —
 // got no rows back. The declared `edgeID` stayed empty, so `Result.EdgeIDs` was a
 // list of empty strings, and the dedupe keyed on `type/edgeID`, which is unique
 // per row, so it never fired and the accumulating branch was unreachable.

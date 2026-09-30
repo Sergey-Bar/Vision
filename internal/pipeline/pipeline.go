@@ -25,7 +25,7 @@
 //   - DrainOnce returns a delivery count, not an error. A short count is the
 //     queue being partly undeliverable, which is a metric and a dead letter, not
 //     a loop condition.
-package pipeline
+package pipeline // wired by cmd/security-core, the composition root
 
 import (
 	"context"
@@ -108,7 +108,7 @@ type Deps struct {
 
 	// InSchedule resolves a schedule id against a site-local instant. A Deps with
 	// none gets `rules.SiteScheduleResolver(SiteLocation)`, which is the same
-	// default the simulation and the CLI use ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â the point being that they cannot
+	// default the simulation and the CLI use — the point being that they cannot
 	// disagree.
 	//
 	// There was no default before, so `matchSchedule` returned false for every
@@ -233,7 +233,7 @@ func (l *Loops) runGauges(ctx context.Context) {
 //
 // Each read is independent and each failure is silent: a gauge that cannot be
 // measured keeps its previous value rather than being set to zero. A gauge set
-// to zero because its query failed is worse than a stale one ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â it reads as "the
+// to zero because its query failed is worse than a stale one — it reads as "the
 // backlog is clear", which is the one thing an operator must never be told by a
 // broken query.
 func (l *Loops) SampleGauges(ctx context.Context) {
@@ -806,7 +806,7 @@ func (l *Loops) decide(ctx context.Context, item inbox.Lease, result normalize.R
 	// A schedule resolver, and the same one the simulation and replay use.
 	//
 	// There was none, and `matchSchedule` returns false when the resolver is nil
-	// ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â correctly, because defaulting to true would make an after-hours rule fire
+	// — correctly, because defaulting to true would make an after-hours rule fire
 	// all day. So every schedule rule in the active bundle was dead in production:
 	// an after-hours rule never fired, and a `not: {schedule: business-hours}` rule
 	// matched twenty-four hours a day. The digest an operator acknowledged at
@@ -850,8 +850,8 @@ func (l *Loops) decide(ctx context.Context, item inbox.Lease, result normalize.R
 	//     RuleID and a zero Action. The rule whose entire purpose is to *prevent*
 	//     an incident was what created one, with the default severity `medium`.
 	//   - `then: {dispatch: [notify_operator]}` with no `create_incident` is
-	//     explicitly legal ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â the semantic validator treats a non-empty dispatch
-	//     list as a non-empty action ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â and its Decision carries a RuleID.
+	//     explicitly legal — the semantic validator treats a non-empty dispatch
+	//     list as a non-empty action — and its Decision carries a RuleID.
 	//
 	// `internal/simulate` already modelled this correctly: its diff says
 	// `IncidentRaised: d.Action.CreateIncident`. So the digest an operator
@@ -1004,8 +1004,8 @@ func (l *Loops) activeBundle(ctx context.Context) (*activeBundle, error) {
 	// clause that declares `ifAIAvailable` without consuming an observation
 	// warns that the declaration has no effect. Both ship in the built-in bundle.
 	//
-	// This refused any bundle with any problem, so a single endorsed warning ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â a
-	// deliberate choice by a rule author ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â made `decide` fail for EVERY event, with
+	// This refused any bundle with any problem, so a single endorsed warning — a
+	// deliberate choice by a rule author — made `decide` fail for EVERY event, with
 	// one log line each. The whole AI-degradation warning path was a bundle-killer
 	// in production, and the bundle had already passed `Store` and `Activate`,
 	// which is where warnings are supposed to be allowed.

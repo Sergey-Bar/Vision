@@ -74,7 +74,7 @@ const (
 // The tiers are the ones the plan defines: A is authoritative state reported by
 // the source of truth, B is a deterministic fact the core derived, C is an AI
 // observation. A canonical event is a derived fact - it is a normalization of a
-// raw envelope, not the device's own report Ã¢â‚¬â€ so candidates are Tier B. The
+// raw envelope, not the device's own report — so candidates are Tier B. The
 // trigger is Tier A, because it is the fact the rule is being evaluated against
 // rather than corroboration for it.
 //
@@ -471,8 +471,8 @@ func buildObservation(id, profile string, structured []byte, insufficient bool, 
 	// and they are different fields because they are different facts.
 	//
 	// They were concatenated here, which corrupts the machine half.
-	// `DegradedReason` is a member of a closed set Ã¢â‚¬â€ `none|model_unavailable|
-	// no_runtime|timeout|error|absent` Ã¢â‚¬â€ and `internal/rules/match.go` switches on
+	// `DegradedReason` is a member of a closed set — `none|model_unavailable|
+	// no_runtime|timeout|error|absent` — and `internal/rules/match.go` switches on
 	// the exact string, so "model_unavailable: the VLM worker exited 137" falls
 	// through to the `default` arm and is recorded on the incident as `absent`.
 	// `ai_observations.degraded_reason` is CHECK-constrained to the same set, so

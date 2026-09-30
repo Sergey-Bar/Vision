@@ -61,7 +61,7 @@ type Accepted struct {
 	Status    Status
 	// EventID is the inbox row's identity, present on both paths so a caller
 	// can log a correlation id for a duplicate too. It is the scoped natural key
-	// rendered as one value ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â tenant, integration and source event id ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â because
+	// rendered as one value — tenant, integration and source event id — because
 	// that triple is what identifies the row and no single column names it. It
 	// was documented as present on both paths and was assigned on neither, so it
 	// was always ""; a caller correlating a duplicate, which is the case where a
@@ -131,8 +131,8 @@ RETURNING 1`
 // documented as "present on both paths so a caller can log a correlation id for a
 // duplicate too", and it was assigned on neither: both duplicate returns built
 // Accepted{Duplicate: true, Status: StatusReceived} and left it "". A caller
-// correlating a duplicate ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â which is the case where a correlation id matters most,
-// because the duplicate is the confusing one ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â had nothing to correlate with and
+// correlating a duplicate — which is the case where a correlation id matters most,
+// because the duplicate is the confusing one — had nothing to correlate with and
 // no error telling it so.
 //
 // The lookup is on the scoped key, which is the table's primary key, so it is an
@@ -215,7 +215,7 @@ func (w *Writer) Write(ctx context.Context, opts WriteOptions) (Accepted, error)
 // the duplicate carries the identity and the ingest instant of the row that
 // actually exists, which is the only version of those two facts an operator can
 // use. A key row with no inbox row behind it would return no rows here, and that
-// is a real state ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â the two writes are in one transaction, so it can only be a
+// is a real state — the two writes are in one transaction, so it can only be a
 // row that some other process is mid-transaction on, and the isolation level is
 // what decides whether this sees it. It is reported as a fresh accept rather than
 // as a duplicate with a blank identity, because the alternative is a duplicate
@@ -297,7 +297,7 @@ type Key struct {
 	// It is part of the key's *scope* rather than its identity: the three fields
 	// above name the row, and this says which site that row is. It is here because
 	// every statement this package issues touches `inbox_events`, which is a
-	// site-scoped table, and the RLS policy meant to enforce that is PERMISSIVE ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â
+	// site-scoped table, and the RLS policy meant to enforce that is PERMISSIVE —
 	// it is ORed away by `tenant_isolation`, so the site constraint does not exist
 	// at the database layer at all. A writer with no site would rely entirely on
 	// a policy that is not doing what its comment says.
@@ -347,7 +347,7 @@ WITH candidate AS (
        AND (
              -- A row that failed keeps lease_expires_at as its not-before time.
              -- The backoff is why a poisoned event costs a bounded number of
-             -- attempts rather than a busy retry forever: 5, 10, 20 ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¦ 320
+             -- attempts rather than a busy retry forever: 5, 10, 20 … 320
              -- seconds, then a dead letter.
              (status IN ('received', 'failed')
               AND (status = 'received' OR lease_expires_at IS NULL OR lease_expires_at <= now()))
@@ -544,7 +544,7 @@ func (w *Writer) Complete(ctx context.Context, key Key, owner, canonicalEventID 
 //
 // Below the bound it becomes 'failed' with a backoff. The backoff lives in
 // lease_expires_at, which the claim reads as a not-before time for a failed row
-// and as a lease deadline for a processing one ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â the column already means "when
+// and as a lease deadline for a processing one — the column already means "when
 // this row becomes claimable again", and the two readings do not conflict
 // because a row is only ever in one status. The exponent is capped before the
 // cast, so the expression cannot overflow at a large attempt_count; a raising
@@ -556,7 +556,7 @@ func (w *Writer) Complete(ctx context.Context, key Key, owner, canonicalEventID 
 // lease and is inside Normalize, the lease lapses, worker B claims the row and
 // commits a successful normalize, and A's normalize then fails on something
 // downstream. A's `Fail` matches unconditionally and flips a fully processed
-// event to `failed` ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â or to `dead_letter`, where the operator's dead-letter
+// event to `failed` — or to `dead_letter`, where the operator's dead-letter
 // console now lists an event whose canonical event, graph edges and incident all
 // exist. Fail takes the owner for the same reason Complete does.
 func (w *Writer) Fail(ctx context.Context, key Key, owner string, cause error, maxAttempts int) (Status, error) {
@@ -614,7 +614,7 @@ type DeadLetter struct {
 	Attempts  int
 	Reason    string
 	FirstSeen time.Time
-	// UpdatedAt is when the event entered dead_letter ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â completed_at. It was
+	// UpdatedAt is when the event entered dead_letter — completed_at. It was
 	// scanned from received_at, which is not an update time in any sense: it is
 	// when the event arrived, and for an event that spent a month being retried
 	// the two are a month apart. A console column labelled "updated" showing the
@@ -633,8 +633,8 @@ type DeadLetter struct {
 // It orders by completed_at, the instant the row entered dead_letter. It used to
 // order by received_at, which is ingest order: an event ingested today and
 // dead-lettered after a month of retries sorted below one ingested yesterday and
-// dead-lettered immediately, so the message that just died ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â the one the operator
-// opened the page for ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â was not on it. That is not a presentation nit, it is the
+// dead-lettered immediately, so the message that just died — the one the operator
+// opened the page for — was not on it. That is not a presentation nit, it is the
 // ordering that decides whether the 60-second visibility SLO is met.
 // DeadLetters lists the terminal failures an operator has to act on.
 //
@@ -730,7 +730,7 @@ type Counts struct {
 // The query runs inside the tenant context, because inbox_events carries
 // tenant_id and therefore row-level security. Without the context the database
 // returns zero rows rather than an error, so the backlog would read as empty on
-// every site and the backpressure alert would never fire ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â the SLO's own
+// every site and the backpressure alert would never fire — the SLO's own
 // monitoring silently blind exactly when it is needed.
 // Counts reports the inbox backlog for one site.
 //

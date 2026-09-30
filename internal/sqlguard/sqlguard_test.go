@@ -41,7 +41,7 @@ func repoRoot(t *testing.T) string {
 // separate adversarial reviews each found at least one instance of:
 //
 //   - a mutation of a tenant-scoped table with no tenant predicate
-//     (`outbox.deliver`, `outbox.markFailed` ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â both wrote with
+//     (`outbox.deliver`, `outbox.markFailed` — both wrote with
 //     `WHERE outbox_id = $1` and no tenant at all);
 //   - an UPDATE of a leased table with no lease-owner constraint
 //     (`inbox.Fail`, `inbox.Complete`, `outbox.deliver`);
@@ -113,8 +113,8 @@ func TestNoMutationBypassesTheTenantOrTheLease(t *testing.T) {
 		}
 		if strings.HasPrefix(rel, "migrations"+string(filepath.Separator)) ||
 			strings.HasPrefix(rel, "tools"+string(filepath.Separator)) {
-			// Migrations are allowed to do anything to a table ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â that is what a
-			// migration is for ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â and the contract tools read the contract, not the
+			// Migrations are allowed to do anything to a table — that is what a
+			// migration is for — and the contract tools read the contract, not the
 			// schema.
 			return nil
 		}
@@ -134,7 +134,7 @@ func TestNoMutationBypassesTheTenantOrTheLease(t *testing.T) {
 	}
 
 	if len(findings) > 0 {
-		// An exemption is reported, not failed on â€” and not hidden either. The
+		// An exemption is reported, not failed on ? and not hidden either. The
 		// point of requiring a reason next to the marker is that the reason is
 		// read, so every one of them is logged on every run. An exemption nobody
 		// ever sees is an exemption nobody ever judges.
@@ -166,7 +166,7 @@ func TestNoMutationBypassesTheTenantOrTheLease(t *testing.T) {
 
 // The rules are only worth having if they fire. Each is exercised against a
 // synthetic statement that is the shape of the real defect, and each is paired
-// with a compliant statement that must pass ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â because a guard that fires on
+// with a compliant statement that must pass — because a guard that fires on
 // everything is a guard people disable, and a guard that fires on nothing is the
 // bug it was written for.
 func TestEachRuleFiresOnTheShapeItIsFor(t *testing.T) {

@@ -20,7 +20,7 @@ import (
 // than "every site they can see": since migration 21 `site_isolation` is
 // RESTRICTIVE, so a read that names no site sees nothing at all. The product is
 // single-site per install and `config.validate` already refuses a start with no
-// `SP_SITE_ID`, so the first entry is the whole scope in practice â€” and when a
+// `SP_SITE_ID`, so the first entry is the whole scope in practice — and when a
 // principal is assigned to several, the listing narrows rather than widening,
 // which is the direction a mistake in this function has to fail.
 //

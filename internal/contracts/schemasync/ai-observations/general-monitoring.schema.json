@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.aicaptain.dev/security/v1/ai-observations/general-monitoring.schema.json",
+  "title": "AI observation output: general monitoring",
+  "description": "One general profile rather than one per detection concept. The operator's question is the task prompt, not a schema field, so a new detection concept needs no code, no schema and no bundle change - which is the product. Shadow only: this profile produces observations and creates no incident until it has been measured against a labelled set of at least 200 cases. Rules consume these validated structured fields only, never free text. The model must be able to say 'insufficient evidence' rather than guess, and that is the one field a rule is allowed to treat as a negative answer.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "insufficientEvidence", "summary"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "profileId": { "const": "general-monitoring" },
+    "insufficientEvidence": {
+      "type": "boolean",
+      "description": "True when the model cannot support a determination. Produces an UNVERIFIED outcome, never a negative one. This is the only boolean in this schema a rule may treat as a negative answer, and it is the only one that is allowed to be true when the model genuinely saw nothing."
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 1000,
+      "description": "Human-facing only. Never evaluated by a rule. A rule that could match wording changes behaviour when a prompt is rephrased, and an incident that appears or disappears because a prompt was edited is not defensible."
+    },
+    "sceneDescription": {
+      "type": "string",
+      "maxLength": 2000,
+      "description": "Human-facing only, and the longest field here on purpose: it is where the model's own account of what it saw goes, quoted for a human and parsed by nothing."
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "The model's own confidence in its summary. Recorded and displayed. Not compared against a threshold by any rule: a threshold chosen now, on no data, is the number a reviewer will challenge and there is nothing to defend it with yet."
+    },
+    "abnormalEvent": {
+      "type": "boolean",
+      "description": "The one structured claim this profile makes: that something in the window departed from what the scene normally is. It is deliberately not 'intruder' or 'theft' or any other concept - a concept is a prompt, and a concept in the schema is a rule per concept, which is what this profile exists to avoid."
+    },
+    "hazardVisible": {
+      "type": "boolean",
+      "description": "A hazard is visible in the window. Separate from abnormalEvent because a hazard can be entirely normal - a fire door standing open at 3am, a vehicle on a road - and collapsing the two would make the field mean 'abnormal' again."
+    },
+    "entities": {
+      "type": "array",
+      "maxItems": 32,
+      "items": { "$ref": "#/$defs/entity" }
+    },
+    "recommendedAction": {
+      "type": "string",
+      "maxLength": 500,
+      "description": "Human-facing only. Never executed and never dispatched. The model has no tools; an action it recommends is a sentence, and a system that acted on a sentence from a model would be the injection boundary this product does not have."
+    }
+  },
+  "$defs": {
+    "entity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "present"],
+      "description": "One thing the model saw. Deliberately coarse: 'person' rather than 'unauthorised person', because authorisation is a question about a site's access list and the model has never seen one. A rule that needs that asks the deterministic spine, not the model.",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "A coarse class, lower-case: person, vehicle, animal, package, fire, smoke, water, other."
+        },
+        "present": { "type": "boolean" },
+        "count": { "type": "integer", "minimum": 0, "maximum": 256 },
+        "moving": { "type": "boolean" },
+        "region": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "Where in the frame, coarse: foreground, midground, background, left, right, centre, unknown. Used to place a mark on the operator's view, not to make a decision."
+        }
+      }
+    }
+  }
+}

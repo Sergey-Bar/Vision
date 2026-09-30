@@ -98,6 +98,29 @@ var M1Profiles = map[string]Profile{
 			"summary": true, "confidence": true,
 		},
 	},
+	// general-monitoring is the profile the plan's "no rules to write per
+	// scenario" claim rests on: one profile whose only structured claims are
+	// "something departed from normal" and "a hazard is visible", with the
+	// concept itself carried by the operator's question in the prompt.
+	//
+	// That is why its field set is so small. A profile with a field per concept
+	// is a schema per concept, and a schema per concept is the rule engineering
+	// this work set out to eliminate. What it does not have is per-concept
+	// *certainty*: nothing here says who, what, or whether it was allowed, because
+	// the model has never seen the site's access list and pretending otherwise
+	// would be a fabrication with a boolean in it.
+	//
+	// Shadow, and deliberately: it has never been measured against a labelled set
+	// of the 200 cases the plan requires, and a profile allowed to create
+	// incidents before that is a profile whose false-positive rate is a guess.
+	"general-monitoring": {
+		ID: "general-monitoring", Shadow: true, Version: 1,
+		Fields: map[string]bool{
+			"insufficientEvidence": true, "summary": true, "sceneDescription": true,
+			"confidence": true, "abnormalEvent": true, "hazardVisible": true,
+			"entities": true, "recommendedAction": true,
+		},
+	},
 }
 
 // IsProductionProfile reports whether a profile may affect authoritative state.
@@ -115,15 +138,41 @@ type Observation struct {
 	EventID       string
 	ProfileID     string
 
-	// Attribution. Every field is mandatory, and the schema enforces it. An
-	// observation without a model and a prompt version is not explainable, and an
-	// unexplainable observation is one an operator cannot act on.
-	Model                string
+	// Attribution. An observation without a model and a prompt version is not
+	// explainable, and an unexplainable observation is one an operator cannot act
+	// on.
+	Model            string
+	RuntimeVersion   string
+	PromptTemplateID string
+	PromptVersion    string
+	// ModelHash is a content hash of the weights that answered.
+	//
+	// It is required, with exactly one exception, and the exception is not a
+	// loosening: see [Observation.ModelIdentity]. A provider whose bundle this
+	// product ships hashes, and its hash is the better answer. A hosted provider
+	// that will not give us weights has no hash to record, and the alternatives
+	// are both worse - leaving it empty and calling it required is a lie about
+	// the schema, and writing a synthetic 64-character string is a lie about the
+	// model. So the field is allowed to be empty when, and only when, the two
+	// honest fields below are present.
 	ModelHash            string
-	RuntimeVersion       string
-	PromptTemplateID     string
-	PromptVersion        string
 	ModelBundleSignature string
+
+	// ModelIdentity is what the provider reported it used, as a claim.
+	//
+	// Together with ModelContractVersion it is the attribution for a provider
+	// whose weights are not ours. "The API said hafnia-8b" plus "this build
+	// asked model hafnia-8b with prompt version 3 against schema version 2" is a
+	// complete and honest answer to "what produced this"; a fabricated hash
+	// would be a complete and dishonest one.
+	ModelIdentity string
+	// ModelContractVersion is this build's content hash over the prompt
+	// template, the prompt version, the output schema version and the API model
+	// name. It is reproducible from the repository.
+	ModelContractVersion string
+	// Temperature is the sampling temperature that was requested. It is part of
+	// attribution: an answer produced at 0.9 is not the answer produced at 0.01.
+	Temperature float64
 
 	InputEvidenceIDs    []string
 	InputEvidenceHashes []string
@@ -172,8 +221,13 @@ func (o *Observation) Validate() error {
 		return fmt.Errorf("%w: profile id is required", ErrInvalid)
 	case o.Model == "":
 		return fmt.Errorf("%w: model is required; an observation without one cannot be attributed", ErrInvalid)
-	case o.ModelHash == "":
-		return fmt.Errorf("%w: model hash is required; a model name is not an identity", ErrInvalid)
+	case o.ModelHash == "" && (o.ModelIdentity == "" || o.ModelContractVersion == ""):
+		// The one relaxation, and it is a swap rather than a loosening: a
+		// provider that cannot be hashed must name itself and pin its contract
+		// version instead. Filling in a hash to satisfy the first branch would
+		// produce an observation that looks attributable and is not.
+		return fmt.Errorf("%w: model hash is required unless the provider is named and pinned: "+
+			"a model name is not an identity, and neither is a fabricated hash", ErrInvalid)
 	case o.RuntimeVersion == "":
 		return fmt.Errorf("%w: runtime version is required", ErrInvalid)
 	case o.PromptTemplateID == "":
@@ -186,11 +240,75 @@ func (o *Observation) Validate() error {
 	case !Degradations[o.Degraded]:
 		return fmt.Errorf("%w: unknown degradation %q; a value this package does not "+
 			"recognise would read as no degradation downstream", ErrInvalid, o.Degraded)
+	case o.Degraded != DegradationNone && strings.TrimSpace(o.DegradedDetail) == "":
+		// The fail-closed rule, at the last point before the row can exist.
+		//
+		// A degraded observation with no reason is the shape that turns into a
+		// fabricated negative: the flag says something went wrong, a consumer
+		// that only checks the flag records "degraded" and moves on, and a
+		// consumer that branches on the reason gets the empty string and no
+		// branch. Either way the reason - the only thing that says *the model was
+		// never asked*, as opposed to *the model was asked and failed* - is gone
+		// before anybody can see it.
+		//
+		// So it is refused here rather than tolerated. This is the plan's P4.3
+		// red-check: with the reason removed, the row must not be writable.
+		return fmt.Errorf("%w: a degraded observation must carry its reason; without it a reader "+
+			"cannot tell 'the model was never asked' from 'the model answered and the answer was unusable', "+
+			"which is the difference between an absence and a negative", ErrInvalid)
+	}
+	if o.Degraded == DegradationNone && strings.TrimSpace(o.DegradedDetail) != "" {
+		// The other half, and the mirror image. A degradation detail on an
+		// observation that claims to be fine is either a field that was not
+		// cleared or a reason that was attached to the wrong row, and both are
+		// facts about this record rather than about the run.
+		return fmt.Errorf("%w: a non-degraded observation carries a degradation detail (%q); "+
+			"either a field was not cleared or a reason was attached to the wrong row",
+			ErrInvalid, o.DegradedDetail)
 	}
 	if o.Degraded == DegradationNone && o.StructuredOutput == nil {
 		return fmt.Errorf("%w: a non-degraded observation must carry its output", ErrInvalid)
 	}
 	return nil
+}
+
+// ApplyDegradedPlaceholders fills the attribution columns a degraded observation
+// still has to carry.
+//
+// The columns are NOT NULL and Validate requires them, because an observation
+// nobody can attribute cannot be replayed or audited. A degradation genuinely
+// has no model, so the values are documented placeholders rather than invented
+// ones: "none" and the degradation reason say plainly that nothing ran, and any
+// reader can tell the difference between that and a real model name.
+//
+// It lives here rather than in the caller that first needed it, because the
+// schema's requirements are this package's and two copies of the placeholder
+// vocabulary would drift into two different sets of values for the same fact.
+func ApplyDegradedPlaceholders(o *Observation) {
+	if o.Model == "" {
+		o.Model = "none"
+	}
+	if o.ModelHash == "" {
+		// 64 hex characters, the shape every other hash in the schema is, so the
+		// column's own constraint accepts it and a reader's tooling does not have
+		// to special-case this row.
+		o.ModelHash = "0000000000000000000000000000000000000000000000000000000000000000"
+	}
+	if o.RuntimeVersion == "" {
+		o.RuntimeVersion = "airuntime/0"
+	}
+	if o.PromptTemplateID == "" {
+		o.PromptTemplateID = "none"
+	}
+	if o.PromptVersion == "" {
+		o.PromptVersion = "none"
+	}
+	// The schema requires a positive output schema version, and a degraded run
+	// produced no output to version. One is the smallest honest value: it is the
+	// first shape, and it declares nothing.
+	if o.OutputSchemaVersion <= 0 {
+		o.OutputSchemaVersion = 1
+	}
 }
 
 // OutputHash is the SHA-256 over the canonical serialization of the output.
@@ -326,13 +444,16 @@ func (w *Writer) Record(ctx context.Context, o Observation) (Observation, error)
 	return o, err
 }
 
-// RecordDegraded persists an observation recording that the AI plane could not
-// answer.
+// MarkDegraded shapes o as a degraded observation: the reason, the detail, an
+// empty output, and insufficient_evidence left true.
 //
-// It is a real row, not a log line. "The model was down at 03:14" is a fact a
-// pilot needs six weeks later when somebody asks why the incident count rose,
-// and a log line is not where anybody looks for that.
-func (w *Writer) RecordDegraded(ctx context.Context, o Observation, reason Degradation, detail string) (Observation, error) {
+// It is separate from the write because the shape is a fact about the run, not
+// about the database, and anything else that records a degradation - a soak
+// report, an incident artefact, a test - has to produce the same row. Two
+// hand-built versions of this shape is how a degraded observation comes to mean
+// "insufficient evidence: false" in one path and true in the other, and a flag
+// that is sometimes false is a negative answer waiting to happen.
+func (o *Observation) MarkDegraded(reason Degradation, detail string) {
 	o.Degraded = reason
 	o.DegradedDetail = detail
 	o.StructuredOutput = map[string]any{}
@@ -340,6 +461,16 @@ func (w *Writer) RecordDegraded(ctx context.Context, o Observation, reason Degra
 	// left true so that any consumer which forgets to check the degradation still
 	// fails closed rather than treating an empty output as a negative answer.
 	o.InsufficientEvidence = true
+}
+
+// RecordDegraded persists an observation recording that the AI plane could not
+// answer.
+//
+// It is a real row, not a log line. "The model was down at 03:14" is a fact a
+// pilot needs six weeks later when somebody asks why the incident count rose,
+// and a log line is not where anybody looks for that.
+func (w *Writer) RecordDegraded(ctx context.Context, o Observation, reason Degradation, detail string) (Observation, error) {
+	o.MarkDegraded(reason, detail)
 	return w.Record(ctx, o)
 }
 

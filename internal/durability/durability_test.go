@@ -442,7 +442,7 @@ func TestReNormalizeIsANoOp(t *testing.T) {
 	// A retry of an already-normalized key is a no-op, and it is a no-op that
 	// says so.
 	//
-	// This used to accept either outcome ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â it counted the events in both arms
+	// This used to accept either outcome — it counted the events in both arms
 	// and asserted nothing about the error. That is how the replay path went on
 	// always failing: every call died at the key claim with "no rows in result
 	// set", which this test's tolerant arm was shaped to survive. A test that

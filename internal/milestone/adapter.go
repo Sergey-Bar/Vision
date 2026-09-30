@@ -129,7 +129,7 @@ func sourceDeviceRef(item map[string]any) string {
 // PascalCase spellings, which produced two failures at once:
 //
 //   - Twelve of its eighteen keys ("Motion", "RecordingStarted", "GateEvent",
-//     "DeviceState", â€¦) could never be reached, because the check runs against
+//     "DeviceState", …) could never be reached, because the check runs against
 //     the *normalized* type and normalization lowercases everything.
 //   - Five types the normalizer does emit - recording.started, recording.stopped,
 //     access.granted, access.denied, gate - were not keys at all.
@@ -145,7 +145,7 @@ func sourceDeviceRef(item map[string]any) string {
 var KnownMilestoneEventTypes = buildKnownEventTypes()
 
 // The two synthetic types the adapter itself produces. They are not vendor
-// vocabulary, and they are not malformed in the "unrecognised" sense — the
+// vocabulary, and they are not malformed in the "unrecognised" sense � the
 // Malformed flag on them describes the feed or the item, not the type.
 const (
 	adapterFeedErrorType    = "adapter_feed_error"
@@ -221,8 +221,8 @@ func (a *Adapter) Poll(ctx context.Context, since *time.Time) ([]RawRecord, erro
 			// loss counts accepted events, not whole feeds.
 			//
 			// The record carries a SourceEventID and a SiteID. It used to carry
-			// neither, and `pipeline.Poll` drops exactly those — "record with no
-			// source id was not written" — so a feed outage produced no inbox row,
+			// neither, and `pipeline.Poll` drops exactly those � "record with no
+			// source id was not written" � so a feed outage produced no inbox row,
 			// no dead letter and no counter, while the ingest-loss SLO saw a clean
 			// feed. An outage that is invisible to the thing that watches for
 			// outages is not an outage that gets noticed.
@@ -267,7 +267,7 @@ func (a *Adapter) readFeed(ctx context.Context, route Route, since *time.Time) (
 	// Follow the cursor to the end of the feed.
 	//
 	// This read exactly one page and then stopped. `transport.Get` captures the
-	// `Next-Cursor` header into `Response.Headers` — deliberately, and with a
+	// `Next-Cursor` header into `Response.Headers` � deliberately, and with a
 	// comment saying so - and nothing ever followed it. The poll then advanced
 	// `integrations.last_success_at` to the newest received_at of the records it
 	// did read, so the next poll asked for `since = now` and items 201..N were
@@ -323,8 +323,8 @@ func (a *Adapter) readFeed(ctx context.Context, route Route, since *time.Time) (
 		cursor = next
 	}
 	return out, fmt.Errorf("milestone: %s still had more pages after %d; the feed was truncated "+
-		"and the unread events are NOT lost from Milestone's side — they will be read on the "+
-		"next poll — but this poll's results are incomplete",
+		"and the unread events are NOT lost from Milestone's side � they will be read on the "+
+		"next poll � but this poll's results are incomplete",
 		describe(route), maxFeedPages)
 }
 
@@ -425,9 +425,33 @@ func (a *Adapter) Parse(route Route, resp *Response) ([]RawRecord, error) {
 // Two different unreadable items must not collide, and the same unreadable item
 // read twice must produce the same id so the platform can show it as one
 // outstanding fact instead of a new dead letter per poll.
+// unparsedItemID identifies a page item the adapter could not parse.
+//
+// The hash is over the item's content because an unparseable item has no usable
+// id, and a position in the page is not an identity. Captured timestamps are
+// excluded from that hash: they say when the page was fetched, not what the item
+// was, so including them would give the same malformed item a different
+// identity on every replay - and a fixture that is not deterministic is exactly
+// what the format exists to prevent.
 func (a *Adapter) unparsedItemID(route Route, item map[string]any) string {
-	sum := sha256.Sum256([]byte(a.integrationID + "\x00" + route.Path + "\x00" + canonicalItemBytes(item)))
+	sum := sha256.Sum256([]byte(a.integrationID + "\x00" + route.Path + "\x00" + canonicalItemBytes(withoutCapturedTimes(item))))
 	return a.integrationID + ":" + route.Path + ":unparsed:" + hex.EncodeToString(sum[:])[:16]
+}
+
+// withoutCapturedTimes returns a copy of item with the timestamp fields
+// replaced by a fixed marker, so that the hash is over what the item says
+// rather than about when it was seen.
+func withoutCapturedTimes(item map[string]any) map[string]any {
+	stripped := make(map[string]any, len(item))
+	for k, v := range item {
+		stripped[k] = v
+	}
+	for _, key := range milestoneTimestampKeys {
+		if _, ok := stripped[key]; ok {
+			stripped[key] = "�captured-at�"
+		}
+	}
+	return stripped
 }
 
 // canonicalItemBytes renders an item so that two structurally equal items hash
@@ -677,9 +701,19 @@ var milestoneTimeLayouts = []string{
 // source that says "+02:00" has said nothing about which country it is in, and
 // a host in Israel would otherwise have every foreign timestamp recorded as
 // IST - which looks like a fact and is an assumption.
+// milestoneTimestampKeys are the envelope fields a timestamp is read from.
+//
+// It is one list, used both to read a timestamp and to rebase one during replay.
+// Two lists would be two chances for a replay to move a field the normalizer does
+// not read, and the symptom of that is a window test that passes against a
+// fixture and disagrees with a live capture.
+var milestoneTimestampKeys = []string{
+	"Timestamp", "timestamp", "Time", "time",
+	"CreationTime", "EventTime", "ObservedAt", "observedAt",
+}
+
 func parseMilestoneTime(item map[string]any) (time.Time, string) {
-	raw := stringField(item, "Timestamp", "timestamp", "Time", "time",
-		"CreationTime", "EventTime", "ObservedAt", "observedAt")
+	raw := stringField(item, milestoneTimestampKeys...)
 	if raw == "" {
 		return time.Time{}, ""
 	}

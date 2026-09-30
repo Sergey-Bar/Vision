@@ -434,8 +434,8 @@ func (n *Normalizer) loadDrift(ctx context.Context, in Input) (driftReading, err
 // readDrift reads one device_clocks row, or Found=false when there is none.
 //
 // The read is scoped to the site as well as the tenant. `device_clocks` is a
-// site-scoped table and the RLS policy meant to enforce that is PERMISSIVE â€” it
-// is ORed away by `tenant_isolation` â€” so the site constraint does not exist at
+// site-scoped table and the RLS policy meant to enforce that is PERMISSIVE � it
+// is ORed away by `tenant_isolation` � so the site constraint does not exist at
 // the database layer. Binding it here means the statement is correct on its own
 // terms and needs no change when the policy becomes RESTRICTIVE.
 func (n *Normalizer) readDrift(ctx context.Context, tenant, site, deviceID string) (driftReading, error) {
@@ -447,7 +447,7 @@ func (n *Normalizer) readDrift(ctx context.Context, tenant, site, deviceID strin
 	if err != nil {
 		// Only "not measured yet" is benign. Swallowing every error would turn a
 		// dropped connection, a cancelled context or a permission failure into
-		// "no drift", and that removes the clock correction silently Ã¢â‚¬â€ the
+		// "no drift", and that removes the clock correction silently — the
 		// correlation degrades and nothing says why.
 		if errors.Is(err, pgx.ErrNoRows) {
 			// No measurement is not an error. The device may not have been

@@ -62,13 +62,25 @@ change to the fixtures or to the active bundle produces a different one — and 
 review that no longer describes what would happen no longer authorises anything.
 
 Runs from committed fixtures with no Milestone server reachable.`,
-			Flags: func(fs *flag.FlagSet) {
-				fs.String("bundle", "", "Candidate bundle file. Defaults to the newest in rules/builtin.")
-				fs.String("fixtures", "testdata/fixtures", "Fixture set directory.")
-				fs.String("baseline", "", "Bundle to diff against. Defaults to the stored active bundle.")
-				fs.Bool("json", false, "Emit machine-readable output.")
-				fs.Int("max-events", 100000, "Cap on evaluated signals.")
-			},
+			// No Flags closure here, deliberately.
+			//
+			// The command dispatcher documents the trap: a command that declares
+			// a Flags closure has its flags parsed by the tree, and its Run then
+			// receives only the positionals. `rules simulate` owned its own
+			// FlagSet as well, so `--bundle`, `--fixtures`, `--baseline`, `--json`
+			// and `--max-events` were all consumed by the tree and arrived
+			// nowhere. Every one of them was silently ignored.
+			//
+			// That is not a cosmetic bug. The activation digest is computed over
+			// the candidate bundle, and `rules activate` refuses anything the
+			// simulate report does not match. So an operator who simulated
+			// `--bundle candidate.yaml` was handed a digest for the *default*
+			// bundle, reviewed it, and activated a bundle nobody simulated - and
+			// the gate agreed, because the report was internally consistent about
+			// the wrong file.
+			//
+			// Owning the FlagSet in Run is the other supported shape, and it is
+			// the one that actually applies the flags.
 			Run: runRulesSimulate,
 		},
 		&command.Command{

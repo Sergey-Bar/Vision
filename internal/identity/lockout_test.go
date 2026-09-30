@@ -14,7 +14,7 @@ import (
 // The lockout is the named control for the CSRF-exempt login route, and it
 // bounded nothing under parallelism.
 //
-// `PasswordStep` takes `FOR UPDATE` in a transaction that COMMITS ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â the argon2
+// `PasswordStep` takes `FOR UPDATE` in a transaction that COMMITS — the argon2
 // verification has to happen outside it, because holding a row lock across a
 // deliberately slow hash would serialise every login on the site - and
 // `registerFailure` then computed `attempts := user.FailedAttempts + 1` in Go

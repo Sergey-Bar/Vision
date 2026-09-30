@@ -148,7 +148,7 @@ func TestDistinctRowsGetDistinctIdentities(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // The console's dead-letter list is what the "visible within 60 seconds of
-// entering the state" SLO is measured against, and it ordered by received_at ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â
+// entering the state" SLO is measured against, and it ordered by received_at —
 // ingest order, not dead-letter order.
 //
 // The two events below are ordered against each other on purpose: the one that
@@ -254,8 +254,8 @@ func TestTheDeadLetterUpdatedAtIsTheCompletionInstantNotTheIngestInstant(t *test
 	}
 }
 
-// A dead letter that reached the state through the ordinary retry path ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Fail,
-// after the retry budget is spent ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â has to carry a completion instant too, or it
+// A dead letter that reached the state through the ordinary retry path — Fail,
+// after the retry budget is spent — has to carry a completion instant too, or it
 // sorts as newest under DESC and heads the operator's list regardless of when it
 // died. This drives the real path rather than writing the row directly.
 func TestADeadLetterReachedThroughRetryCarriesACompletionInstant(t *testing.T) {

@@ -148,8 +148,7 @@ func (t *httpTransport) Get(ctx context.Context, route Route, query Query) (*Res
 			"Milestone is redirecting. Point base_url at the address that answers",
 			describe(route), resp.StatusCode, resp.Header.Get("Location"))
 	case resp.StatusCode < 200 || resp.StatusCode >= 300:
-		return nil, fmt.Errorf("milestone: %s returned %d: %s",
-			describe(route), resp.StatusCode, summarize(raw))
+		return nil, &StatusError{Route: route, Status: resp.StatusCode, Body: summarize(raw)}
 	}
 
 	if !json.Valid(raw) {

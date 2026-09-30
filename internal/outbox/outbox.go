@@ -246,8 +246,8 @@ func (r *Relay) deliver(ctx context.Context, d Delivery) error {
 	// A claims, its handler is slow past the lease, relay B claims the expired
 	// row, B's handler fails, and B drives the message to dead_letter. A then
 	// returns from its handler successfully and overwrites status with
-	// 'delivered' and clears last_error. The dead letter Ã¢â‚¬â€ the "visible, audited
-	// fact, never a silent drop" this package's own doc promises Ã¢â‚¬â€ is erased by a
+	// 'delivered' and clears last_error. The dead letter — the "visible, audited
+	// fact, never a silent drop" this package's own doc promises — is erased by a
 	// worker that finished late, and the operator never sees the message at all.
 	// Matching the claim is the whole fix: A's write affects no rows, and A is
 	// told its lease is gone rather than being allowed to assert a terminal state
@@ -260,7 +260,7 @@ func (r *Relay) deliver(ctx context.Context, d Delivery) error {
 	//
 	// The site is not in the WHERE, and deliberately so. This write is guarded on
 	// `lease_owner`: only the relay that claimed this specific row may write it,
-	// which is a strictly stronger predicate than site scope â€” a relay does not
+	// which is a strictly stronger predicate than site scope � a relay does not
 	// hold every row of its site, it holds one row of one site. Since migration 21
 	// `site_isolation` is RESTRICTIVE and a worker holding a lease across a
 	// legitimate site boundary would be refused, so this runs as the system worker.
@@ -273,8 +273,8 @@ func (r *Relay) deliver(ctx context.Context, d Delivery) error {
 		       lease_owner = NULL, lease_expires_at = NULL, last_error = NULL,
 		       -- The same reason last_error is cleared above, applied to the column
 		       -- that replaced it for the dead-letter state. A row reaching this
-		       -- write always has it NULL already â€” Replay clears it and markFailed
-		       -- only writes it on the terminal transition â€” so this is the
+		       -- write always has it NULL already � Replay clears it and markFailed
+		       -- only writes it on the terminal transition � so this is the
 		       -- assertion rather than the mechanism. It costs one column in a
 		       -- statement that is already matching on the claim.
 		       dead_letter_reason = NULL
@@ -332,7 +332,7 @@ func (r *Relay) markFailed(ctx context.Context, d Delivery, cause error) error {
 	//
 	// dead_letter_reason is written only on the transition to dead_letter, and is
 	// never rewritten afterwards. That is the reason an operator needs, and it is
-	// the column inbox_events and jobs already have â€” outbox_events was the only
+	// the column inbox_events and jobs already have � outbox_events was the only
 	// one of the three without it, which meant the same question was answered
 	// from two different columns depending on which table the message was in.
 	//
@@ -345,8 +345,8 @@ func (r *Relay) markFailed(ctx context.Context, d Delivery, cause error) error {
 	// last_error, which is the answer it gives today.
 	//
 	// As in `deliver`: this write is guarded on `lease_owner`, which is a
-	// stronger predicate than site scope â€” a relay holds one message, not every
-	// message of its site â€” so it runs as the system worker rather than
+	// stronger predicate than site scope � a relay holds one message, not every
+	// message of its site � so it runs as the system worker rather than
 	// narrowing to a site it is not scoped to. Since migration 21
 	// `site_isolation` is RESTRICTIVE, and a tenant-scoped write against this
 	// table would be refused by a policy the relay cannot see.
@@ -399,8 +399,8 @@ type DeadLetter struct {
 	// Reason is the dead letter's own reason, falling back to last_error.
 	//
 	// The fallback is not a courtesy. dead_letter_reason is nullable with no
-	// default, so every row written before migration 0019 â€” and every row written
-	// by a relay that has not been upgraded since â€” has it NULL, and reporting
+	// default, so every row written before migration 0019 � and every row written
+	// by a relay that has not been upgraded since � has it NULL, and reporting
 	// "" for those would replace today's answer with silence. COALESCE is what
 	// lets the two populations of rows be reported through one listing.
 	Reason string

@@ -82,7 +82,7 @@ func run() error {
 		}
 		// The phase on a migration says how it was *meant* to ship. A carried
 		// violation says one of them was not, and the operator reading a status
-		// report is entitled to know which version that is â€” otherwise "every
+		// report is entitled to know which version that is — otherwise "every
 		// migration is an expand and every expand is safe" is something the tool
 		// asserts about a tree where it is not true.
 		report.CarriedViolations = migrations.CarriedContractViolations()
@@ -174,7 +174,7 @@ func printStatus(s migrate.Status) {
 	if s.Compatible {
 		fmt.Println("compatibility  : OK")
 	} else {
-		fmt.Println("compatibility  : OUT OF RANGE â€” upgrade or roll back the binary")
+		fmt.Println("compatibility  : OUT OF RANGE — upgrade or roll back the binary")
 	}
 	if len(s.Pending) > 0 {
 		fmt.Printf("pending (%d):\n", len(s.Pending))
@@ -206,7 +206,7 @@ func printStatus(s migrate.Status) {
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `security-migrate â€” ordered Postgres migrations, forward-only.
+	fmt.Fprint(os.Stderr, `security-migrate — ordered Postgres migrations, forward-only.
 
 Usage:
   security-migrate [flags] <command>

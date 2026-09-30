@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/Sergey-Bar/Ai-Captain/internal/bundles"
@@ -132,9 +134,72 @@ func runRulesSimulate(ctx context.Context, env *command.Env, args []string) erro
 			describeOutcome(c.Before), describeOutcome(c.After))
 	}
 	fmt.Fprintf(env.Stdout, "totals     : %s\n", formatTotals(report.Totals))
+	// The AI plane's state, on every run.
+	//
+	// The plan's P4.2 is that this path runs with the plane killed and *shows
+	// the degraded path*. The per-change lines already carry the degradation, but
+	// a first run has no baseline and therefore prints no change lines, so the
+	// claim would be invisible exactly when somebody first runs it. Stating it
+	// here makes the one thing this simulation is for present in the summary a
+	// reader sees without scrolling.
+	printDegradedSummary(env, after)
 	fmt.Fprintf(env.Stdout, "\nactivate with:\n  securityctl rules activate --version %s --diff-digest %s\n",
 		report.BundleVersion, report.DiffDigest)
 	return nil
+}
+
+// degradedReasonCount tallies the reasons a run recorded, so a reader sees which
+// failure they are looking at rather than only how many.
+func degradedReasonCount(after []simulate.Outcome) (int, map[string]int) {
+	var n int
+	byReason := map[string]int{}
+	for _, o := range after {
+		if !o.Degraded {
+			continue
+		}
+		n++
+		reason := o.DegradedReason
+		if reason == "" {
+			// A degradation with no reason is the failure this whole repository
+			// treats as the worst one, and a simulation that printed a count and
+			// no reason would hide it.
+			reason = "UNNAMED"
+		}
+		byReason[reason]++
+	}
+	return n, byReason
+}
+
+func printDegradedSummary(env *command.Env, after []simulate.Outcome) {
+	degraded, byReason := degradedReasonCount(after)
+	raised := 0
+	for _, o := range after {
+		if o.IncidentRaised {
+			raised++
+		}
+	}
+	fmt.Fprintf(env.Stdout, "\nAI PLANE: absent.\n")
+	fmt.Fprintf(env.Stdout, "  This simulation runs with no model configured, so every request_vlm dispatch is a\n")
+	fmt.Fprintf(env.Stdout, "  degraded observation carrying a named reason - the counts below are what this run\n")
+	fmt.Fprintf(env.Stdout, "  actually recorded. `no_runtime` and `absent` are deliberately different facts and\n")
+	fmt.Fprintf(env.Stdout, "  the report does not collapse them.\n")
+	fmt.Fprintf(env.Stdout, "  An incident is still raised on the evidence the deterministic spine can see on its\n")
+	fmt.Fprintf(env.Stdout, "  own; it is marked UNVERIFIED rather than blocked, and no rule treats the\n")
+	fmt.Fprintf(env.Stdout, "  absence as a negative answer.\n")
+	fmt.Fprintf(env.Stdout, "  %d of %d incident(s) raised, %d outcome(s) degraded", raised, len(after), degraded)
+	if degraded > 0 {
+		var parts []string
+		for reason, n := range byReason {
+			parts = append(parts, reason+"="+fmt.Sprint(n))
+		}
+		sort.Strings(parts)
+		fmt.Fprintf(env.Stdout, " (%s)", strings.Join(parts, " "))
+	}
+	fmt.Fprintln(env.Stdout)
+	if byReason["UNNAMED"] > 0 {
+		fmt.Fprintf(env.Stdout, "  WARNING: %d degradation(s) carried no reason. That is the failure this product\n", byReason["UNNAMED"])
+		fmt.Fprintf(env.Stdout, "  treats as its worst, and it must not survive to an operator.\n")
+	}
 }
 
 func describeOutcome(o simulate.Outcome) string {

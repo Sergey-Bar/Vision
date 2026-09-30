@@ -44,7 +44,7 @@ func runOnce(t *testing.T, h harness) {
 // `activeBundle` refused any bundle with any problem, so one deliberate warning
 // by a rule author made `decide` fail for EVERY event, with one log line each.
 // The whole AI-degradation warning path was a bundle-killer in production, and
-// the bundle had already passed `Store` and `Activate` ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â which is exactly where
+// the bundle had already passed `Store` and `Activate` — which is exactly where
 // warnings are supposed to be allowed.
 //
 // The bundle below is the endorsed warning: a rule that must keep working with
@@ -66,7 +66,7 @@ func TestABundleWithWarningsStillDecides(t *testing.T) {
 // bundle that could not be stored is a bundle that cannot reach the pipeline.
 func TestABundleWithAnErrorNeverReachesThePipeline(t *testing.T) {
 	// A bundle with an error-level problem is refused at the store, and the
-	// harness's own `setup` treats a problem as fatal Ã¢â‚¬â€ so the store's gate is
+	// harness's own `setup` treats a problem as fatal � so the store's gate is
 	// what is under test here, and it is the gate that decides whether such a
 	// bundle can ever reach the pipeline at all.
 	//
@@ -88,7 +88,7 @@ func TestABundleWithAnErrorNeverReachesThePipeline(t *testing.T) {
 
 	// `Store` signals refusal through a zero Meta and a nil error, which is what
 	// the API handler checks. Asserting on the error alone would pass for a bundle
-	// that was silently not stored â€” which is the shape of mistake that made a
+	// that was silently not stored ? which is the shape of mistake that made a
 	// warning look like a failure in the first place.
 	meta, _, err := (&bundles.Service{
 		Pool:     pool,
@@ -113,8 +113,8 @@ func TestABundleWithAnErrorNeverReachesThePipeline(t *testing.T) {
 //     RuleID and a zero Action. The rule whose entire purpose is to *prevent* an
 //     incident was what created one, with the default severity medium.
 //   - `then: {dispatch: [notify_operator]}` with no `create_incident` is
-//     explicitly legal ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the validator treats a non-empty dispatch list as a
-//     non-empty action ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â and its Decision carries a RuleID.
+//     explicitly legal — the validator treats a non-empty dispatch list as a
+//     non-empty action — and its Decision carries a RuleID.
 //
 // `internal/simulate` already modelled this correctly: its diff says
 // `IncidentRaised: d.Action.CreateIncident`. So the digest an operator
@@ -168,7 +168,7 @@ settings:
 
 // degradingBundle produces `degrade_proceeds`: a rule that must keep working
 // with the AI plane down, and warns that it creates incidents on less evidence
-// when it is. The warning is the endorsed case â€” the semantic validator
+// when it is. The warning is the endorsed case ? the semantic validator
 // documents `proceed_without` as a legitimate choice and warns about it precisely
 // so the author sees it and keeps going.
 const degradingBundle = bundleHeader + `rules:
@@ -221,7 +221,7 @@ func noIncidentBundle(action string) string {
 
 // dispatchOnlyBundle is a rule that acts and does not raise: a non-empty dispatch
 // list with `createIncident: false`. The schema requires `createIncident` to be
-// said explicitly, which is the right shape â€” but the pipeline's gate was
+// said explicitly, which is the right shape ? but the pipeline's gate was
 // `RuleID != ""`, which did not read it, so a rule that dispatched an alert and
 // deliberately raised no incident raised one anyway.
 func dispatchOnlyBundle() string {

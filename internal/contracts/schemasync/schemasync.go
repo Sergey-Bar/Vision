@@ -23,12 +23,13 @@ var embedded embed.FS
 // Published is the published path of each schema, relative to the repository
 // root, mapped to the copy held here.
 var Published = map[string]string{
-	"contracts/json-schema/rule-bundle.schema.json":                       "rule-bundle.schema.json",
-	"contracts/json-schema/site-config.schema.json":                       "site-config.schema.json",
-	"contracts/json-schema/bundle-manifest.schema.json":                   "bundle-manifest.schema.json",
-	"contracts/json-schema/ai-observations/door-forced.schema.json":       "ai-observations/door-forced.schema.json",
-	"contracts/json-schema/ai-observations/restricted-person.schema.json": "ai-observations/restricted-person.schema.json",
-	"contracts/json-schema/ai-observations/vehicle-at-gate.schema.json":   "ai-observations/vehicle-at-gate.schema.json",
+	"contracts/json-schema/rule-bundle.schema.json":                        "rule-bundle.schema.json",
+	"contracts/json-schema/site-config.schema.json":                        "site-config.schema.json",
+	"contracts/json-schema/bundle-manifest.schema.json":                    "bundle-manifest.schema.json",
+	"contracts/json-schema/ai-observations/door-forced.schema.json":        "ai-observations/door-forced.schema.json",
+	"contracts/json-schema/ai-observations/restricted-person.schema.json":  "ai-observations/restricted-person.schema.json",
+	"contracts/json-schema/ai-observations/general-monitoring.schema.json": "ai-observations/general-monitoring.schema.json",
+	"contracts/json-schema/ai-observations/vehicle-at-gate.schema.json":    "ai-observations/vehicle-at-gate.schema.json",
 }
 
 // Bytes returns the embedded copy of one schema, named as it is named in

@@ -340,38 +340,11 @@ func (w *VLMWorker) recordResult(ctx context.Context, base observations.Observat
 }
 
 // applyDegradedPlaceholders fills the attribution columns a degraded observation
-// still has to carry.
-//
-// The columns are NOT NULL and Validate requires them, because an observation
-// nobody can attribute cannot be replayed or audited. A degradation genuinely
-// has no model, so the values are documented placeholders rather than invented
-// ones: "none" and the degradation reason say plainly that nothing ran, and any
-// reader can tell the difference between that and a real model name.
+// still has to carry. The vocabulary lives with the schema it satisfies, in the
+// observations package, because a second copy of it would drift into a second
+// set of values for the same fact.
 func applyDegradedPlaceholders(base *observations.Observation) {
-	if base.Model == "" {
-		base.Model = "none"
-	}
-	if base.ModelHash == "" {
-		// 64 hex characters, the shape every other hash in the schema is, so the
-		// column's own constraint accepts it and a reader's tooling does not have
-		// to special-case this row.
-		base.ModelHash = "0000000000000000000000000000000000000000000000000000000000000000"
-	}
-	if base.RuntimeVersion == "" {
-		base.RuntimeVersion = "airuntime/0"
-	}
-	if base.PromptTemplateID == "" {
-		base.PromptTemplateID = "none"
-	}
-	if base.PromptVersion == "" {
-		base.PromptVersion = "none"
-	}
-	// The schema requires a positive output schema version, and a degraded run
-	// produced no output to version. One is the smallest honest value: it is the
-	// first shape, and it declares nothing.
-	if base.OutputSchemaVersion <= 0 {
-		base.OutputSchemaVersion = 1
-	}
+	observations.ApplyDegradedPlaceholders(base)
 }
 
 func evidenceIDs(list []Evidence) []string {

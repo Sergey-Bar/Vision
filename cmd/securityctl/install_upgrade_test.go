@@ -6,10 +6,10 @@ package main
 // scripts/verify.ps1 cover restore-from-backup. They prove a site can be brought
 // back from data loss. They say nothing about the operation an operator
 // actually performs on a running site at 02:00, which is: put the next version
-// on top of this one. That is a different failure surface â€” a staging mistake
+// on top of this one. That is a different failure surface — a staging mistake
 // clobbers the operator's env file, a swap that deletes the old directory leaves
 // nothing to roll back to, a refusal that is not a refusal installs a core that
-// cannot read the site it was just put on â€” and none of it was covered by
+// cannot read the site it was just put on — and none of it was covered by
 // anything a release is gated on.
 //
 // These tests drive the real commands through newRootCommand().Execute, not a
@@ -187,7 +187,7 @@ func TestAnUpgradeReplacesTheProgramAndPreservesTheOperatorSEnvFile(t *testing.T
 
 	// Preserved: the environment file and the operator's edits to it. Replacing it
 	// with a fresh template on the upgrade meant to fix the site is the single
-	// most damaging thing an installer can do here â€” the site comes back up with
+	// most damaging thing an installer can do here — the site comes back up with
 	// an empty tenant id and no database password.
 	if got := readFile(t, site.envFile); got != operatorEdit {
 		t.Errorf("the environment file after the upgrade is:\n%s\nwant the operator's own:\n%s",
@@ -278,7 +278,7 @@ func TestThePreviousVersionIsStillOnDiskAfterAnUpgrade(t *testing.T) {
 	// a working rollback into a refusal at exactly the wrong moment.
 	//
 	// readVersionWindow takes the live program directory and appends the suffix
-	// itself â€” that is how the rollback command calls it, and calling it any
+	// itself — that is how the rollback command calls it, and calling it any
 	// other way would test a path the shipped code never reads.
 	prevManifest, err := readVersionWindow(site.program)
 	if err != nil {
@@ -295,7 +295,7 @@ func TestThePreviousVersionIsStillOnDiskAfterAnUpgrade(t *testing.T) {
 
 // An archive whose core window excludes the core doing the installing. The
 // rollback target is that same core, so installing it leaves a state nothing can
-// recover from â€” which is why this is a refusal and not a warning.
+// recover from — which is why this is a refusal and not a warning.
 func TestAnInstallWhoseCompatibilityWindowExcludesThisCoreIsRefused(t *testing.T) {
 	site := newSite(t)
 	rel := buildRelease(t, "0.1.0", release.Compatibility{
@@ -443,7 +443,7 @@ func TestUpgradingAnEmptyDirectoryIsRefused(t *testing.T) {
 }
 
 // The rollback, run for real. Database-backed, because the window check reads
-// the schema version the site is actually at â€” which is the whole point of the
+// the schema version the site is actually at — which is the whole point of the
 // check, and the reason a rollback cannot be reasoned about offline.
 func TestTheRollbackReturnsToThePreviousVersionWhenThatVersionCanReadTheSchema(t *testing.T) {
 	site := newSite(t)
@@ -483,14 +483,14 @@ func TestTheRollbackReturnsToThePreviousVersionWhenThatVersionCanReadTheSchema(t
 // The other half of the window check: a previous version that cannot read the
 // schema the site is at. Rolling the program back would leave a site no binary
 // supports, and the only state both versions can serve is a restore from the
-// pre-upgrade backup â€” so the rollback is refused and says so.
+// pre-upgrade backup — so the rollback is refused and says so.
 func TestTheRollbackIsRefusedWhenThePreviousVersionCannotReadTheSchema(t *testing.T) {
 	site := newSite(t)
 	requireMigratedSchema(t)
 
 	// A is installed and then replaced by B. A's own declared window is
-	// deliberately narrow, so the database â€” which is at the current schema
-	// version â€” is outside it.
+	// deliberately narrow, so the database — which is at the current schema
+	// version — is outside it.
 	narrow := release.Compatibility{
 		MinSchemaVersion: 1, MaxSchemaVersion: 1,
 		MinCoreVersion: "0.1.0", MaxCoreVersion: "0.x", ContractsVersion: "security/v1",
@@ -509,7 +509,7 @@ func TestTheRollbackIsRefusedWhenThePreviousVersionCannotReadTheSchema(t *testin
 			"refusal (%d)\n%s", code, command.ExitRefused, out)
 	}
 	if !strings.Contains(out, "Restore the database") {
-		t.Errorf("the refusal does not name the only state that is safe â€” a restore:\n%s", out)
+		t.Errorf("the refusal does not name the only state that is safe — a restore:\n%s", out)
 	}
 	// And it did not move: a refused rollback that half-applies is worse than
 	// either outcome.
@@ -554,8 +554,8 @@ func newSite(t *testing.T) *site {
 		dumpFile: filepath.Join(root, "dump.sql"),
 	}
 	// The pre-upgrade backup. runBackup deliberately does not shell out to
-	// pg_dump â€” a backup that depends on a tool being present fails silently on
-	// the site that needed it â€” so it takes a dump the operator produced and
+	// pg_dump — a backup that depends on a tool being present fails silently on
+	// the site that needed it — so it takes a dump the operator produced and
 	// copies it. This is that dump.
 	if err := os.WriteFile(s.dumpFile, []byte("-- a database dump\n"), 0o600); err != nil {
 		t.Fatalf("write the dump: %v", err)

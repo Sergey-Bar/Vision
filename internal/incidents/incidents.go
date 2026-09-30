@@ -137,8 +137,8 @@ func (s *Service) CreateIncident(ctx context.Context, in Create) (string, error)
 		// the incident was inserted with no `incident_events` rows at all. Replay
 		// then reads `detail.Events == nil`, `signalsFrom` returns a zero-valued
 		// trigger, and `reevaluate` runs the rule against `EventType: ""`. The
-		// replay mismatch was structural â€” the incident had never recorded what it
-		// was about â€” and not a property of the bundle.
+		// replay mismatch was structural — the incident had never recorded what it
+		// was about — and not a property of the bundle.
 		linked := make([]string, 0, len(in.Decision.SupportingEvents)+1)
 		trigger := first(in.SupportingEventIDs)
 		if trigger != "" {
@@ -595,8 +595,8 @@ func scanDispositions(ctx context.Context, tx pgx.Tx, tenant, incidentID string,
 //
 // The current state was read on a separate connection outside the transaction,
 // checked against a lifecycle table that is advisory, and then written with no
-// guard on the state it was read from. Two operators racing â€” A reads `open` and
-// asks for `in_review`, B closes â€” had A's update land after B's and set
+// guard on the state it was read from. Two operators racing — A reads `open` and
+// asks for `in_review`, B closes — had A's update land after B's and set
 // `state = 'in_review'` while `COALESCE($4, closed_at)` preserved the close
 // timestamp. The incident was simultaneously dispositioned-as-open and closed,
 // and nothing in the ledger recorded that the two updates interleaved.

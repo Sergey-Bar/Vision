@@ -152,7 +152,7 @@ func (s *Server) handleConsoleRoot(w http.ResponseWriter, r *http.Request) {
 	// the new one away. The browser kept the old value, which no longer matches
 	// the row, so the very next request failed to resolve and bounced to /login:
 	// visiting the console root logged the operator out. Every other handler that
-	// resolves a session â€™ `s.principal` and therefore the whole API â€™ does this,
+	// resolves a session ’ `s.principal` and therefore the whole API ’ does this,
 	// and this one was the exception.
 	s.setSessionCookie(w, rotated, p.CSRFToken)
 	http.Redirect(w, r, "/incidents", http.StatusFound)
@@ -235,7 +235,7 @@ func (s *Server) handleConsoleIncident(w http.ResponseWriter, r *http.Request, p
 //
 // A closed map rather than the string interpolated into a class attribute: the
 // severity comes from a rule bundle, and a bundle is untrusted input, so a
-// severity of `x" onclick="â€¦` must not be able to become a handler.
+// severity of `x" onclick="…` must not be able to become a handler.
 func severityClass(s string) string {
 	switch s {
 	case "info":

@@ -44,7 +44,12 @@ func repoRootOf(t *testing.T) string {
 // not exist.
 //
 // Fixing it is `ALTER POLICY site_isolation ... AS RESTRICTIVE` on every
-// tenant-scoped table ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â one statement per table, and then *every* query that does
+// tenant-scoped table - and the set of them is not fixed, because 0008 applied the
+// policy by enumerating whatever tenant-bearing relations existed at the time, and
+// later migrations added more. That is exactly why this is one statement per table:
+// a list in a document is not a control, because the next migration that adds a
+// tenant-bearing table has to add its own `ALTER POLICY`, and nothing here makes
+// that happen automatically.
 // not set `app.site_ids` sees no site-bound rows. That is fail-closed, which is
 // the right direction and also the dangerous one: a consume loop that forgets
 // its scope ingests nothing, and that failure is invisible until a site has
@@ -221,8 +226,10 @@ func TestTheTwoPoliciesComposeAsAnd(t *testing.T) {
 // the principal's site scope. `For` binds the tenant and nothing else.
 //
 // The decision is made by the *table*, not by the call. `audit_ledger` is
-// tenant-wide by design ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â a ledger row is attributed to a site by its
-// `site_scope` column and does not belong to one ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â so it is read with `For` and
+// tenant-wide by design. A ledger row is attributed to a site by its own
+// `site_scope` column and does not *belong* to one, so it is read with `For` and
+// a rule that flagged it would be wrong in the strict direction - which is how a
+// guard gets switched off.
 // a rule that flagged it would be wrong in the strict direction, which is how a
 // guard gets switched off.
 func TestEveryRequestPathQueryOnASiteScopedTableBindsASiteScope(t *testing.T) {

@@ -26,7 +26,7 @@ func newStore(t *testing.T) *evidence.Store {
 
 // storedAgo stands in for the `evidence` table's stored_at column. Sweep reads
 // age from there, never from the filesystem, so a test that wants an object to
-// look old says so here rather than touching the file's mtime ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â and the whole
+// look old says so here rather than touching the file's mtime — and the whole
 // point of D5 is that those two are not the same thing.
 type fakeEvidenceTable map[string]time.Time
 
@@ -257,7 +257,7 @@ func TestAlteredFileIsReportedNotServed(t *testing.T) {
 
 // Sweep deletes files. Its tenant argument builds the directory it walks and the
 // directory it deletes inside, and it used to join that argument onto the root
-// with no validation at all ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â so a tenant of "../../etc" walked out of the
+// with no validation at all — so a tenant of "../../etc" walked out of the
 // evidence root and os.Remove took whatever the policy said was expired with it.
 // Put validates the same argument; Sweep did not, in the one package whose
 // contract is that it is the only code touching that root.

@@ -291,8 +291,77 @@ is deterministic; it does not prove the Milestone endpoint mapping is correct,
 because that mapping is `Unverified` in `internal/milestone/routes.go` until a
 real server confirms it. DoD item 1 stays open until it is.
 
-## 7. What is not yet modelled
+## 6a. Video frames are untrusted input
 
+Added when the capture path went from "no video" to "video from a camera", which
+is the change that made this boundary exist. Everything above it treats the
+platform as a system of record; this section is about the one input that is
+attacker-influenced by design.
+
+### The boundary
+
+```
+camera ─RTSP─▶ mux ─▶ (transmit) ─▶ VLM ─▶ schema-validated output ─▶ rule ─▶ incident
+   untrusted        untrusted        UNTRUSTED, third-party      trusted        trusted
+```
+
+A frame is untrusted input for the same reason a rule bundle is: **somebody
+outside the system can write words into it.** A sign by a loading bay, a licence
+plate, graffiti, a banner on a fence, a caption burned into a stream, a person
+holding a printed page. The model reads pixels and turns them into text, and
+there is no seam between the two.
+
+The provider states it has no general guardrails by design. That is a reasonable
+provider position and it is exactly why the control cannot be delegated to it.
+
+### What an injected frame can and cannot do
+
+**It can** make the model say something. It cannot do anything else, and the
+reason is structural rather than a filter:
+
+| | |
+|---|---|
+| Tools the model holds | **none.** It is given a prompt and an asset and returns text. There is no function to call, no URL to fetch, no credential to read. |
+| What reaches the spine | schema-validated fields only. `additionalProperties: false` on every profile, and a field a rule may reference is a field the registry lists — a test asserts the two agree. |
+| What is ever matched on | **structure, never prose.** `summary`, `sceneDescription` and `recommendedAction` are stored and displayed. No rule compares a string. |
+| What the model can influence | whether an incident is raised, and its severity — i.e. whether a human is interrupted. |
+
+So the blast radius of a successful injection is: **a human gets interrupted.**
+That is a real cost and the plan's answer is the gate board — a measured
+false-positive rate and a case count, before the profile is allowed to decide
+anything. `general-monitoring` is shadow for that reason and for no other.
+
+### The controls, and the test that proves each
+
+| Control | Test |
+|---|---|
+| The model holds no tools | Structural: there is no tool interface in `internal/hafnia` or `internal/airuntime` to call. A test asserts the client exposes exactly the four documented endpoints. |
+| Output is schema-validated before it is stored | Every profile's `additionalProperties` is `false`; the validator refuses an undeclared field rather than dropping it. |
+| A rule may only name a field the registry lists | `TestTheGeneralProfileFieldSetMatchesItsPublishedSchema`, and the bundle compiler's own check at compile time. |
+| Prose is never parsed | `TestReasonsNameAMeasurementAndNotAConclusion` and the absence of any rule comparing a string. The `general-monitoring` schema documents this on `summary` itself. |
+| An in-frame instruction produces an observation and no action | `TestAnInjectedFrameProducesAnObservationAndNoAction` — the plan's red-check. It asserts the injected text is *stored* (it is data) and that nothing was dispatched, and it is red-checked by removing the "no tools" property. |
+| The profile is not allowed to decide | `TestTheGeneralProfileCarriesNoPerConceptFields` and the shadow flag. |
+
+### The residual, stated plainly
+
+The control above bounds the blast radius; it does not remove the attack. A
+frame can still cause a false positive, and a determined attacker can cause them
+cheaply by holding a printed page in frame. Two things limit that, and neither is
+a technical control:
+
+- **The trigger is local and the model is only asked on novelty.** An attacker
+  who can hold a page in frame can also walk in frame, so they have already spent
+  the effort the attack is trying to avoid.
+- **The gate board counts cases before promotion.** Until the false-positive rate
+  is measured over the required case floor, the profile creates no incident and
+  an injected frame costs one observation row.
+
+That is a weaker position than "prompt injection is solved" and a stronger one
+than silence. It is recorded here rather than left in the gap list because it is
+a decision, and an unrecorded decision gets re-litigated by whoever reads this
+next.
+
+## 7. What is not yet modelled
 Named so the next person does not mistake silence for a decision.
 
 - Physical access to the evidence host. Out of scope: the product assumes the

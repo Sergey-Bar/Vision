@@ -45,7 +45,7 @@ func seedIncident(t *testing.T, svc *incidents.Service, tenant, site string, sup
 //
 // The engine resolves such a rule to StateCorroborated with the reason
 // "no_corroboration_required", and the trigger is carried in a *different* field
-// Ã¢â‚¬â€ `Create.SupportingEventIDs` Ã¢â‚¬â€ which the link loop read only to decide which
+// — `Create.SupportingEventIDs` — which the link loop read only to decide which
 // of the supporting events was the trigger. So the loop iterated an empty list
 // and the incident was inserted with no `incident_events` rows at all.
 //

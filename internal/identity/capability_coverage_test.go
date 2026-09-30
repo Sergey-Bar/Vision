@@ -19,8 +19,8 @@ import (
 // capUse matches a reference to a Cap* identifier.
 //
 // It is deliberately loose. Every match that is not a declared capability is
-// ignored â€” `Captain` appears in the module path in the import block of most
-// files, and `CapturedAt` is a generated protobuf field â€” so the noise costs
+// ignored — `Captain` appears in the module path in the import block of most
+// files, and `CapturedAt` is a generated protobuf field — so the noise costs
 // nothing. What matters is one direction only: a declared capability has to
 // appear here, outside this package. A tighter pattern would be more precise
 // and would need to know every shape a reference can take, and the failure mode
@@ -77,7 +77,7 @@ func TestEveryDeclaredCapabilityIsReadBySomething(t *testing.T) {
 			"or check outside internal/identity reads it. It grants nothing, and a role table "+
 			"that lists it lies to the auditor who reads it.\n"+
 			"Either gate something on it, or remove the constant, the grants and any audit "+
-			"action for it â€” and if the removal cannot ship in this milestone, record it in "+
+			"action for it — and if the removal cannot ship in this milestone, record it in "+
 			"capabilitiesDeclaredButNotYetEnforced with the reason, so the debt is visible "+
 			"rather than a second undocumented capability",
 			name, constantName(t, c))
@@ -163,7 +163,7 @@ func constantName(t *testing.T, c identity.Capability) string {
 // Cap* identifier it finds in non-test Go source.
 //
 // internal/identity is excluded because the constants are declared there, and a
-// declaration is not a use â€” counting them would make this check pass on the
+// declaration is not a use — counting them would make this check pass on the
 // file it exists to police. Test files are excluded because a test naming a
 // capability is not a gate either: that is the whole defect, an identifier that
 // only tests have ever heard of.

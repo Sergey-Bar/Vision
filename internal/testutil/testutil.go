@@ -137,7 +137,7 @@ func Exec(t *testing.T, pool *pgxpool.Pool, sql string, args ...any) {
 // ExpectError runs a statement and requires it to fail.
 //
 // It returns nothing, deliberately. The assertion is "this statement must be
-// refused", and it is made by failing the test if the statement succeeds Ã¢â‚¬â€ which
+// refused", and it is made by failing the test if the statement succeeds — which
 // happens inside the helper. Returning the error as well gave every call site
 // two ways to do nothing with it, and eight of them took the second: the call
 // read as if the error were being checked when it was being dropped, and a

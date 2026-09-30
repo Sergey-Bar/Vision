@@ -34,7 +34,7 @@
 // It does not execute SQL, parse SQL properly, or understand transactions. It
 // reads Go string literals and asks narrow questions about them. A rule that
 // needs a real parser is a rule that will produce false positives, and a gate
-// that produces false positives is a gate people learn to ignore ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â which is the
+// that produces false positives is a gate people learn to ignore — which is the
 // condition this repository keeps finding in other checks.
 package sqlguard
 
@@ -104,8 +104,8 @@ var (
 // The exemption marker.
 //
 // A rule that cannot be excepted is a rule somebody turns off. Every legitimate
-// exception to the lease rule has the same shape Ã¢â‚¬â€ a statement that is
-// *supposed* to act on a row nobody holds a lease on Ã¢â‚¬â€ so the exception is a
+// exception to the lease rule has the same shape ? a statement that is
+// *supposed* to act on a row nobody holds a lease on ? so the exception is a
 // named, greppable marker in the SQL comment, and the guard refuses an exemption
 // that does not say why.
 //
@@ -207,8 +207,8 @@ func checkStatement(path string, s statement, tables map[string]TableFacts) []Fi
 		// Rule 2: only the lease holder may write a leased row.
 		//
 		// A row that carries a lease is a row a worker is holding. An UPDATE that
-		// ignores the owner lets a worker whose lease lapsed ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â and which has no
-		// way of knowing it lapsed, because nothing tells it ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â write a terminal
+		// ignores the owner lets a worker whose lease lapsed — and which has no
+		// way of knowing it lapsed, because nothing tells it — write a terminal
 		// state over the work the current holder is doing.
 		if s.verb == "UPDATE" && facts.Leased && !mentions(statementWhere(s.text), "lease_owner") {
 			out = append(out, Finding{
@@ -238,14 +238,14 @@ func checkStatement(path string, s statement, tables map[string]TableFacts) []Fi
 }
 
 // statementWhere returns the WHERE clause of a statement, or the whole statement
-// when there is none ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â because a statement with no WHERE has no tenant
+// when there is none — because a statement with no WHERE has no tenant
 // predicate in it, which is the finding.
 var whereRe = regexp.MustCompile(`(?i)\bwhere\b`)
 
 func statementWhere(sql string) string {
 	flat := strings.ToLower(normaliseWhitespace(sql))
 	// The word, not a spaced token. A statement whose text begins with the WHERE
-	// Ã¢â‚¬â€ because the verb and the table name were already consumed Ã¢â‚¬â€ has no
+	// ? because the verb and the table name were already consumed ? has no
 	// leading space, and requiring one silently classified every such statement
 	// as having no predicate at all.
 	loc := whereRe.FindStringIndex(flat)
@@ -269,7 +269,7 @@ func statementWhere(sql string) string {
 //
 // A statement in this repository is written across several lines with tab
 // indentation, and a matcher that requires a literal space before `where` misses
-// every one of them Ã¢â‚¬â€ which is the same bug as a rule that never fires.
+// every one of them ? which is the same bug as a rule that never fires.
 func normaliseWhitespace(s string) string {
 	s = strings.ReplaceAll(s, `\n`, " ")
 	s = strings.ReplaceAll(s, `\t`, " ")
@@ -332,7 +332,7 @@ var bareIdentifier = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
 func excerpt(s string) string {
 	s = strings.Join(strings.Fields(s), " ")
 	if len(s) > 110 {
-		return s[:110] + "ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦"
+		return s[:110] + "…"
 	}
 	return s
 }
@@ -469,7 +469,7 @@ func createTableBlocks(sqlText string) []tableBlock {
 			i += open
 			continue
 		}
-		// `CREATE TABLE [IF NOT EXISTS] name` ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the name is the last word before
+		// `CREATE TABLE [IF NOT EXISTS] name` � the name is the last word before
 		// the body opens.
 		name := lastIdentifier(rest[:open])
 		// Walk to the paren that closes the body, counting nesting so a
@@ -495,8 +495,8 @@ func createTableBlocks(sqlText string) []tableBlock {
 		out = append(out, tableBlock{name: name, body: rest[open:end]})
 		// Resume just past the keyword rather than past the block.
 		//
-		// Advancing by the block means one spurious match â€” the words "create
-		// table" inside a comment, or inside a PL/pgSQL body â€” consumes everything
+		// Advancing by the block means one spurious match ? the words "create
+		// table" inside a comment, or inside a PL/pgSQL body ? consumes everything
 		// up to the next closing paren and silently drops the real tables in
 		// between. Resuming immediately costs a re-scan of a few kilobytes and
 		// cannot lose a table, and names are deduplicated by the map.
@@ -536,7 +536,7 @@ func appendOnlyTables(dir string, entries []os.DirEntry) map[string]bool {
 	// `rule_bundles_content_immutable` is `BEFORE UPDATE ON rule_bundles ...
 	// WHEN (OLD.content IS DISTINCT FROM NEW.content)`: it refuses a change to
 	// the bundle's bytes and allows every other update, which is a correct and
-	// deliberate design Ã¢â‚¬â€ a bundle's content is fixed once stored and its
+	// deliberate design ? a bundle's content is fixed once stored and its
 	// `active` flag is not. Reading that trigger as "append-only" made the guard
 	// report four findings against code doing the right thing, and a guard that
 	// cries wolf is a guard that gets switched off.
@@ -556,7 +556,7 @@ func appendOnlyTables(dir string, entries []os.DirEntry) map[string]bool {
 			// The shape is CREATE TRIGGER <name> BEFORE <events> ON <table>, so
 			// the event list is *before* the ON clause. Reading the text after
 			// `on` finds the table and never the events, which is how an
-			// append-only table stops being recognised as one Ã¢â‚¬â€ a guard that
+			// append-only table stops being recognised as one ? a guard that
 			// quietly covers less while reporting green.
 			on := strings.Index(rest, " on ")
 			if on < 0 {
