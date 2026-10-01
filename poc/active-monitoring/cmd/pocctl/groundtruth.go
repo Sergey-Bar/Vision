@@ -50,8 +50,19 @@ import (
 	"time"
 )
 
-// groundtruthManifest records what was fetched and what it may be used for.
-const groundtruthManifest = "testdata/groundtruth.json"
+// groundtruthManifest is where fetch-groundtruth records a STILL set's provenance.
+//
+// It is NOT `testdata/groundtruth.json`. That file holds a person's marks about
+// PUSHED EVENTS — a different measurement, made by a different person, about
+// footage that already left the process. Writing the still set's manifest over it
+// would destroy the only record of a marking session that ever happened, and it
+// would do so silently, because both are called "ground truth" and only one of
+// them is.
+const groundtruthManifest = "testdata/still-groundtruth.json"
+
+// eventGroundtruth is the OTHER file with that name, named here so a reader of
+// this one is not surprised to find it.
+const eventGroundtruth = "testdata/groundtruth.json"
 
 // openImagesBase is the bucket the annotation CSVs live in.
 //
@@ -204,6 +215,16 @@ func cmdFetchGroundtruth(args []string) error {
 	}, args)
 	if err != nil {
 		return err
+	}
+	// The refusal that matters most in this file: this command writes a manifest
+	// whose name is one character away from another file that holds a human's marks
+	// about pushed events, and an overwrite there is unrecoverable.
+	if sameFile(flags["manifest"], eventGroundtruth) {
+		return fmt.Errorf("fetch-groundtruth: refusing to write the still-set manifest over %s, "+
+			"which holds a person's marks about PUSHED EVENTS. Those are a different measurement by "+
+			"a different person about footage that already left the process, and writing here would "+
+			"destroy the only record of a marking session that ever happened",
+			eventGroundtruth)
 	}
 	out := flags["out"]
 	if err := os.MkdirAll(out, 0o755); err != nil {

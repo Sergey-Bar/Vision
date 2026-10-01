@@ -405,6 +405,85 @@ if ($py) {
   if ($pyExit -ne 0) { Fail "the sidecar's Python tests exited $pyExit" } else { Pass "pyworker tests" }
 } else { Skip "no Python interpreter, so the sidecar's tests did not run" }
 
+# --- 7b. cross-decoder parity ---------------------------------------------
+# The detector exists to produce a precision number, and a precision number from a
+# decoder nobody has checked is a number about the decoder. The Python sidecar is
+# the reference: different language, different Numpy, and the implementation that
+# produced every number this project has reported so far.
+#
+# This step runs the PARITY HARNESS, which is the part of the check that needs no
+# model and no network: both axis layouts decoding the same records to the same
+# boxes, and the fixture proving that it exercises both NMS passes and the
+# clamp-then-gate ordering.
+#
+# The full cross-decoder comparison needs a running sidecar and a downloaded
+# model, neither of which a gate may assume. It is SKIPPED with the command that
+# runs it — never a quiet pass.
+Step "cross-decoder parity"
+& $go test -count=1 -run 'Parity|BothAxisLayouts|ExerciseBothNMS|ScoreParity' ./internal/ortdetect/
+if ($LASTEXITCODE -ne 0) { Fail "the decoder's own parity harness failed: the two axis layouts disagree, or the fixture no longer exercises both suppression passes" }
+else { Pass "the decoder's axis-layout and NMS-fixture parity harness" }
+
+$pyRunner = Get-Command py -ErrorAction SilentlyContinue
+if ($pyRunner) { $pyCmd = if ($pyRunner.Name -eq 'py.exe') { @('py','-3') } else { @('python') } }
+else { $pyCmd = $null }
+
+# The library name is resolved from `go env` rather than from `$IsWindows`.
+# `$IsWindows` and `$IsMacOS` are PowerShell 7 variables and this script runs
+# under Windows PowerShell 5.1, where they are UNSET — so a test on them is a
+# test that silently takes the wrong branch on the platform this gate is written
+# for. `go env GOOS` is the same question asked of the toolchain that will
+# actually load the file.
+$ortGOOS = (& $go env GOOS).Trim()
+$ortLib = 'models/libonnxruntime.so'
+if ($ortGOOS -eq 'windows') { $ortLib = 'models\onnxruntime.dll' }
+elseif ($ortGOOS -eq 'darwin') { $ortLib = 'models/libonnxruntime.dylib' }
+$ortModel = 'models\yolov8n.onnx'
+if (-not (Test-Path -LiteralPath $ortModel)) { $ortModel = 'models/yolov8n.onnx' }
+
+if ($pyCmd -and (Test-Path -LiteralPath $ortLib) -and (Test-Path -LiteralPath $ortModel)) {
+  & $go test -count=1 -run 'TestCrossDecoderParity' -tags parity ./internal/ortdetect/
+  if ($LASTEXITCODE -ne 0) {
+    Fail "the Go decoder and pyworker's disagree on the same tensor. Every measurement taken with either is a measurement of their disagreement."
+  } else { Pass "the Go decoder and pyworker agree on the same tensor" }
+} else {
+  $missing = @()
+  if (-not $pyCmd) { $missing += 'no Python interpreter' }
+  if (-not (Test-Path -LiteralPath $ortLib)) { $missing += "no ONNX Runtime library at $ortLib" }
+  if (-not (Test-Path -LiteralPath $ortModel)) { $missing += "no model at $ortModel" }
+  Skip "the full cross-decoder comparison did not run: $($missing -join '; '). `pocctl fetch-runtime` and `pocctl fetch-model` obtain the two files. NOT a pass."
+}
+
+# --- 7c. benchmark arithmetic ----------------------------------------------
+# The metrics are pure, so this needs no model and no network — and that is the
+# point of them being pure. The golden test works because metrics.go imports
+# nothing that could agree with it.
+Step "benchmark arithmetic"
+& $go test -count=1 -run 'TestTheMetricsAreTheHandComputed|TestARateWithNoDenominator|TestADroppedClass|TestOneToOneMatching|TestTheMatchThreshold' ./internal/bench/
+if ($LASTEXITCODE -ne 0) { Fail "the benchmark's hand-computed arithmetic does not hold; every rate the report prints comes from these two functions" }
+else { Pass "the benchmark's hand-computed arithmetic" }
+
+# The STILL set's manifest, which is a DIFFERENT file from testdata/groundtruth.json.
+# That one holds a person's marks about pushed events and it is not what
+# `bench --images` reads; checking for it here would pass on a file that has nothing
+# to do with a benchmark's inputs.
+$gtManifest = 'testdata\still-groundtruth.json'
+if (-not (Test-Path -LiteralPath $gtManifest)) { $gtManifest = 'testdata/still-groundtruth.json' }
+if (Test-Path -LiteralPath $gtManifest) {
+  Pass "a still-set ground-truth manifest exists, so a benchmark's material is attributable"
+} else {
+  Skip "no testdata/still-groundtruth.json, so `pocctl bench --images` refuses: a benchmark over material whose licence nobody wrote down produces numbers nobody may show. Run `pocctl fetch-groundtruth`. NOT a pass."
+}
+
+# The two must not have been collapsed into one path. `fetch-groundtruth` refuses to
+# write over the event marks, and this checks the refusal's premise rather than the
+# refusal itself — a guard against a file that does not exist protects nothing.
+if (Test-Path -LiteralPath 'testdata\groundtruth.json') {
+  Pass "the event-mark file is still separate from the still-set manifest"
+} else {
+  Pass "no event-mark file, so there is nothing for the still-set manifest to overwrite"
+}
+
 # --- 8. red check -----------------------------------------------------------
 Step "red check (each control removed from the CODE, each must turn the suite red; the count is printed by the step below, not here)"
 
@@ -514,6 +593,79 @@ if ($SkipRedCheck) {
       to   = 'unsearchable := 0 // REDCHECK RC-9: the unsearchable-window refusal was removed'
       pkg  = './cmd/pocctl'
       why  = 'pocctl search prints "no matches" for a window whose verifier was never consulted, which is a negative answer nobody gave. R7.'
+    },
+    # --- RC-13..RC-20: the detector controls. ----------------------------------
+    #
+    # Each of these is a line whose REMOVAL produces a specific lie about a
+    # detector's measurements, and each has a test whose subject is that line.
+    #
+    # They are grouped separately from RC-1..RC-9 because these are about a
+    # component that did not exist when those were written: the previous build
+    # reported 6,578 approved boxes and zero vehicles, and every one of these
+    # controls exists because that number was possible.
+    @{
+      name = 'RC-13 the letterbox divides by the CONTENT, not the input'
+      file = 'internal\ortdetect\letterbox.go'
+      from = 'return (v - float64(pad)) / float64(content)'
+      to   = 'return (v - float64(pad)) / float64(gInputSizeOf) // REDCHECK RC-13: the content divisor was replaced'
+      pkg  = './internal/ortdetect'
+      why  = 'every box is drawn 0.6x its true height on a 16:9 frame, every crossing happens early, and nothing anywhere reports an error — the boxes are in the right x and confidently the wrong size'
+    },
+    @{
+      name = 'RC-14 the class-agnostic suppression pass runs'
+      file = 'internal\ortdetect\decode.go'
+      from = 'afterBoth := nmsGlobal(afterClass, cfg.NMSGlobal)'
+      to   = 'afterBoth := afterClass // REDCHECK RC-14: the class-agnostic pass was removed'
+      pkg  = './internal/ortdetect'
+      why  = 'a car box and a truck box on ONE object survive as two boxes, two tracks and two crossings, because a class-aware pass structurally cannot compare across classes. The picture shows one car and the report counts two.'
+    },
+    @{
+      name = 'RC-15 the score chain cannot be inverted'
+      file = 'internal\config\config.go'
+      from = 'if c.DetScore > c.GhostMinScore {'
+      to   = 'if false { // REDCHECK RC-15: the chain validator was removed'
+      pkg  = './internal/config'
+      why  = 'with an inverted chain the picture shows objects the model scored below its own emit floor AND omits objects it did emit. Both halves individually pass every arithmetic in the module; only the ordering is checkable.'
+    },
+    @{
+      name = 'RC-16 no degenerate box is ever emitted'
+      file = 'internal\ortdetect\decode.go'
+      from = 'if cx2-cx1 <= 1e-6 || cy2-cy1 <= 1e-6 {'
+      to   = 'if false { // REDCHECK RC-16: the degenerate-box gate was removed'
+      pkg  = './internal/ortdetect'
+      why  = 'one box off the top of the frame clamps to a zero-area box, the consumer reads it as an uninterpretable answer, and a frame with nineteen good detections becomes a frame nobody can read'
+    },
+    @{
+      name = 'RC-17 a benchmark over a finished run opens no model'
+      file = 'cmd\pocctl\bench.go'
+      from = 'return strings.TrimSpace(envOr("SP_POC_ORT_LIB", lib)) != "" ||'
+      to   = 'if false { // REDCHECK RC-17: the refusal to re-decode a finished run was removed'
+      pkg  = './cmd/pocctl'
+      why  = 'a benchmark over a recorded run that opens a model is measuring the MODEL rather than the run, and the two disagree whenever the run used different settings — which is most of the time'
+    },
+    @{
+      name = 'RC-18 every detector-mode decision names its model'
+      file = 'internal\store\observations.go'
+      from = 'if d.TriggerMode == TriggerModeDetector && !d.NamesModel() {'
+      to   = 'if false { // REDCHECK RC-18: the provenance refusal on the write path was removed'
+      pkg  = './internal/store'
+      why  = 'a precision number that cannot name the file it came from describes a build nobody can reconstruct, and nothing downstream can detect it because every arithmetic still works perfectly well on the row'
+    },
+    @{
+      name = 'RC-19 a ghost cannot create or age a track'
+file = 'internal\detect\engine.go'
+      from = 'if t.Seen >= e.cfg.TrackMinFrames {'
+      to   = 'if true { // REDCHECK RC-19: a track ages on its FIRST sighting'
+      pkg  = './internal/detect'
+      why  = 'a box the model approved once would be treated as an object that exists, so a refused box beside it could hold it alive and age it past the minimum. The gate is the AGED ASSIGNMENT and not the check: mutating the check to `if false` makes the recovery pass inert rather than permissive, which a test asserting "nothing was resumed" cannot see. Single-line controls only — PowerShell single quotes do not expand a newline, so a multi-line match string is a control that silently never fires.'
+    },
+    @{
+      name = 'RC-20 the per-frame box log records whether a frame was MEASURED'
+      file = 'internal\soak\boxlog.go'
+      from = 'measured := tel.Candidates > 0 || tel.PreNms > 0 || len(boxes) > 0'
+      to   = 'measured := true // REDCHECK RC-20: every frame is recorded as measured'
+      pkg  = './internal/soak'
+      why  = '"the model saw nothing" and "the pipeline never asked" become the same row, and a reader counting rows computes a recall of zero out of a run that never ran. This repository has shipped that exact confusion three times.'
     }
   )
   Push-Location $PWD
@@ -590,5 +742,6 @@ if ($script:skipped) {
   Write-Host "The gate is GREEN WITH SKIPS. Read the skips before treating this as a pass." -ForegroundColor Yellow
   exit 0
 }
-Write-Host "The gate is GREEN. It ran: toolchain, build, gofmt, vet, module boundary, tests, sidecar tests, red check." -ForegroundColor Green
+Write-Host "The gate is GREEN. It ran: toolchain, build, gofmt, vet, module boundary, tests, sidecar tests, decoder parity, benchmark arithmetic, red check." -ForegroundColor Green
+Write-Host "If the list above printed SKIPPED lines, this is GREEN WITH SKIPS and the skips are part of the result." -ForegroundColor Green
 exit 0

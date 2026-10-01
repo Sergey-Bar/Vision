@@ -14,19 +14,105 @@
 
 ---
 
-## Read these three, in English, before anything else
+## Read these, in English, before anything else
+
+Four documents survive in this module. There were eleven; the rest are folded into
+these and the fold is recorded at the bottom of each.
 
 | | |
 |---|---|
-| [`docs/verify-live.md`](docs/verify-live.md) | **the five minutes a judge watches**, with the answer to each question that follows it, and a `live-vms` variant of each of the five |
-| [`docs/demo-live.md`](docs/demo-live.md) | the run against a **live** camera and a **live** XProtect, and the four refusals that must be in place before it |
-| [`contracts/hafnia/README.md`](contracts/hafnia/README.md) | what the VLM client assumes, which assumption is **contested by the provider's own documentation**, and what settles it — `pocctl vlm-probe`, which now exists |
-| [`docs/architecture.md`](docs/architecture.md) | the system on one page, with the AI plane drawn as optional and its absence as a first-class state |
-| [`docs/probes.md`](docs/probes.md) | what the two probes answer, and what is `NOT RUN` and why |
-| [`docs/gap-ledger.md`](docs/gap-ledger.md) | every gap: built and tested, or blocked on a person with the reason |
-| [`docs/provenance.md`](docs/provenance.md) | which clip came from where, why `car-crossing.mp4` is cleared and the YouTube clip is not, and what "not shown outside this machine" means |
-| [`docs/vss-mapping.md`](docs/vss-mapping.md) | the VSS 4.2 mapping, and where it stops being a mapping |
-| [`docs/one-pager.md`](docs/one-pager.md) | one page, for handing to somebody |
+| [`docs/JUDGE.md`](docs/JUDGE.md) | **the five minutes a judge watches**, and what each step does *not* prove |
+| [`docs/STATUS.md`](docs/STATUS.md) | what is built, what is not, and who each missing thing is waiting on |
+| [`CONTRACT.md`](CONTRACT.md) | the law. Rules R1–R8, the acceptance arithmetic, the four absence words |
+| [`contracts/hafnia/README.md`](contracts/hafnia/README.md) | what the VLM client assumes, which assumption the provider's own documentation contests, and what settles it |
+
+### Three commands, on a clean checkout
+
+```powershell
+$env:Path += ";C:\Program Files\Go\bin;C:\msys64\mingw64\bin;$env:USERPROFILE\go\bin"
+cd poc\active-monitoring
+
+go build -o bin\pocctl.exe ./cmd/pocctl
+go build -o bin\watch.exe   ./cmd/watch
+go build -o bin\fixtureprobe.exe ./cmd/fixtureprobe
+
+.\scripts\verify.ps1          # the gate: build, vet, boundary, tests, 20 red checks
+```
+
+**Build comes first because the binaries are not in git.** `bin/` is gitignored,
+so on a fresh clone `.\bin\pocctl.exe` does not exist yet, and a document that
+opens with a command from `bin\` is a document whose first line fails.
+
+Then the two commands that make the detector real:
+
+```powershell
+.\bin\pocctl.exe fetch-runtime --url <onnxruntime-release-zip-url>
+.\bin\pocctl.exe fetch-model   --url <your-onnx-url>
+.\bin\fixtureprobe.exe -detector qa\fixtures\crossing.mp4
+```
+
+`fetch-runtime` prints the library's SHA-256. **Read it against the release page
+and re-run with `--sha256=` to confirm it** — a digest nobody checked is not a
+provenance record, it is a number. It ships no hardcoded digest on purpose: one
+baked into a source file is a digest somebody verified once, on a build that may
+not be the one being downloaded.
+
+`fixtureprobe -detector` prints the declared output shape, the record width, the
+raw candidate count, what each suppression pass removed, and the per-class
+histogram. **Those five facts are what make a zero diagnosable** rather than merely
+observable, and this repository shipped three silent zeros before this pass.
+
+### The system, on one page
+
+```
+  camera ──► recorder ──► frame loop ──► TRIGGER ──► line test ──► detection
+             (ffmpeg)      (soak.Runner)    │            (detect)      │
+                                             │                            │
+                        ┌────────────────────┴───────┐                    │
+                        │  detector  (internal/     │                    │
+                        │  ortdetect, ONNX, cgo)    │                    │
+                        │  detector  (pyworker,     │                    │
+                        │  Python)                 │                    │
+                        │  novelty  (pure Go)      │                    │
+                        └───────────────────────────┘                    │
+                                                                            ▼
+                                          store ──► evidence ──► ledger ──► seal
+                                            │                        │
+                                            ├──► outbox ──► XProtect ──┘
+                                            └──► box_observations ──► replay
+```
+
+Three trigger modes, all still selectable:
+
+- **`detector`** — the shipped path. In-process ONNX Runtime, real classes and
+  scores per frame, Kalman-filtered tracks, two-stage ghost recovery.
+- **`sidecar`** — the per-frame Python classifier. Kept as the cross-decoder
+  parity reference: the implementation that produced every number this project has
+  reported so far, in a different language against a different Numpy.
+- **`novelty`** — pure-Go whole-frame change measurement. Licence-free, no
+  weights, and **no class vocabulary at all**, which is why the previous build
+  reported zero vehicles.
+
+The AI plane is optional and its absence is a first-class state, not an error.
+`not_asked` and `no_objects` are different words and the report prints them
+differently; a run that asked nothing and a run that asked and found nothing are
+not the same claim.
+
+### Module boundary
+
+`scripts/verify.ps1` holds ten import-graph rows. The load-bearing ones:
+
+- `internal/vlm` may not reach the store or the pipeline. RC-4's replay proof is
+  structural **only** because of this: a verifier that can read what somebody said
+  last time is a recorder.
+- `internal/bench/metrics.go` may not reach anything. Its golden test works
+  because it can be checked against hand-computed arithmetic, and a metric that
+  read the database could not be.
+- `internal/ortdetect` may not reach storage, because the cross-decoder parity
+  claim is only meaningful if neither decoder can be handed the other's answer.
+- `internal/proposal` is the strictest leaf: `ai.Box`, `detect.Box` and
+  `novelty.Box` are ALIASES of it, so all three import it and it may import none
+  of them back.
 
 ### What changed, and what it cost
 

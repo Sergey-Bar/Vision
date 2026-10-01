@@ -305,6 +305,82 @@ func TestAGhostResumesATrackRatherThanSplittingIt(t *testing.T) {
 	}
 }
 
+// TestAGhostCannotResumeATrackThatHasNotAged is RC-19, and it needs
+// TrackMinFrames greater than the number of approved frames fed — which is why it
+// builds its own engine rather than using newKalmanEngine.
+//
+// The helper runs TrackMinFrames=1, so a track ages on its FIRST approved box and
+// the `aged` gate is unreachable there: every track that exists is already aged,
+// and removing the gate changes nothing an assertion can see. The red check found
+// exactly that — it removed the gate and the suite stayed green.
+//
+// A track that exists but is NOT yet aged is the only case where the gate does
+// anything, and it is the case that matters: it is a box the model approved once,
+// which is not yet an object anybody should be confident about, and a refused box
+// beside it must not be what makes it one.
+func TestAGhostCannotResumeATrackThatHasNotAged(t *testing.T) {
+	zone := Zone{
+		Lines: []Line{{Name: "l", A: [2]float64{0.5, 0}, B: [2]float64{0.5, 1},
+			Direction: "left-to-right", Classes: []string{"car"}}},
+		Polygons: []Polygon{{Name: "frame",
+			Points: [][2]float64{{0, 0}, {1, 0}, {1, 1}, {0, 1}}, Classes: []string{"car"}}},
+	}
+	e, err := New(zone, Config{
+		ScoreThreshold: 0.45, Classes: []string{"car"}, IoU: 0.2, Tolerance: 0.005,
+		MaxAge: 2 * time.Second, TrackMinFrames: 3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	at := time.Unix(0, 0).UTC()
+	// Two approved frames: the track exists and has Seen=2, which is BELOW
+	// TrackMinFrames=3, so it is NOT aged.
+	for i := 0; i < 2; i++ {
+		b := Box{Class: "car", Score: 0.9, X1: 0.16, Y1: 0.35, X2: 0.24, Y2: 0.75}
+		e.FeedAnswered(at, Answer{AIState: "asked_answered", Boxes: []Box{b}})
+		at = at.Add(100 * time.Millisecond)
+	}
+	for id, tr := range e.live {
+		if tr.aged {
+			t.Fatalf("track %d is aged after 2 of 3 required frames", id)
+		}
+	}
+
+	// Now a refused box in the same place. It must not resume an unaged track.
+	ghost := Box{Class: "car", Score: 0.31, X1: 0.16, Y1: 0.35, X2: 0.24, Y2: 0.75}
+	_, _, st := e.FeedAnswered(at, Answer{AIState: "asked_answered", Boxes: []Box{ghost}})
+	if st.Resumed != 0 {
+		t.Fatalf("a refused box resumed %d track(s) that had not aged. A track the model approved "+
+			"once is not yet an object anybody should be confident about, and a box the pipeline "+
+			"REFUSED must not be what makes it one", st.Resumed)
+	}
+
+	// And once the track HAS aged, the same ghost does resume it — otherwise the gate
+	// would be a second, accidental minimum-frames rule and every genuine score dip
+	// would split an object in two.
+	aged, err := New(zone, Config{
+		ScoreThreshold: 0.45, Classes: []string{"car"}, IoU: 0.2, Tolerance: 0.005,
+		MaxAge: 2 * time.Second, TrackMinFrames: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	at = time.Unix(0, 0).UTC()
+	for i := 0; i < 2; i++ {
+		b := Box{Class: "car", Score: 0.9, X1: 0.16, Y1: 0.35, X2: 0.24, Y2: 0.75}
+		aged.FeedAnswered(at, Answer{AIState: "asked_answered", Boxes: []Box{b}})
+		at = at.Add(100 * time.Millisecond)
+	}
+	at = at.Add(100 * time.Millisecond)
+	_, _, st2 := aged.FeedAnswered(at, Answer{AIState: "asked_answered", Boxes: []Box{ghost}})
+	if st2.Resumed != 1 {
+		t.Fatalf("an AGED track was not resumed by the refused box beside it (%d). Without that, "+
+			"every genuine score dip splits an object in two and the crossing is lost — which is the "+
+			"defect the two-stage association exists to prevent", st2.Resumed)
+	}
+}
+
 // TestAGhostCannotApproveAnythingOrAgeATrack is the safety property, and it is the
 // reason the second pass cannot reuse the first one's machinery.
 func TestAGhostCannotApproveAnythingOrAgeATrack(t *testing.T) {

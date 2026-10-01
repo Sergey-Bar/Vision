@@ -30,6 +30,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/Sergey-Bar/ai-captain-poc/internal/bench"
@@ -58,6 +59,22 @@ func cmdBench(args []string) error {
 	return fmt.Errorf("bench: pass --images <dir> to drive the detector over a still set, or --run <id> " +
 		"to measure a finished run. They are different measurements with different privileges: " +
 		"--images holds a detector session, --run does not and must not")
+}
+
+// refusesToOpenModel is RC-17's subject, and it is a FUNCTION so a test can call
+// it.
+//
+// It was a bare `if` condition once, and the red check that removes it went GREEN:
+// a control with no test behind it is not a control, it is a comment. That is the
+// whole reason the gate exists and this is the first time it has caught the gate's
+// own table rather than the code.
+//
+// The predicate reads the ENVIRONMENT as well as the flags, because the flags are
+// the less likely route: an operator with SP_POC_ORT_LIB set in their shell and a
+// run measurement requested would otherwise get a model opened behind their back.
+func refusesToOpenModel(lib, model string) bool {
+	return strings.TrimSpace(envOr("SP_POC_ORT_LIB", lib)) != "" ||
+		strings.TrimSpace(model) != ""
 }
 
 // benchImages drives the detector over the still set.
@@ -291,7 +308,7 @@ func writeBenchReport(path string, rep bench.Report, opts bench.Options, id ortd
 // opened a model would be measuring the model rather than the run, and the two
 // disagree whenever the run used different settings — which is most of the time.
 func benchRun(flags map[string]string) error {
-	if envOr("SP_POC_ORT_LIB", flags["ort"]) != "" || flags["model"] != "" {
+	if refusesToOpenModel(flags["ort"], flags["model"]) {
 		fmt.Println("bench: refusing to open a model for a run measurement.")
 		fmt.Println("  A benchmark over a FINISHED run measures what the run recorded. Re-decoding")
 		fmt.Println("  the material with a model here would measure the model instead, and the two")

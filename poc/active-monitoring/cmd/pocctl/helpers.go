@@ -25,9 +25,29 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
+
+// sameFile reports whether two paths name the same file.
+//
+// It compares ABSOLUTE paths rather than strings, because the interesting case is
+// `testdata/groundtruth.json` named as `./testdata/groundtruth.json`, and a string
+// comparison would say those are different files when they are the same one. That
+// is precisely the mistake that would let a command overwrite a file it was
+// supposed to be checking against.
+func sameFile(a, b string) bool {
+	aa, err := filepath.Abs(a)
+	if err != nil {
+		return filepath.Clean(a) == filepath.Clean(b)
+	}
+	bb, err := filepath.Abs(b)
+	if err != nil {
+		return filepath.Clean(a) == filepath.Clean(b)
+	}
+	return filepath.Clean(aa) == filepath.Clean(bb)
+}
 
 // envOr reads a fallback from the environment, treating an empty value as unset.
 //
