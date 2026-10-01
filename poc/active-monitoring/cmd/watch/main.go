@@ -27,6 +27,7 @@ import (
 	"github.com/Sergey-Bar/ai-captain-poc/internal/detect"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/evidence"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/novelty"
+	"github.com/Sergey-Bar/ai-captain-poc/internal/ortdetect"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/recorder"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/soak"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/source"
@@ -266,6 +267,36 @@ func run() error {
 		logf("trigger mode: novelty — the local novelty engine measures regions and the model verifies each event once")
 	}
 
+	// The in-process detector. Opened here, once, and its IDENTITY printed before
+	// the recorder starts — so a run that is about to be un-attributable says so
+	// while there is still nobody watching.
+	//
+	// It is opened before `rec.Start` deliberately. A model that cannot be loaded is
+	// a configuration error, and the cheapest moment to discover it is before ffmpeg
+	// is running and a camera is being recorded. Discovering it at frame 3000 means
+	// a run that recorded three minutes of somebody's footage and then found it had
+	// no detector.
+	var detector *soak.ORTDetector
+	var detIdentity soak.DetIdentity
+	if soak.UsesDetector(cfg.TriggerMode) {
+		d, id, err := buildDetector(cfg, logf)
+		if err != nil {
+			return err
+		}
+		detector = d
+		detIdentity = id
+		defer func() { _ = d.Session().Close() }()
+		logf("trigger mode: detector — %s, sha256 %s, licence %s, input %dx%d, %d threads",
+			id.ModelPath, shortSHA(id.SHA256), licenceOrUnrecorded(id.Licence), id.InputSize, id.InputSize, id.Threads)
+		if id.Licence == "" {
+			// Not fatal, and said out loud. An unrecorded licence does not stop a run,
+			// but a demo that redistributes its own output inherits whatever the
+			// weights' licence says, and nobody can find that out later.
+			logf("the model's licence is NOT RECORDED. A run whose output is shown to somebody else " +
+				"depends on a term nobody has written down; record it with `pocctl fetch-runtime`")
+		}
+	}
+
 	// The verifier. One hosted model, one region, no failover.
 	observer, err := buildObserver(cfg, logf)
 	if err != nil {
@@ -318,6 +349,11 @@ func run() error {
 		RunID: runID, DataRoot: cfg.DataRoot, Spec: spec, Store: st, Evidence: ev,
 		Client: aic, XProtect: push, Engine: engine, Recorder: rec,
 		TriggerMode: cfg.TriggerMode, Trigger: trigger, Observer: observer,
+		Detector: detector, DetIdentity: detIdentity,
+		DetDecode: soak.DetDecode{
+			NMSClass: cfg.DetNMSClass, NMSGlobal: cfg.DetNMSGlobal,
+			EmitScore: cfg.DetScore, MaxBoxes: cfg.DetMaxBoxes, MinBoxArea: cfg.MinBoxArea,
+		},
 		BookmarkDevicePath: cfg.DevicePath,
 		// The clipper and the VMS identifiers are wired HERE, from the
 		// configuration, and not left to a caller to remember.
@@ -644,7 +680,12 @@ func (o vlmObserver) PromptIDFor(class string) (string, string, error) {
 // different detector would change what the report is about without changing the
 // report's text.
 func buildTrigger(cfg config.Config, st *store.Store, ev *evidence.Store) (soak.Trigger, error) {
-	if soak.UsesSidecar(cfg.TriggerMode) {
+	// `detector` mode has no novelty trigger at all. It builds nil here and the
+	// detector is built separately, because the two answer different questions: the
+	// novelty trigger asks "did the whole view change" and the detector asks "what
+	// is in this frame". Wiring a detector through the trigger's candidate type
+	// would discard every class it found — see soak.Detector for that arithmetic.
+	if soak.UsesSidecar(cfg.TriggerMode) || soak.UsesDetector(cfg.TriggerMode) {
 		return nil, nil
 	}
 	base := novelty.Config{
@@ -678,6 +719,117 @@ func buildTrigger(cfg config.Config, st *store.Store, ev *evidence.Store) (soak.
 		return nil, err
 	}
 	return soak.NewNoveltyTrigger(eng, st, ev, cfg.DataRoot), nil
+}
+
+// buildDetector opens the in-process ONNX detector and reports what it is.
+//
+// The identity comes back alongside the detector because the run must be able to
+// PRINT it before it starts, and a detector whose weights cannot be named is a
+// detector whose every measurement is unattributable. Three things happen here that
+// are worth naming:
+//
+//   - the session's DECLARED input is cross-checked against SP_POC_DET_INPUT, and a
+//     mismatch is refused rather than adjusted. The input size is a property of the
+//     export, not a preference, and letterboxing into the wrong square produces
+//     boxes rather than an error;
+//   - the model's SHA-256 is computed from the bytes on disk and carried into every
+//     decision the run writes, because that is RC-18 and it is unreachable
+//     otherwise;
+//   - the number of class names the model itself declares is read and reported,
+//     because falling back to COCO-80 is a fact about the answer and not a detail.
+//
+// Every failure here is a REFUSAL with a name. A detector that opened and reported
+// nothing would be indistinguishable from an empty road, which is the defect the
+// previous build shipped.
+func buildDetector(cfg config.Config, logf func(string, ...any)) (*soak.ORTDetector, soak.DetIdentity, error) {
+	sess, err := ortdetect.Open(ortdetect.SessionConfig{
+		LibraryPath: cfg.ORTLib,
+		ModelPath:   cfg.DetModel,
+		Threads:     cfg.ORTThreads,
+	})
+	if err != nil {
+		// The no-cgo refusal arrives here, and it names the toolchain to install.
+		// It is wrapped rather than replaced so the operator sees the reason and
+		// not "the detector failed to start".
+		return nil, soak.DetIdentity{}, fmt.Errorf(
+			"SP_POC_TRIGGER_MODE=detector but the detector could not be opened: %w", err)
+	}
+	ok := false
+	defer func() {
+		if !ok {
+			_ = sess.Close()
+		}
+	}()
+
+	// The declared input is checked BEFORE the detector is built, so the failure
+	// names the model and the number rather than a later refusal about a box.
+	if err := sess.CheckInputSize(cfg.DetInput); err != nil {
+		return nil, soak.DetIdentity{}, fmt.Errorf(
+			"SP_POC_TRIGGER_MODE=detector: %w", err)
+	}
+
+	in := sess.Input()
+	d, err := ortdetect.NewDetector(ortdetect.Config{
+		Session: sess,
+		Decode: ortdetect.DecodeConfig{
+			EmitScore: cfg.DetScore, MaxBoxes: cfg.DetMaxBoxes,
+			NMSClass: cfg.DetNMSClass, NMSGlobal: cfg.DetNMSGlobal,
+			MinBoxArea: cfg.MinBoxArea,
+		},
+		LatencyWindow: 0,
+		InputSize:     cfg.DetInput,
+	})
+	if err != nil {
+		return nil, soak.DetIdentity{}, fmt.Errorf(
+			"SP_POC_TRIGGER_MODE=detector: %w", err)
+	}
+
+	// The model's own declared shapes, printed before a single frame is decoded.
+	// "Why is the picture empty" is answered by the tensor shape, and it cannot be
+	// answered later unless the shape was recorded.
+	for _, o := range sess.Outputs() {
+		logf("model output %q declares %v", o.Name, o.Dims)
+	}
+	logf("model input %q declares %s %dx%d", in.Name, in.Layout, in.W, in.H)
+
+	id := sess.Identity()
+	// The licence is read from the provenance record rather than invented. An empty
+	// one is reported as unrecorded rather than defaulted, and a run whose output
+	// somebody else will see depends on a term that is written down or is not.
+	identity := soak.DetIdentity{
+		ModelPath: id.ModelPath, SHA256: id.SHA256, Licence: id.Licence,
+		InputSize: cfg.DetInput, Threads: cfg.ORTThreads, RuntimeVersion: id.RuntimeVersion,
+	}
+
+	adapter, err := soak.NewORTDetector(d)
+	if err != nil {
+		return nil, soak.DetIdentity{}, err
+	}
+	ok = true
+	return adapter, identity, nil
+}
+
+// shortSHA abbreviates a hash for a log line while leaving it identifiable.
+//
+// Twelve hex characters is enough to recognise a model by eye in a run log and too
+// few to be mistaken for the full digest a report has to carry. The full hash is on
+// every decision row; this is only what a human reads while a run is in progress.
+func shortSHA(sha string) string {
+	if len(sha) <= 12 {
+		return sha
+	}
+	return sha[:12]
+}
+
+// licenceOrUnrecorded says so in words rather than printing an empty string.
+//
+// A log line reading `licence ` tells nobody anything, and a reader who does not
+// notice the gap will assume there was no gap.
+func licenceOrUnrecorded(l string) string {
+	if strings.TrimSpace(l) == "" {
+		return "NOT RECORDED"
+	}
+	return l
 }
 
 // verifierLabel is what the picture prints for the verifier, so a screenshot says

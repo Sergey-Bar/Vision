@@ -98,8 +98,11 @@ func (a *ORTDetector) Latencies() *ortdetect.Latencies { return a.lat }
 // Identity returns what a decision made from this detector's boxes must name.
 func (a *ORTDetector) Identity() ortdetect.Identity { return a.d.Identity() }
 
-// Inner returns the wrapped detector, for `cmd/watch` to close the session it owns.
+// Inner returns the wrapped detector, for `cmd/watch` to reach the session it owns.
 func (a *ORTDetector) Inner() *ortdetect.Detector { return a.d }
+
+// Session returns the session, for whoever opened it to close it.
+func (a *ORTDetector) Session() *ortdetect.Session { return a.d.Session() }
 
 // latencyPercentiles is the shape a detector exposes for the gate, as an interface
 // so a test double can supply one without a session.

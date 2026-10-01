@@ -259,6 +259,14 @@ func (d *Detector) Latencies() *Latencies { return d.lat }
 // Identity returns what a decision made from this detector's boxes must name.
 func (d *Detector) Identity() Identity { return d.sess.Identity() }
 
+// Session returns the session this detector runs on, so the owner that opened it
+// can close it.
+//
+// The detector does not close it on Close-of-its-own because the run may want to
+// print the model's identity after the detector has stopped, and because ownership
+// of a process-wide ORT environment belongs to whoever initialised it.
+func (d *Detector) Session() *Session { return d.sess }
+
 // Input returns the model's declared input, for the banner and the report.
 func (d *Detector) Input() InputSpec { return d.input }
 

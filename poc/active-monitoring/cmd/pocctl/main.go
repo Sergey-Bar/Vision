@@ -61,6 +61,8 @@ func main() {
 		err = cmdSim(os.Args[2:])
 	case "fetch-model":
 		err = cmdFetchModel(os.Args[2:])
+	case "fetch-runtime":
+		err = cmdFetchRuntime(os.Args[2:])
 	case "-h", "--help", "help":
 		usage()
 		return
@@ -104,6 +106,9 @@ func usage() {
   run                      run the pipeline in the foreground
   sim                      run the xpsim simulator on loopback
   fetch-model              download the ONNX model into models/
+  fetch-runtime            download the ONNX Runtime library, record its sha256 and licence,
+                           and refuse a digest that does not match. --verify re-checks what
+                           is already on disk against models/runtime.json, offline.
 
 Run 'pocctl <subcommand> --help' for a subcommand's own flags.
 
