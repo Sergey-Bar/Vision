@@ -248,7 +248,12 @@ func TestTheFamilyIsTheColour(t *testing.T) {
 func TestTheLabelNamesTheFamilyInWords(t *testing.T) {
 	tb := TrackedBox{Box: Box{Class: "truck", Score: 0.874, X1: 0.1, Y1: 0.1, X2: 0.4, Y2: 0.4}, Track: 12, Seen: 5}
 	got := labelFor(tb)
-	want := "VEHICLE · truck · 0.87 · T12"
+	// The `f5` is the frame count, and it is here because it is the one thing on
+	// the picture that explains a box the operator is looking at and not being told
+	// about: a track seen twice cannot emit a crossing yet, and without the count
+	// the operator concludes the system missed something — the opposite of what
+	// happened, and the kind of conclusion that becomes a support ticket.
+	want := "VEHICLE · truck · 0.87 · T12 · f5"
 	if got != want {
 		t.Fatalf("labelFor = %q, want %q", got, want)
 	}

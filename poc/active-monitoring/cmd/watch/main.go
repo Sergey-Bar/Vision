@@ -350,6 +350,7 @@ func run() error {
 		Client: aic, XProtect: push, Engine: engine, Recorder: rec,
 		TriggerMode: cfg.TriggerMode, Trigger: trigger, Observer: observer,
 		Detector: detector, DetIdentity: detIdentity, BoxLogFrames: cfg.BoxLogFrames,
+		AIFPS: cfg.AIFPS,
 		DetDecode: soak.DetDecode{
 			NMSClass: cfg.DetNMSClass, NMSGlobal: cfg.DetNMSGlobal,
 			EmitScore: cfg.DetScore, MaxBoxes: cfg.DetMaxBoxes, MinBoxArea: cfg.MinBoxArea,

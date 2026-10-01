@@ -142,6 +142,17 @@ type Spec struct {
 	PushResult string
 	// Counters are the run's totals, printed in the same bar.
 	Counters string
+	// Footer is the strip across the bottom: what model ran, what it cost, what it
+	// found, and what the run may not claim.
+	//
+	// It is a separate struct and not six more Spec fields because it is assembled
+	// from four different places — the detector's telemetry, the run's counters, the
+	// box log's arithmetic and the benchmark's rates — and each of them is optional
+	// in a way the others are not. A run with no marking session has no
+	// false-positive rate and must print nothing for one; a run with no detector has
+	// no model and must print nothing for one. Fields cannot express "absent" and
+	// an empty string that renders as a dash is a claim somebody will read.
+	Footer Footer
 }
 
 // lineColour is the crossing line. It is deliberately NOT a family colour: a line
@@ -203,6 +214,10 @@ func Draw(img *image.RGBA, s Spec) {
 	if s.Note != "" {
 		drawNote(img, s.Note)
 	}
+	// The footer LAST, so it sits over the note rather than under it. The note is
+	// what the picture is choosing not to show and the footer is what it is, and a
+	// footer half-hidden behind a note is a footer nobody reads.
+	drawFooter(img, s, s.Footer)
 }
 
 // DefaultMaxBoxes is what the screen uses when nothing declared a cap. It is the
@@ -252,6 +267,14 @@ func labelFor(tb TrackedBox) string {
 	s += " · " + fixed2(tb.Score)
 	if tb.Track > 0 {
 		s += " · T" + itoa(int(tb.Track))
+	}
+	// The frame count is the ONE thing on the picture that explains a box the
+	// operator is looking at and not being told about. A box whose track has been
+	// seen twice cannot emit a crossing yet, and without an `f2` beside it the
+	// operator's conclusion is that the system MISSED something — the opposite of
+	// what happened, and the kind of conclusion that becomes a support ticket.
+	if tb.Seen > 0 && tb.Seen < 100 {
+		s += " · f" + itoa(tb.Seen)
 	}
 	return s
 }

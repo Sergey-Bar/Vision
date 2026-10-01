@@ -174,6 +174,10 @@ type RunnerOptions struct {
 	// every crossing frame is kept and every Nth of the rest, and the run records
 	// box_log_sampled with both counts.
 	BoxLogFrames int
+	// AIFPS is SP_POC_AI_FPS, kept here because the footer prints the DECLARED
+	// detection rate beside the MEASURED decode rate, and the gap between them is the
+	// signature of a detector that cannot keep up with the frames arriving.
+	AIFPS int
 	// Observer is the VLM. Nil means nobody to ask, which is `not_asked` and not
 	// a degraded answer.
 	Observer Observer
@@ -227,6 +231,11 @@ type Runner struct {
 	// is set immediately before the call and read immediately inside it, on the one
 	// frame loop goroutine, and the runner's own mutex makes that safe if a second
 	// consumer is ever added.
+	// start is when the run began, for the observed duration the footer prints.
+	//
+	// It is NOT the declared target: a rate computed against a DECLARED duration is a
+	// rate against a plan.
+	start       time.Time
 	attribution Attribution
 	// refusalCount and refusalTotal drive the refusal log's rate limit: the first
 	// refusal, then every hundredth, so a misconfigured model does not write 9000
@@ -428,6 +437,12 @@ func (r *Runner) watchReconnects(ctx context.Context) {
 // So: the heartbeat is a goroutine, the frame pop is a poll, and neither can
 // stop the other.
 func (r *Runner) Run(ctx context.Context) error {
+	// The start time, for the OBSERVED duration the footer prints. It is set here
+	// rather than in NewRunner because a run that is constructed and then waits on a
+	// camera is not yet running, and a duration measured from construction would
+	// include the waiting.
+	r.start = time.Now()
+
 	// The outbox pump runs for the whole run. A detection enqueues its push and
 	// the pump makes the attempt, so a slow or dead provider cannot block the
 	// frame loop. It is the pump that owns retries and the backoff budget.

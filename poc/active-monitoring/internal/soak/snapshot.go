@@ -139,6 +139,13 @@ func (r *Runner) drawSnapshot(raw []byte, aiState string) ([]byte, error) {
 		AIState:      aiState,
 		AIStateKnown: aiState != "",
 		Note:         "the frame the crossing was decided on, with the boxes the pipeline approved",
+		// The footer, and the reason a SNAPSHOT carries it is the same as for the
+		// live picture: this PNG is the artefact. An operator who receives it three
+		// days later has no way to learn which model produced the boxes, what it cost,
+		// or whether this run's replay reads a complete per-frame log — and a picture
+		// that omits all three is a picture that makes a system which cannot hold its
+		// frame rate look like one that can.
+		Footer: r.footer(),
 	}
 	for _, l := range r.opt.Zone.Lines {
 		spec.Lines = append(spec.Lines, overlay.Line{Name: l.Name, A: l.A, B: l.B})
