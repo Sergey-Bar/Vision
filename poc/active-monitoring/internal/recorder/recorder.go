@@ -73,7 +73,39 @@ type Recorder struct {
 	decodeErr  uint64
 	frameClock atomic.Int64
 	lastJPEG   atomic.Pointer[[]byte]
-	rotations  uint64
+	// lastJPEGSeq is the sequence of the frame lastJPEG belongs to.
+	//
+	// W2-5. It was not stored, so a caller reading the snapshot got whatever
+	// frame the reader goroutine happened to have stored since — possibly a
+	// later one than the decision it was about to attach it to. Once a snapshot
+	// is EVIDENCE in a proof chain, "the picture of the decision" has to be true,
+	// and it could not be: it was the newest picture, which is a different thing.
+	lastJPEGSeq atomic.Uint64
+	// recent holds the last few frames' JPEGs by sequence.
+	//
+	// It exists because "the newest picture" and "the picture of this decision" are
+	// different questions and the process is one goroutine behind its own pipe:
+	// `process` receives frame N from the queue after the reader has already
+	// decoded N+3. Reading `lastJPEG` there therefore returns a LATER frame, and
+	// the sequence check that would have caught it refuses — correctly — so the
+	// snapshot path would be dead in every live run rather than merely wrong.
+	//
+	// A bounded ring is the honest fix: the lag is bounded by the pipe queue
+	// depth, the memory is bounded by the ring, and a frame older than the ring
+	// is refused rather than approximated.
+	recentMu sync.Mutex
+	recent   []jpegFrame
+	// watcher is ffmpeg's stderr, which is where the reconnect announcements
+	// arrive. It is held here rather than only in the local variable that made it,
+	// because a local variable is not reachable and an unreachable counter is a
+	// counter that never reaches a fault record.
+	//
+	// W2-4: `watchReconnects` type-asserted `Reconnects()` on the frame source,
+	// and the method existed only on the watcher and not on the Recorder, so the
+	// assertion failed, the function returned on its first tick, and `stream_gap`
+	// faults were never recorded in a real run.
+	watcher   *reconnectWatcher
+	rotations uint64
 }
 
 // New builds a recorder. It does not start anything.
@@ -156,7 +188,11 @@ func (r *Recorder) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("recorder: cannot start ffmpeg: %w", err)
 	}
-	cmd.Stderr = newReconnectWatcher(r.opt.Logf)
+	watcher := newReconnectWatcher(r.opt.Logf)
+	r.mu.Lock()
+	r.watcher = watcher
+	r.mu.Unlock()
+	cmd.Stderr = watcher
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("recorder: cannot start ffmpeg: %w", err)
 	}
@@ -214,7 +250,17 @@ func (r *Recorder) readPipe(sp io.ReadCloser) {
 				// already read, not a second read of the source.
 				snapshot := make([]byte, len(f))
 				copy(snapshot, f)
+				// The sequence goes in BEFORE the pointer is published, so a reader
+				// that sees the bytes always also sees the number they belong to.
+				// Publishing them the other way round leaves a window where the
+				// picture is a newer frame than the number says.
+				r.lastJPEGSeq.Store(frame.Seq)
 				r.lastJPEG.Store(&snapshot)
+				// The same bytes are retained by sequence for the snapshot path.
+				// The pointer above is the newest picture for the live screen; this
+				// ring is the picture OF A FRAME for the evidence store, and the two
+				// are different questions.
+				r.retainPicture(frame.Seq, snapshot)
 				if err := r.queue.push(frame); err != nil {
 					return
 				}
@@ -389,15 +435,109 @@ func (r *Recorder) ProcessID() int {
 	return r.cmd.Process.Pid
 }
 
+// jpegFrame is one retained picture and the sequence it belongs to.
+type jpegFrame struct {
+	Seq  uint64
+	Data []byte
+}
+
+// RecentFrameDepth is how many frames the recorder keeps their pictures for.
+//
+// The bound is the pipe's queue depth with room to spare, because the worst lag
+// between a frame being decoded and `process` reading it is how many frames can be
+// queued ahead of it. Deeper is wasted memory; shallower is a snapshot that is
+// refused because the pipe was busy, which is a fault an operator cannot act on.
+const RecentFrameDepth = 96
+
+// FrameJPEGFor returns the picture of one specific frame.
+//
+// It returns false rather than the newest picture when the frame is not in the
+// ring, and that refusal is the whole reason the method exists. "The picture of
+// this decision" and "the newest picture" are different questions; the second was
+// what the snapshot path used, and it made the snapshot of a crossing a picture of
+// some later crossing.
+func (r *Recorder) FrameJPEGFor(seq uint64) ([]byte, bool) {
+	if seq == 0 {
+		return nil, false
+	}
+	r.recentMu.Lock()
+	defer r.recentMu.Unlock()
+	for i := len(r.recent) - 1; i >= 0; i-- {
+		if r.recent[i].Seq == seq {
+			return r.recent[i].Data, true
+		}
+	}
+	return nil, false
+}
+
+// retainPicture adds a frame to the ring. It is called by the reader goroutine
+// and is the only writer.
+func (r *Recorder) retainPicture(seq uint64, data []byte) {
+	r.recentMu.Lock()
+	defer r.recentMu.Unlock()
+	if len(r.recent) == RecentFrameDepth {
+		// Copy down rather than reallocate: this runs on every frame, and a
+		// per-frame allocation of a 96-entry slice is a measurable cost on a path
+		// that exists only for evidence.
+		copy(r.recent, r.recent[1:])
+		r.recent[len(r.recent)-1] = jpegFrame{}
+		r.recent = r.recent[:len(r.recent)-1]
+	}
+	r.recent = append(r.recent, jpegFrame{Seq: seq, Data: data})
+}
+
 // LastFrameJPEG is the most recent JPEG as it came off the pipe, for the screen
 // to draw on. It returns nil before the first frame, and the screen says "no
 // frame has been read" rather than rendering a black picture.
+//
+// It says nothing about WHICH frame. Callers that attach a picture to a decision
+// must use [Recorder.LastFrameJPEGSeq], because this one answers "what is
+// newest" and the question they are asking is "what is mine".
 func (r *Recorder) LastFrameJPEG() []byte {
+	b, _ := r.LastFrameJPEGSeq()
+	return b
+}
+
+// LastFrameJPEGSeq is the most recent JPEG together with the sequence of the frame
+// it belongs to.
+//
+// W2-5. It is the pair because the picture and the number have to be read
+// together or neither is trustworthy: a caller that compares the number against
+// its own frame can refuse a mismatch, and a caller that has only the picture
+// cannot. A sequence of 0 means no frame has been read yet, which is different
+// from "the newest frame happens to be sequence 0".
+func (r *Recorder) LastFrameJPEGSeq() ([]byte, uint64) {
 	p := r.lastJPEG.Load()
 	if p == nil {
-		return nil
+		return nil, 0
 	}
-	return *p
+	return *p, r.lastJPEGSeq.Load()
+}
+
+// Reconnects is how many times ffmpeg has announced that it re-established the
+// source.
+//
+// A count, not a flag: a boolean would hide the difference between one blip and
+// two hundred, and the report's whole claim is that a camera's uptime is a
+// measured property of this run rather than an assumption.
+//
+// It is on the Recorder rather than only on the stderr watcher because the
+// watcher is a local variable and a local variable is not reachable from the run
+// loop. Before this method existed, `watchReconnects` asserted on the frame
+// source for a method it did not have, the assertion failed, and the function
+// returned on its first tick — so `stream_gap` faults were never recorded in a
+// real run, and the fault tolerance that is this module's best story was silently
+// absent from every live demonstration of it.
+func (r *Recorder) Reconnects() int {
+	r.mu.Lock()
+	w := r.watcher
+	r.mu.Unlock()
+	if w == nil {
+		// ffmpeg has not started, so nothing has been re-established. Zero, and
+		// not an error: a recorder that has not started has not failed.
+		return 0
+	}
+	return w.Reconnects()
 }
 
 // BackpressureWait is how long the pipe has been blocked, or 0 when it is

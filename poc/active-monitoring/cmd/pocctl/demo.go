@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/xprotect"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/xpsim"
 )
@@ -36,7 +38,7 @@ func cmdDemo(args []string) error {
 	flags, err := flagSet("demo", map[string]string{
 		"data-root": "", "clip": "", "zones": "", "seconds": "180",
 		"sim-addr": "127.0.0.1:8098", "ui-addr": "127.0.0.1:8097", "model": "",
-		"skip-build": boolSpec, "rtsp": boolSpec,
+		"skip-build": boolSpec, "rtsp": boolSpec, "live": boolSpec,
 	}, args)
 	if err != nil {
 		return err
@@ -81,29 +83,63 @@ func cmdDemo(args []string) error {
 	seconds := 180
 	fmt.Sscanf(flags["seconds"], "%d", &seconds)
 	useRTSP := flags["rtsp"] == "true"
-
-	step(1, 7, "check the material exists")
-	for _, p := range []string{clip, zones, model, anchors, filepath.Join(root, "pyworker", "server.py")} {
-		if _, err := os.Stat(p); err != nil {
-			return fmt.Errorf("demo: %s is missing: %w\n\n"+
-				"  The demo needs the labelled clip, its zone file and the ONNX model. Build them with:\n"+
-				"    scripts\\make-bird-clip.sh      (the synthetic bird case)\n"+
-				"    pocctl fetch-model --url <url>  (the model is not in git)\n\n"+
-				"  The anchors file is not in git either: the measured model is an ANCHORED export and\n"+
-				"  its anchor boxes live in the model's .cfg, not in the ONNX file. See\n"+
-				"  pyworker/fixtures/yolov8n.contract.json.", p, err)
+	live := flags["live"] == "true"
+	if live {
+		// W2-10: the live demo, in one flag.
+		//
+		// Two things stop working the moment this runs, and both have to be checked
+		// here rather than discovered as a confusing failure twenty minutes later.
+		if useRTSP {
+			return errors.New("demo --live --rtsp: the rtsp relay publishes the local clip over a loopback socket, and " +
+				"the live demo reads the camera in SP_POC_SOURCE_ARG. Running both would print a relay source line on a " +
+				"demo that is reading a real camera, which is the one impression this module exists not to give")
+		}
+		if err := livePreconditions(root); err != nil {
+			return err
 		}
 	}
-	fmt.Printf("  clip   %s\n", clip)
-	fmt.Printf("  zones  %s\n", zones)
-	fmt.Printf("  model  %s\n", model)
-	fmt.Printf("  anchors %s\n", anchors)
-	fmt.Printf("  data   %s\n\n", dataRoot)
-	fmt.Println("  The default clip is a real night intersection and the model detects vehicles in")
-	fmt.Println("  it. Its licence is NOT recorded (testdata/labels.json): it may be read on THIS")
-	fmt.Println("  machine and may NOT be shown to anyone outside it. A screenshot of this demo is")
-	fmt.Println("  a screenshot of that footage.")
-	fmt.Println()
+
+	step(1, 7, "check the material exists")
+	// In live mode the ONNX model, the anchors file and the Python worker are NOT
+	// needed: the shipped trigger is the local novelty engine and the verifier is a
+	// hosted model. Requiring them here would put W1-4's dependency straight back
+	// into the one command an operator runs in front of a customer.
+	if live {
+		for _, p := range []string{flags["zones"]} {
+			if _, err := os.Stat(p); err != nil {
+				return fmt.Errorf("demo --live: %s is missing: %w", p, err)
+			}
+		}
+		fmt.Printf("  zones  %s\n", zones)
+		fmt.Printf("  data   %s\n\n", dataRoot)
+		fmt.Printf("  source %s %s\n", os.Getenv("SP_POC_SOURCE_KIND"), redactSource(os.Getenv("SP_POC_SOURCE_ARG")))
+		fmt.Println()
+		fmt.Println("  trigger: the local novelty engine. model: pure Go, no ONNX, no Python, no")
+		fmt.Println("  sidecar. The verifier is the model in SP_POC_VLM_MODEL, called ONCE per event.")
+		fmt.Println()
+	} else {
+		for _, p := range []string{clip, zones, model, anchors, filepath.Join(root, "pyworker", "server.py")} {
+			if _, err := os.Stat(p); err != nil {
+				return fmt.Errorf("demo: %s is missing: %w\n\n"+
+					"  The demo needs the labelled clip, its zone file and the ONNX model. Build them with:\n"+
+					"    scripts\\make-bird-clip.sh      (the synthetic bird case)\n"+
+					"    pocctl fetch-model --url <url>  (the model is not in git)\n\n"+
+					"  The anchors file is not in git either: the measured model is an ANCHORED export and\n"+
+					"  its anchor boxes live in the model's .cfg, not in the ONNX file. See\n"+
+					"  pyworker/fixtures/yolov8n.contract.json.", p, err)
+			}
+		}
+		fmt.Printf("  clip   %s\n", clip)
+		fmt.Printf("  zones  %s\n", zones)
+		fmt.Printf("  model  %s\n", model)
+		fmt.Printf("  anchors %s\n", anchors)
+		fmt.Printf("  data   %s\n\n", dataRoot)
+		fmt.Println("  The default clip is a real night intersection and the model detects vehicles in")
+		fmt.Println("  it. Its licence is NOT recorded (testdata/labels.json): it may be read on THIS")
+		fmt.Println("  machine and may NOT be shown to anyone outside it. A screenshot of this demo is")
+		fmt.Println("  a screenshot of that footage.")
+		fmt.Println()
+	}
 
 	step(2, 7, "build the two binaries")
 	if flags["skip-build"] != "true" {
@@ -150,17 +186,30 @@ func cmdDemo(args []string) error {
 	// simulator — so it was rehearsed with the loop environment and the run gets
 	// the relay one.
 	env = demoEnv(root, dataRoot, clip, zones, model, anchors, flags["sim-addr"], flags["ui-addr"], seconds, relay)
-
-	step(5, 7, "start the simulator the run will push to")
-	fmt.Println("  This is xpsim, a SIMULATOR. It is not an XProtect server, and no XProtect")
-	fmt.Println("  server was reachable. The screen and the report both say so on every page.")
-	fmt.Println()
-	_, stop, err := runSim(flags["sim-addr"])
-	if err != nil {
-		return err
+	if live {
+		// W2-10. The live environment REPLACES the demo's environment rather than
+		// adding to it: a demo that left `SP_POC_SOURCE_ARG` pointing at the local
+		// clip would read a recording while the screen said `live rtsp camera`.
+		env = liveEnv(env)
 	}
-	defer stop()
-	fmt.Printf("  xpsim on http://%s\n\n", flags["sim-addr"])
+
+	step(5, 7, "start the push target the run will write to")
+	if live {
+		fmt.Println("  LIVE: this is the XProtect instance in SP_POC_XPROTECT_BASE_URL. No simulator is")
+		fmt.Println("  started, and nothing in this demo is a rehearsal. Events and bookmarks will")
+		fmt.Println("  appear in that instance's alarm list within seconds of a detection.")
+		fmt.Println()
+	} else {
+		fmt.Println("  This is xpsim, a SIMULATOR. It is not an XProtect server, and no XProtect")
+		fmt.Println("  server was reachable. The screen and the report both say so on every page.")
+		fmt.Println()
+		_, stop, err := runSim(flags["sim-addr"])
+		if err != nil {
+			return err
+		}
+		defer stop()
+		fmt.Printf("  xpsim on http://%s\n\n", flags["sim-addr"])
+	}
 
 	step(6, 7, "run the real pipeline for the demo window")
 	fmt.Println("  mode=demo-replay is stamped on the screen, in the log and in the report.")
@@ -192,7 +241,127 @@ func cmdDemo(args []string) error {
 	}
 
 	step(7, 7, "show what landed, read back")
+	if live {
+		return showLandedLive(root, env, dataRoot)
+	}
 	return showLanded(root, env, dataRoot, flags["sim-addr"], relay)
+}
+
+// showLandedLive reads the run back and PROVES one decision from stored facts.
+//
+// W2-10's last step. Against a simulator, "here is what landed" is a read of a
+// process this module started. Against a live instance it is a read of somebody
+// else's alarm list, so it is worth doing properly: the report, the ledger, the
+// sealed head and one replay with zero provider calls.
+func showLandedLive(root string, env []string, dataRoot string) error {
+	fmt.Println("  Every number below is read back out of the data root, not out of the")
+	fmt.Println("  process that produced it. Nothing here is a claim about what happened;")
+	fmt.Println("  it is what the database holds.")
+	fmt.Println()
+	if err := runEnv(root, env, filepath.Join(root, "bin", "pocctl.exe"), "audit", "ledger"); err != nil {
+		return fmt.Errorf("demo --live: the ledger did not verify: %w", err)
+	}
+	fmt.Println()
+	if err := runEnv(root, env, filepath.Join(root, "bin", "pocctl.exe"), "audit", "observations"); err != nil {
+		return fmt.Errorf("demo --live: the attribution records could not be read: %w", err)
+	}
+	fmt.Println()
+	// The proof. It picks the newest detection because naming one means copying an
+	// id off a screen during a live demo, and a proof command that needs a copied
+	// id is a proof command nobody runs.
+	runID := os.Getenv("SP_POC_DATA_ROOT")
+	_ = runID
+	if err := runEnv(root, env, filepath.Join(root, "bin", "pocctl.exe"), "prove", "--run", newestRunID(dataRoot)); err != nil {
+		return fmt.Errorf("demo --live: the replay did not reproduce the newest decision: %w", err)
+	}
+	fmt.Println()
+	fmt.Println("  Go and look at the camera in Milestone XProtect. The alarm you see there is")
+	fmt.Println("  the one this run pushed; its bookmark is the pointer to the recording.")
+	return nil
+}
+
+func newestRunID(dataRoot string) string {
+	st, err := store.Open(dataRoot)
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = st.Close() }()
+	run, err := st.LatestRun(context.Background())
+	if err != nil || run == nil {
+		return ""
+	}
+	return run.ID
+}
+
+// livePreconditions refuses a live demo that is not configured to be one.
+//
+// Every item is checked HERE, before the build, so the operator finds out in one
+// pass rather than one variable per run — and each refusal says what breaks, which
+// is the rule the whole preflight table is built on.
+//
+// The list is not "everything the module needs". It is "everything whose absence
+// would make a live demo quietly not-live", and the three that matter most:
+//
+//   - a push target that is not the loopback simulator, because a demo that
+//     reports events and pushed them nowhere is the worst outcome available
+//   - `SP_POC_SOURCE_KIND=rtsp`, because a loop over a local file prints a source
+//     line that reads like a camera and is not one
+//   - `SP_POC_VLM_REGION` with a key, because footage that has nowhere declared to
+//     go must not be sent anywhere at all
+func livePreconditions(root string) error {
+	var missing []string
+	require := func(name, why string) {
+		v := strings.TrimSpace(os.Getenv(name))
+		if v == "" {
+			missing = append(missing, name+"\n           without it "+why)
+		}
+	}
+	require("SP_POC_XPROTECT_BASE_URL", "there is nothing to push to, and a demo that reports events and pushed them nowhere is the worst outcome available")
+	require("SP_POC_XPROTECT_CLIENT_ID", "the push target cannot authenticate")
+	require("SP_POC_XPROTECT_CLIENT_SECRET", "the push target cannot authenticate")
+	require("SP_POC_XPROTECT_CAMERA_GUID", "a pushed event would name no camera, so no Alarm Definition could match it")
+	require("SP_POC_EVENT_TYPE_GUID", "a pushed event would have no type, and the VMS would refuse it as a 400")
+	require("SP_POC_DEVICE_PATH", "a bookmark points at no camera, so a pushed event has nowhere for an operator to go")
+	require("SP_POC_SOURCE_KIND", "the source line cannot say what the run is reading")
+	require("SP_POC_SOURCE_ARG", "there is no source")
+	require("SP_POC_SOURCE_LICENCE", "a live source has no declared lawful basis, and this module will not record footage whose basis nobody can name")
+	if strings.TrimSpace(os.Getenv("SP_POC_SOURCE_KIND")) != "rtsp" {
+		missing = append(missing, "SP_POC_SOURCE_KIND\n           the live demo reads a CAMERA. With kind=loop the source line reads\n"+
+			"           `loop over recorded material` and a run against a recording is not a live demo")
+	}
+	provider := strings.ToLower(strings.TrimSpace(os.Getenv("SP_POC_VLM_PROVIDER")))
+	switch provider {
+	case "none":
+		fmt.Println("  SP_POC_VLM_PROVIDER=none: every event will be an UNVERIFIED proposal. The screen, the")
+		fmt.Println("  report and every bookmark will say so. That is a legitimate configuration and this demo")
+		fmt.Println("  will not pretend otherwise.")
+	case "hafnia":
+		if r := strings.ToLower(strings.TrimSpace(os.Getenv("SP_POC_VLM_REGION"))); r != "eu" && r != "us" {
+			missing = append(missing, "SP_POC_VLM_REGION\n           footage has no declared destination. There is NO failover between regions")
+		}
+		if strings.TrimSpace(os.Getenv("SP_POC_VLM_API_KEY")) == "" {
+			missing = append(missing, "SP_POC_VLM_API_KEY\n           the call would upload footage unauthenticated, or silently not happen")
+		}
+	default:
+		missing = append(missing, "SP_POC_VLM_PROVIDER\n           it must be `none` or `hafnia`. A provider name on a report is a claim\n"+
+			"           that something verified the events, and an unrecognised one claims nothing")
+	}
+
+	if len(missing) == 0 {
+		fmt.Println("  live demo preconditions pass. The push target is:")
+		fmt.Printf("    %s\n", os.Getenv("SP_POC_XPROTECT_BASE_URL"))
+		fmt.Println("  This is NOT the loopback simulator. Events and bookmarks will be written into that")
+		fmt.Println("  XProtect instance and the operator's real alarm list.")
+		fmt.Println()
+		return nil
+	}
+	fmt.Println("demo --live refuses to start. These are missing or wrong, and each one makes the demo")
+	fmt.Println("something other than a live demo:")
+	fmt.Println()
+	for _, m := range missing {
+		fmt.Printf("  - %s\n", m)
+	}
+	return fmt.Errorf("demo --live: %d precondition(s) not met", len(missing))
 }
 
 func step(n, total int, what string) {
@@ -532,6 +701,74 @@ const mediamtxURL = "https://github.com/bluenviron/mediamtx/releases"
 // the same as the loop demo's, which is what makes the two runs comparable:
 // changing the transport and the transport's own honesty line at the same time
 // is what the source label exists to prevent.
+// liveEnv replaces the demo environment with the operator's live one.
+//
+// It REPLACES rather than appends. The demo environment exists to point a run at a
+// local clip and the loopback simulator; leaving any of those in place for a live
+// demo would produce a run that reads a recording and pushes to nothing while every
+// line of its own banner says `live`. A demo whose environment is half-substituted
+// is the exact defect `IsLiveVMS` was added to detect.
+//
+// The variables the demo owns and the operator's live run must set themselves are
+// cleared explicitly, so a value inherited from the operator's shell is not quietly
+// used.
+func liveEnv(env []string) []string {
+	cleared := []string{
+		"SP_POC_MODE",
+		"SP_POC_SOURCE_KIND", "SP_POC_SOURCE_ARG", "SP_POC_SOURCE_RELAY",
+		"SP_POC_SOURCE_LICENCE", "SP_POC_SOURCE_USER", "SP_POC_SOURCE_PASSWORD",
+		"SP_POC_XPROTECT_BASE_URL", "SP_POC_XPROTECT_CLIENT_ID", "SP_POC_XPROTECT_CLIENT_SECRET",
+		"SP_POC_XPROTECT_USERNAME", "SP_POC_XPROTECT_PASSWORD",
+		"SP_POC_CAMERA_GUID", "SP_POC_DEVICE_PATH", "SP_POC_EVENT_TYPE_GUID",
+		"SP_POC_SIM_URL", "SP_POC_TRIGGER_MODE", "SP_POC_AI_MODEL", "SP_POC_AI_ANCHORS",
+		"SP_POC_SIDECAR_SCRIPT", "SP_POC_VLM_PROVIDER", "SP_POC_VLM_REGION",
+		"SP_POC_VLM_API_KEY", "SP_POC_VLM_MODEL", "SP_POC_VLM_DAILY_CAP",
+		"SP_POC_CAMERA_INTEGRITY",
+	}
+	out := make([]string, 0, len(env)+8)
+	for _, kv := range env {
+		name, _, ok := strings.Cut(kv, "=")
+		if ok && inList(cleared, name) {
+			continue
+		}
+		out = append(out, kv)
+	}
+	for _, name := range cleared {
+		if v := strings.TrimSpace(os.Getenv(name)); v != "" {
+			out = append(out, name+"="+v)
+		}
+	}
+	// Stamped after the loop, because it is this command's decision and not a
+	// default: a live run has no simulator, and the screen says so.
+	out = append(out, "SP_POC_MODE=live")
+	return out
+}
+
+func inList(list []string, name string) bool {
+	for _, n := range list {
+		if n == name {
+			return true
+		}
+	}
+	return false
+}
+
+// redactSource prints a source URL without its credentials, because this line
+// lands in a terminal and in a screenshot.
+func redactSource(raw string) string {
+	rest := raw
+	if i := strings.Index(rest, "://"); i >= 0 {
+		rest = rest[i+3:]
+	}
+	if j := strings.IndexAny(rest, "/?#"); j >= 0 {
+		rest = rest[:j]
+	}
+	if strings.Contains(rest, "@") {
+		rest = "REDACTED@" + rest[strings.Index(rest, "@")+1:]
+	}
+	return rest
+}
+
 func demoEnv(root, dataRoot, clip, zones, model, anchors, simAddr, uiAddr string, seconds int, r *relay) []string {
 	env := []string{
 		"SP_POC_DATA_ROOT=" + dataRoot,

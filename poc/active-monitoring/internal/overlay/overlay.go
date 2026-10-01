@@ -28,6 +28,7 @@ import (
 	"image/color"
 	"image/draw"
 	"sort"
+	"strings"
 
 	"github.com/Sergey-Bar/ai-captain-poc/internal/classify"
 )
@@ -120,6 +121,27 @@ type Spec struct {
 	// AIStateKnown distinguishes "the pipeline told us" from "no state has been
 	// published yet". A blank AIState printed as an empty cell reads as "fine".
 	AIStateKnown bool
+
+	// Verdict is the MODEL's answer, burned into the picture. W2-8.
+	//
+	// It is on the server-drawn overlay rather than only in the HTML because a
+	// screenshot is the artefact: a judge, a customer, a ticket — every one of
+	// them gets a PNG, not a URL. And the earlier claim of "we show the verdict"
+	// was carried by a row of text that the crop tool could remove and the
+	// snapshot path did not draw at all.
+	Verdict string
+	// VerdictKnown distinguishes "the model answered" from "there is no answer".
+	// An empty Verdict printed as an empty cell reads as `false_positive`, which
+	// is the one impression this module must never give by omission.
+	VerdictKnown bool
+	// VerdictSummary is the model's own sentence, truncated for the banner.
+	VerdictSummary string
+	// PushResult is what the VMS said, and it is on the picture for the same
+	// reason: "the event was raised" and "the event reached the VMS" are
+	// different claims and a screenshot cannot make the difference.
+	PushResult string
+	// Counters are the run's totals, printed in the same bar.
+	Counters string
 }
 
 // lineColour is the crossing line. It is deliberately NOT a family colour: a line
@@ -264,6 +286,83 @@ func drawHeader(img *image.RGBA, s Spec) {
 		return
 	}
 	labelBarAt(img, b.Min.X+4, b.Min.Y+barHeight-4, text, noteColour)
+	drawVerdict(img, s)
+}
+
+// clip truncates a string to n characters with an ellipsis, which is what a
+// banner needs: the model's summary is one sentence and the bar is 640 pixels
+// wide, and a summary that overflows the bar is a summary that pushed the verdict
+// off it.
+func clip(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	if n <= 1 {
+		return "…"
+	}
+	return string(r[:n-1]) + "…"
+}
+
+// verdictColour maps a verdict to a hue. It is a hue and never a colour alone,
+// because the word is always printed beside it — the same rule as the family
+// plates, and for the same reason.
+func verdictColour(v string) color.RGBA {
+	switch v {
+	case "confirmed":
+		return color.RGBA{90, 220, 130, 255}
+	case "false_positive":
+		return color.RGBA{200, 200, 200, 255}
+	case "needs_review":
+		return color.RGBA{255, 176, 32, 255}
+	default:
+		return noteColour
+	}
+}
+
+// drawVerdict burns the model's answer into the picture. W2-8.
+//
+// The bar is at the BOTTOM and drawn with a plate, because the verdict is the
+// single most-screenshotted part of this module and it has to survive being
+// cropped to the road.
+//
+// Two rules it obeys without exception:
+//
+//   - An answer that does not exist is printed as an absence, never as an empty
+//     cell. `no answer (cap_reached)` and a blank both read as "fine" otherwise,
+//     and "fine" on a camera that was not asked is the worst impression this
+//     module can leave.
+//   - The push result is printed next to it. "The model said confirmed" and "the
+//     VMS accepted the event" are different claims, and a screenshot that carries
+//     only the first has been cropped to hide a failure.
+func drawVerdict(img *image.RGBA, s Spec) {
+	b := img.Bounds()
+	const barHeight = 22
+	if b.Dy() <= barHeight*2 {
+		return
+	}
+	parts := make([]string, 0, 3)
+	switch {
+	case s.VerdictKnown && s.Verdict != "":
+		parts = append(parts, "VERDICT "+s.Verdict)
+	case s.VerdictKnown:
+		parts = append(parts, "VERDICT none")
+	default:
+		parts = append(parts, "VERDICT not asked")
+	}
+	if s.PushResult != "" {
+		parts = append(parts, s.PushResult)
+	}
+	if s.Counters != "" {
+		parts = append(parts, s.Counters)
+	}
+	if summary := clip(s.VerdictSummary, 46); summary != "" {
+		parts = append(parts, summary)
+	}
+	y := b.Max.Y - barHeight
+	draw.Draw(img, image.Rect(b.Min.X, y, b.Max.X, b.Max.Y),
+		&image.Uniform{headerColour}, image.Point{}, draw.Src)
+	labelBarAt(img, b.Min.X+4, y+barHeight-4, strings.Join(parts, "  ·  "), verdictColour(s.Verdict))
 }
 
 // familyColour is D-6: the colour is the FAMILY, and the plate text always names

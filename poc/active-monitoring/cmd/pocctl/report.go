@@ -66,6 +66,24 @@ type review struct {
 	Marks  []mark `json:"marks"`
 }
 
+// modelName is who verified this run's events, read from the environment the run
+// ran under rather than from the database.
+//
+// `none` is printed as `none`. An unverified proposal is a real product — the local
+// novelty trigger measures a region and proposes it — and it is a different thing
+// from a verified incident, and the truth line is where that difference has to be
+// visible.
+func modelName() string {
+	p := strings.TrimSpace(os.Getenv("SP_POC_VLM_PROVIDER"))
+	if p == "" || strings.EqualFold(p, "none") {
+		return "none"
+	}
+	if m := strings.TrimSpace(os.Getenv("SP_POC_VLM_MODEL")); m != "" {
+		return p + " (" + m + ")"
+	}
+	return p
+}
+
 // applyGroundTruth loads the review, records it against the run, prints the line,
 // and returns the marking for the report.
 //
@@ -212,7 +230,8 @@ func reportFor(st *store.Store, run *store.Run, c context.Context) (soak.Report,
 		rows = append(rows, soak.FaultRow{At: f.At, Reason: f.Reason, Detail: f.Detail,
 			Expected: f.Expected, Observed: f.Observed, Verdict: v})
 	}
-	truth := soak.BuildTruth(run.SourceKind, run.PushBaseURL, "xpsim", run.PushIsVMS, in.Provenance)
+	truth := soak.BuildTruth(run.SourceKind, run.PushBaseURL, "xpsim", run.PushIsVMS, in.Provenance).
+		WithProof(st, c, run.ID, modelName())
 	return soak.Report{
 		GeneratedAt: time.Now().UTC(),
 		Run: soak.RunInfo{ID: run.ID, Label: run.Label, Mode: run.Mode, StartedAt: run.StartedAt,

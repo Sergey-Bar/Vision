@@ -213,6 +213,54 @@ func (s *Store) refForHash(sum string) (string, error) {
 	}
 	return full, nil
 }
+
+// refuseLinks walks every component between the store root and the destination
+// and refuses a symlink or a junction at any of them.
+//
+// W2-7. `RuleLink` was declared in the rule set and nothing ever emitted it,
+// which is the worst state a guard can be in: the table says the check exists, so
+// a reader concludes the store is protected against a link being planted inside
+// it, and no code has ever looked. The evidence store is about to hold the clips a
+// proof chain points at, and a proof chain that can be redirected by a directory
+// some other process created is not a proof chain.
+//
+// A junction on Windows is not a symbolic link and `os.Lstat` does not report it
+// as one, so the mode is checked for irregularity as well: `os.ModeIrregular` is
+// what a reparse point that is not a name-surrogate looks like through this API,
+// and a junction is exactly that. Skipping it would leave the rule true on Linux
+// and false on the platform this module actually runs on.
+//
+// A component that does not exist is not a refusal. `PutKind` creates the
+// directories immediately above the destination before calling this, so anything
+// missing between the root and the leaf is a race we lose to a cleaner rather
+// than an attack we should refuse.
+func refuseLinks(root, dst string) error {
+	rel, err := filepath.Rel(root, dst)
+	if err != nil {
+		return &Refused{dst, RuleLink, fmt.Sprintf("the destination cannot be related to the store root (%v)", err)}
+	}
+	cur := root
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		if part == "." || part == "" {
+			continue
+		}
+		cur = filepath.Join(cur, part)
+		info, err := os.Lstat(cur)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return &Refused{cur, RuleLink, fmt.Sprintf("the component cannot be inspected (%v)", err)}
+		}
+		mode := info.Mode()
+		if mode&os.ModeSymlink != 0 || mode&os.ModeIrregular != 0 {
+			return &Refused{cur, RuleLink, "the store contains a symbolic link or a junction at this path, so a write " +
+				"here would land outside the store; deleting the guard is not a fix and this rule is the guard"}
+		}
+	}
+	return nil
+}
+
 func within(root, p string) bool {
 	rel, err := filepath.Rel(root, p)
 	if err != nil {
@@ -266,6 +314,13 @@ func (s *Store) PutKind(src, kind string) (Stored, error) {
 	if err := copyFile(src, dst); err != nil {
 		return Stored{}, err
 	}
+	// W2-7: the destination is walked AFTER the copy and BEFORE the read-back, so
+	// a link that appeared under the store while we were copying is caught before
+	// anything is recorded as evidence.
+	if err := refuseLinks(s.Root, dst); err != nil {
+		_ = os.Remove(dst)
+		return Stored{}, err
+	}
 	// R5: read the copy back and hash it. A successful copy() is not evidence
 	// that the bytes landed.
 	got, gotSize, err := hashFile(dst)
@@ -306,6 +361,19 @@ func (s *Store) StorageRef(sum string) string { return s.StorageRefKind(sum, Eve
 // wrong answer that looks right — it is a reference to nothing, and the row
 // pointing at it would look complete.
 func (s *Store) StorageRefKind(sum, kind string) string {
+	return StorageRefKindOf(sum, kind)
+}
+
+// StorageRefKindOf is the relative storage reference for a content hash and a
+// kind.
+//
+// It is a function rather than a method because the runner needs to build the
+// reference for a row it is writing and the store that holds the bytes is a
+// different package-boundary concern from the shape of the reference. The method
+// above is kept so every existing caller keeps working, and the two share this
+// one body — a second implementation of the path shape is a second thing to keep
+// in sync with the extension table.
+func StorageRefKindOf(sum, kind string) string {
 	return filepath.ToSlash(filepath.Join(sum[:2], sum[2:4], sum+extFor(kind)))
 }
 

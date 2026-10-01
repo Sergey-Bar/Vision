@@ -188,6 +188,39 @@ func (s *Store) DB() *sql.DB { return s.db }
 // Path is the database file.
 func (s *Store) Path() string { return s.path }
 
+// SealPath is where a run's seal lives.
+//
+// It is beside the database rather than inside it, because a seal has to survive
+// the database being replaced: if the ledger is rewritten from scratch the old
+// seal file is still the old attestation, and putting the seal IN the database
+// would mean rewriting the evidence along with the thing it is evidence about.
+//
+// The run id is sanitised because it reaches the filesystem here, and a run id is
+// operator-supplied: `SP_POC_LABEL` becomes part of it, and a label of
+// `..\..\somewhere` must not decide where a file is written.
+func (s *Store) SealPath(runID string) string {
+	return filepath.Join(filepath.Dir(s.path), "seals", sanitiseRunID(runID)+".seal.json")
+}
+
+// sanitiseRunID reduces an operator-supplied run id to something that can be a
+// filename and nothing else.
+func sanitiseRunID(id string) string {
+	var b strings.Builder
+	for _, r := range id {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('_')
+		}
+	}
+	out := b.String()
+	if out == "" {
+		return "run"
+	}
+	return out
+}
+
 // Size is the on-disk size including the WAL, which is the number AC5 scores.
 func (s *Store) Size() (int64, error) {
 	var total int64
@@ -316,6 +349,11 @@ CREATE TABLE IF NOT EXISTS outbox (
   detail       TEXT,
   remote_id    TEXT,
   dead_letter  INTEGER NOT NULL DEFAULT 0,
+  -- max_attempts is the budget, stored ON THE ROW rather than only in the
+  -- runner's configuration. W2-6: it was accepted by Enqueue and discarded, so a
+  -- push the VMS will never accept retried until the demo ended. A budget that
+  -- is not next to the counter it bounds is a number in a slide.
+  max_attempts INTEGER NOT NULL DEFAULT 0,
   created_at   TEXT NOT NULL,
   updated_at   TEXT NOT NULL
 );
@@ -378,11 +416,111 @@ CREATE TABLE IF NOT EXISTS samples (
   disk_bytes INTEGER NOT NULL,
   PRIMARY KEY (run_id, at)
 );
+
+-- W1-8: the attribution record for one VLM answer about one clip.
+--
+-- It is a TABLE and not a column on detections because a detection may be asked
+-- about more than once across a resumed run, and because the fields here are the
+-- ones a proof chain reads rather than the ones a report scans.
+--
+-- model_identity is what the API SAID, which is a claim by the provider. There is
+-- deliberately NO model_hash column and there never will be one in this table: a
+-- hosted model has no weights to hash, and a synthetic hash would satisfy a
+-- column check while defeating the only thing the column is for.
+CREATE TABLE IF NOT EXISTS vlm_observations (
+  detection_id        TEXT PRIMARY KEY REFERENCES detections(id),
+  run_id              TEXT NOT NULL REFERENCES runs(id),
+  prompt_id           TEXT NOT NULL DEFAULT '',
+  prompt_version      TEXT NOT NULL DEFAULT '',
+  aistate             TEXT NOT NULL,
+  verdict             TEXT NOT NULL,
+  summary             TEXT NOT NULL DEFAULT '',
+  confidence          REAL NOT NULL DEFAULT 0,
+  insufficient_evidence INTEGER NOT NULL DEFAULT 0,
+  model_identity      TEXT NOT NULL DEFAULT '',
+  contract_version    TEXT NOT NULL DEFAULT '',
+  temperature         REAL NOT NULL DEFAULT 0,
+  reason_code         TEXT NOT NULL DEFAULT 'none',
+  detail              TEXT NOT NULL DEFAULT '',
+  output_hash         TEXT NOT NULL DEFAULT '',
+  input_hashes        TEXT NOT NULL DEFAULT '',
+  latency_ms          INTEGER NOT NULL DEFAULT 0,
+  prompt_tokens       INTEGER NOT NULL DEFAULT 0,
+  completion_tokens   INTEGER NOT NULL DEFAULT 0,
+  asset_id            TEXT NOT NULL DEFAULT '',
+  created_at          TEXT NOT NULL
+);
+
+-- W3-4: the stored decision inputs, so a decision can be replayed from facts
+-- with no provider call at all.
+--
+-- Everything needed to recompute "did this fire" lives here and nowhere else: the
+-- measurement, the threshold it was compared against, the region the measurement
+-- produced and where that region came from. The model was NOT an input to the
+-- decision to raise the alert — it is the verdict on an alert that was already
+-- raised — and this table is what makes that structural rather than a claim.
+CREATE TABLE IF NOT EXISTS decisions (
+  detection_id  TEXT PRIMARY KEY REFERENCES detections(id),
+  run_id        TEXT NOT NULL REFERENCES runs(id),
+  trigger_mode  TEXT NOT NULL,
+  trigger_class TEXT NOT NULL,
+  score         REAL NOT NULL,
+  threshold     REAL NOT NULL,
+  release       REAL NOT NULL,
+  sustain       INTEGER NOT NULL DEFAULT 0,
+  streak        INTEGER NOT NULL DEFAULT 0,
+  score_reason  TEXT NOT NULL DEFAULT '',
+  region_source TEXT NOT NULL DEFAULT '',
+  region_top    INTEGER NOT NULL DEFAULT 0,
+  region_left   INTEGER NOT NULL DEFAULT 0,
+  region_bottom INTEGER NOT NULL DEFAULT 0,
+  region_right  INTEGER NOT NULL DEFAULT 0,
+  frame_seq     INTEGER NOT NULL DEFAULT 0,
+  reference_sha TEXT NOT NULL DEFAULT '',
+  created_at    TEXT NOT NULL
+);
+
+-- W2-1: the pinned reference view for a camera, stored so the measurement it
+-- anchors is reproducible on the next run and so a reviewer can be handed the
+-- exact picture.
+CREATE TABLE IF NOT EXISTS reference_views (
+  run_id       TEXT NOT NULL REFERENCES runs(id),
+  camera_guid  TEXT NOT NULL,
+  storage_ref  TEXT NOT NULL,
+  sha256       TEXT NOT NULL,
+  pinned_at    TEXT NOT NULL,
+  source       TEXT NOT NULL,
+  PRIMARY KEY (run_id, camera_guid)
+);
+
+-- W3-1: the hash-chained decision ledger. One row per decision step.
+--
+-- hash is computed over a LENGTH-PREFIXED encoding of this row and the previous
+-- row's hash, so field boundaries cannot be shifted to produce a collision, and
+-- every row after an edited one fails verification.
+CREATE TABLE IF NOT EXISTS ledger (
+  seq       INTEGER PRIMARY KEY,
+  at        TEXT NOT NULL,
+  kind      TEXT NOT NULL,
+  subject   TEXT NOT NULL,
+  payload   TEXT NOT NULL,
+  prev_hash TEXT NOT NULL,
+  hash      TEXT NOT NULL
+);
 `
 
 func (s *Store) migrate(ctx context.Context) error {
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("store: cannot create the schema in %s: %w", s.path, err)
+	}
+	// W3-2: the ledger is append-only, and a chain a single SQL statement can
+	// rewrite is a comment. The triggers are created after the table rather than
+	// inside the schema blob so that the red check can remove them from ONE place
+	// and the rest of the migration is untouched by the mutation.
+	for _, stmt := range ledgerGuards {
+		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("store: cannot install the ledger's append-only guard: %w", err)
+		}
 	}
 	// A data root that predates a column must keep working. `CREATE TABLE IF NOT
 	// EXISTS` does not add a column, so a new release against an old database
@@ -432,10 +570,12 @@ var addedColumns = []struct {
 	// column that always said the same thing, and a column that is always the
 	// same value cannot be extended and cannot be told from an observed one.
 	{"detections", "snapshot_kind", "TEXT"},
+	// W2-6: the attempt budget, beside the attempt counter it bounds.
+	{"outbox", "max_attempts", "INTEGER NOT NULL DEFAULT 0"},
 }
 
 // schemaVersion is bumped whenever a migration is added above.
-const schemaVersion = 6
+const schemaVersion = 7
 
 func (s *Store) ensureColumns(ctx context.Context) error {
 	for _, c := range addedColumns {

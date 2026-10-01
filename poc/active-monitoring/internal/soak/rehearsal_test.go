@@ -306,7 +306,16 @@ func TestAPushThatCameBackIsNotSentTwice(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := c.TriggerEvent(ctx, xprotect.EventInput{EventTypeGUID: "t", SourceGUID: "g", At: time.Now(), Tag: "tag-b"})
+	// A real box, because RC-6 refuses an all-zero one. That refusal is the point:
+	// the rehearsal is about the pump and the read-back, and a fixture that could
+	// not be pushed would have failed for a reason that has nothing to do with
+	// either.
+	out, err := c.TriggerEvent(ctx, xprotect.EventInput{
+		EventTypeGUID: "t", SourceGUID: "g", At: time.Now(), Tag: "tag-b",
+		Class: "motion", Value: "motion", Confidence: 0.5,
+		Box:      xprotect.Box{Top: 400, Left: 120, Bottom: 560, Right: 340},
+		RuleName: "alarm-reference-pinned",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

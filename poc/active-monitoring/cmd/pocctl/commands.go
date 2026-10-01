@@ -17,6 +17,7 @@ import (
 	"github.com/Sergey-Bar/ai-captain-poc/internal/soak"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/source"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
+	"github.com/Sergey-Bar/ai-captain-poc/internal/vlm"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/xprotect"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/xpsim"
 )
@@ -124,6 +125,14 @@ func cmdPreflight(args []string) error {
 		FFmpeg: "ffmpeg", FFprobe: "ffprobe", SourceReport: facts,
 		FreeBytes: free, Headroom: cfg.DiskHeadroom, BudgetDays: cfg.DiskBudgetDays,
 		DataRoot: cfg.DataRoot, Client: aic, SimURL: cfg.SimURL,
+		// W1-4: which component is required depends on the trigger, and preflight
+		// is told which rather than inferring it from whether an address was
+		// configured — inference is how a row came to require a sidecar the run
+		// does not have.
+		TriggerMode: cfg.TriggerMode,
+		VLMProvider: cfg.VLMProvider,
+		VLMRegion:   cfg.VLMRegion,
+		VLMHost:     vlmHost(cfg),
 		// The clock row defaults to the run's own declared clock source, so an
 		// operator who set SP_POC_CLOCK_SOURCE is not then refused by a second
 		// flag for the same fact.
@@ -144,6 +153,23 @@ func cmdPreflight(args []string) error {
 	fmt.Println("preflight: every check passes. `pocctl rehearse all` is still required before a")
 	fmt.Println("long run: gate D is about surviving, and this table is about starting.")
 	return nil
+}
+
+// vlmHost resolves the pinned host for the declared region, for the preflight row
+// that tells an operator where their footage is about to go.
+//
+// It returns an empty string when there is no verifier, and preflight treats that
+// as `none` rather than as a failure: a run that asks nobody is a legitimate
+// configuration and the report labels it as unverified.
+func vlmHost(cfg config.Config) string {
+	if strings.EqualFold(strings.TrimSpace(cfg.VLMProvider), "none") || cfg.VLMProvider == "" {
+		return ""
+	}
+	host, err := vlm.Region(strings.ToLower(strings.TrimSpace(cfg.VLMRegion))).Host()
+	if err != nil {
+		return ""
+	}
+	return host
 }
 
 func printPreflight(res soak.PreflightResult) {

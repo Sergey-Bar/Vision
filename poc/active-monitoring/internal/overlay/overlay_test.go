@@ -103,9 +103,16 @@ func TestNoDrawnRunSpansMoreThanHalfTheFrameWidth(t *testing.T) {
 	// widest thing drawn, and at 7x13 with `PERSON · person · 0.90 · T1` it is
 	// about 170 pixels. Half the frame is 320.
 	const maxRun = w / 2
+	// The scan excludes BOTH chrome bands — the provenance bar at the top and the
+	// verdict bar W2-8 added at the bottom. Both are full-width by design and
+	// both carry text; a full-width run of chrome is not the shape this test is
+	// looking for, and counting it would make the test fail for the addition of a
+	// header rather than for a decode that collapsed. The verdict bar has its own
+	// assertion below.
 	const headerBand = 22
+	const footerBand = 22
 	worst, worstY := 0, -1
-	for y := headerBand; y < h; y++ {
+	for y := headerBand; y < h-footerBand; y++ {
 		run := 0
 		for x := 0; x < w; x++ {
 			if changedAt(img, x, y) {
@@ -124,6 +131,46 @@ func TestNoDrawnRunSpansMoreThanHalfTheFrameWidth(t *testing.T) {
 	}
 	if worst == 0 {
 		t.Fatal("nothing at all was drawn below the header: a drawing test that measures nothing is not a test")
+	}
+}
+
+// TestTheVerdictIsBurnedIntoThePicture is W2-8's assertion.
+//
+// The claim it closes was that the screen "shows the verdict", and it was carried
+// by a row of HTML text that a screenshot's crop tool removes and that the
+// snapshot path did not draw at all. So the verdict is a bar on the image, and
+// this asserts the bar exists and that an ABSENCE is drawn as an absence rather
+// than as an empty cell.
+func TestTheVerdictIsBurnedIntoThePicture(t *testing.T) {
+	const w, h = 640, 384
+	img := blank(w, h)
+	Draw(img, Spec{Provenance: "synthetic", VerdictKnown: true, Verdict: "confirmed",
+		PushResult: "push_sent", Counters: "det 4 · vlm 1/1"})
+	footer := 0
+	for y := h - 22; y < h; y++ {
+		for x := 0; x < w; x++ {
+			if changedAt(img, x, y) {
+				footer++
+			}
+		}
+	}
+	if footer < 200 {
+		t.Fatalf("the verdict bar drew %d pixels; a verdict that is not in the pixels is a verdict in a text row", footer)
+	}
+	// An unasked model must NOT look like an answered one.
+	unasked := blank(w, h)
+	Draw(unasked, Spec{Provenance: "synthetic", VerdictKnown: false})
+	quiet := 0
+	for y := h - 22; y < h; y++ {
+		for x := 0; x < w; x++ {
+			if changedAt(unasked, x, y) {
+				quiet++
+			}
+		}
+	}
+	if quiet < 200 {
+		t.Fatalf("an unanswered run drew %d pixels in the verdict bar; it must still SAY it has no answer, because an "+
+			"empty cell next to a live picture reads as a false_positive", quiet)
 	}
 }
 

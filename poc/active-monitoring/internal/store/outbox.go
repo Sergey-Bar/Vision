@@ -24,6 +24,8 @@ type OutboxEntry struct {
 	Detail      string
 	RemoteID    string
 	DeadLetter  bool
+	// MaxAttempts is the budget, stored on the row so the attempt counter and the bound are in the same place.
+	MaxAttempts int
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
@@ -46,12 +48,19 @@ func (s *Store) Enqueue(ctx context.Context, e OutboxEntry, maxAttempts int) (in
 	if e.Tag == "" {
 		return 0, errors.New("store: an outbox entry needs a tag; the tag is the idempotency key the read-back uses, and a counter would collide across a restart")
 	}
+	// W2-6: the budget is stored on the row. It used to be accepted and
+	// discarded (`_ = maxAttempts`), which meant a push the VMS will never accept
+	// — a 403, a deleted event type — retried with exponential backoff until the
+	// demo ended, and the run reported a pending row rather than a dead letter.
+	if maxAttempts <= 0 {
+		maxAttempts = DefaultPushAttempts
+	}
 	now := time.Now().UTC()
 	res, err := s.exec(ctx, `
-		INSERT INTO outbox (detection_id,kind,payload,tag,attempts,next_attempt,created_at,updated_at)
-		VALUES (?,?,?,?,0,?,?,?)
+		INSERT INTO outbox (detection_id,kind,payload,tag,attempts,next_attempt,max_attempts,created_at,updated_at)
+		VALUES (?,?,?,?,0,?,?,?,?)
 		ON CONFLICT(detection_id,kind) DO NOTHING`,
-		e.DetectionID, e.Kind, e.Payload, e.Tag, nowUTC(now), nowUTC(now), nowUTC(now))
+		e.DetectionID, e.Kind, e.Payload, e.Tag, now, maxAttempts, nowUTC(now), nowUTC(now))
 	if err != nil {
 		return 0, fmt.Errorf("store: cannot enqueue a %s for detection %s: %w", e.Kind, e.DetectionID, err)
 	}
@@ -64,23 +73,50 @@ func (s *Store) Enqueue(ctx context.Context, e OutboxEntry, maxAttempts int) (in
 		}
 		return id, nil
 	}
-	_ = maxAttempts
 	return id, nil
 }
 
-// RecordAttempt increments the attempt counter and schedules the next try. The
-// backoff is exponential with a cap, and it is the budget AC4 measures: a
-// provider that never answers must exhaust it and be dead-lettered rather than
-// retried forever.
+// DefaultPushAttempts is the budget a push gets when the caller says nothing.
+//
+// A number rather than "unlimited": a real VMS answers 403 for an event it will
+// never accept, and a row that retries forever is a row whose absence nobody
+// notices until they go looking for it.
+const DefaultPushAttempts = 8
+
+// RecordAttempt increments the attempt counter, schedules the next try, and
+// dead-letters the row when the budget is spent.
+//
+// The dead-lettering is the fix and the reason this is one method rather than
+// three: a budget enforced by the caller is a budget that a caller forgets, and
+// the caller here is a two-second ticker with a context that gets cancelled.
 func (s *Store) RecordAttempt(ctx context.Context, id int64) error {
 	now := time.Now()
+	attempts := currentAttempts(ctx, s, id)
 	_, err := s.exec(ctx, `
 		UPDATE outbox SET attempts=attempts+1, next_attempt=?, updated_at=? WHERE id=?`,
-		nowUTC(now.Add(backoffFor(now, currentAttempts(ctx, s, id)))), nowUTC(now), id)
+		nowUTC(now.Add(backoffFor(now, attempts))), nowUTC(now), id)
 	if err != nil {
 		return fmt.Errorf("store: cannot record an attempt on outbox row %d: %w", id, err)
 	}
-	return nil
+	return s.expireIfSpent(ctx, id, attempts+1)
+}
+
+// expireIfSpent dead-letters a row whose budget is gone.
+//
+// A row with max_attempts=0 predates the column and has no declared budget, so
+// it is left alone rather than dead-lettered on its first attempt: the expand step
+// is not allowed to change behaviour for rows that already exist.
+func (s *Store) expireIfSpent(ctx context.Context, id int64, attempts int) error {
+	var max int
+	if err := s.db.QueryRowContext(ctx, `SELECT max_attempts FROM outbox WHERE id=?`, id).Scan(&max); err != nil {
+		return nil
+	}
+	if max <= 0 || attempts < max {
+		return nil
+	}
+	return s.DeadLetter(ctx, id, fmt.Sprintf(
+		"the push budget of %d attempt(s) is spent and the VMS has not accepted this body; the row is dead-lettered rather "+
+			"than retried forever, and it is kept for a human to read", max))
 }
 
 func currentAttempts(ctx context.Context, s *Store, id int64) int {
@@ -148,7 +184,7 @@ func (s *Store) DeadLetter(ctx context.Context, id int64, reason string) error {
 // another try, and not dead-lettered.
 func (s *Store) Due(ctx context.Context, now time.Time, limit int) ([]OutboxEntry, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id,detection_id,kind,payload,tag,attempts,next_attempt,result,detail,remote_id,dead_letter,created_at,updated_at
+		SELECT id,detection_id,kind,payload,tag,attempts,next_attempt,result,detail,remote_id,dead_letter,max_attempts,created_at,updated_at
 		FROM outbox
 		WHERE dead_letter=0 AND (result IS NULL OR result='') AND (next_attempt IS NULL OR next_attempt <= ?)
 		ORDER BY next_attempt, id LIMIT ?`, nowUTC(now), limit)
@@ -166,7 +202,7 @@ func scanOutbox(rows *sql.Rows) ([]OutboxEntry, error) {
 		var next sql.NullString
 		var result, detail, remoteID sql.NullString
 		var created, updated string
-		if err := rows.Scan(&e.ID, &e.DetectionID, &e.Kind, &e.Payload, &e.Tag, &e.Attempts, &next, &result, &detail, &remoteID, &e.DeadLetter, &created, &updated); err != nil {
+		if err := rows.Scan(&e.ID, &e.DetectionID, &e.Kind, &e.Payload, &e.Tag, &e.Attempts, &next, &result, &detail, &remoteID, &e.DeadLetter, &e.MaxAttempts, &created, &updated); err != nil {
 			return nil, err
 		}
 		e.Result, e.Detail, e.RemoteID = result.String, detail.String, remoteID.String
@@ -185,13 +221,13 @@ func scanOutbox(rows *sql.Rows) ([]OutboxEntry, error) {
 // Entry returns one outbox row.
 func (s *Store) Entry(ctx context.Context, id int64) (*OutboxEntry, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id,detection_id,kind,payload,tag,attempts,next_attempt,result,detail,remote_id,dead_letter,created_at,updated_at
+		SELECT id,detection_id,kind,payload,tag,attempts,next_attempt,result,detail,remote_id,dead_letter,max_attempts,created_at,updated_at
 		FROM outbox WHERE id=?`, id)
 	var e OutboxEntry
 	var next sql.NullString
 	var result, detail, remoteID sql.NullString
 	var created, updated string
-	if err := row.Scan(&e.ID, &e.DetectionID, &e.Kind, &e.Payload, &e.Tag, &e.Attempts, &next, &result, &detail, &remoteID, &e.DeadLetter, &created, &updated); err != nil {
+	if err := row.Scan(&e.ID, &e.DetectionID, &e.Kind, &e.Payload, &e.Tag, &e.Attempts, &next, &result, &detail, &remoteID, &e.DeadLetter, &e.MaxAttempts, &created, &updated); err != nil {
 		return nil, err
 	}
 	e.Result, e.Detail, e.RemoteID = result.String, detail.String, remoteID.String
@@ -201,7 +237,7 @@ func (s *Store) Entry(ctx context.Context, id int64) (*OutboxEntry, error) {
 // OutboxFor returns the entries belonging to a detection.
 func (s *Store) OutboxFor(ctx context.Context, detectionID string) ([]OutboxEntry, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id,detection_id,kind,payload,tag,attempts,next_attempt,result,detail,remote_id,dead_letter,created_at,updated_at
+		SELECT id,detection_id,kind,payload,tag,attempts,next_attempt,result,detail,remote_id,dead_letter,max_attempts,created_at,updated_at
 		FROM outbox WHERE detection_id=? ORDER BY id`, detectionID)
 	if err != nil {
 		return nil, err

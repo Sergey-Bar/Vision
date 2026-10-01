@@ -57,6 +57,30 @@ type Live struct {
 	// published yet". An empty AIState printed as an empty cell reads as "fine",
 	// and "fine" is a claim nobody made.
 	AIStateKnown bool
+	// The verdict line. W2-8.
+	//
+	// VerdictKnown is what makes these honest: it distinguishes "the model
+	// answered `false_positive`" from "the model was not asked". Both have an
+	// empty Verdict, and drawing the first as the second is the fabricated
+	// negative in pixels.
+	VerdictKnown   bool
+	Verdict        string
+	VerdictSummary string
+	// PushResult is what the VMS said about the last event, and it is on the
+	// picture because "the model confirmed it" and "the VMS accepted it" are
+	// different claims.
+	PushResult string
+	// Counters are the run's totals, printed beside the verdict so a cropped
+	// screenshot still carries a number somebody can check against the report.
+	Counters string
+	// Ledger, Seal and Model are the run's own record of itself. W3-6.
+	//
+	// They live on the screen because the screen is what a judge is looking at, and
+	// a chain that verifies is a claim somebody can check and nobody will check
+	// unless it is on the surface in front of them.
+	Ledger string
+	Seal   string
+	Model  string
 	// Telemetry is the sidecar's own report about how it decoded THIS frame, and
 	// it is the last thing that was missing from the screen.
 	//
@@ -196,6 +220,9 @@ func (s *Server) current() Live {
 // the change.
 func readOnly(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// W2-9: the headers go on BEFORE the method check, because a 405 that
+		// carries no policy header is still a response a browser will parse.
+		securityHeaders(w)
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			w.Header().Set("Allow", "GET, HEAD")
 			http.Error(w, "the screen is read-only; there is nothing to change here and no number on it may be edited through a browser", http.StatusMethodNotAllowed)
@@ -203,6 +230,42 @@ func readOnly(next http.HandlerFunc) http.HandlerFunc {
 		}
 		next(w, r)
 	}
+}
+
+// ContentSecurityPolicy is the screen's policy. W2-9.
+//
+// There is no JavaScript on this screen at all — the HTML sets the picture in an
+// `<img>` and every number in a table — so `script-src 'none'` is not a tuning
+// decision, it is a statement of the architecture that the module has had from
+// the start. A screen with no script has no XSS surface, and saying so in a header
+// means a future edit that adds a script has to edit this line.
+//
+// The three allowances are the three things the screen genuinely needs:
+//
+//   - `img-src 'self' data:` for the frame and the inline base64 placeholder
+//   - `style-src 'unsafe-inline'` because the stylesheet is inline in the HTML
+//   - `connect-src 'self'` for the one fetch the live view makes, to /api/summary
+//
+// `frame-ancestors 'none'` is the one that is about the demo rather than the
+// attacker: a judge screenshotting the screen in a browser window that somebody
+// else's page has framed it in is not a screenshot of this product, it is a
+// screenshot of somebody else's page.
+const ContentSecurityPolicy = "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; " +
+	"connect-src 'self'; script-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+
+// ReferrerPolicy is `no-referrer`: the screen's URLs carry a run id and a
+// detection id, and neither belongs in a Referer to anywhere.
+const ReferrerPolicy = "no-referrer"
+
+// XContentTypeOptions stops a browser from guessing a MIME type for a response,
+// which on this screen is one that serves JPEGs from several paths.
+const XContentTypeOptions = "nosniff"
+
+func securityHeaders(w http.ResponseWriter) {
+	h := w.Header()
+	h.Set("Content-Security-Policy", ContentSecurityPolicy)
+	h.Set("Referrer-Policy", ReferrerPolicy)
+	h.Set("X-Content-Type-Options", XContentTypeOptions)
 }
 
 // Handler builds the routes.
@@ -221,7 +284,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/still.jpg", readOnly(s.stillHandler))
 	mux.HandleFunc("/live.mjpeg", readOnly(s.streamHandler))
 	mux.HandleFunc("/api/summary", readOnly(s.handleJSON))
-	return mux
+	// The mux itself also gets the headers, so a path this list does not name
+	// still answers with a policy. readOnly covers the seven routes above; a 404
+	// from the mux is still a document a browser will render.
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		securityHeaders(w)
+		mux.ServeHTTP(w, r)
+	})
 }
 
 // Serve runs until the context is cancelled.

@@ -88,9 +88,14 @@ type Event struct {
 
 // Bookmark is one accepted bookmark push.
 type Bookmark struct {
+	// ID and Reference exist for the READ-BACK. The bookmarks API has no tag, so
+	// the reference is the only field a duplicate check can match on, and a
+	// bookmark that cannot be found again is a bookmark that can be placed twice.
+	ID            string `json:"id"`
 	TimeTriggered string `json:"timeTriggered"`
 	DevicePath    string `json:"devicePath"`
 	Header        string `json:"header"`
+	Reference     string `json:"reference"`
 	Received      time.Time
 }
 
@@ -219,6 +224,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/__control/fault", s.handleFault)
 	mux.HandleFunc("/__control/reset", s.handleReset)
 	mux.HandleFunc("/__control/events", s.handlePushed)
+	mux.HandleFunc("/__control/bookmarks", s.handleBookmarksHeld)
 
 	// Authentication, at the documented path and form.
 	mux.HandleFunc("/API/IDP/connect/token", s.handleToken)
@@ -522,8 +528,12 @@ func (s *Server) handleBookmarks(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	if r.Method == http.MethodGet {
+		s.handleBookmarkList(w, r)
+		return
+	}
 	if r.Method != http.MethodPost {
-		http.Error(w, "bookmarks are POST only in this build", http.StatusMethodNotAllowed)
+		http.Error(w, "bookmarks are POST and GET only in this build", http.StatusMethodNotAllowed)
 		return
 	}
 	raw, _ := readAll(r)
@@ -559,10 +569,85 @@ func (s *Server) handleBookmarks(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "timeTriggered is required: a bookmark without a time does not point at anything", http.StatusBadRequest)
 		return
 	}
+	// The reference is required, and that is a claim about this build's
+	// implementation rather than about the provider: the bookmarks API has no tag,
+	// so the reference is the only field a read-back can match on, and a bookmark
+	// without one can be placed twice. The client refuses it before the POST, and
+	// the simulator refuses it too, so the contract test has something to fail
+	// against.
+	if bm.Reference == nil || *bm.Reference == "" {
+		http.Error(w, "reference is required: it is the only field a read-back can match on, and a bookmark without one "+
+			"can be placed twice", http.StatusBadRequest)
+		return
+	}
 	s.mu.Lock()
-	s.bookmark = append(s.bookmark, Bookmark{TimeTriggered: *bm.TimeTriggered, DevicePath: *bm.DevicePath.ID, Header: *bm.Header, Received: time.Now().UTC()})
+	s.bookmark = append(s.bookmark, Bookmark{
+		ID:            "bmk-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		TimeTriggered: *bm.TimeTriggered, DevicePath: *bm.DevicePath.ID,
+		Header: *bm.Header, Reference: *bm.Reference, Received: time.Now().UTC(),
+	})
 	s.mu.Unlock()
 	writeJSON(w, 200, map[string]any{"data": map[string]any{"id": "bmk-" + strconv.FormatInt(time.Now().UnixNano(), 10)}})
+}
+
+// bookmarkRefFilter reads the `reference=equals:'<ref>'` filter, in the same
+// documented form the events collection uses. The quoting is stripped rather than
+// escaped, because the values this build generates are hex and hyphens and an
+// escaped quote in a reference is a question the client should refuse to ask.
+func bookmarkRefFilter(r *http.Request) string {
+	v := strings.TrimSpace(r.URL.Query().Get("reference"))
+	v = strings.TrimPrefix(v, "equals:")
+	return strings.Trim(v, "'\"")
+}
+
+// handleBookmarksHeld is the control surface for bookmarks, so a test can assert
+// that one was placed and by what. Without it the bookmark path is only observable
+// through its own read-back, which is the thing under test.
+func (s *Server) handleBookmarksHeld(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	out := make([]map[string]any, 0, len(s.bookmark))
+	for _, b := range s.bookmark {
+		out = append(out, map[string]any{
+			"id": b.ID, "header": b.Header, "reference": b.Reference,
+			"devicePath": b.DevicePath, "timeTriggered": b.TimeTriggered,
+		})
+	}
+	count := len(out)
+	s.mu.Unlock()
+	writeJSON(w, 200, map[string]any{"count": count, "data": out})
+}
+
+// handleBookmarkList answers the read-back.
+//
+// It exists because W1-6 makes the read-back part of the operation rather than a
+// separate convenience: a bookmark answers 200 whether or not it created anything
+// useful, so "we placed a bookmark" is a claim about a status code unless
+// something goes and looks. The filter is `reference=equals:'<ref>'`, which is
+// the documented form for the other collections in this simulator.
+func (s *Server) handleBookmarkList(w http.ResponseWriter, r *http.Request) {
+	ref := bookmarkRefFilter(r)
+	s.mu.Lock()
+	var out []map[string]any
+	for _, b := range s.bookmark {
+		if ref != "" && b.Reference != ref {
+			continue
+		}
+		out = append(out, map[string]any{
+			"id": b.ID, "header": b.Header, "reference": b.Reference,
+			"timeTriggered": b.TimeTriggered,
+			"devicePath":    map[string]any{"type": "local", "id": b.DevicePath},
+			"received":      b.Received.Format(time.RFC3339Nano),
+		})
+	}
+	s.mu.Unlock()
+	if out == nil {
+		// An empty collection is an empty ARRAY, not a 404. The client treats a
+		// 404 as "not there" for version tolerance, but a simulator that answers
+		// 404 for an empty list is teaching the client to tolerate something the
+		// real API does not do.
+		out = []map[string]any{}
+	}
+	writeJSON(w, 200, map[string]any{"data": out})
 }
 
 func (s *Server) handleEventTypes(w http.ResponseWriter, r *http.Request) {

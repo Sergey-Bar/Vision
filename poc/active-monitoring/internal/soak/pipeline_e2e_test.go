@@ -257,16 +257,22 @@ func TestTheWholePipelineFromAFrameToAnEventIsProven(t *testing.T) {
 		// runner is given the same reader `watch` gives it. Without this the
 		// crossing-snapshot path is skipped for the whole run and the assertions
 		// below would be assertions about nothing.
-		LastJPEG:   rec.LastFrameJPEG,
-		Provenance: store.ProvenanceSynthetic,
-		ClipBefore: 1 * time.Second, ClipAfter: 1 * time.Second,
+		LastJPEG:     rec.LastFrameJPEG,
+		LastJPEGSeq:  rec.LastFrameJPEGSeq,
+		FrameJPEGFor: rec.FrameJPEGFor,
+		Provenance:   store.ProvenanceSynthetic,
+		ClipBefore:   1 * time.Second, ClipAfter: 1 * time.Second,
 		Target: 16 * time.Second, Heartbeat: 2 * time.Second,
 		PushMax: 4, MaxDisk: 1 << 30,
 		DeclaredRSS: 1 << 30, DeclaredDB: 1 << 28, DeclaredCPU: 400,
 		DeclaredAIBudget: 4 * time.Second,
 		PushBaseURL:      simSrv.URL, PushIsVMS: false, ClockSource: "host",
 		EventTypeGUID: eventTypeGUID, CameraGUID: cameraGUID,
-		Logf: t.Logf,
+		// W1-6: the bookmark's device path. It was already required by
+		// configuration and read nowhere, so without this the event goes out with
+		// no pointer to a recording at all.
+		BookmarkDevicePath: "/Local/" + cameraGUID,
+		Logf:               t.Logf,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -350,6 +356,12 @@ func TestTheWholePipelineFromAFrameToAnEventIsProven(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, row := range rows {
+			if row.Kind != store.KindEvent {
+				// A bookmark is a different body with a different shape, and
+				// unmarshalling one as an event is how a test starts asserting about
+				// an empty struct and calling it a zero box.
+				continue
+			}
 			var body xprotect.EventRequest
 			if err := json.Unmarshal([]byte(row.Payload), &body); err != nil {
 				t.Fatalf("the outbox payload for %s is not a readable event body: %v\n%s", d.ID, err, row.Payload)
@@ -450,10 +462,28 @@ func TestTheWholePipelineFromAFrameToAnEventIsProven(t *testing.T) {
 	}
 	defer held.Body.Close()
 	body, _ := ioReadAll(held)
-	if !strings.Contains(string(body), "aicap-car-") {
+	// W1-6: the tag no longer names the class, because the class is the PROMPT.
+	// Two classes are two prompt files and the tag is derived from whichever one
+	// this incident used, so the assertion is on the tag PREFIX.
+	if !strings.Contains(string(body), "aicap-alarm-") {
 		t.Fatalf("the simulator holds no pushed event, so nothing was delivered: %s", body)
 	}
 	t.Logf("pushed: %s", strings.TrimSpace(string(body)))
+
+	// The bookmark went out alongside the event. An analytics event tells a VMS
+	// operator THAT something happened; the bookmark is what puts them on the
+	// recording, and it is the single highest-value line in the pipeline — which
+	// is exactly why it is asserted rather than assumed.
+	bmURL, err := http.Get(simSrv.URL + "/__control/bookmarks")
+	if err == nil {
+		defer bmURL.Body.Close()
+		if b, _ := ioReadAll(bmURL); len(b) > 0 {
+			t.Logf("bookmarks held by the simulator: %s", strings.TrimSpace(string(b)))
+			if !strings.Contains(string(b), "aicap-alarm-") {
+				t.Fatalf("the simulator holds no bookmark, so a pushed event has no pointer to a recording: %s", b)
+			}
+		}
+	}
 
 	// And the whole run scores, from the store, with the same function the
 	// report uses.

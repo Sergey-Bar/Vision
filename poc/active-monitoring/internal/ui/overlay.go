@@ -78,15 +78,20 @@ func (l Live) OverlaySpec() overlay.Spec {
 		ghosts = append(ghosts, g.Box())
 	}
 	return overlay.Spec{
-		Lines:        lines,
-		Boxes:        chosen,
-		Ghosts:       ghosts,
-		MaxBoxes:     l.MaxBoxesDrawn,
-		Suppressed:   suppressed,
-		Provenance:   l.Provenance,
-		AIState:      l.AIState,
-		At:           l.AtLabel(),
-		AIStateKnown: l.AIState != "",
+		Lines:          lines,
+		Boxes:          chosen,
+		Ghosts:         ghosts,
+		MaxBoxes:       l.MaxBoxesDrawn,
+		Suppressed:     suppressed,
+		Provenance:     l.Provenance,
+		AIState:        l.AIState,
+		At:             l.AtLabel(),
+		AIStateKnown:   l.AIState != "",
+		Verdict:        l.Verdict,
+		VerdictKnown:   l.VerdictKnown,
+		VerdictSummary: l.VerdictSummary,
+		PushResult:     l.PushResult,
+		Counters:       l.Counters,
 	}
 }
 

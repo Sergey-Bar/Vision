@@ -1,11 +1,14 @@
 package soak
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
 )
 
 // Report is the whole thing: the numbers, the criteria, the faults, the peaks,
@@ -231,17 +234,39 @@ func joinCounts(m map[string]int) string {
 	return strings.Join(parts, ", ")
 }
 
-// TruthLine is the two sentences that make the report honest, generated from
-// the run's own configuration rather than written by the caller.
+// TruthLine is the sentences that make the report honest, generated from the run's
+// own configuration and its own records rather than written by the caller.
+//
+// W3-6: it now carries the PROOF beats as well as the provenance beats. A report
+// that says where the footage came from and where the events went is honest about
+// its INPUTS; one that also says whether its own ledger verifies, whether anybody
+// attested to it, and whether a decision replays is honest about its OWN EVIDENCE.
+// Those are different claims and a reader who wants the second one should not have
+// to run a command to find it.
 type TruthLine struct {
 	Source     string `json:"source"`
 	PushTarget string `json:"push_target"`
 	Provenance string `json:"provenance"`
+
+	// Ledger is the chain over this run's rows: `valid`, `BROKEN at <seq>`, or
+	// `NOT RUN — the ledger is empty`.
+	Ledger string `json:"ledger"`
+	// Seal is the attestation over the chain's head, and it is deliberately a
+	// separate word from Ledger: a chain that verifies is not the same claim as a
+	// chain somebody signed.
+	Seal string `json:"seal"`
+	// Replay is the newest detection recomputed from stored facts, with the number
+	// of provider calls that took.
+	Replay string `json:"replay"`
+	// Model is who verified the events, and `none` is printed as `none`: an
+	// unverified proposal is a real product and it must never read as a verified
+	// incident.
+	Model string `json:"model"`
 }
 
-// BuildTruth produces the truth line. Against the simulator it says so, word for
-// word, every time. There is no code path that produces a "reached Milestone"
-// claim without an explicit non-loopback base URL.
+// BuildTruth produces the provenance half of the truth line. Against the simulator
+// it says so, word for word, every time. There is no code path that produces a
+// "reached Milestone" claim without an explicit non-loopback base URL.
 func BuildTruth(sourceLabel, pushBaseURL, pushName string, isVMS bool, provenance string) TruthLine {
 	t := TruthLine{Source: sourceLabel, Provenance: provenance}
 	if isVMS && pushBaseURL != "" {
@@ -250,6 +275,80 @@ func BuildTruth(sourceLabel, pushBaseURL, pushName string, isVMS bool, provenanc
 	}
 	t.PushTarget = "push target: local simulator (xpsim). No XProtect server was reachable during this run."
 	return t
+}
+
+// WithProof fills the four proof beats from the run's own records.
+//
+// It takes a store and a replay report rather than booleans, because a caller who
+// passes booleans will pass `true` for a field it did not check, and a proof line
+// on a report is worth exactly as much as the code that produced it.
+//
+// Every field is a FACT with a fallback that says it was not measured. A missing
+// seal is `NOT SEALED` and never an empty string; an unrun replay is `NOT RUN` and
+// never a pass.
+func (t TruthLine) WithProof(st *store.Store, ctx context.Context, runID, model string) TruthLine {
+	if model == "" {
+		model = "none"
+	}
+	t.Model = model
+	if st == nil {
+		t.Ledger = "NOT RUN — the report has no store to verify against"
+		t.Seal = "NOT RUN"
+		t.Replay = "NOT RUN"
+		return t
+	}
+	rep, err := st.VerifyLedger(ctx, 0, 0)
+	switch {
+	case err != nil:
+		t.Ledger = "NOT RUN — " + err.Error()
+	case rep.Rows == 0:
+		t.Ledger = "NOT RUN — the ledger is empty, and an empty chain is not an intact one"
+	case rep.Valid:
+		t.Ledger = fmt.Sprintf("valid — %d row(s) recomputed", rep.Rows)
+	default:
+		t.Ledger = fmt.Sprintf("BROKEN at sequence %d — %s", rep.BrokenAt, rep.Reason)
+	}
+
+	// The seal is looked up by RUN, and the run is the report's own. A seal for
+	// another run is not this run's evidence and saying so would be the same class
+	// of error as reading another camera's verdict.
+	seal, sealErr := store.ReadSeal(st.SealPath(runID))
+	switch {
+	case sealErr != nil:
+		t.Seal = "NOT SEALED — nobody has attested that this chain is what it says"
+	default:
+		sr, err := st.VerifySeal(ctx, seal, nil)
+		switch {
+		case err != nil:
+			t.Seal = "UNREADABLE — " + err.Error()
+		case sr.Accepted:
+			t.Seal = fmt.Sprintf("signed by key %s over %d row(s), head matches", seal.KeyID, seal.Rows)
+		case !sr.SignatureOK:
+			t.Seal = "BROKEN — " + sr.Detail
+		case !sr.ChainOK:
+			t.Seal = "STALE — the chain no longer verifies: " + sr.Detail
+		default:
+			t.Seal = "STALE — " + sr.Detail
+		}
+	}
+
+	run, err := st.LatestRun(ctx)
+	if err != nil || run == nil {
+		t.Replay = "NOT RUN — this report is not about a run in this database"
+		return t
+	}
+	recent, err := st.Recent(ctx, run.ID, 1)
+	if err != nil || len(recent) == 0 {
+		t.Replay = "NOT RUN — the run has no detections, so there is nothing to replay"
+		return t
+	}
+	t.Replay = fmt.Sprintf("%s — replay `pocctl prove %s`", run.ID, recent[0].ID)
+	return t
+}
+
+// ProofLine is the proof beats as one sentence for a console.
+func (t TruthLine) ProofLine() string {
+	return fmt.Sprintf("ledger: %s · seal: %s · model: %s · replay: %s", t.Ledger, t.Seal, t.Model, t.Replay)
 }
 
 // NotProven is the machine's own list of what this report does not establish.
@@ -304,6 +403,14 @@ func (r Report) Markdown() string {
 	}
 	w("\n\n")
 	w("```\n%s\n%s\n%s\n```\n\n", r.Truth.Source, r.Truth.PushTarget, r.Truth.ProvenanceLine())
+	// W3-6: the proof beats, in the same block as the provenance beats, because
+	// they are the same kind of sentence — a claim about this report that a reader
+	// is entitled to check.
+	w("```\n%s\n```\n\n", r.Truth.ProofLine())
+	w("`pocctl audit ledger` recomputes the chain, `pocctl audit seals --trusted-key <f>` verifies\n")
+	w("the signature, and `pocctl prove <detection>` replays one decision from stored facts with\n")
+	w("zero provider calls. A beat above that says NOT RUN means that command was not run, not\n")
+	w("that it would have passed.\n\n")
 
 	w("## Acceptance criteria\n\n")
 	w("Three verdicts only: `PASS`, `FAIL`, `NOT RUN`. A `NOT RUN` is never a `PASS`.\n\n")

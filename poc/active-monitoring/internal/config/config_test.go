@@ -91,6 +91,17 @@ func complete(t *testing.T) map[string]string {
 		"SP_POC_PUSH_TIMEOUT":           "15s",
 		"SP_POC_UI_ADDR":                "127.0.0.1:8097",
 		"SP_POC_LABEL":                  "baseline",
+		// W1-4 / W1-7. The sidecar variables above are present because this world
+		// runs in `sidecar` mode; the shipped `novelty` world is
+		// TestTheSidecarIsNotRequiredByTheShippedTrigger, which is the assertion
+		// that an operator running the pipeline does not have to declare an ONNX
+		// model and a Python script it will never execute.
+		"SP_POC_TRIGGER_MODE":  "sidecar",
+		"SP_POC_VLM_PROVIDER":  "hafnia",
+		"SP_POC_VLM_REGION":    "eu",
+		"SP_POC_VLM_API_KEY":   "test-key-not-a-secret",
+		"SP_POC_VLM_MODEL":     "cosmos-3-nano-16b",
+		"SP_POC_VLM_DAILY_CAP": "500",
 	}
 }
 
@@ -101,10 +112,133 @@ func lookupFrom(m map[string]string) Lookup {
 	}
 }
 
+// TestTheSidecarIsNotRequiredByTheShippedTrigger is W1-4's assertion.
+//
+// The defect was not that the sidecar was broken. It was that every sidecar
+// variable was listed as unconditionally required, so an operator running the
+// shipped pipeline had to declare an ONNX model and a Python script that the run
+// never executed — and the remedy text told them a run would "die in minute one",
+// describing a failure the shipped run cannot have. A gate that is wrong in the
+// safe direction is still wrong, because the operator learns to type things in to
+// get past it and stops reading what the gate says.
+func TestTheSidecarIsNotRequiredByTheShippedTrigger(t *testing.T) {
+	w := complete(t)
+	for _, name := range []string{
+		"SP_POC_AI_ADDR", "SP_POC_AI_MODEL", "SP_POC_SIDECAR_SCRIPT", "SP_POC_AI_ANCHORS",
+	} {
+		delete(w, name)
+	}
+	w["SP_POC_TRIGGER_MODE"] = "novelty"
+	w["SP_POC_VLM_PROVIDER"] = "none"
+	delete(w, "SP_POC_VLM_REGION")
+	delete(w, "SP_POC_VLM_API_KEY")
+	delete(w, "SP_POC_VLM_MODEL")
+	delete(w, "SP_POC_VLM_DAILY_CAP")
+
+	if _, err := Load(lookupFrom(w)); err != nil {
+		t.Fatalf("the shipped pipeline must load with no ONNX model, no Python worker and no anchors: %v", err)
+	}
+	cfg, _ := Load(lookupFrom(w))
+	if cfg.TriggerMode != "novelty" {
+		t.Fatalf("trigger mode = %q", cfg.TriggerMode)
+	}
+	if cfg.AIModel != "" || cfg.SidecarScript != "" {
+		t.Fatalf("the sidecar variables leaked in with empty values: model=%q script=%q", cfg.AIModel, cfg.SidecarScript)
+	}
+	if cfg.VLMProvider != "none" {
+		t.Fatalf("the provider defaulted to %q rather than none; `none` is the only safe default, because a provider name "+
+			"on a report is a claim that something was verified", cfg.VLMProvider)
+	}
+	// And the thresholds really do have defaults, because they are measured
+	// numbers rather than decisions an operator has to make blind.
+	if cfg.NoveltyThreshold != 0.35 || cfg.NoveltySustain != 90 || cfg.NoveltyGrid != 64 {
+		t.Fatalf("the measured defaults did not survive: threshold=%g sustain=%d grid=%d",
+			cfg.NoveltyThreshold, cfg.NoveltySustain, cfg.NoveltyGrid)
+	}
+}
+
+// TestTheSidecarIsStillRequiredWhenItIsInUse is the other half, because a
+// conditional requirement that is wrong in the other direction is worse: the run
+// would start and never classify anything.
+func TestTheSidecarIsStillRequiredWhenItIsInUse(t *testing.T) {
+	w := complete(t)
+	delete(w, "SP_POC_AI_MODEL")
+	_, err := Load(lookupFrom(w))
+	if err == nil {
+		t.Fatal("the sidecar mode started with no model")
+	}
+	if names := MissingNames(err); len(names) != 1 || names[0] != "SP_POC_AI_MODEL" {
+		t.Fatalf("names = %v, want [SP_POC_AI_MODEL]", names)
+	}
+}
+
+// TestTheVerifierIsRequiredWhenItIsDeclared is the same rule on the other side of
+// the pipeline, and it is the one that matters: a run that says it verifies and
+// cannot is a run whose report says something false.
+func TestTheVerifierIsRequiredWhenItIsDeclared(t *testing.T) {
+	for _, missing := range []string{
+		"SP_POC_VLM_REGION", "SP_POC_VLM_API_KEY", "SP_POC_VLM_MODEL", "SP_POC_VLM_DAILY_CAP",
+	} {
+		w := complete(t)
+		delete(w, missing)
+		if _, err := Load(lookupFrom(w)); err == nil {
+			t.Fatalf("the run started with no %s", missing)
+		} else if names := MissingNames(err); len(names) != 1 || names[0] != missing {
+			t.Fatalf("removing %s reported %v", missing, names)
+		}
+	}
+	// An unknown region is refused by name, because a region string that is not in
+	// the closed set is a site whose footage has no declared destination.
+	w := complete(t)
+	w["SP_POC_VLM_REGION"] = "moon"
+	if _, err := Load(lookupFrom(w)); err == nil {
+		t.Fatal("an unknown region was accepted")
+	} else if !strings.Contains(err.Error(), "eu") {
+		t.Fatalf("the refusal does not name the valid regions: %v", err)
+	}
+	w = complete(t)
+	w["SP_POC_VLM_PROVIDER"] = "openai"
+	if _, err := Load(lookupFrom(w)); err == nil {
+		t.Fatal("an unknown provider was accepted")
+	}
+}
+
+// TestTheUpsideDownHysteresisBandIsRefused is the threshold's own rule: a release
+// level ABOVE the trigger is a band that can never reset, and the detector then
+// fires once and stays quiet until the process restarts.
+func TestTheUpsideDownHysteresisBandIsRefused(t *testing.T) {
+	w := complete(t)
+	w["SP_POC_NOVELTY_RELEASE"] = "0.9"
+	if _, err := Load(lookupFrom(w)); err == nil {
+		t.Fatal("a release level above the threshold was accepted")
+	}
+	w = complete(t)
+	w["SP_POC_NOVELTY_THRESHOLD"] = "1.5"
+	if _, err := Load(lookupFrom(w)); err == nil {
+		t.Fatal("a threshold above one was accepted; it is a FRACTION of the frame")
+	}
+	w = complete(t)
+	w["SP_POC_NOVELTY_SUSTAIN"] = "0"
+	if _, err := Load(lookupFrom(w)); err == nil {
+		t.Fatal("a sustain of zero was accepted; one frame of difference would be an incident")
+	}
+	w = complete(t)
+	w["SP_POC_TRIGGER_MODE"] = "psychic"
+	if _, err := Load(lookupFrom(w)); err == nil {
+		t.Fatal("an unknown trigger mode was accepted")
+	}
+}
+
 func TestCompleteWorldLoads(t *testing.T) {
 	cfg, err := Load(lookupFrom(complete(t)))
 	if err != nil {
 		t.Fatalf("complete world must load: %v", err)
+	}
+	if cfg.TriggerMode != "sidecar" {
+		t.Fatalf("trigger mode = %q", cfg.TriggerMode)
+	}
+	if cfg.VLMRegion != "eu" {
+		t.Fatalf("vlm region = %q", cfg.VLMRegion)
 	}
 	if cfg.Mode != ModeLive {
 		t.Fatalf("mode = %q", cfg.Mode)
@@ -318,12 +452,34 @@ func TestTheNewNumbersHaveBoundsWorthHaving(t *testing.T) {
 // TestEveryVariableIsRequiredByName is the T4 test: remove one variable, get a// refusal that names that variable and states the consequence. A variable that
 // silently defaults is the defect this whole package exists to prevent.
 func TestEveryVariableIsRequiredByName(t *testing.T) {
-	for name := range schemaByName {
+	for name, f := range schemaByName {
 		if _, structural := structuralDefaults[name]; structural {
 			continue
 		}
+		if f.structural {
+			continue
+		}
+		// A CONDITIONAL variable is required only when its condition holds, so
+		// this table checks it in the world where it is: set the condition's
+		// variable to the value that makes it required, then remove this one.
+		m := complete(t)
+		if f.when != "" {
+			want := strings.TrimPrefix(f.when, "")
+			condName, condVal, ok := strings.Cut(f.when, "=")
+			if !ok {
+				t.Fatalf("%s has the unparseable condition %q", name, f.when)
+			}
+			m[condName] = condVal
+			_ = want
+		}
+		// And the world it sits in must otherwise satisfy that condition, so a
+		// table entry whose condition its own world does not meet is testing
+		// nothing.
+		if f.when != "" && !conditionHolds(lookupFrom(m), f.when) {
+			t.Fatalf("%s requires %q, which the complete world does not satisfy; this table would be testing nothing",
+				name, f.when)
+		}
 		t.Run(name, func(t *testing.T) {
-			m := complete(t)
 			delete(m, name)
 
 			_, err := Load(lookupFrom(m))
@@ -334,7 +490,6 @@ func TestEveryVariableIsRequiredByName(t *testing.T) {
 			if len(names) != 1 || names[0] != name {
 				t.Fatalf("missing names = %v, want exactly [%s]", names, name)
 			}
-			f := schemaByName[name]
 			if f.Consequence == "" {
 				t.Fatalf("%s has no stated consequence", name)
 			}
@@ -392,11 +547,30 @@ func TestNonPositiveDurationIsRefused(t *testing.T) {
 
 // TestAllMissingAreReportedAtOnce: an operator fixes the environment in one
 // pass, not one variable per run.
+//
+// The empty world cannot satisfy any condition, so the conditional variables are
+// not among the missing — and that is the CORRECT count, not a hole: with nothing
+// set, `SP_POC_TRIGGER_MODE` takes its structural default of `novelty`, the
+// sidecar is not in use, and demanding its model would be demanding a decision
+// this run is not making.
 func TestAllMissingAreReportedAtOnce(t *testing.T) {
 	_, err := Load(lookupFrom(map[string]string{}))
 	names := MissingNames(err)
-	if len(names) != len(schemaByName)-len(structuralDefaults) {
-		t.Fatalf("got %d names, want %d", len(names), len(schemaByName)-len(structuralDefaults))
+	want := 0
+	for name, f := range schemaByName {
+		if _, structural := structuralDefaults[name]; structural {
+			continue
+		}
+		if f.structural {
+			continue
+		}
+		if f.when != "" && !conditionHolds(lookupFrom(map[string]string{}), f.when) {
+			continue
+		}
+		want++
+	}
+	if len(names) != want {
+		t.Fatalf("got %d names, want %d: %v", len(names), want, names)
 	}
 	if !sort.StringsAreSorted(names) {
 		t.Fatalf("names are not sorted: %v", names)

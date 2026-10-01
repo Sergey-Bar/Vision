@@ -1,12 +1,56 @@
 # Status — poc/active-monitoring
 
-Last revised 2026-09-30 (the RTSP relay, the real bounding box, the crossing
-snapshot, the family taxonomy on the wire, the KPI strip, and the human
-false-positive review).
+Last revised 2026-09-30 (the Hafnia VLM client, the pure-Go novelty engine, the
+bookmark push, the hash-chained ledger, the ed25519 seal, `pocctl prove`,
+`pocctl demo --live`, and the eleven red checks).
 
 This is the source of truth for **what is built** in this module. The README is
 not, and neither is the commit history. Where something is not done it says why,
 and where the reason is a person rather than a line of code it says that too.
+
+## The five minutes nobody has had yet
+
+| | |
+|---|---|
+| a live camera | **never** â€” every run this build was tested on reads a recording |
+| a live XProtect instance | **never** â€” every push went to `xpsim`, a program in this repository |
+| a live VLM call | **never** â€” `contracts/hafnia/` is ASSERTED against published documentation, not verified on the wire |
+| ground-truth marks | **none** â€” `testdata/groundtruth.json` is empty, so the false-positive row is `NOT RUN` |
+| the reference-mode trigger on a real moved camera | **never** â€” tested against synthetic fixtures, which is not the same thing |
+
+Those five lines are the whole of what is missing, and they are the whole of what
+`pocctl demo --live` and `contracts/hafnia/README.md` exist to close.
+
+## The four defects that were live before this work
+
+They are listed because their shape is the argument for the red checks. None was in
+an interesting part of the module; all four were **refusals that were missing**, and
+a missing refusal is invisible in every artifact a demo produces.
+
+| | what was wrong | now |
+|---|---|---|
+| the pushed bounding box | every event carried `top/left/bottom/right` all zero while the row beside it held real numbers | `xprotect.BuildEvent` refuses an all-zero box; RC-6 removes that refusal and asserts the suite goes red |
+| the bookmark | `SP_POC_DEVICE_PATH` was required by configuration and read **nowhere**, so every event went out with no pointer to any recording | a bookmark is built, queued through the same outbox as the event, and read back by reference; `xpsim` learned the read-back so the contract has something to fail against |
+| the sidecar | every sidecar variable was unconditionally required, so the shipped pipeline needed an ONNX model, a Python worker and a config the run could not use | `SP_POC_TRIGGER_MODE` gates them; preflight asks the question about the component the run actually has |
+| the incident class | the class was a hard-coded family enum, so a second class was a code change | the class is a prompt file and one manifest entry; a test asserts two classes differ only in prompt id |
+
+## What is built, and has been tested here
+
+- the **novelty engine** as a region measurer, including the two ways it fails
+  silently â€” a reference score must not rise on a moving object, and a temporal
+  score must not fire on a lighting change. Both are tests, with synthetic scenes
+  built so a displacement is a displacement and a vehicle is a vehicle.
+- the **VLM client**: strict parsing, a closed four-word verdict set, region pinning
+  with no failover, redirects refused, a TLS floor, a per-site daily cap reserved
+  *before* the upload, and an asset deleted on every path after it.
+- the **spine**: commit, record the decision inputs, snapshot the frame the decision
+  was made on, cut the clip, ask once, push the event, place the bookmark â€” every
+  external effect after the row.
+- the **ledger**: length-prefixed chained hashes, SQLite triggers refusing UPDATE and
+  DELETE, verification that names the first broken row, and an ed25519 seal over the
+  head that is **refused over a broken chain**.
+- `pocctl prove`, which recomputes a decision from stored facts with **zero** provider
+  calls because the replay function is handed no observer and no client.
 
 ## Verification
 
@@ -18,8 +62,20 @@ poc/active-monitoring\scripts\verify.ps1
 
 It runs, and it stops at the first failure: toolchain, `go build ./...`,
 `gofmt -l`, `go vet ./...`, the module boundary check (including the
-`internal/overlay` and `internal/classify` leaf rows), `go test -race -p 1
+`internal/overlay` and `internal/classify` leaf rows, and the two new ones:
+**`internal/vlm`** and **`internal/novelty`**, which may not reach a database, a
+pipeline or a detector â€” `internal/vlm` in particular, because a verifier that
+could read what somebody said last time would be a recorder, and a recorder is
+exactly what `pocctl prove` forbids), `go test -race -p 1
 -count=1 ./...`, the sidecar's Python tests, and the red check.
+
+**The red check now removes eleven controls**, not three. The eight added are RC-1
+through RC-7 from the milestone plan: a verdict cleared on an unasked ask (twice,
+at parse time and at write time), the chain's hash comparison, the append-only
+triggers, the zero-provider-call assertion in the replay, the snapshot's
+frame-attribution refusal, the all-zero bounding-box refusal, and the cross-region
+refusal. Each is a control removed from the **production** code, and the suite must
+go red every time.
 
 **Last recorded result: see the table below.** A green gate here is a *local
 claim* about one command on one machine. There is no pipeline on this repository

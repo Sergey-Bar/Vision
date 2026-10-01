@@ -66,8 +66,46 @@ func truthLine(d Data) string {
 	l := d.Live
 	push := pushSentence(l, d)
 	prov := orNone(l.Provenance, "provenance NOT STATED")
-	return fmt.Sprintf(`<b>push:</b> %s &nbsp;·&nbsp; <b>footage:</b> %s &nbsp;·&nbsp; `+
+	head := fmt.Sprintf(`<b>push:</b> %s &nbsp;·&nbsp; <b>footage:</b> %s &nbsp;·&nbsp; `+
 		`<span class="warn">no Milestone server was reached</span>`, esc(push), esc(prov))
+	// W3-6: the proof beats, in the same bar. A screen that says where the footage
+	// came from and where the events went is honest about its INPUTS; one that also
+	// says whether its own ledger verifies is honest about its own EVIDENCE, and
+	// those are different claims.
+	if p := proofSentence(l); p != "" {
+		return head + `<br><span class="proof">` + p + `</span>`
+	}
+	return head
+}
+
+// proofSentence is the run's own record of itself, on the operator's screen.
+//
+// Every beat has a word for the case where it was NOT measured. A blank beside a
+// live picture reads as a pass, and "the ledger is fine" is the sort of thing a
+// reader believes without asking.
+func proofSentence(l Live) string {
+	if l.Ledger == "" && l.Seal == "" && l.Model == "" {
+		return ""
+	}
+	cls := func(s string) string {
+		switch {
+		case strings.HasPrefix(s, "NOT "), strings.HasPrefix(s, "UNSEALED"):
+			return "notrun"
+		case strings.Contains(s, "BROKEN"), strings.Contains(s, "STALE"):
+			return "fail"
+		default:
+			return "pass"
+		}
+	}
+	out := fmt.Sprintf(`<span class="%s"><b>ledger:</b> %s</span>`, cls(l.Ledger), esc(orNone(l.Ledger, "NOT RUN")))
+	out += fmt.Sprintf(` &nbsp;·&nbsp; <span class="%s"><b>seal:</b> %s</span>`, cls(l.Seal), esc(orNone(l.Seal, "NOT SEALED")))
+	model := orNone(l.Model, "none")
+	mcls := ""
+	if strings.EqualFold(model, "none") {
+		mcls = ` class="notrun"`
+	}
+	out += fmt.Sprintf(` &nbsp;·&nbsp; <span%s><b>model:</b> %s</span>`, mcls, esc(model))
+	return out
 }
 
 func kpi(k, v, s, cls string) string {
@@ -254,6 +292,49 @@ func faultCard(f store.Fault) string {
 		cls, verdict, esc(f.Reason), f.At.Local().Format("15:04:05"), esc(note), esc(clip(f.Detail, 240)))
 }
 
+// modelVerdictFoot renders the model's answer for the last event.
+//
+// The three cases are printed as three different WORDS and never as one empty
+// cell, because a reader glancing at this row must be able to tell:
+//
+//	confirmed / false_positive / needs_review — a model answered
+//	no verdict                            — a model answered and declined
+//	model not asked                       — nothing was sent
+//
+// The third is the one that matters. A blank next to a live picture reads as a
+// negative answer, and a negative answer is the failure this whole module exists
+// to prevent.
+func modelVerdictFoot(l Live) string {
+	verb, text, class := "model verdict", "", "notrun"
+	switch {
+	case !l.VerdictKnown:
+		verb, text, class = "model", "not asked", "notrun"
+	case l.Verdict == "" || l.Verdict == "none":
+		verb, text, class = "model verdict", "no verdict", "notrun"
+	default:
+		verb, text = "model verdict", l.Verdict
+		switch l.Verdict {
+		case "confirmed":
+			class = "pass"
+		case "needs_review":
+			class = "notrun"
+		default:
+			class = ""
+		}
+	}
+	out := `<span class="` + class + `">` + verb + ` <b>` + esc(text) + `</b></span>`
+	if l.PushResult != "" {
+		out += `<span>vms <b>` + esc(l.PushResult) + `</b></span>`
+	}
+	if l.Counters != "" {
+		out += `<span>` + esc(l.Counters) + `</span>`
+	}
+	if s := clip(l.VerdictSummary, 120); s != "" {
+		out += `<span style="color:var(--fg3)">` + esc(s) + `</span>`
+	}
+	return out
+}
+
 func handleLive(s *Server) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
@@ -293,6 +374,11 @@ func handleLive(s *Server) http.HandlerFunc {
 		fmt.Fprintf(&foot, `<span>sidecar <b>%s</b></span>`, orNone(d.Live.AIState, "—"))
 		fmt.Fprintf(&foot, `<span>provenance <b>%s</b></span>`, orNone(d.Live.Provenance, "not stated"))
 		fmt.Fprintf(&foot, `<span>tracked now <b>%d</b></span>`, len(d.Live.Tracks))
+		// W2-8. The MODEL's verdict, next to the run's own verdict, and never
+		// merged with it: `PASS` on this page is the acceptance criteria and
+		// `confirmed` on this line is one event. A page that showed only the first
+		// would let a reader conclude the second.
+		foot.WriteString(modelVerdictFoot(d.Live))
 		if d.Live.Source == "" {
 			foot.WriteString(`<span style="color:var(--notrun)">no live source line</span>`)
 		}

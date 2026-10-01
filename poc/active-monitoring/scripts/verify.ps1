@@ -210,6 +210,38 @@ $boundaries = @(
     pkg = './internal/classify'
     forbid = @('modernc.org/sqlite')
     why = 'internal/classify is the family vocabulary and must stay a leaf; a taxonomy that imports the store is a taxonomy that can be wrong in a way no table can show'
+  },
+  @{
+    # The verifier is a leaf. It is the package that decides what a camera operator
+    # is told, so the one thing it must not be able to do is read the database and
+    # report what somebody else said last time.
+    #
+    # It also forbids internal/soak and internal/store, and the reason is the
+    # replay: soak.Replay proves a decision by recomputing it from stored facts, and
+    # that proof is structural ONLY because internal/vlm cannot reach the store. The
+    # moment a client takes a *store.Store it can be handed a recorder's answer
+    # instead of asking, and RC-4 becomes unfalsifiable.
+    pkg = './internal/vlm'
+    forbid = @('github.com/Sergey-Bar/ai-captain-poc/internal/store',
+               'github.com/Sergey-Bar/ai-captain-poc/internal/soak',
+               'github.com/Sergey-Bar/ai-captain-poc/internal/detect',
+               'github.com/Sergey-Bar/ai-captain-poc/internal/novelty',
+               'modernc.org/sqlite')
+    why = 'internal/vlm decides what an operator is told. It must reach no database, no pipeline and no detector: a verifier that can read what somebody said last time is a recorder, and a recorder is exactly what RC-4 forbids.'
+  },
+  @{
+    # The novelty engine is a leaf for the same reason as the overlay: it owns the
+    # region and it owns nothing else. A detector that could reach the store could
+    # report a decision it did not measure, and a detector that could reach soak
+    # would be inside the pipeline it is supposed to be a measurement of.
+    pkg = './internal/novelty'
+    forbid = @('github.com/Sergey-Bar/ai-captain-poc/internal/store',
+               'github.com/Sergey-Bar/ai-captain-poc/internal/soak',
+               'github.com/Sergey-Bar/ai-captain-poc/internal/vlm',
+               'github.com/Sergey-Bar/ai-captain-poc/internal/detect',
+               'github.com/Sergey-Bar/ai-captain-poc/internal/ui',
+               'modernc.org/sqlite')
+    why = 'internal/novelty measures a region from pixels and nothing else. A score that could read the database could report a decision nobody measured, and the box on a pushed event is supposed to be ours and measured.'
   }
 )
 foreach ($b in $boundaries) {
@@ -262,7 +294,7 @@ if ($py) {
 } else { Skip "no Python interpreter, so the sidecar's tests did not run" }
 
 # --- 8. red check -----------------------------------------------------------
-Step "red check (three controls removed from the CODE, each must turn the suite red)"
+Step "red check (eleven controls removed from the CODE, each must turn the suite red)"
 
 if ($SkipRedCheck) {
   Skip "the red check was skipped with -SkipRedCheck. A release check must run it."
@@ -295,6 +327,73 @@ if ($SkipRedCheck) {
       to   = 'if dist < e.cfg.Tolerance*1000 { // REDCHECK: the band was made total'
       pkg  = './internal/detect'
       why  = 'widen it until every frame is "on the line" and no crossing is ever decided, so a run reports zero events and no error at all'
+    },
+    # --- RC-1..RC-7: the seven checks the plan calls "the whole difference
+    # between a demo and a system". Each one is a control whose REMOVAL produces a
+    # specific lie, and each has a test whose subject is that control.
+    @{
+      name = 'RC-1 a missing answer is never a negative one (parse time)'
+      file = 'internal\vlm\parse.go'
+      from = 'if o.State != aistate.Asked {'
+      to   = 'if o.State != aistate.Asked && false { // REDCHECK RC-1: the fabricated-negative control was removed'
+      pkg  = './internal/vlm'
+      why  = 'a degraded or not_asked observation keeps its verdict, so a camera operator is told nothing happened because we could not ask'
+    },
+    @{
+      name = 'RC-1 the same rule, at write time'
+      file = 'internal\store\observations.go'
+      from = 'if o.AIState != aistateAsked && vlm.Verdict(o.Verdict) != vlm.VerdictNone {'
+      to   = 'if false { // REDCHECK RC-1: the durable half was removed'
+      pkg  = './internal/store'
+      why  = 'a second writer that forgot the parser would put a fabricated negative into the one table a proof chain reads'
+    },
+    @{
+      name = 'RC-2 an edited ledger row fails verification'
+      file = 'internal\store\ledger.go'
+      from = 'func hashMatches(a, b string) bool { return len(a) == 64 && a == b }'
+      to   = 'func hashMatches(a, b string) bool { return len(a) == 64 } // REDCHECK RC-2: the comparison was reduced to a length test'
+      pkg  = './internal/store'
+      why  = 'the chain verifies for an edited row, so "the ledger is intact" becomes a comment and the proof chain proves nothing'
+    },
+    @{
+      name = 'RC-3 the ledger is append-only'
+      file = 'internal\store\ledger.go'
+      from = 'var ledgerGuards = []string{ledgerGuardUpdate, ledgerGuardDelete}'
+      to   = 'var ledgerGuards = []string{} // REDCHECK RC-3: the append-only triggers were removed'
+      pkg  = './internal/store'
+      why  = 'a person with a sqlite3 prompt can edit or delete a recorded decision row, and the guard that said they could not is gone'
+    },
+    @{
+      name = 'RC-4 a replay makes zero provider calls'
+      file = 'internal\soak\replay.go'
+      from = 'if rep.ProviderCalls > 0 {'
+      to   = 'if rep.ProviderCalls > 0 && false { // REDCHECK RC-4: the zero-call assertion was removed'
+      pkg  = './internal/soak'
+      why  = 'a replay that quietly re-inferred prints the same PASS, so "replayable from stored facts" stops being a claim about this code'
+    },
+    @{
+      name = 'RC-5 a snapshot is the frame the decision was made on'
+      file = 'internal\soak\snapshot.go'
+      from = 'if !ok || len(raw) == 0 {'
+      to   = 'if false { // REDCHECK RC-5: the frame-attribution refusal was removed'
+      pkg  = './internal/soak'
+      why  = 'the picture on file is a real frame of the same camera and a different instant, and every check that only asks "is there a picture?" still passes'
+    },
+    @{
+      name = 'RC-6 the measured box reaches the pushed event'
+      file = 'internal\xprotect\client.go'
+      from = 'if in.Box.Empty() {'
+      to   = 'if in.Box.Empty() && false { // REDCHECK RC-6: the all-zero-box refusal was removed'
+      pkg  = './internal/xprotect'
+      why  = 'the VMS draws nothing on the operator timeline while the database beside it says the region is real — the worst thing a demo can show'
+    },
+    @{
+      name = 'RC-7 a call to the other region is refused by name'
+      file = 'internal\vlm\vlm.go'
+      from = 'if !c.pinned(host) {'
+      to   = 'if !c.pinned(host) && false { // REDCHECK RC-7: the cross-region refusal was removed'
+      pkg  = './internal/vlm'
+      why  = "a site in the EU ships footage to the US host; there is deliberately no failover, and this is the line that refuses it"
     }
   )
   Push-Location $PWD
@@ -313,8 +412,17 @@ if ($SkipRedCheck) {
       }
       try {
         [System.IO.File]::WriteAllText($full, $mutated)
+        # The same relaxation the sidecar step needs, for the same reason: a
+        # control whose removal produces a COMPILE ERROR makes `go test` write to
+        # stderr, and on this shell that becomes a terminating NativeCommandError
+        # which aborts the whole gate mid-loop. A compile error is a legitimate red
+        # result here — the control really is gone — so it must be read as one
+        # rather than as a crash.
+        $ErrorActionPreference = 'Continue'
         & $go test -count=1 $c.pkg *> $null
-        if ($LASTEXITCODE -eq 0) {
+        $exit = $LASTEXITCODE
+        $ErrorActionPreference = 'Stop'
+        if ($exit -eq 0) {
           Fail "$($c.name): the suite stayed green with the control removed. $($c.why). A test that cannot fail when its subject is gone is not a test."
         } else {
           Pass "$($c.name) removed -> the suite went red, as it must"

@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/detect"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/evidence"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/overlay"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
@@ -40,34 +39,57 @@ import (
 // clip takes, and a snapshot written after it would be a snapshot of a LATER
 // frame. The picture of a decision has to be the frame the decision was made on.
 //
+// W2-5: the picture and the sequence are read TOGETHER and the sequence is
+// compared against the frame the decision was made on. The pointer used to be read
+// with no sequence at all, so "the picture of the decision" was in fact "the
+// newest picture", which is a different thing and is a lie once the snapshot is
+// evidence in a proof chain. A mismatch is REFUSED rather than stored: an
+// unattributable snapshot is not evidence, and a mis-attributed one is worse than
+// none.
+//
 // A failure here is recorded and the run continues. A missing snapshot is
 // visible — the screen renders `no data` — and a run that died because a JPEG
 // could not be encoded would have thrown away a real detection over a
 // convenience.
-func (r *Runner) storeSnapshot(ctx context.Context, id string, c detect.Crossing, aiState string) {
-	if r.opt.Evidence == nil || r.opt.LastJPEG == nil {
+func (r *Runner) storeSnapshot(ctx context.Context, id string, ev TriggerEvent, aiState string, frameSeq uint64) {
+	if r.opt.Evidence == nil || r.opt.FrameJPEGFor == nil {
+		if r.opt.Evidence != nil {
+			r.noteSnapshotFault(ctx, ev, "no snapshot was recorded for "+id+" because the frame source cannot produce the "+
+				"picture of a NAMED frame; a snapshot that cannot be attributed to an instant is not evidence of one")
+		}
 		return
 	}
-	raw := r.opt.LastJPEG()
-	if len(raw) == 0 {
-		// No frame has been read yet. That is the absence of a picture, and the
-		// screen says so; inventing one is the one thing this must not do.
+	raw, ok := r.opt.FrameJPEGFor(frameSeq)
+	if !ok || len(raw) == 0 {
+		// REDCHECK RC-5: the snapshot must be the frame the decision was made on.
+		//
+		// Removing this refusal is what a mis-attributed proof chain looks like:
+		// the picture on file is a real frame of the same camera and a different
+		// instant, and every check that only asks "is there a picture?" still
+		// passes.
+		var newest uint64
+		if r.opt.LastJPEGSeq != nil {
+			_, newest = r.opt.LastJPEGSeq()
+		}
+		r.noteSnapshotFault(ctx, ev, fmt.Sprintf("no snapshot was recorded for %s: frame %d is no longer held and the newest "+
+			"picture is frame %d, so attributing one to the other would file a different instant's picture under this decision",
+			id, frameSeq, newest))
 		return
 	}
 	drawn, err := r.drawSnapshot(raw, aiState)
 	if err != nil {
-		r.noteSnapshotFault(ctx, c, "the crossing snapshot could not be drawn: "+err.Error())
+		r.noteSnapshotFault(ctx, ev, "the crossing snapshot could not be drawn: "+err.Error())
 		return
 	}
 
 	staging := filepath.Join(r.opt.DataRoot, "staging")
 	if err := os.MkdirAll(staging, 0o755); err != nil {
-		r.noteSnapshotFault(ctx, c, "the staging directory for the crossing snapshot could not be created: "+err.Error())
+		r.noteSnapshotFault(ctx, ev, "the staging directory for the crossing snapshot could not be created: "+err.Error())
 		return
 	}
 	tmp := filepath.Join(staging, id+"-snapshot.jpg")
 	if err := os.WriteFile(tmp, drawn, 0o644); err != nil {
-		r.noteSnapshotFault(ctx, c, "the crossing snapshot could not be written: "+err.Error())
+		r.noteSnapshotFault(ctx, ev, "the crossing snapshot could not be written: "+err.Error())
 		return
 	}
 	// PutKind reads the copy back out of the store and hashes it before it
@@ -75,20 +97,23 @@ func (r *Runner) storeSnapshot(ctx context.Context, id string, c detect.Crossing
 	// medium — the same R5 the clip path has always had.
 	stored, err := r.opt.Evidence.PutKind(tmp, evidence.CrossingSnapshot)
 	if err != nil {
-		r.noteSnapshotFault(ctx, c, "the crossing snapshot could not be stored: "+err.Error())
+		r.noteSnapshotFault(ctx, ev, "the crossing snapshot could not be stored: "+err.Error())
 		return
 	}
 	ref := r.opt.Evidence.StorageRefKind(stored.Hash, stored.Kind)
 	if err := r.opt.Store.SetSnapshot(ctx, id, ref, stored.Kind); err != nil {
-		r.noteSnapshotFault(ctx, c, "the crossing snapshot was stored but not recorded against the detection: "+err.Error())
+		r.noteSnapshotFault(ctx, ev, "the crossing snapshot was stored but not recorded against the detection: "+err.Error())
 		return
 	}
-	r.logf("crossing snapshot %s (%d bytes) recorded as %s", stored.Hash[:12], stored.Bytes, stored.Kind)
+	r.appendLedger(ctx, store.LedgerClipStored, id,
+		"snapshot_ref="+ref, "snapshot_kind="+stored.Kind,
+		"snapshot_frame_seq="+itoa64(int64(frameSeq)))
+	r.logf("crossing snapshot %s (%d bytes) recorded as %s for frame %d", stored.Hash[:12], stored.Bytes, stored.Kind, frameSeq)
 }
 
-func (r *Runner) noteSnapshotFault(ctx context.Context, c detect.Crossing, detail string) {
+func (r *Runner) noteSnapshotFault(ctx context.Context, ev TriggerEvent, detail string) {
 	_ = r.opt.Store.RecordFault(ctx, r.opt.RunID, store.Fault{
-		At: c.At, Reason: store.FaultClipRefused, Detail: detail,
+		At: ev.At, Reason: store.FaultClipRefused, Detail: detail,
 	})
 	r.logf("%s", detail)
 }

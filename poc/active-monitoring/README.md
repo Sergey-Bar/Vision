@@ -14,6 +14,47 @@
 
 ---
 
+## Read these three, in English, before anything else
+
+| | |
+|---|---|
+| [`docs/verify-live.md`](docs/verify-live.md) | **the five minutes a judge watches**, with the answer to each question that follows it |
+| [`docs/demo-live.md`](docs/demo-live.md) | the run against a **live** camera and a **live** XProtect, and the four refusals that must be in place before it |
+| [`contracts/hafnia/README.md`](contracts/hafnia/README.md) | what the VLM client assumes, which assumption is **contested by the provider's own documentation**, and what settles it |
+| [`docs/one-pager.md`](docs/one-pager.md) | one page, for handing to somebody |
+
+### What changed, and what it cost
+
+The trigger path is no longer a per-frame ONNX sidecar. It is a **pure-Go novelty
+engine** (`internal/novelty`) that MEASURES which part of the frame changed, and a
+**hosted model** (`internal/vlm`) that is asked **once per event** what is happening
+in that region. The split is the honest one:
+
+> Cheap perception proposes; the expensive model verifies.
+
+The Hafnia API documents **no region output and no bounding box** — it returns text.
+So the box on a pushed event is ours and measured, and the label on it is the model's
+and is attributed as a claim. There is no synthetic model hash anywhere.
+
+The `SP_POC_AI_MODEL`, `SP_POC_AI_ANCHORS` and `SP_POC_SIDECAR_SCRIPT` variables are
+still read — `SP_POC_TRIGGER_MODE=sidecar` is a real mode and a useful one, it is how
+a threshold gets chosen — but the **shipped pipeline does not require them**, and
+`pyworker/` is a measurement tool rather than a dependency.
+
+New commands:
+
+```
+pocctl demo --live             the same demo against a live camera and a live VMS
+pocctl prove <detection>       recompute one decision from stored facts, zero provider calls
+pocctl audit ledger            recompute the hash-chained decision ledger
+pocctl audit seal              sign the chain head, or verify a seal
+pocctl audit seals             verify every seal against a trusted public key
+pocctl audit decisions         the stored decision inputs: score, threshold, measured region
+pocctl audit observations      every model's answer, with its attribution and reason code
+```
+
+---
+
 ## מה זה
 
 מערכת אחת ש:
@@ -177,7 +218,7 @@ set it with a path on a LOCAL disk
 | boundary | אין import של הפלטפורמה; השורש לא בונה את המודול; `internal/xprotect` לא מכיר את `xpsim`; `internal/detect` ו־`internal/ai` לא מכירים אחסון או את התול |
 | tests | `go test -race -p 1 -count=1 ./...` |
 | sidecar | `py -3 -m unittest` על `pyworker/` |
-| **red check** | **שלושה בקרות מוסרות מהקוד**, וכל אחת חייבת להפוך את הסביבה ל־אדום |
+| **red check** | **אחד עשרה בקרות מוסרות מהקוד**, וכל אחת חייבת להפוך את הסביבה ל־אדום |
 
 ### ה־red check
 
@@ -185,11 +226,23 @@ set it with a path on a LOCAL disk
 טסט. מחיקת טסט לא מוכיחה דבר: סביבה עם טסט אחד פחות עדיין ירוקה, והדבר שהטסט
 שמר עליו עדיין לא מוגן. מחיקת הבדיקה עצמה מוכיחה שהטסט **שומר** עליה.
 
+שלוש הראשונות היו קיימות לפני עבודת ה־VLM, ושבע האחרונות הן `RC-1` עד `RC-7` —
+שבע הבדיקות שהתוכנית קוראת להן "ההבדל בין הדמו למערכת". כל אחת מסירה הכחשה
+אחת מסוימת:
+
 | נמחק | למה הסביבה חייבת להאדים |
 |---|---|
 | `internal/evidence/store.go` — בדיקת צורת ה־SHA-256 | בלי היא שם שנבחר על ידי קורא מתקבל, ושתי תקלות יכולות להצביע על אותו אובייקט |
 | `internal/store/detections.go` — ה־`WHERE … status NOT IN ('done')` | בלי היא זיהוי שהסתיים אפשר להזיז שוב, וחצייה אחת מקבלת שתי סיפורים |
 | `internal/detect/engine.go` — רצועת הסבילות | בליה כל פריים "על הקו", ולא חוצה דבר: ריצה מדווחת אפס אירועים **ואין שום שגיאה** |
+| `internal/vlm/parse.go` — ניקוי גזירה כשלא נשאלו | מפעיל רואה "לא קרה דבר" כי **אנחנו** לא הצלחנו לשאול |
+| `internal/store/observations.go` — אותו כלל בכתיבה | כותב שני שכח את הפרסר מכניס את אותה שקר לטבלה שההוכחה קוראת |
+| `internal/store/ledger.go` — השוואת הגיבוב | "הלדגר שלם" הופך להערה |
+| `internal/store/ledger.go` — הטריגרים של append-only | אדם עם `sqlite3` עורך החלטה שכבר נרשמה |
+| `internal/soak/replay.go` — אפס קריאות ספק בהשרדה | "ניתן להשמע מעובדות שמורות" מפסיק להיות טענה על הקוד הזה |
+| `internal/soak/snapshot.go` — השיוך הפריים | התמונה שבקובץ היא פריים אמיתי מאותה מצלמה ב**רגע אחר** |
+| `internal/xprotect/client.go` — סירוב תיבת אפס | Milestone מצייר כלום בזמן שמסד הנתונים אומר שהאזור אמיתי |
+| `internal/vlm/vlm.go` — סירוב חוצה־אזור | אתר ב־EU שולח וידאו למארח ה־US |
 
 ---
 
@@ -223,15 +276,21 @@ set it with a path on a LOCAL disk
 | `internal/source` | בניית שורת הפקודה של `ffmpeg`, `ffprobe`, טבלת יכולות | כלום |
 | `internal/recorder` | תהליך `ffmpeg` היחיד, צינור MJPEG, קטעים, גלילת תקציב דיסק, חיתוך קליפים | `internal/source` |
 | `internal/ai` | לקוח הצד־שרת, אוצר האחווה, p50/p95/p99 | כלום |
+| `internal/novelty` | **מנוע החדשנות המקומי** — מודד את האזור מפיקסלים, בלי ONNX ובלי Python | כלום |
+| `internal/vlm` | **לקוח Hafnia** — העלאה, קריאה, פריסה, סימון אזור, תקציב יומי | `contracts/hafnia` |
 | `internal/detect` | מעקב IoU, מכונת מצבי חציית קו, קירור | כלום |
-| `internal/store` | SQLite ב־WAL, outbox, הפקה חוזרת מהמסד | כלום |
-| `internal/evidence` | מאגר מבוסס תוכן, הגנות נתיב, ניקוי לפי גיל | כלום |
-| `internal/xprotect` | תבניות חוט Milestone | `contracts/xprotect` |
-| `internal/xpsim` | מדמה VMS מקומי | כלום — הוא **שרת**, לא משתתף |
+| `internal/store` | SQLite ב־WAL, outbox, **לדגר משורש גיבוב**, חתימת ed25519, הפקה חוזרת מהמסד | כלום |
+| `internal/evidence` | מאגר מבוסס תוכן, הגנות נתיׁ, ניקוי לפי גיל | כלום |
+| `internal/xprotect` | תבניות חוט Milestone, דחיפת **אירוע ו־bookmark** עם קריאת־חזרה | `contracts/xprotect` |
+| `internal/xpsim` | מדמה VMS מקומי, כולל קריאת־חזרה ל־bookmarks | כלום — הוא **שרת**, לא משתתף |
 | `internal/supervisor` | תהליכי הילדים, backpressure, `stream_gap` | `internal/recorder` |
-| `internal/soak` | preflight, קריטריות, מנוע ההרצה, הדוח | הכול |
-| `internal/ui` | המסך | `internal/store` |
-| `pyworker/` | צד־שרת Python: פריים → תיבות | `numpy`, `onnxruntime`. **לא** OpenCV, **לא** Pillow |
+| `internal/soak` | preflight, קריטריות, מנוע ההרצה, `prove`, הדוח | הכול |
+| `internal/ui` | המסך, **הגזירה שרופה בפיקסלים**, כותרות אבטחה | `internal/store` |
+| `pyworker/` | צד־שרת Python: פריים → תיבות. **כלי מדידה**, לא במסלול ההפעלה | `numpy`, `onnxruntime`. **לא** OpenCV, **לא** Pillow |
+
+`internal/vlm` ו־`internal/novelty` הם **עלים**: הגרף־הייבוא ב־gate אוסר עליהם לייבא
+מסד, צינור, זיהוי או ממשק. לוקח ה־VLM אינו יכול לקרוא מהמסד ולהחזיר מה שמישהו אמר
+בפעם האחרונה — וזה בדיוק מה ש־`pocctl prove` טוען שאין בו.
 
 `internal/xpsim` **לא** מיובא על ידי `internal/xprotect`. זו לא בדיקת סגנון: הלקוח
 אינו יודע שיש מדמה, והמדמה אינה יודעת שיש צינור. הגבול נבדק ב־**גרף הייבוא** על

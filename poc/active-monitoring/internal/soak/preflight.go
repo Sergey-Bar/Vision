@@ -50,6 +50,17 @@ type PreflightInput struct {
 	DataRoot     string
 	Client       *ai.Client
 	SimURL       string
+	// TriggerMode is where the boxes come from: `novelty` (the shipped path) or
+	// `sidecar`. An empty value means the caller has not been updated, and the
+	// sidecar row keeps its old meaning rather than the run silently changing
+	// which component is required.
+	TriggerMode string
+	// VLMProvider is the declared verifier: `none` or `hafnia`.
+	VLMProvider string
+	// VLMRegion and VLMHost pin where footage may go. There is no failover, so
+	// preflight prints the host an operator is about to send video to.
+	VLMRegion string
+	VLMHost   string
 	// ClockChecked is the result of an NTP probe: "synchronised", "not
 	// verified", or the error. "not verified" is allowed, but the report has to
 	// say so.
@@ -108,23 +119,57 @@ func Preflight(ctx context.Context, in PreflightInput) (PreflightResult, error) 
 	add(Check{Name: "h264 decoder listed by ffmpeg", Pass: decodersOK, Why: decoderWhy,
 		Detail: decoderDetail(ctx, in, "h264")})
 
-	// 3. The sidecar answers and its model is loaded. Before the run, not during.
-	if in.Client == nil {
-		add(Check{Name: "sidecar ready with the model loaded", Pass: false,
-			Why:      sidecarWhy,
-			Detail:   "no sidecar client was supplied",
-			Measured: "none"})
-	} else {
-		p, err := in.Client.Probe(ctx)
-		if err != nil {
+	// 3. The trigger path is ready.
+	//
+	// W1-4: this row was "the sidecar answers and its model is loaded", hard-on.
+	// The shipped trigger is the local novelty engine, so the row asked a question
+	// about a component the run does not have — and the table's own lesson is
+	// "it failed is not an action", which applies to a row that cannot fail for a
+	// reason that exists as much as to one that cannot pass.
+	//
+	// So the row is replaced rather than deleted. A `sidecar` run still needs the
+	// sidecar; a `novelty` run instead checks the two things that can actually
+	// stop it: that the verifier it declared is configured, and that the pinned
+	// reference can be written, because a camera_integrity trigger with nowhere to
+	// pin its reference measures against nothing.
+	switch {
+	case in.TriggerMode == "sidecar" || (in.TriggerMode == "" && in.Client != nil):
+		if in.Client == nil {
 			add(Check{Name: "sidecar ready with the model loaded", Pass: false,
-				Why: sidecarWhy, Detail: err.Error()})
-		} else {
-			add(Check{Name: "sidecar ready with the model loaded", Pass: true,
 				Why:      sidecarWhy,
-				Measured: fmt.Sprintf("model=%s input=%dx%d providers=%s", p.Model, p.InputSize[0], p.InputSize[1], strings.Join(p.Providers, ",")),
-				Detail:   "the sidecar answered /healthz with ready=true"})
+				Detail:   "no sidecar client was supplied and SP_POC_TRIGGER_MODE is sidecar",
+				Measured: "none"})
+		} else {
+			p, err := in.Client.Probe(ctx)
+			if err != nil {
+				add(Check{Name: "sidecar ready with the model loaded", Pass: false,
+					Why: sidecarWhy, Detail: err.Error()})
+			} else {
+				add(Check{Name: "sidecar ready with the model loaded", Pass: true,
+					Why:      sidecarWhy,
+					Measured: fmt.Sprintf("model=%s input=%dx%d providers=%s", p.Model, p.InputSize[0], p.InputSize[1], strings.Join(p.Providers, ",")),
+					Detail:   "the sidecar answered /healthz with ready=true"})
+			}
 		}
+	default:
+		verifier := in.VLMProvider
+		if verifier == "" {
+			verifier = "none"
+		}
+		detail := "the trigger is the local novelty engine and the run declares no verifier, so every event is an " +
+			"UNVERIFIED proposal. That is a legitimate configuration and the report labels it as such; it is not the same " +
+			"product as a run that asks a model."
+		if verifier != "none" {
+			detail = fmt.Sprintf("the trigger is the local novelty engine and the verifier is %q in region %q, pinned to %s. "+
+				"Region is not failed over: an outage degrades the run and the footage stays on site.", verifier, in.VLMRegion, in.VLMHost)
+			if in.VLMRegion == "" || in.VLMHost == "" {
+				add(Check{Name: "local trigger with a declared verifier", Pass: false,
+					Why: triggerWhy, Detail: "a verifier was declared without a region, so footage has no pinned destination"})
+				break
+			}
+		}
+		add(Check{Name: "local trigger with a declared verifier", Pass: true,
+			Why: triggerWhy, Measured: "trigger=novelty verifier=" + verifier, Detail: detail})
 	}
 
 	// 4. The source is visible: at least one frame within the deadline.
@@ -258,11 +303,16 @@ const (
 	ffmpegWhy  = "without ffmpeg there is no source, no recording and no frames, so the run would produce nothing while looking alive"
 	decoderWhy = "a source whose codec ffmpeg cannot decode produces a stream of errors and no frames, which looks like a source problem and is not"
 	sidecarWhy = "a model that fails to load is a crash in minute one, and the report would call that a dropout of the run rather than of the setup"
-	sourceWhy  = "no decodable video stream means preflight cannot see a first frame, and the run would hang silently instead of failing"
-	diskWhy    = "starting with too little room means the run fills the disk and stops with disk_budget_exceeded, which is a run that never concluded"
-	localWhy   = "SQLite WAL and fsync are not guaranteed on a network share, and a WAL that does not fsync loses commits"
-	powerWhy   = "a machine that sleeps in the middle of the night makes a week of uptime look like a week of dropouts, and AC1 is zero-tolerance"
-	whoamiWhy  = "a push that reached nothing and a push that reached a simulator look identical unless the target is asked, and this run reports against a simulator"
+	// triggerWhy is the novelty row's. The shipped trigger has no model to fail to
+	// load, so the thing that can actually stop it is a verifier declared without a
+	// pinned destination — and that is a refusal, not a warning.
+	triggerWhy = "the trigger measures a region locally and cannot decide about it; the only thing that can stop the run " +
+		"is a verifier that was declared without saying where the footage may go"
+	sourceWhy = "no decodable video stream means preflight cannot see a first frame, and the run would hang silently instead of failing"
+	diskWhy   = "starting with too little room means the run fills the disk and stops with disk_budget_exceeded, which is a run that never concluded"
+	localWhy  = "SQLite WAL and fsync are not guaranteed on a network share, and a WAL that does not fsync loses commits"
+	powerWhy  = "a machine that sleeps in the middle of the night makes a week of uptime look like a week of dropouts, and AC1 is zero-tolerance"
+	whoamiWhy = "a push that reached nothing and a push that reached a simulator look identical unless the target is asked, and this run reports against a simulator"
 )
 
 func commandExists(name string) (bool, string) {

@@ -33,6 +33,10 @@ func main() {
 		err = cmdRehearse(os.Args[2:])
 	case "report":
 		err = cmdReport(os.Args[2:])
+	case "audit":
+		err = cmdAudit(os.Args[2:])
+	case "prove":
+		err = cmdProve(os.Args[2:])
 	case "soak":
 		err = cmdSoak(os.Args[2:])
 	case "local-faults":
@@ -74,6 +78,13 @@ func usage() {
   soak faults              the six LOCAL fault classes: worker, ffmpeg, python, db freeze, disk fill, sim down
   report [--run <id>]      re-read the store and print the report
   demo                     the three-minute demonstration against xpsim
+  demo --live             the same, against the LIVE XProtect instance and the live source
+  prove <detection>        recompute this decision from stored facts, with zero provider calls
+  audit ledger             recompute the hash-chained decision ledger
+  audit seal               sign the chain head, or verify a seal
+  audit seals              verify every seal against a trusted public key
+  audit decisions          the stored decision inputs: score, threshold, measured region
+  audit observations       every model's answer, with its attribution and reason code
   zone --pick <source>     print a still with a coordinate grid, to draw a line on
   run                      run the pipeline in the foreground
   sim                      run the xpsim simulator on loopback

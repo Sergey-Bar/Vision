@@ -79,7 +79,9 @@ func TestPreflightSaysWhatEachFailingRowCosts(t *testing.T) {
 	for _, want := range []string{
 		"ffmpeg on PATH",
 		"h264 decoder listed by ffmpeg",
-		"sidecar ready with the model loaded",
+		// W1-4: the row is named for the TRIGGER, not for the sidecar. This
+		// world declares none, so the sidecar is not required and asking for it
+		// would be asking about a component the run does not have.
 		"source visible (at least one frame)",
 		"free space >= 1.50x the measured 7-day budget",
 		"clock stated (ntp, host, or explicitly not verified)",

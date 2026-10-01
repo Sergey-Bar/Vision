@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "output_shape": {
+    "fields": ["verdict", "summary", "confidence", "insufficient_evidence"]
+  },
+  "prompts": [
+    {
+      "id": "alarm",
+      "class": "alarm",
+      "version": "v1",
+      "file": "alarm.v1.txt"
+    },
+    {
+      "id": "camera_integrity",
+      "class": "camera_integrity",
+      "version": "v1",
+      "file": "camera_integrity.v1.txt"
+    }
+  ]
+}

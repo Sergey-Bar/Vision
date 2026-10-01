@@ -155,6 +155,10 @@ func TestPlaceBookmarkSendsTheDocumentedBody(t *testing.T) {
 		DevicePath:    "/Local/00000000-0000-0000-0000-000000000000",
 		TimeTriggered: at,
 		Description:   "bookmark target: no VMS recording in this build - the pointer is empty by construction; the event's evidence ref is the usable one",
+		// W1-6: the reference is required, because it is the only field the
+		// read-back can match on and a bookmark that cannot be found again can be
+		// placed twice.
+		Reference: "aicap-alarm-abcdef0123456789",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -170,9 +174,10 @@ func TestPlaceBookmarkRefusesAnIncompleteRequest(t *testing.T) {
 		name string
 		in   xprotect.BookmarkInput
 	}{
-		{"no header", xprotect.BookmarkInput{DevicePath: "/x", TimeTriggered: time.Now()}},
-		{"no device path", xprotect.BookmarkInput{Header: "h", TimeTriggered: time.Now()}},
-		{"no time", xprotect.BookmarkInput{Header: "h", DevicePath: "/x"}},
+		{"no header", xprotect.BookmarkInput{DevicePath: "/x", TimeTriggered: time.Now(), Reference: "r"}},
+		{"no device path", xprotect.BookmarkInput{Header: "h", TimeTriggered: time.Now(), Reference: "r"}},
+		{"no time", xprotect.BookmarkInput{Header: "h", DevicePath: "/x", Reference: "r"}},
+		{"no reference", xprotect.BookmarkInput{Header: "h", DevicePath: "/x", TimeTriggered: time.Now()}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

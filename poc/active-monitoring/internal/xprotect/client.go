@@ -422,6 +422,21 @@ type EventInput struct {
 	Evidence      EvidenceRef
 }
 
+// Empty reports whether the box names no region at all.
+//
+// It exists for RC-6. A box of all zeros is not "a small object" and it is not "a
+// conservative default": it is a missing measurement printed as a real one, and
+// on a pushed XProtect event it is the difference between a VMS drawing the
+// object on the operator's timeline and drawing nothing at all.
+func (b Box) Empty() bool {
+	return b.Top == 0 && b.Left == 0 && b.Bottom == 0 && b.Right == 0
+}
+
+// NonEmpty reports whether the box names a real region. A full-frame box counts.
+func (b Box) NonEmpty() bool {
+	return b.Right > b.Left && b.Bottom > b.Top
+}
+
 // BuildEvent turns a detection into the documented body. The source is
 // "cameras/<guid>" because that is the shape the events API expects for a
 // camera-originated event.
@@ -434,6 +449,32 @@ func BuildEvent(in EventInput) (EventRequest, error) {
 	}
 	if in.Tag == "" {
 		return EventRequest{}, errors.New("xprotect: the event has no tag; the tag is derived from the detection's content and is the only field the read-back can match on")
+	}
+	// REDCHECK RC-6: an event with an all-zero box is refused rather than sent.
+	//
+	// Every pushed event used to carry top/left/bottom/right all zero while the
+	// row in the database beside it held real numbers. That is the worst thing a
+	// demo can show, because the bounding box is what makes a VMS draw the object
+	// on the operator's timeline — and it fails while the database says otherwise.
+	// REDCHECK RC-6: an event with an all-zero box is refused rather than sent.
+	//
+	// Every pushed event used to carry top/left/bottom/right all zero while the
+	// row in the database beside it held real numbers. That is the worst thing a
+	// demo can show, because the bounding box is what makes a VMS draw the object
+	// on the operator's timeline — and it fails while the database says otherwise.
+	//
+	// The check below is the ONLY one that catches the zero box. The inversion
+	// check after it deliberately does not: a box that is 0,0,0,0 is inverted by
+	// every ordinary definition (`right < left` is false for equal values), so
+	// folding the two together would make this line unreachable and the red check
+	// for it would pass vacuously. Two refusals, two defects, two controls.
+	if in.Box.Empty() {
+		return EventRequest{}, fmt.Errorf("xprotect: refusing to push an event whose bounding box is all zero (%+v); "+
+			"the region is measured locally and a zero region is a missing measurement, not a conservative default", in.Box)
+	}
+	if in.Box.Right < in.Box.Left || in.Box.Bottom < in.Box.Top {
+		return EventRequest{}, fmt.Errorf("xprotect: refusing to push an event whose bounding box is inverted (%+v); "+
+			"bottom/right must be at or above top/left", in.Box)
 	}
 	return EventRequest{
 		Type:     in.EventTypeGUID,
@@ -618,6 +659,48 @@ type BookmarkInput struct {
 	Reference     string
 }
 
+// BuildBookmark turns a bookmark into the documented body.
+//
+// It is a separate function from [Client.PlaceBookmark] rather than being folded
+// into it, because the outbox has to carry the exact bytes that were meant to be
+// sent and a body assembled at the send site is a body nobody reviewed. The
+// refusals are the same ones the send path makes, so a bookmark that would be
+// refused is refused at build time — while the incident is still being recorded
+// and the failure can be attributed to it.
+//
+// A bookmark carries no video. It is a pointer, and in a real VMS it points at the
+// VMS's own recording of that interval, which is exactly its value.
+func BuildBookmark(in BookmarkInput) (BookmarkRequest, error) {
+	if in.Header == "" {
+		return BookmarkRequest{}, errors.New("xprotect: the bookmark has no header, which the contract marks required")
+	}
+	if in.DevicePath == "" {
+		return BookmarkRequest{}, errors.New("xprotect: the bookmark has no device path, which the contract marks required; " +
+			"a bookmark with no device points at nothing, and an operator who follows it finds nothing")
+	}
+	if in.TimeTriggered.IsZero() {
+		return BookmarkRequest{}, errors.New("xprotect: the bookmark has no timeTriggered; a bookmark without a time does not point at anything")
+	}
+	if in.Reference == "" {
+		return BookmarkRequest{}, errors.New("xprotect: the bookmark has no reference; the bookmarks API has no tag, so the " +
+			"reference is the only field the read-back can match on and a bookmark without one can be placed twice")
+	}
+	body := BookmarkRequest{
+		Header:        in.Header,
+		DevicePath:    DevicePath{Type: "local", ID: in.DevicePath},
+		TimeTriggered: in.TimeTriggered.UTC().Format(time.RFC3339Nano),
+		Description:   in.Description,
+		Reference:     in.Reference,
+	}
+	if !in.TimeBegin.IsZero() {
+		body.TimeBegin = in.TimeBegin.UTC().Format(time.RFC3339Nano)
+	}
+	if !in.TimeEnd.IsZero() {
+		body.TimeEnd = in.TimeEnd.UTC().Format(time.RFC3339Nano)
+	}
+	return body, nil
+}
+
 // PlaceBookmark posts a bookmark.
 //
 // The bookmark is a pointer, not a copy: the body carries no video. In a real
@@ -667,6 +750,113 @@ func (c *Client) PlaceBookmark(ctx context.Context, in BookmarkInput) (Outcome, 
 		return Outcome{State: "push_refused", Status: status, Body: respBody}, &RefusedError{Status: status, Detail: firstLine(respBody), Body: respBody}
 	}
 	return Outcome{State: "retry", Status: status, Body: respBody}, &RetryableError{Status: status, Detail: firstLine(respBody), Body: respBody}
+}
+
+// SendBookmarkPayload posts a pre-built bookmark body and reads it back.
+//
+// It is the same operation as [Client.PlaceBookmark] with the body supplied
+// rather than assembled, and it exists for the same reason
+// [Client.SendPayload] does: an outbox row has to carry the exact bytes that were
+// meant to be sent, because a body reconstructed from a Go struct is a body whose
+// fields nobody reviewed.
+//
+// The read-back is not optional. A bookmark answers 200 whether or not it created
+// anything useful, so "we placed a bookmark" is a claim about a status code unless
+// something goes and looks.
+func (c *Client) SendBookmarkPayload(ctx context.Context, p PushPayload) (Outcome, error) {
+	if len(p.Body) == 0 {
+		return Outcome{}, &RefusedError{Status: 0, Detail: "xprotect: an empty bookmark body cannot be pushed"}
+	}
+	if p.Tag == "" {
+		return Outcome{}, &RefusedError{Status: 0, Detail: "xprotect: a bookmark with no reference has nothing for the read-back to match on"}
+	}
+	// Read back first. A duplicate from a previous attempt that returned 200 and
+	// then lost its response must not become a second bookmark.
+	if id, err := c.FindBookmarkByRef(ctx, p.Tag); err != nil {
+		return Outcome{}, err
+	} else if id != "" {
+		return Outcome{State: "push_sent", RemoteID: id, Status: StatusOKBookmark,
+			Detail: "a bookmark with this reference already exists, so it was not placed again"}, nil
+	}
+	tok, err := c.accessToken(ctx, false)
+	if err != nil {
+		return Outcome{}, err
+	}
+	endpoint := strings.TrimRight(c.cfg.BaseURL, "/") + PathBookmarks
+	status, respBody, err := c.do(ctx, http.MethodPost, endpoint, tok, p.Body, "application/json")
+	if err != nil {
+		return Outcome{State: classifyPushStatus(status), Status: status, Body: respBody}, err
+	}
+	if status == StatusOKBookmark {
+		id, _ := idFromResponse(respBody)
+		found, rberr := c.FindBookmarkByRef(ctx, p.Tag)
+		if rberr != nil {
+			return Outcome{State: "unknown", Status: status, Body: respBody,
+				Detail: "the bookmark returned 200 but the read-back failed, so the bookmark's existence is not established"}, rberr
+		}
+		if found == "" {
+			return Outcome{State: "unknown", Status: status, Body: respBody,
+				Detail: "the bookmark returned 200 but a read-back of the reference found nothing, so it is not treated as " +
+					"placed; the outbox row keeps it for a human"}, nil
+		}
+		if id == "" {
+			id = found
+		}
+		return Outcome{State: "push_sent", RemoteID: id, Status: status, Body: respBody,
+			Detail: "200 and the read-back found the bookmark"}, nil
+	}
+	switch {
+	case status == 403 || status == 400:
+		return Outcome{State: "push_refused", Status: status, Body: respBody}, &RefusedError{Status: status, Detail: firstLine(respBody), Body: respBody}
+	default:
+		return Outcome{State: "retry", Status: status, Body: respBody}, &RetryableError{Status: status, Detail: firstLine(respBody), Body: respBody}
+	}
+}
+
+// FindBookmarkByRef reads a bookmark back by its reference field.
+//
+// The bookmarks API has no idempotency key and no tag, so the reference IS the
+// key — which is why BookmarkInput.Reference carries the event's tag rather than a
+// human label. A bookmark whose reference is prose cannot be found again, and a
+// push that cannot be found again is a push that can happen twice.
+func (c *Client) FindBookmarkByRef(ctx context.Context, ref string) (string, error) {
+	tok, err := c.accessToken(ctx, false)
+	if err != nil {
+		return "", err
+	}
+	q := url.Values{}
+	q.Set("reference", "equals:'"+ref+"'")
+	endpoint := strings.TrimRight(c.cfg.BaseURL, "/") + PathBookmarks + "?" + q.Encode()
+	status, body, err := c.do(ctx, http.MethodGet, endpoint, tok, nil, "")
+	if err != nil {
+		return "", err
+	}
+	if status == http.StatusNotFound {
+		// The bookmarks API answers 404 for an empty result set on some versions
+		// and 200 with an empty array on others. Both mean "not there", and
+		// treating the 404 as an error would make every first push look like a
+		// failure on one version and not the other.
+		return "", nil
+	}
+	if status != http.StatusOK {
+		return "", &RetryableError{Status: status, Detail: "the bookmark read-back answered " + firstLine(body), Body: body}
+	}
+	var out struct {
+		Data []struct {
+			ID        string `json:"id"`
+			Reference string `json:"reference"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(body), &out); err != nil {
+		return "", &RetryableError{Status: status, Detail: "the bookmark read-back is not usable JSON, so whether the " +
+			"bookmark exists is unknown", Body: body}
+	}
+	for _, b := range out.Data {
+		if b.Reference == ref {
+			return b.ID, nil
+		}
+	}
+	return "", nil
 }
 
 // do performs one request, refreshing the token once on a 401 and retrying.

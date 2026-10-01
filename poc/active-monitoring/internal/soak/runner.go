@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,10 +17,12 @@ import (
 	"github.com/Sergey-Bar/ai-captain-poc/internal/classify"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/detect"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/evidence"
+	"github.com/Sergey-Bar/ai-captain-poc/internal/novelty"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/recorder"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/source"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/supervisor"
+	"github.com/Sergey-Bar/ai-captain-poc/internal/vlm"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/xprotect"
 )
 
@@ -88,6 +91,23 @@ type RunnerOptions struct {
 	// LastJPEG is consulted by the frame hook when it needs the picture rather
 	// than the pixels. It is nil until a frame has been read.
 	LastJPEG func() []byte
+	// LastJPEGSeq is LastJPEG and the sequence of the frame it belongs to, read
+	// together.
+	//
+	// W2-5: the snapshot path needs the PAIR, because a picture with no number
+	// beside it cannot be checked against the decision it is supposed to be
+	// evidence of. A nil here means no snapshot is attributed, and that is said
+	// out loud as a recorded fault rather than leaving the pointer readable and
+	// unchecked.
+	LastJPEGSeq func() ([]byte, uint64)
+	// FrameJPEGFor returns the picture of one SPECIFIC frame, by sequence.
+	//
+	// It is what the snapshot path uses, because the process is a goroutine or two
+	// behind its own pipe and "the newest picture" is a later frame than the one
+	// the decision was made on. A nil here means no snapshot is attributed, and
+	// that is said out loud as a recorded fault rather than leaving the pointer
+	// readable and unchecked.
+	FrameJPEGFor func(seq uint64) ([]byte, bool)
 	// ChildPIDs returns the processes AC5's CPU clause is about: ffmpeg and the
 	// sidecar. It is a function because the set changes when a child restarts,
 	// and a stale PID is a process that is no longer ours.
@@ -115,6 +135,38 @@ type RunnerOptions struct {
 	// from the store. A run with none of them scores AC7 as NOT RUN, which is
 	// the correct answer and not a passing one.
 	Rehearsals []Rehearsal
+
+	// TriggerMode names what produces the boxes in the trigger path.
+	//
+	// `novelty` is the shipped path: the local novelty engine measures a region
+	// from pixels and proposes, and the VLM verifies once per event. `sidecar` is
+	// the older path, where a local ONNX sidecar classified every frame at 5 fps.
+	//
+	// It is a field rather than a boolean because the two paths differ in cost
+	// (one call per event against one per frame), in latency, and in what an
+	// absent answer MEANS. A boolean `UseSidecar` is a name that has to be read
+	// to know which way round it is, and that is how a demo ends up paying per
+	// frame for a model it says it calls per event.
+	TriggerMode string
+
+	// Trigger is the local novelty engine. Nil in `sidecar` mode.
+	Trigger Trigger
+	// Observer is the VLM. Nil means nobody to ask, which is `not_asked` and not
+	// a degraded answer.
+	Observer Observer
+
+	// BookmarkDevicePath is the VMS device path a bookmark points at.
+	//
+	// It is required to place a bookmark and was already required by
+	// configuration (`SP_POC_DEVICE_PATH`) and read nowhere. A bookmark with no
+	// device path names no camera, so it points at nothing, and a bookmark that
+	// points at nothing is worse than no bookmark because an operator follows it.
+	BookmarkDevicePath string
+
+	// ReferenceSHA is the pinned reference's content hash for this run's camera,
+	// so the decision record can name the picture every measurement was made
+	// against. It is set by the runner when it pins or restores.
+	ReferenceSHA string
 }
 
 // Runner owns the run loop: frames in, decisions out, side effects recorded
@@ -217,6 +269,12 @@ func NewRunner(opt RunnerOptions) (*Runner, error) {
 	}
 	if opt.Heartbeat <= 0 {
 		opt.Heartbeat = 10 * time.Second
+	}
+	if opt.TriggerMode == "" {
+		// The shipped path is the novelty trigger. A runner built with neither a
+		// trigger nor a sidecar client is still legal — the loop tests build one —
+		// and it produces `not_asked` rather than a zero detection count.
+		opt.TriggerMode = TriggerNovelty
 	}
 	return &Runner{opt: opt, log: opt.Logf, lat: ai.NewLatencies(200000), stopPush: make(chan struct{}), cpu: NewCPUSampler(func() []int {
 		if opt.ChildPIDs == nil {
@@ -380,57 +438,54 @@ func (r *Runner) frameLoop(ctx context.Context) error {
 	}
 }
 
-// process handles one frame: infer, decide, and for each crossing record first
+// Trigger modes. The shipped path is `novelty`; `sidecar` is the older local
+// classifier, kept as a measurement tool rather than in the trigger path.
+const (
+	// TriggerNovelty is the local novelty engine: measured regions, one model
+	// call per event, licence-free.
+	TriggerNovelty = "novelty"
+	// TriggerSidecar is the per-frame ONNX sidecar. It is a measurement tool now:
+	// useful for choosing a threshold, wrong for the trigger path because it
+	// costs a call per frame and answers about frames nobody asked about.
+	TriggerSidecar = "sidecar"
+)
+
+// ValidTriggerMode refuses a mode this build does not operate.
+func ValidTriggerMode(m string) bool { return m == TriggerNovelty || m == TriggerSidecar }
+
+// UsesSidecar reports whether the run's boxes come from the per-frame sidecar.
+//
+// Every sidecar precondition is gated on this one predicate, because three
+// separate conditionals is three places where the gate was left hard-on and the
+// ONNX model was required by a run that never called it.
+func UsesSidecar(m string) bool { return m == TriggerSidecar }
+
+// process handles one frame: measure, decide, and for each incident record first
 // and then act.
 func (r *Runner) process(ctx context.Context, f recorder.Frame) {
 	r.mu.Lock()
 	hook := r.opt.onFrame
 	r.mu.Unlock()
 
-	boxes := make([]ai.Box, 0, 8)
+	var boxes []ai.Box
 	telemetry := ai.Telemetry{}
 	// aiState is the four-word vocabulary state, and it defaults to `not_asked`
 	// — the honest reading when no client is configured at all, rather than an
 	// empty string that the screen would render as "fine".
 	aiState := ai.StateNotAsked
-	if r.opt.Client == nil {
-		// No client means nobody to ask. NewRunner refuses this, so reaching
-		// here means a runner was built by hand; treating it as "nothing was
-		// asked" is the honest reading and is what the loop test relies on.
-		r.logf("frame %d: not_asked — no sidecar client is configured", f.Seq)
-	} else {
-		res := r.opt.Client.Detect(ctx, f.Seq, f.RGB, f.Width, f.Height)
-		r.lat.Add(res.Latency)
-		telemetry, aiState = res.Telemetry, res.State
-		r.mu.Lock()
-		r.lastAIState = res.State
-		r.mu.Unlock()
-		switch res.State {
-		case ai.StateDegraded, ai.StateCannotTell:
-			// Only a reply that ARRIVED and could not be read counts as unparsed.
-			// A `degraded` frame is a deadline, and a tripwire refusal is the
-			// tripwire working; folding either into AC6's "unparsed" clause would
-			// make the clause mean something other than what it says.
-			if res.Unparsed {
-				r.mu.Lock()
-				r.unparsedAI++
-				r.mu.Unlock()
-			}
-			_ = r.opt.Store.RecordFault(ctx, r.opt.RunID, store.Fault{
-				At: f.At, Reason: store.FaultAIUnreadable,
-				Detail: fmt.Sprintf("frame %d at %s: %s", f.Seq, f.At.Format(time.RFC3339), res.Reason),
-			})
-		case ai.StateNotAsked:
-			// A frame that was never sent is not a failure of the model, and it is
-			// not an empty scene. It is counted as not_asked and nothing else.
-		}
-		for _, b := range res.Boxes {
-			boxes = append(boxes, b)
-		}
+
+	switch {
+	case r.opt.Trigger != nil:
+		boxes, aiState = r.measureTrigger(f)
+	default:
+		boxes, telemetry, aiState = r.askSidecar(ctx, f)
 	}
 
 	if r.opt.Engine == nil {
-		hook(f, boxes, nil, telemetry, ai.StateNotAsked)
+		if hook != nil {
+			hook(f, boxes, nil, telemetry, aiState)
+		}
+		r.handleSentinels(ctx, f)
 		return
 	}
 	crossings, tracks, _ := r.opt.Engine.FeedAnswered(f.At, detect.Answer{
@@ -458,12 +513,111 @@ func (r *Runner) process(ctx context.Context, f recorder.Frame) {
 		// reassurance and means nothing.
 		hook(f, boxes, nil, telemetry, aiState)
 	}
-	// The sidecar's answer is recorded with the detection, so the report can say
-	// whether a crossing came from a frame the model actually answered.
+	// The measurement's state is recorded with the detection, so the report can say
+	// whether a crossing came from a frame something actually measured.
 	for _, c := range crossings {
-		r.handleCrossing(ctx, c, aiState)
+		r.handleIncident(ctx, toTriggerEvent(c, r.defaultPromptID(), r.triggerScore()), aiState, f.Seq)
 	}
 	_ = tracks
+
+	// A reference trigger's sustained event is NOT a line crossing: the whole view
+	// changed, so there is no line to cross and no side to come from. It is handled
+	// here, on the same spine — record, evidence, ask, push, bookmark — and the only
+	// thing that differs is which arithmetic produced the trigger.
+	r.handleSentinels(ctx, f)
+}
+
+// measureTrigger runs the local novelty engine over one frame.
+//
+// It returns `asked_answered` when the engine produced something and
+// `no_objects` when it did not, and it never returns a box it did not measure. A
+// novelty engine has no opinion about whether a change is an incident, so the most
+// it can honestly report is that it measured something.
+func (r *Runner) measureTrigger(f recorder.Frame) ([]ai.Box, string) {
+	if len(f.RGB) == 0 || f.Width <= 0 || f.Height <= 0 {
+		r.logf("frame %d: no pixels; the trigger measured nothing and this is not a zero", f.Seq)
+		return nil, ai.StateNotAsked
+	}
+	cands, _ := r.opt.Trigger.Candidates(f.RGB, f.Width, f.Height)
+	out := make([]ai.Box, 0, len(cands))
+	for _, c := range cands {
+		if !c.Box.NonEmpty() {
+			// An empty region is not a proposal. Passing it on would put an
+			// all-zero box on a pushed event, which is the defect RC-6 exists for.
+			continue
+		}
+		out = append(out, ai.Box{
+			Class: r.triggerClass(), Score: c.Score,
+			X1: c.Box.X1, Y1: c.Box.Y1, X2: c.Box.X2, Y2: c.Box.Y2,
+		})
+	}
+	if len(out) == 0 {
+		return nil, ai.StateNoObjects
+	}
+	return out, ai.StateAnswered
+}
+
+// askSidecar is the older per-frame path, kept as a measurement tool.
+func (r *Runner) askSidecar(ctx context.Context, f recorder.Frame) ([]ai.Box, ai.Telemetry, string) {
+	if r.opt.Client == nil {
+		r.logf("frame %d: not_asked — no sidecar client is configured", f.Seq)
+		return nil, ai.Telemetry{}, ai.StateNotAsked
+	}
+	res := r.opt.Client.Detect(ctx, f.Seq, f.RGB, f.Width, f.Height)
+	r.lat.Add(res.Latency)
+	r.mu.Lock()
+	r.lastAIState = res.State
+	r.mu.Unlock()
+	switch res.State {
+	case ai.StateDegraded, ai.StateCannotTell:
+		// Only a reply that ARRIVED and could not be read counts as unparsed.
+		// A `degraded` frame is a deadline, and a tripwire refusal is the
+		// tripwire working; folding either into AC6's "unparsed" clause would
+		// make the clause mean something other than what it says.
+		if res.Unparsed {
+			r.mu.Lock()
+			r.unparsedAI++
+			r.mu.Unlock()
+		}
+		_ = r.opt.Store.RecordFault(ctx, r.opt.RunID, store.Fault{
+			At: f.At, Reason: store.FaultAIUnreadable,
+			Detail: fmt.Sprintf("frame %d at %s: %s", f.Seq, f.At.Format(time.RFC3339), res.Reason),
+		})
+	case ai.StateNotAsked:
+		// A frame that was never sent is not a failure of the model, and it is
+		// not an empty scene. It is counted as not_asked and nothing else.
+	}
+	boxes := make([]ai.Box, 0, len(res.Boxes))
+	boxes = append(boxes, res.Boxes...)
+	return boxes, res.Telemetry, res.State
+}
+
+// handleSentinels runs every trigger that produces a whole-view event rather than
+// a proposed region.
+func (r *Runner) handleSentinels(ctx context.Context, f recorder.Frame) {
+	t := r.opt.Trigger
+	if t == nil || len(f.RGB) == 0 {
+		return
+	}
+	cfg := t.Config()
+	if string(cfg.Mode) != string(referenceMode) {
+		return
+	}
+	finding, fired := t.Watch(f.At, f.RGB, f.Width, f.Height)
+	if !fired {
+		return
+	}
+	ev := TriggerEvent{
+		DetectionClass: cfg.Class, PromptID: cfg.PromptID,
+		// No line and no direction, and both say so. A whole-frame change has
+		// neither, and inventing one would put a line name on an event that never
+		// crossed anything.
+		Line: "reference-pinned", Direction: "none", At: f.At,
+		Box:   [4]float64{0, 0, 1, 1},
+		Score: finding.Score, Novelty: t.Last(), Streak: finding.Streak,
+		RegionSource: finding.RegionSource,
+	}
+	r.handleIncident(ctx, ev, ai.StateAnswered, f.Seq)
 }
 
 func toDetect(boxes []ai.Box) []detect.Box {
@@ -474,27 +628,38 @@ func toDetect(boxes []ai.Box) []detect.Box {
 	return out
 }
 
-// handleCrossing is the R2 sequence, in this order and no other:
+// handleIncident is the R2 sequence, in this order and no other:
 //
 //  1. commit the detection row in `accepted`
-//  2. render and store the snapshot of the frame the decision was made on
-//  3. cut the clip and read it back, record clip_ok or clip_refused
-//  4. enqueue the push
+//  2. record the decision inputs, so the incident can be replayed from facts
+//  3. render and store the snapshot of the frame the decision was made on
+//  4. cut the clip and read it back, record clip_ok or clip_refused
+//  5. ask the VLM ONCE about the clip, and record the attribution
+//  6. enqueue the push
+//  7. enqueue the bookmark
 //
 // Nothing external happens before step 1, and a crash between any two steps
 // leaves a resumable row.
 //
-// The snapshot is step 2 and not step 3.5 because `cutAndStore` is a synchronous
+// The snapshot is step 3 and not step 4 because `cutAndStore` is a synchronous
 // ffmpeg re-encode that blocks the frame loop, so anything rendered after it
 // would be a snapshot of a LATER frame — which is the one thing a picture of a
 // decision must not be.
-func (r *Runner) handleCrossing(ctx context.Context, c detect.Crossing, aiState string) {
-	id := DetectionID(c, r.opt.Provenance)
+//
+// The model call is step 5 and not per frame. A paid API belongs on the event,
+// not at 5 fps: the same clip asked about twice costs twice and tells us nothing
+// new, and the clip is the evidence the answer is about.
+func (r *Runner) handleIncident(ctx context.Context, ev TriggerEvent, aiState string, frameSeq uint64) {
+	provenance := r.opt.Provenance
+	id := ev.DetectionIDFor(provenance)
+	tag := ev.EventTagFor(provenance)
+	top, left, bottom, right := regionThousandths(ev)
+
 	det := store.Detection{
-		ID: id, RunID: r.opt.RunID, At: c.At, Class: c.Class, Family: string(c.Family()), TrackID: c.TrackID, Score: scoreOf(c),
-		BoxTop: int(c.Box.Y1 * 1000), BoxLeft: int(c.Box.X1 * 1000),
-		BoxBottom: int(c.Box.Y2 * 1000), BoxRight: int(c.Box.X2 * 1000),
-		Direction: c.Direction, AIState: aiState, Provenance: r.opt.Provenance,
+		ID: id, RunID: r.opt.RunID, At: ev.At, Class: ev.DetectionClass,
+		Family: string(classify.FamilyOf(ev.DetectionClass)), TrackID: ev.TrackID, Score: ev.Score,
+		BoxTop: top, BoxLeft: left, BoxBottom: bottom, BoxRight: right,
+		Direction: ev.Direction, AIState: aiState, Provenance: provenance,
 	}
 	if err := r.opt.Store.Accept(ctx, det); err != nil {
 		// A duplicate id is the idempotency boundary working, not a defect. An
@@ -507,42 +672,257 @@ func (r *Runner) handleCrossing(ctx context.Context, c detect.Crossing, aiState 
 			// Nothing to do: the same detection is already recorded.
 		case DBBusyError(err):
 			_ = r.opt.Store.RecordFault(ctx, r.opt.RunID, store.Fault{
-				At: c.At, Reason: store.FaultDBUnavailable,
+				At: ev.At, Reason: store.FaultDBUnavailable,
 				Detail: "the detection could not be committed because the database is not accepting writes, so no clip and no push exist for it: " + err.Error(),
 			})
 			r.logf("database is not accepting writes: %v", err)
 		default:
 			_ = r.opt.Store.RecordFault(ctx, r.opt.RunID, store.Fault{
-				At: c.At, Reason: store.FaultClipRefused,
+				At: ev.At, Reason: store.FaultClipRefused,
 				Detail: "the detection could not be committed, so no evidence and no push exist for it: " + err.Error(),
 			})
 		}
 		return
 	}
+	r.appendLedger(ctx, store.LedgerDetectionCommitted, id,
+		"class="+ev.DetectionClass, "prompt="+ev.PromptID, "line="+ev.Line,
+		"direction="+ev.Direction,
+		"box="+itoa64(int64(top))+","+itoa64(int64(left))+","+itoa64(int64(bottom))+","+itoa64(int64(right)),
+		"score="+fmt.Sprintf("%.6f", ev.Novelty.Value),
+		"threshold="+fmt.Sprintf("%.6f", r.threshold()),
+		"region_source="+string(ev.RegionSource),
+	)
 
-	// Step 2: the picture of the decision. Best-effort and non-fatal — see
+	// Step 2: the decision inputs, stored from the same values the arithmetic
+	// used. A decision whose inputs cannot be replayed is a claim.
+	if r.opt.Trigger != nil {
+		d := decisionFrom(ev, r.opt.RunID, r.opt.Trigger.Config(), frameSeq, r.opt.ReferenceSHA)
+		d.DetectionID = id
+		if err := r.opt.Store.PutDecision(ctx, d); err != nil {
+			_ = r.opt.Store.RecordFault(ctx, r.opt.RunID, store.Fault{
+				At: ev.At, Reason: store.FaultDBUnavailable,
+				Detail: "the decision inputs could not be recorded, so this incident cannot be replayed from facts: " + err.Error(),
+			})
+		}
+	}
+
+	// Step 3: the picture of the decision. Best-effort and non-fatal — see
 	// storeSnapshot.
-	r.storeSnapshot(ctx, id, c, aiState)
+	r.storeSnapshot(ctx, id, ev, aiState, frameSeq)
 
-	// Step 3: the clip.
-	ref, clipErr := r.cutAndStore(ctx, c)
+	// Step 4: the clip.
+	ref, clipErr := r.cutAndStore(ctx, ev.At)
 	if clipErr != nil {
 		_ = r.opt.Store.Transition(ctx, id, store.StatusClipRefused, "", clipErr.Error())
 		_ = r.opt.Store.RecordFault(ctx, r.opt.RunID, store.Fault{
-			At: c.At, Reason: store.FaultClipRefused, Detail: clipErr.Error(),
+			At: ev.At, Reason: store.FaultClipRefused, Detail: clipErr.Error(),
 		})
 	} else {
 		if err := r.opt.Store.Transition(ctx, id, store.StatusClipOK, ref.StorageRef, ""); err != nil {
 			return
 		}
+		r.appendLedger(ctx, store.LedgerClipStored, id,
+			"sha256="+ref.SHA256, "ref="+ref.StorageRef,
+			"trim="+ref.Trim,
+			"bytes="+itoa64(ref.Bytes))
 	}
 
-	// Step 4: the push. The payload is built and enqueued; the pump attempts it.
-	if err := r.enqueueEvent(ctx, c, ref); err != nil {
+	// Step 5: the model, once, on the clip that was just stored.
+	obs := r.askObserver(ctx, id, ev, ref, clipErr)
+
+	// Steps 6 and 7: the two write-backs, both queued rather than attempted, so a
+	// slow VMS cannot block the frame loop.
+	if err := r.enqueueEvent(ctx, ev, ref, obs, tag); err != nil {
 		_ = r.opt.Store.Transition(ctx, id, store.StatusPushRefused, "", err.Error())
 		r.finish(ctx, id)
+		return
+	}
+	if err := r.enqueueBookmark(ctx, ev, ref, obs, tag); err != nil {
+		_ = r.opt.Store.RecordFault(ctx, r.opt.RunID, store.Fault{
+			At: ev.At, Reason: store.FaultClipRefused,
+			Detail: "the bookmark could not be queued, so the pushed event has no pointer to the recording: " + err.Error(),
+		})
 	}
 }
+
+// askObserver asks the model once about the stored clip and records the answer.
+//
+// There is exactly one path from a clip to an observation, and every branch of it
+// records something. A caller that gets no observation cannot record that it got
+// nothing, and a run that silently skips the model on some incidents reads as a
+// run where the model found nothing.
+func (r *Runner) askObserver(ctx context.Context, id string, ev TriggerEvent, ref EvidenceResult, clipErr error) vlm.Observation {
+	if r.opt.Observer == nil {
+		// Nobody to ask. `not_asked`, and it is recorded as that rather than as
+		// left blank.
+		obs := vlm.Observation{DetectionID: id, State: ai.StateNotAsked}
+		obs.SetState(ai.StateNotAsked)
+		obs.Finalise()
+		r.recordObservation(ctx, id, ev, obs, "")
+		return obs
+	}
+	if clipErr != nil {
+		// There is no clip to send. We did not ask, and the reason is a recorded
+		// clip failure rather than a silent skip.
+		obs := vlm.Observation{DetectionID: id, State: ai.StateNotAsked, Message: clipErr.Error()}
+		obs.SetState(ai.StateNotAsked)
+		obs.Finalise()
+		r.recordObservation(ctx, id, ev, obs, "")
+		return obs
+	}
+	clip, err := readEvidenceClip(r.opt.Evidence, ref.SHA256)
+	if err != nil {
+		obs := vlm.Observation{DetectionID: id, State: ai.StateNotAsked, Message: err.Error()}
+		obs.SetState(ai.StateNotAsked)
+		obs.Finalise()
+		_ = r.opt.Store.RecordFault(ctx, r.opt.RunID, store.Fault{
+			At: ev.At, Reason: store.FaultClipRefused,
+			Detail: "the stored clip could not be read back for the model, so the model was not asked: " + err.Error(),
+		})
+		r.recordObservation(ctx, id, ev, obs, "")
+		return obs
+	}
+	obs := r.opt.Observer.Observe(ctx, id, ev.PromptID, clip, "video/mp4")
+	if obs.DetectionID == "" {
+		obs.DetectionID = id
+	}
+	r.recordObservation(ctx, id, ev, obs, ref.SHA256)
+	return obs
+}
+
+// recordObservation writes the attribution row and the ledger step.
+func (r *Runner) recordObservation(ctx context.Context, id string, ev TriggerEvent, obs vlm.Observation, clipSHA string) {
+	input := map[string]string{}
+	if clipSHA != "" {
+		input["clip"] = clipSHA
+	}
+	if r.opt.ReferenceSHA != "" {
+		input["reference"] = r.opt.ReferenceSHA
+	}
+	row := store.Observation{
+		DetectionID: id, RunID: r.opt.RunID,
+		PromptID: obs.PromptID, PromptVersion: obs.PromptVersion,
+		AIState: obs.State, Verdict: string(obs.Verdict), Summary: obs.Summary,
+		Confidence: obs.Confidence, InsufficientEvidence: obs.InsufficientEvidence,
+		ModelIdentity: obs.ModelIdentity, ContractVersion: obs.ContractVersion,
+		Temperature: obs.Temperature, ReasonCode: obs.Reason, Detail: obs.Message,
+		OutputHash: obs.OutputHash, InputHashes: store.InputHashesOf(input),
+		LatencyMS: obs.LatencyMS, PromptTokens: obs.PromptTokens,
+		CompletionTokens: obs.CompletionTokens, AssetID: obs.AssetID,
+	}
+	// The prompt the row carries is the CLASS's prompt, not whatever the observer
+	// last reported: the class is the fact, and an observer that returned a blank
+	// prompt id has failed in a way the row must not hide.
+	if row.PromptID == "" {
+		row.PromptID = ev.PromptID
+	}
+	if err := r.opt.Store.PutObservation(ctx, row); err != nil {
+		_ = r.opt.Store.RecordFault(ctx, r.opt.RunID, store.Fault{
+			At: ev.At, Reason: store.FaultDBUnavailable,
+			Detail: "the attribution record could not be written, so this incident has no auditable answer: " + err.Error(),
+		})
+		return
+	}
+	r.appendLedger(ctx, store.LedgerVLMAsked, id,
+		"aistate="+row.AIState, "verdict="+row.Verdict,
+		"prompt_id="+row.PromptID, "prompt_version="+row.PromptVersion,
+		"contract_version="+row.ContractVersion,
+		"model_identity="+row.ModelIdentity,
+		"temperature="+fmt.Sprintf("%.4f", row.Temperature),
+		"latency_ms="+itoa64(row.LatencyMS),
+		"input_hashes="+row.InputHashes)
+	r.appendLedger(ctx, store.LedgerVLMVerdict, id,
+		"output_hash="+row.OutputHash,
+		"insufficient_evidence="+boolWord(row.InsufficientEvidence),
+		"confidence="+fmt.Sprintf("%.6f", row.Confidence),
+		"reason="+row.ReasonCode)
+}
+
+func boolWord(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
+}
+
+// readEvidenceClip reads a stored clip back for the model.
+//
+// Read-back, not a path from the cut: the file on disk in staging is a temporary
+// the disk budget may have swept, and an answer about a clip we no longer have is
+// an answer nobody can check.
+func readEvidenceClip(st *evidence.Store, sha string) ([]byte, error) {
+	if st == nil || sha == "" {
+		return nil, errors.New("soak: there is no stored clip to send")
+	}
+	rc, err := st.Open(sha)
+	if err != nil {
+		return nil, fmt.Errorf("soak: the stored clip %s cannot be opened: %w", sha, err)
+	}
+	defer func() { _ = rc.Close() }()
+	return vlm.CopyTo(rc)
+}
+
+// regionThousandths is the ONE place a normalised box becomes 0..1000
+// thousandths.
+//
+// `detections.box_*`, the pushed event and the stored decision all use it, and
+// they used to be scaled by three separate expressions. Three expressions is three
+// chances for one of them to drift, and a drifted box on a pushed event is a
+// number on a screen that disagrees with the row beside it.
+func regionThousandths(ev TriggerEvent) (top, left, bottom, right int) {
+	if ev.RegionSource == novelty.RegionWholeFrame {
+		return 0, 0, 1000, 1000
+	}
+	top = int(ev.Box[1] * 1000)
+	left = int(ev.Box[0] * 1000)
+	bottom = int(ev.Box[3] * 1000)
+	right = int(ev.Box[2] * 1000)
+	// A region that measured out as empty is clamped to the whole frame rather
+	// than pushed as zeros. Zero is not a conservative box; it is a missing one,
+	// and BuildEvent refuses it.
+	if right <= left || bottom <= top {
+		return 0, 0, 1000, 1000
+	}
+	return top, left, bottom, right
+}
+
+// triggerClass is the detector's own name for what the novelty engine measured.
+func (r *Runner) triggerClass() string {
+	if r.opt.Trigger != nil {
+		return r.opt.Trigger.Config().Class
+	}
+	return "motion"
+}
+
+// defaultPromptID is the incident class asked about when the trigger has none.
+//
+// It is the `alarm` prompt because a temporal trigger's whole question is "is
+// there a real incident in this clip", which is what that file says. A run with a
+// trigger that declared no class is asking that question, and saying so is better
+// than inventing a class.
+func (r *Runner) defaultPromptID() string {
+	if r.opt.Trigger != nil && r.opt.Trigger.Config().PromptID != "" {
+		return r.opt.Trigger.Config().PromptID
+	}
+	return "alarm"
+}
+
+func (r *Runner) triggerScore() novelty.Score {
+	if r.opt.Trigger != nil {
+		return r.opt.Trigger.Last()
+	}
+	return novelty.Score{Mode: novelty.ModeTemporal, Reason: novelty.ReasonFirstFrame}
+}
+
+func (r *Runner) threshold() float64 {
+	if r.opt.Trigger != nil {
+		return r.opt.Trigger.Config().Threshold
+	}
+	return 0
+}
+
+// referenceMode is the novelty mode whose trigger is a whole-view event.
+const referenceMode = novelty.ModeReference
 
 // EvidenceResult is what the clip step produced.
 type EvidenceResult struct {
@@ -554,9 +934,9 @@ type EvidenceResult struct {
 	Bytes      int64
 }
 
-func (r *Runner) cutAndStore(ctx context.Context, c detect.Crossing) (EvidenceResult, error) {
-	from := c.At.Add(-r.opt.ClipBefore)
-	to := c.At.Add(r.opt.ClipAfter)
+func (r *Runner) cutAndStore(ctx context.Context, at time.Time) (EvidenceResult, error) {
+	from := at.Add(-r.opt.ClipBefore)
+	to := at.Add(r.opt.ClipAfter)
 	staging := filepath.Join(r.opt.DataRoot, "staging")
 	if err := os.MkdirAll(staging, 0o755); err != nil {
 		return EvidenceResult{}, fmt.Errorf("the staging directory could not be created: %w", err)
@@ -570,8 +950,9 @@ func (r *Runner) cutAndStore(ctx context.Context, c detect.Crossing) (EvidenceRe
 		return EvidenceResult{}, err
 	}
 	ref := r.opt.Evidence.StorageRef(stored.Hash)
+	id := cutDetectionID(stored.Hash, at)
 	if err := r.opt.Store.PutEvidence(ctx, store.Evidence{
-		ID: detectionIDOf(c, r.opt.Provenance) + "-ev", DetectionID: detectionIDOf(c, r.opt.Provenance),
+		ID: id + "-ev", DetectionID: id,
 		SHA256: stored.Hash, StorageRef: ref, Bytes: stored.Bytes, Trim: cut.Trim,
 		TimeBegin: from, TimeEnd: to, ReadbackOK: true,
 	}); err != nil {
@@ -580,29 +961,26 @@ func (r *Runner) cutAndStore(ctx context.Context, c detect.Crossing) (EvidenceRe
 	return EvidenceResult{StorageRef: ref, SHA256: stored.Hash, TimeBegin: from, TimeEnd: to, Trim: cut.Trim, Bytes: stored.Bytes}, nil
 }
 
-func (r *Runner) enqueueEvent(ctx context.Context, c detect.Crossing, ev EvidenceResult) error {
-	tag := EventTag(c, r.opt.Provenance)
+// cutDetectionID is the evidence row's foreign key.
+//
+// It is derived from the clip's CONTENT rather than from the detection, because
+// the evidence table is keyed by detection and a resumed run may cut the same
+// clip twice. Two cuts of the same interval produce the same id and therefore one
+// row, which is what the unique index on sha256 was already enforcing one level
+// up.
+func cutDetectionID(sha string, at time.Time) string {
+	return "ev-" + store.HashOf([]byte(sha + "|" + at.UTC().Format(time.RFC3339Nano)))[:20]
+}
+
+func (r *Runner) enqueueEvent(ctx context.Context, ev TriggerEvent, evidence EvidenceResult, obs vlm.Observation, tag string) error {
 	in := xprotect.EventInput{
-		EventTypeGUID: r.opt.EventTypeGUID, SourceGUID: r.opt.CameraGUID, At: c.At, Tag: tag,
-		Class: c.Class, Value: classify.Value(c.Class), Confidence: scoreOf(c),
-		// B2. The box is the REAL box, in the same 0..1000 thousandths
-		// `detections.box_*` already stores, and it is scaled here by exactly the
-		// same expression rather than by a second scale that would drift.
-		//
-		// It used to be `xprotect.Box{}`. Every pushed event therefore carried
-		// top/left/bottom/right all zero while the row in the database beside it
-		// held real numbers, and the bounding box is what makes a VMS draw the
-		// object on the operator's timeline: a demo that shows zeros there is
-		// showing the product does not work, and it does so while the database
-		// says otherwise.
-		Box: xprotect.Box{
-			Top:    int(c.Box.Y1 * 1000),
-			Left:   int(c.Box.X1 * 1000),
-			Bottom: int(c.Box.Y2 * 1000),
-			Right:  int(c.Box.X2 * 1000),
-		},
-		RuleName: c.Line + "-line-cross",
-		Evidence: xprotect.EvidenceRef{StorageRef: ev.StorageRef, SHA256: ev.SHA256, TimeBegin: ev.TimeBegin.UTC().Format(time.RFC3339), TimeEnd: ev.TimeEnd.UTC().Format(time.RFC3339),
+		EventTypeGUID: r.opt.EventTypeGUID, SourceGUID: r.opt.CameraGUID, At: ev.At, Tag: tag,
+		Class: ev.DetectionClass, Value: classify.Value(ev.DetectionClass), Confidence: eventConfidence(ev, obs),
+		// The box is the MEASURED box, in the same 0..1000 thousandths
+		// `detections.box_*` stores, scaled by the one expression that does it.
+		Box:      measuredBox(ev),
+		RuleName: ruleNameFor(ev, obs),
+		Evidence: xprotect.EvidenceRef{StorageRef: evidence.StorageRef, SHA256: evidence.SHA256, TimeBegin: evidence.TimeBegin.UTC().Format(time.RFC3339), TimeEnd: evidence.TimeEnd.UTC().Format(time.RFC3339),
 			Note: "POC evidence ref; the bookmark pushed alongside points at no VMS recording in this build"},
 	}
 	body, err := xprotect.BuildEvent(in)
@@ -610,15 +988,165 @@ func (r *Runner) enqueueEvent(ctx context.Context, c detect.Crossing, ev Evidenc
 		return err
 	}
 	payload, _ := json.Marshal(body)
-	id, err := r.opt.Store.Enqueue(ctx, store.OutboxEntry{
-		DetectionID: detectionIDOf(c, r.opt.Provenance), Kind: store.KindEvent,
+	id := ev.DetectionIDFor(r.opt.Provenance)
+	outboxID, err := r.opt.Store.Enqueue(ctx, store.OutboxEntry{
+		DetectionID: id, Kind: store.KindEvent,
 		Payload: string(payload), Tag: tag,
 	}, r.opt.PushMax)
 	if err != nil {
 		return err
 	}
-	r.logf("queued push %s for detection %s", id, detectionIDOf(c, r.opt.Provenance))
+	r.appendLedger(ctx, store.LedgerPushEnqueued, id,
+		"kind="+store.KindEvent, "tag="+tag, "outbox="+itoa64(outboxID),
+		"box="+boxString(measuredBox(ev)),
+		"confidence="+fmt.Sprintf("%.6f", in.Confidence),
+		"rule="+in.RuleName)
+	r.logf("queued %s push %d for detection %s", store.KindEvent, outboxID, id)
 	return nil
+}
+
+// enqueueBookmark places the pointer that puts the operator on the recording.
+//
+// It is the single highest-value line in the pipeline and it is the one that was
+// missing: an analytics event with a bounding box tells a VMS operator THAT
+// something happened, and a bookmark tells them WHERE to look. The event carries
+// no video and this build has no VMS recording to point at, so the bookmark is
+// the only thing that connects the pushed record to the footage it is about.
+//
+// It is queued through the same outbox as the event rather than sent inline,
+// because it is an external effect and every external effect in this module is
+// recorded before it is attempted.
+func (r *Runner) enqueueBookmark(ctx context.Context, ev TriggerEvent, evidence EvidenceResult, obs vlm.Observation, tag string) error {
+	if r.opt.BookmarkDevicePath == "" {
+		// Said out loud rather than skipped. An event with no bookmark is
+		// weaker, not broken, and a run that quietly omits it looks identical to
+		// a run that placed one.
+		_ = r.opt.Store.RecordFault(ctx, r.opt.RunID, store.Fault{
+			At: ev.At, Reason: store.FaultProviderGone,
+			Detail: "no bookmark was placed because no device path is configured (SP_POC_DEVICE_PATH); the pushed event " +
+				"carries no pointer to a recording, so an operator has the alert and nowhere to go",
+		})
+		return nil
+	}
+	in := xprotect.BookmarkInput{
+		Header:        bookmarkHeader(ev, obs),
+		DevicePath:    r.opt.BookmarkDevicePath,
+		TimeTriggered: ev.At,
+		TimeBegin:     evidence.TimeBegin,
+		TimeEnd:       evidence.TimeEnd,
+		Description:   bookmarkDescription(ev, obs),
+		// The reference is the EVENT TAG, not prose. The bookmarks API has no
+		// tag field, so the reference IS the idempotency key: it is what the
+		// read-back matches on, and a bookmark whose reference is a sentence
+		// cannot be found again.
+		Reference: tag,
+	}
+	body, err := xprotect.BuildBookmark(in)
+	if err != nil {
+		return err
+	}
+	payload, _ := json.Marshal(body)
+	id := ev.DetectionIDFor(r.opt.Provenance)
+	if _, err := r.opt.Store.Enqueue(ctx, store.OutboxEntry{
+		DetectionID: id, Kind: store.KindBookmark,
+		Payload: string(payload), Tag: tag,
+	}, r.opt.PushMax); err != nil {
+		return err
+	}
+	r.appendLedger(ctx, store.LedgerPushEnqueued, id,
+		"kind="+store.KindBookmark, "tag="+tag,
+		"device="+r.opt.BookmarkDevicePath,
+		"time="+ev.At.UTC().Format(time.RFC3339))
+	return nil
+}
+
+// measuredBox is the pushed event's region, from the one scaling expression.
+func measuredBox(ev TriggerEvent) xprotect.Box {
+	top, left, bottom, right := regionThousandths(ev)
+	return xprotect.Box{Top: top, Left: left, Bottom: bottom, Right: right}
+}
+
+func boxString(b xprotect.Box) string {
+	return itoa64(int64(b.Top)) + "," + itoa64(int64(b.Left)) + "," + itoa64(int64(b.Bottom)) + "," + itoa64(int64(b.Right))
+}
+
+// eventConfidence is the confidence on the pushed event.
+//
+// The MODEL's confidence when the model answered, and the measurement's otherwise —
+// never a default. A field that is always zero tells a VMS operator the detector
+// had no opinion about a detection it had just raised, and a field that is always
+// the novelty score claims the model was more certain than it was. So the two are
+// distinguished by whether the ask was answered, which is the same predicate
+// everything else in this module uses.
+func eventConfidence(ev TriggerEvent, obs vlm.Observation) float64 {
+	if obs.State == ai.StateAnswered {
+		return obs.Confidence
+	}
+	return ev.Score
+}
+
+// ruleNameFor is the rule an Alarm Definition matches on.
+//
+// It carries the prompt id, so the VMS-side rule that fires for a tamper event is
+// a DIFFERENT rule from the one that fires for an alarm event — which is the whole
+// claim: two classes, one spine, and the class is what routes them.
+func ruleNameFor(ev TriggerEvent, obs vlm.Observation) string {
+	name := ev.Line + "-line-cross"
+	if ev.PromptID != "" {
+		name = ev.PromptID + "-" + ev.Line
+	}
+	if obs.Verdict == vlm.VerdictNone {
+		// The verdict is appended when there is one. A rule named for a verdict
+		// that does not exist would be a rule that matched a fabricated negative.
+		return name + "-unverified"
+	}
+	return name + "-" + string(obs.Verdict)
+}
+
+func bookmarkHeader(ev TriggerEvent, obs vlm.Observation) string {
+	cls := ev.DetectionClass
+	if cls == "" {
+		cls = "incident"
+	}
+	return fmt.Sprintf("%s @ %s — %s", cls, ev.At.UTC().Format(time.RFC3339), verdictPhrase(obs))
+}
+
+func bookmarkDescription(ev TriggerEvent, obs vlm.Observation) string {
+	parts := []string{
+		"incident class: " + ev.PromptID,
+		"measured region: " + string(ev.RegionSource),
+		"novelty score: " + fmt.Sprintf("%.4f", ev.Novelty.Value) + " (threshold " + fmt.Sprintf("%.4f", ev.Score) + ")",
+	}
+	if obs.Summary != "" {
+		parts = append(parts, "model: "+obs.Summary)
+	}
+	if obs.ModelIdentity != "" {
+		parts = append(parts, "model identity (as reported by the API, not verified): "+obs.ModelIdentity)
+	}
+	if obs.OutputHash != "" {
+		parts = append(parts, "output hash: "+obs.OutputHash)
+	}
+	if !obs.Absence() {
+		parts = append(parts, "the bookmark points at the VMS recording of this interval; the clip this verdict is "+
+			"about is the POC's own stored evidence and is referenced by the event's evidence field")
+	}
+	return strings.Join(parts, "; ")
+}
+
+// verdictPhrase is the operator-facing sentence for an observation.
+//
+// An absent answer says so in words rather than printing a word from the closed
+// set. "none" next to a bookmark reads as a judgement; "the model was not asked"
+// does not.
+func verdictPhrase(obs vlm.Observation) string {
+	switch {
+	case obs.State != ai.StateAnswered:
+		return "the model was not asked (" + obs.Reason + ")"
+	case obs.Verdict == vlm.VerdictNone:
+		return "the model returned no verdict"
+	default:
+		return string(obs.Verdict)
+	}
 }
 
 // pump makes the outbox attempts. It is the only place a push is attempted, so
@@ -651,41 +1179,65 @@ func (r *Runner) pump(ctx context.Context) {
 }
 
 func (r *Runner) attempt(ctx context.Context, e store.OutboxEntry) {
+	if r.opt.XProtect == nil {
+		return
+	}
 	// The outbox row carries the exact bytes that were meant to be sent, and
 	// they are sent as they are. Reconstructing an EventInput from a stored
 	// payload would be a lossy round trip through a Go struct, and the field
 	// that quietly did not survive it would be the one the report claims was
 	// pushed.
-	out, err := r.opt.XProtect.SendPayload(ctx, xprotect.PushPayload{Body: []byte(e.Payload), Tag: e.Tag})
+	var out xprotect.Outcome
+	var err error
+	if e.Kind == store.KindBookmark {
+		out, err = r.opt.XProtect.SendBookmarkPayload(ctx, xprotect.PushPayload{Body: []byte(e.Payload), Tag: e.Tag})
+	} else {
+		out, err = r.opt.XProtect.SendPayload(ctx, xprotect.PushPayload{Body: []byte(e.Payload), Tag: e.Tag})
+	}
 	switch {
 	case err == nil && out.State == "push_sent":
 		_ = r.opt.Store.RecordResult(ctx, e.ID, "push_sent", out.Detail, out.RemoteID)
-		_ = r.opt.Store.Transition(ctx, e.DetectionID, store.StatusPushSent, "", "")
-		r.pushed++
-		r.finish(ctx, e.DetectionID)
+		if e.Kind == store.KindEvent {
+			_ = r.opt.Store.Transition(ctx, e.DetectionID, store.StatusPushSent, "", "")
+			r.pushed++
+			r.finish(ctx, e.DetectionID)
+		}
+		r.appendLedger(ctx, store.LedgerPushResult, e.DetectionID,
+			"kind="+e.Kind, "result=push_sent", "remote_id="+out.RemoteID,
+			"tag="+e.Tag, "attempts="+itoa64(int64(e.Attempts+1)))
 	case err == nil:
 		// The push returned something the client is not willing to call sent. The
 		// row stays with no result, so AC4 counts it, and the backoff retries.
 		_ = r.opt.Store.RecordResult(ctx, e.ID, "", out.Detail, "")
-		r.logf("push %d: state=%q %s", e.ID, out.State, out.Detail)
+		r.logf("push %d (%s): state=%q %s", e.ID, e.Kind, out.State, out.Detail)
 	default:
 		var refused *xprotect.RefusedError
 		if asRefused(err, &refused) {
 			_ = r.opt.Store.RecordResult(ctx, e.ID, "push_refused", refused.Detail, "")
-			_ = r.opt.Store.Transition(ctx, e.DetectionID, store.StatusPushRefused, "", refused.Detail)
-			r.finish(ctx, e.DetectionID)
+			r.appendLedger(ctx, store.LedgerPushResult, e.DetectionID,
+				"kind="+e.Kind, "result=push_refused", "detail="+oneLine(refused.Detail), "tag="+e.Tag)
+			if e.Kind == store.KindEvent {
+				_ = r.opt.Store.Transition(ctx, e.DetectionID, store.StatusPushRefused, "", refused.Detail)
+				r.finish(ctx, e.DetectionID)
+			}
 			return
 		}
 		var auth *xprotect.ErrAuth
 		if asAuth(err, &auth) {
 			_ = r.opt.Store.RecordResult(ctx, e.ID, "auth_failed", auth.Error(), "")
-			_ = r.opt.Store.Transition(ctx, e.DetectionID, store.StatusPushRefused, "", "auth_failed: "+auth.Detail)
-			r.finish(ctx, e.DetectionID)
+			r.appendLedger(ctx, store.LedgerPushResult, e.DetectionID,
+				"kind="+e.Kind, "result=auth_failed", "tag="+e.Tag)
+			if e.Kind == store.KindEvent {
+				_ = r.opt.Store.Transition(ctx, e.DetectionID, store.StatusPushRefused, "", "auth_failed: "+auth.Detail)
+				r.finish(ctx, e.DetectionID)
+			}
 			return
 		}
-		// Retryable: the row keeps no result and the backoff brings it back.
+		// Retryable: the row keeps no result and the backoff brings it back —
+		// until the budget is spent, at which point the store dead-letters it and
+		// the row says so rather than retrying until the run ends.
 		_ = r.opt.Store.RecordResult(ctx, e.ID, "", err.Error(), "")
-		r.logf("push %d retryable: %v", e.ID, err)
+		r.logf("push %d (%s) retryable: %v", e.ID, e.Kind, err)
 	}
 }
 

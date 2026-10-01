@@ -26,12 +26,14 @@ import (
 	"github.com/Sergey-Bar/ai-captain-poc/internal/config"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/detect"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/evidence"
+	"github.com/Sergey-Bar/ai-captain-poc/internal/novelty"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/recorder"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/soak"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/source"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/supervisor"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/ui"
+	"github.com/Sergey-Bar/ai-captain-poc/internal/vlm"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/xprotect"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/xpsim"
 )
@@ -229,15 +231,50 @@ func run() error {
 	}
 
 	// The sidecar, started and proven ready before the recording begins.
-	aic, err := ai.New(cfg.AIAddr, cfg.AIDeadline)
+	//
+	// W1-4: it is started only in `sidecar` trigger mode. It used to be started
+	// unconditionally, which meant every shipped run — the one that measures a
+	// region with pure Go and asks a hosted model once per event — required a
+	// Python interpreter, numpy, onnxruntime and an ONNX file it never loaded,
+	// and `watch` returned an error before the recorder started if any of them
+	// was missing. A hard dependency on a component the run does not use is a
+	// dependency an operator debugs for an hour before discovering the answer is
+	// "you don't need this".
+	usesSidecar := soak.UsesSidecar(cfg.TriggerMode)
+	var aic *ai.Client
+	var side *supervisor.Sidecar
+	if usesSidecar {
+		aic, err = ai.New(cfg.AIAddr, cfg.AIDeadline)
+		if err != nil {
+			return err
+		}
+		side, err = supervisor.StartSidecar(context.Background(), sidecarConfig(cfg), aic, logf)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = side.Stop(3 * time.Second) }()
+		logf("trigger mode: sidecar — the per-frame ONNX classifier is in the trigger path")
+	} else {
+		logf("trigger mode: novelty — the local novelty engine measures regions and the model verifies each event once")
+	}
+
+	// The verifier. One hosted model, one region, no failover.
+	observer, err := buildObserver(cfg, logf)
 	if err != nil {
 		return err
 	}
-	side, err := supervisor.StartSidecar(context.Background(), sidecarConfig(cfg), aic, logf)
+	if observer == nil {
+		logf("no verifier is configured (SP_POC_VLM_PROVIDER=%q): every event will be an UNVERIFIED proposal, "+
+			"and the report will say so", cfg.VLMProvider)
+	} else {
+		logf("verifier: %s in region %s", soak.NameOf(observer), cfg.VLMRegion)
+	}
+
+	// The trigger. Pure Go, licence-free, and it owns the region.
+	trigger, err := buildTrigger(cfg, st, ev, provenanceFor(cfg, spec))
 	if err != nil {
 		return err
 	}
-	defer func() { _ = side.Stop(3 * time.Second) }()
 
 	if err := rec.Start(context.Background()); err != nil {
 		return err
@@ -272,6 +309,8 @@ func run() error {
 	runner, err := soak.NewRunner(soak.RunnerOptions{
 		RunID: runID, DataRoot: cfg.DataRoot, Spec: spec, Store: st, Evidence: ev,
 		Client: aic, XProtect: push, Engine: engine, Recorder: rec,
+		TriggerMode: cfg.TriggerMode, Trigger: trigger, Observer: observer,
+		BookmarkDevicePath: cfg.DevicePath,
 		// The clipper and the VMS identifiers are wired HERE, from the
 		// configuration, and not left to a caller to remember.
 		//
@@ -298,8 +337,13 @@ func run() error {
 		// them there. Reading them from a scratch directory is what left AC7 as
 		// NOT RUN in every run before it was fixed.
 		Rehearsals: loadRehearsals(st, runID),
-		LastJPEG:   rec.LastFrameJPEG,
-		OnFrame:    nil,
+		// W2-4 / W2-5: the picture, the sequence it belongs to, and the picture OF
+		// A NAMED FRAME. The screen needs the newest; the snapshot path needs the
+		// one the decision was made on, and those are different questions.
+		LastJPEG:     rec.LastFrameJPEG,
+		LastJPEGSeq:  rec.LastFrameJPEGSeq,
+		FrameJPEGFor: rec.FrameJPEGFor,
+		OnFrame:      nil,
 	})
 	if err != nil {
 		return err
@@ -313,6 +357,9 @@ func run() error {
 			return err
 		}
 		runner.SetFrameHook(func(f recorder.Frame, boxes []ai.Box, jpg []byte, tel ai.Telemetry, aiState string) {
+			// W3-6: the run's own record of itself, read ONCE per frame so the truth
+			// bar and the picture cannot show two different moments of the same run.
+			proofLedger, proofSeal := proofFor(st, context.Background(), runID, verifierLabelFromEnv(cfg))
 			// aiState is whatever `ai.Interpret` returned, from the runner, for
 			// THIS frame. It used to be the literal "answered", which is not one
 			// of the four words in CONTRACT.md §2.2 and which was printed for
@@ -329,6 +376,21 @@ func run() error {
 				Provenance: provenanceFor(cfg, spec), MaxBoxesDrawn: cfg.MaxBoxesDrawn,
 				Simulator: !cfg.IsLiveVMS(), Source: spec.Label(), Mode: cfg.Mode,
 				ClockSource: cfg.ClockSource,
+				// W2-8: the verdict line, read from the store rather than kept in
+				// the runner, so the picture can only say what the proof chain can
+				// read back. Mapped field by field, because `ui.Live` holds
+				// strings and a string cannot drag a package dependency across a
+				// boundary into a drawing routine.
+				Verdict:        verdictFor(runner, context.Background()).Verdict,
+				VerdictKnown:   verdictFor(runner, context.Background()).Known,
+				VerdictSummary: verdictFor(runner, context.Background()).Summary,
+				PushResult:     verdictFor(runner, context.Background()).PushResult,
+				Ledger:         proofLedger,
+				Seal:           proofSeal,
+				Model:          verifierLabelFromEnv(cfg),
+				Counters: fmt.Sprintf("det %d  ·  pushed %d  ·  vlm %s",
+					crossingsThisRun(st, runID), pushesThisRun(st, runID),
+					verifierLabel(observer)),
 			})
 		})
 		uiCtx, cancelUI := context.WithCancel(context.Background())
@@ -510,6 +572,179 @@ func ringWindow(cfg config.Config) time.Duration {
 		w = 2 * one
 	}
 	return w
+}
+
+// buildObserver builds the verifier, or returns nil when the run declares none.
+//
+// A nil observer is a legitimate configuration and it is NOT a degraded one: the
+// novelty trigger measures a region and proposes it, and an operator who wants an
+// unverified proposal has exactly that. What must never happen is the reverse — a
+// run that says it verifies and cannot — and that is a configuration refusal in
+// internal/config rather than a nil here.
+func buildObserver(cfg config.Config, logf func(string, ...any)) (soak.Observer, error) {
+	if strings.EqualFold(strings.TrimSpace(cfg.VLMProvider), "none") || cfg.VLMProvider == "" {
+		return nil, nil
+	}
+	region, err := vlm.ParseRegion(cfg.VLMRegion)
+	if err != nil {
+		return nil, err
+	}
+	c, err := vlm.New(vlm.Config{
+		Region: region, APIKey: cfg.VLMAPIKey, APIModelName: cfg.VLMModel,
+		DailyQueryCap: cfg.VLMDailyCap, Logf: logf,
+	})
+	if err != nil {
+		return nil, err
+	}
+	host, _ := region.Host()
+	logf("footage is pinned to %s for this run. There is no failover: if %s is unreachable the run degrades "+
+		"and the footage stays on site.", host, host)
+	return vlmObserver{c: c}, nil
+}
+
+// vlmObserver adapts *vlm.Client to soak.Observer.
+//
+// It is a two-method adapter rather than making Client implement the interface
+// directly, so internal/vlm never learns what a pipeline is. The dependency runs
+// one way: the pipeline may use a client, and a client does not use a pipeline.
+type vlmObserver struct{ c *vlm.Client }
+
+func (o vlmObserver) Observe(ctx context.Context, detectionID, class string, clip []byte, mediaType string) vlm.Observation {
+	return o.c.Observe(ctx, detectionID, class, clip, mediaType)
+}
+
+func (o vlmObserver) PromptIDFor(class string) (string, string, error) {
+	p, err := o.c.Prompts().Get(class)
+	if err != nil {
+		return "", "", err
+	}
+	return p.ID, p.Version, nil
+}
+
+// buildTrigger builds the local novelty engine for this run's trigger mode.
+//
+// Two engines are possible and the mode picks one:
+//
+//   - `alarm` is TEMPORAL. It proposes a measured region per frame and the line
+//     crossing machine turns a track of them into an event.
+//   - `camera_integrity` is REFERENCE. It pins a view and fires when the view has
+//     STAYED different for a sustained period, which is the only shape a moved or
+//     covered camera has.
+//
+// Both are built here because the choice belongs to the operator's declared mode
+// and not to a default inside the runner: a detector that silently became a
+// different detector would change what the report is about without changing the
+// report's text.
+func buildTrigger(cfg config.Config, st *store.Store, ev *evidence.Store, provenance string) (soak.Trigger, error) {
+	if soak.UsesSidecar(cfg.TriggerMode) {
+		return nil, nil
+	}
+	base := novelty.Config{
+		Threshold: cfg.NoveltyThreshold, Release: cfg.NoveltyRelease,
+		Sustain: cfg.NoveltySustain, GridWidth: cfg.NoveltyGrid,
+		Cooldown: cfg.Cooldown,
+	}
+	if integrity, err := integrityEnabled(provenance); err != nil {
+		return nil, err
+	} else if integrity {
+		nc := base
+		nc.Mode = novelty.ModeReference
+		nc.Class = "camera_integrity"
+		nc.PromptID = "camera_integrity"
+		nc.Sustain = cfg.NoveltySustain
+		eng, err := novelty.New(nc)
+		if err != nil {
+			return nil, err
+		}
+		return soak.NewNoveltyTrigger(eng, st, ev, cfg.DataRoot), nil
+	}
+	nc := base
+	nc.Mode = novelty.ModeTemporal
+	nc.Class = "motion"
+	nc.PromptID = "alarm"
+	nc.Sustain = 1
+	eng, err := novelty.New(nc)
+	if err != nil {
+		return nil, err
+	}
+	return soak.NewNoveltyTrigger(eng, st, ev, cfg.DataRoot), nil
+}
+
+// integrityEnabled reports whether this run should carry the camera_integrity
+// trigger beside the alarm one.
+//
+// It is off by default and on with `SP_POC_CAMERA_INTEGRITY=1`, because a whole-view
+// trigger needs a PINNED REFERENCE and pinning one changes what is on disk for
+// every future run. That is a decision to make deliberately, not one to make in a
+// default.
+func integrityEnabled(provenance string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("SP_POC_CAMERA_INTEGRITY"))) {
+	case "1", "true", "yes":
+		return true, nil
+	case "", "0", "false", "no":
+		return false, nil
+	default:
+		return false, fmt.Errorf("SP_POC_CAMERA_INTEGRITY is not a yes/no value; a camera_integrity trigger pins a " +
+			"reference view on disk and that has to be a decision, not a typo")
+	}
+}
+
+// verifierLabel is what the picture prints for the verifier, so a screenshot says
+// whether a model looked at this and which one. `none` is printed as `none` and
+// not as an empty cell: a picture that cannot say whether anything verified it is
+// the picture from which the fabricated negative is cropped.
+func verifierLabel(o soak.Observer) string {
+	if o == nil {
+		return "none"
+	}
+	return soak.NameOf(o)
+}
+
+// verifierLabelFromEnv is the same answer, read from the configuration the run was
+// started with rather than from a handle that only exists while it is running.
+//
+// The report is regenerated long after the run ended, and a truth line that can
+// only be produced inside the run is a truth line that goes stale. It is also the
+// answer the REPORT should give: "who was configured to verify this" is a property
+// of the configuration, and a report that says "somebody" because a handle had
+// been dropped is worse than useless.
+func verifierLabelFromEnv(cfg config.Config) string {
+	if strings.EqualFold(strings.TrimSpace(cfg.VLMProvider), "none") || cfg.VLMProvider == "" {
+		return "none"
+	}
+	if cfg.VLMModel != "" {
+		return cfg.VLMProvider + " (" + cfg.VLMModel + ")"
+	}
+	return cfg.VLMProvider
+}
+
+// verdictFor reads the store for the verdict the picture will show. It is a
+// function so the four fields in the Publish call are read from ONE snapshot: four
+// reads of a table another goroutine is writing can show four different answers on
+// one frame, which is worse than showing a slightly old one.
+func verdictFor(r *soak.Runner, ctx context.Context) soak.VerdictLine {
+	return r.Verdict(ctx)
+}
+
+// proofFor reads the run's own record of itself for the screen's truth bar. W3-6.
+//
+// It is read once per frame and published with the frame, so the bar and the
+// picture can never show two different moments of the same run.
+func proofFor(st *store.Store, ctx context.Context, runID, model string) (ledger, seal string) {
+	t := soak.BuildTruth("", "", "", false, "").WithProof(st, ctx, runID, model)
+	return t.Ledger, t.Seal
+}
+
+// pushesThisRun counts the detections whose event reached the VMS, which is a
+// different number from the detections and is the one an operator checks against
+// Smart Client.
+func pushesThisRun(st *store.Store, runID string) int {
+	entries, err := st.Stats(context.Background(), runID)
+	if err != nil {
+		return 0
+	}
+	_ = entries
+	return entries.WithResult
 }
 
 func sidecarConfig(cfg config.Config) supervisor.SidecarConfig {
@@ -730,7 +965,7 @@ func buildReport(st *store.Store, runID string, cfg config.Config, spec source.S
 			Evidence: evidenceStats.Stored, PushAttempts: push.Total, DeadLettered: push.DeadLetter,
 			Heartbeats: beats, Faults: len(faults), Detector: detectorTally},
 		FalsePositives: soak.NewFalsePositiveRow(in.FalsePositives),
-		Truth:          soak.BuildTruth(spec.Label(), cfg.XProtectBaseURL, pushTargetName(cfg), cfg.IsLiveVMS(), provenanceFor(cfg, spec)),
+		Truth:          soak.BuildTruth(spec.Label(), cfg.XProtectBaseURL, pushTargetName(cfg), cfg.IsLiveVMS(), provenanceFor(cfg, spec)).WithProof(st, ctx, runID, verifierLabelFromEnv(cfg)),
 		NotProven:      soak.NotProven(in, summary),
 		Warnings:       warnings(endReason, in, cfg),
 	}

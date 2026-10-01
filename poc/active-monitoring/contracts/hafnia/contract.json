@@ -1,0 +1,69 @@
+{
+  "$comment": [
+    "The machine-readable twin of contracts/hafnia/README.md. `internal/vlm` reads",
+    "neither file: the client is built against the ASSUMPTIONS below, and this",
+    "document exists so a reader can tell an assumption from a verified fact",
+    "without reading Go.",
+    "",
+    "`status` is the whole point of this file. It is `asserted` because no live",
+    "call has been made; `pocctl preflight` prints it, and `pocctl vlm-probe`",
+    "records the raw response under contracts/hafnia/raw/ and a human flips these",
+    "to `verified` with the date.",
+    "",
+    "Rows whose wrongness fails LOUDLY (a 404, a 401) are the cheap ones. Row 6,",
+    "the region host, is the expensive one, and the README explains why."
+  ],
+  "contract": "hafnia/vlm",
+  "contract_version": 1,
+  "retrieved": "2026-09-30",
+  "source": "https://hafnia.readme.io/docs/vlm-api",
+  "status": "asserted_not_verified",
+  "provider": "Hafnia, a Milestone Systems product",
+  "region_hosts": {
+    "eu": "api.eu.hafnia.milestonesys.com",
+    "us": "api.us.hafnia.milestonesys.com"
+  },
+  "superseded_hosts": [
+    {
+      "host": "api.hafnia.milestonesys.com",
+      "region": "eu",
+      "note": "Published by an earlier revision of the documentation without the eu. label. Recorded, not dialled; internal/vlm/regionHosts does not contain it and a test asserts that."
+    }
+  ],
+  "endpoints": [
+    {"method": "POST", "path": "/api/v1/assets", "kind": "multipart/form-data", "role": "upload", "status": "asserted"},
+    {"method": "POST", "path": "/api/v1/chat/completions", "kind": "application/json", "role": "completion", "status": "asserted"},
+    {"method": "DELETE", "path": "/api/v1/assets/{id}", "kind": "none", "role": "delete", "status": "asserted"}
+  ],
+  "auth": {"header": "Authorization", "scheme": "ApiKey", "note": "Bearer is what the root platform's client sends and it is a 401 on every call."},
+  "message_content": {
+    "kind": "typed_array",
+    "parts": [
+      {"type": "text", "field": "text"},
+      {"type": "asset_id", "field": "asset_id"}
+    ],
+    "status": "asserted"
+  },
+  "limits": {"media_type": "video/mp4", "max_bytes": 104857600, "recommended_seconds": 30},
+  "response": {
+    "documented_schema": false,
+    "documented_region": false,
+    "documented_bounding_box": false,
+    "status": "asserted",
+    "consequence": "The region is measured locally by internal/novelty and the model is never asked for coordinates. This is the assumption the architecture rests on."
+  },
+  "verdicts": ["confirmed", "false_positive", "needs_review", "none"],
+  "output_fields": ["verdict", "summary", "confidence", "insufficient_evidence"],
+  "classes": [
+    {"id": "alarm", "version": "v1", "file": "prompts/alarm.v1.txt"},
+    {"id": "camera_integrity", "version": "v1", "file": "prompts/camera_integrity.v1.txt"}
+  ],
+  "attribution": {
+    "model_identity": "what the API said; a claim by the provider",
+    "contract_version": "a content hash over the prompt, its revision, the output schema version, the API model name and the region",
+    "output_hash": "the content hash of the validated four-field output",
+    "model_hash": null,
+    "model_hash_note": "Deliberately absent. A hosted model has no weights to hash, and a synthetic hash satisfies a column check while defeating the only thing the column is for."
+  },
+  "raw_responses": "contracts/hafnia/raw/ — empty until a live call is made"
+}

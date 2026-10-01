@@ -88,6 +88,22 @@ type field struct {
 	// structural default IS the empty string: the two camera credentials.
 	structural    bool
 	structuralVal string
+	// when is the CONDITION under which this variable IS required.
+	//
+	// It exists because W1-4 retired the sidecar from the trigger path and every
+	// sidecar variable was still listed as unconditionally required. An operator
+	// running the shipped pipeline had to declare an ONNX model and a Python
+	// script it would never execute, and the remedy text described a run that
+	// "dies in minute one" — a run that has no sidecar in it and therefore cannot
+	// die that way. A gate that is wrong in the safe direction is still wrong,
+	// because the operator learns to type things in to get past it.
+	//
+	// The value is `<VAR>=<value>`. A condition naming a structural variable
+	// sees that variable's structural default, because `conditionHolds` resolves
+	// it the same way `get` does — a condition that read the raw environment
+	// while the run read the default would gate on a different value from the one
+	// the run uses, which is the worst way for a gate to be wrong.
+	when string
 }
 
 // schema is the single declaration of every variable the POC reads. A variable
@@ -128,13 +144,23 @@ var schema = []field{
 		Remedy:      "set SP_POC_SOURCE_RELAY=true for a recording re-published over rtsp, or SP_POC_SOURCE_RELAY=false for an actual camera"},
 
 	// --- AI sidecar ---
-	{Name: "SP_POC_AI_ADDR", kind: kindString,
+	//
+	// Every one of these is conditional on `SP_POC_TRIGGER_MODE != sidecar`. W1-4
+	// retired the sidecar from the trigger path: the shipped pipeline measures a
+	// region with pure-Go arithmetic and asks a hosted model once per event, so it
+	// needs no ONNX model, no Python worker and no anchors. They are kept, because
+	// `trigger-mode=sidecar` is still a real mode and a useful one — it is how a
+	// threshold gets chosen — and a tool with one path is a tool with one opinion.
+	{Name: "SP_POC_TRIGGER_MODE", kind: kindString, structural: true, structuralVal: "novelty",
+		Consequence: "the run would not say where its boxes come from, and the cost argument (one call per event against one per frame) has no subject",
+		Remedy:      "set SP_POC_TRIGGER_MODE=novelty (shipped) or SP_POC_TRIGGER_MODE=sidecar (the older per-frame ONNX classifier)"},
+	{Name: "SP_POC_AI_ADDR", kind: kindString, when: "SP_POC_TRIGGER_MODE=sidecar",
 		Consequence: "there is no sidecar to send frames to, and every detection would be not_asked",
 		Remedy:      "set SP_POC_AI_ADDR=127.0.0.1:8099"},
-	{Name: "SP_POC_AI_MODEL", kind: kindString,
+	{Name: "SP_POC_AI_MODEL", kind: kindString, when: "SP_POC_TRIGGER_MODE=sidecar",
 		Consequence: "preflight cannot load the model, and a run that starts without it dies in minute one",
 		Remedy:      "set SP_POC_AI_MODEL to the path of an ONNX file, e.g. models\\yolov8n.onnx"},
-	{Name: "SP_POC_SIDECAR_SCRIPT", kind: kindString,
+	{Name: "SP_POC_SIDECAR_SCRIPT", kind: kindString, when: "SP_POC_TRIGGER_MODE=sidecar",
 		Consequence: "there is no Python worker to send frames to, and every detection would be not_asked",
 		Remedy:      "set SP_POC_SIDECAR_SCRIPT=pyworker/server.py"},
 	{Name: "SP_POC_AI_FPS", kind: kindInt,
@@ -153,6 +179,48 @@ var schema = []field{
 		Consequence: "the sidecar is fed frames of unknown size, so it would have to guess and a wrong guess is a corrupted letterbox",
 		Remedy:      "set SP_POC_AI_INPUT_WIDTH=640"},
 
+	// --- the verifier: which model, which region ---
+	//
+	// The provider defaults to `none`, so a run that never asks a model says so
+	// rather than printing an empty provider name on a slide. `none` is not a
+	// failure: the novelty trigger measures a region and proposes it, and an
+	// operator who wants an unverified proposal has exactly that.
+	{Name: "SP_POC_VLM_PROVIDER", kind: kindString, structural: true, structuralVal: "none",
+		Consequence: "the report cannot say who verified the events, and an unverified proposal reads like a verified incident",
+		Remedy:      "set SP_POC_VLM_PROVIDER=hafnia to verify each event against a hosted model, or none to run the local trigger alone"},
+	{Name: "SP_POC_VLM_REGION", kind: kindString, when: "SP_POC_VLM_PROVIDER=hafnia",
+		Consequence: "footage has no declared destination, and a default here is a site whose video went somewhere nobody chose",
+		Remedy:      "set SP_POC_VLM_REGION=eu or SP_POC_VLM_REGION=us. There is NO failover between regions: during an outage a silent failover is a sovereignty breach"},
+	{Name: "SP_POC_VLM_API_KEY", kind: kindString, when: "SP_POC_VLM_PROVIDER=hafnia",
+		Consequence: "the call would upload footage unauthenticated, or silently not happen at all",
+		Remedy:      "set SP_POC_VLM_API_KEY from the secret store. It is never a flag, a URL or a file in the repository"},
+	{Name: "SP_POC_VLM_MODEL", kind: kindString, when: "SP_POC_VLM_PROVIDER=hafnia",
+		Consequence: "the request would name no model, and the attribution record would have nothing to attribute to",
+		Remedy:      "set SP_POC_VLM_MODEL to the provider's model identifier, e.g. cosmos-3-nano-16b"},
+	{Name: "SP_POC_VLM_DAILY_CAP", kind: kindInt, when: "SP_POC_VLM_PROVIDER=hafnia",
+		Consequence: "the site's spend against the contract is unbounded by anything local, and the cost argument depends on a local cap existing",
+		Remedy:      "set SP_POC_VLM_DAILY_CAP=500 — the most inference calls this site may make per UTC day"},
+
+	// --- the trigger: novelty threshold, sustain, grid ---
+	//
+	// These are structural, because a detector with no stated reference is a word
+	// and not a measurement, and the threshold is the number a judge will
+	// challenge. Both defaults are the measured ones and both are stored beside
+	// every decision they produced, so a report can print the number rather than
+	// name it.
+	{Name: "SP_POC_NOVELTY_THRESHOLD", kind: kindFloat, structural: true, structuralVal: "0.35",
+		Consequence: "the trigger would have no bar, and a bar of zero is a detector that fires on every frame",
+		Remedy:      "set SP_POC_NOVELTY_THRESHOLD=0.35 — the fraction of the frame that must change"},
+	{Name: "SP_POC_NOVELTY_RELEASE", kind: kindFloat, structural: true, structuralVal: "0.20",
+		Consequence: "there is no hysteresis band, so a detector firing on one frame and resetting on the next stutters on a noisy scene",
+		Remedy:      "set SP_POC_NOVELTY_RELEASE=0.20 — below this the sustain streak resets; it must be at or under the threshold"},
+	{Name: "SP_POC_NOVELTY_SUSTAIN", kind: kindInt, structural: true, structuralVal: "90",
+		Consequence: "one frame of difference would be an incident, and one frame is a car, a shadow or a compression artefact",
+		Remedy:      "set SP_POC_NOVELTY_SUSTAIN=90 — consecutive frames a whole-view change must persist before it fires"},
+	{Name: "SP_POC_NOVELTY_GRID", kind: kindInt, structural: true, structuralVal: "64",
+		Consequence: "the mask would be computed at whatever resolution the frame happened to be, so the score would not be comparable between runs",
+		Remedy:      "set SP_POC_NOVELTY_GRID=64 — the width of the luma grid the region is measured on"},
+
 	// --- detection ---
 	{Name: "SP_POC_SCORE_THRESHOLD", kind: kindFloat,
 		Consequence: "there is no approved class threshold, so every box would be both kept and dropped depending on who asked",
@@ -160,7 +228,7 @@ var schema = []field{
 	{Name: "SP_POC_CLASSES", kind: kindString,
 		Consequence: "an unapproved class could reach the line-cross machine, and the class list in the report would be whatever the model happened to emit",
 		Remedy:      "set SP_POC_CLASSES=vehicle,person — a family name or a raw class name; both are accepted, and an entry that is neither is refused by name"},
-	{Name: "SP_POC_AI_ANCHORS", kind: kindString,
+	{Name: "SP_POC_AI_ANCHORS", kind: kindString, when: "SP_POC_TRIGGER_MODE=sidecar",
 		Consequence: "an ANCHORED export — one that publishes an output per stride — cannot be decoded without its anchor boxes, and they are in the model's .cfg rather than in the ONNX file. Without them the sidecar refuses the model by name rather than answering 'no objects' for every frame of the run",
 		Remedy:      "set SP_POC_AI_ANCHORS=models\\yolov8n.anchors.txt for an anchored export, or SP_POC_AI_ANCHORS=none to STATE that this model is a fused export and needs none. 'none' rather than an empty value, because a variable set to nothing has said nothing and this module treats it as unset"},
 	{Name: "SP_POC_MIN_BOX_AREA", kind: kindFloat,
@@ -362,6 +430,38 @@ type Config struct {
 	AIBackpressure time.Duration
 	AIInputWidth   int
 
+	// TriggerMode is where the boxes come from: `novelty` (the shipped path —
+	// pure-Go measurement, one model call per event) or `sidecar` (the older
+	// per-frame ONNX classifier, kept as a threshold-selection tool).
+	TriggerMode string
+
+	// The verifier. W1-4 through W1-7: the hosted model that confirms what the
+	// local measurement proposed.
+	//
+	// VLMProvider is `none` by default and `none` is not a failure. The novelty
+	// trigger measures a region and proposes it; without a verifier an operator
+	// gets an UNVERIFIED proposal, which is a different thing from a verified
+	// incident and is labelled as one.
+	VLMProvider string
+	// VLMRegion is `eu` or `us`, and there is no failover between them.
+	VLMRegion string
+	// VLMAPIKey comes from the secret store. It is never logged, never a flag and
+	// never in the repository.
+	VLMAPIKey string
+	// VLMModel is the provider's model identifier. It goes into the attribution
+	// record as a CLAIM by the provider; there is no model hash because a hosted
+	// model has no weights to hash.
+	VLMModel string
+	// VLMDailyCap is the site's local daily call cap, on a UTC day.
+	VLMDailyCap int
+
+	// The trigger's measurement settings. Both are stored beside every decision
+	// they produced, so a report prints the number rather than naming it.
+	NoveltyThreshold float64
+	NoveltyRelease   float64
+	NoveltySustain   int
+	NoveltyGrid      int
+
 	ScoreThreshold float64
 	// Classes is SP_POC_CLASSES as written: a list of family names and class
 	// names, both accepted. `ApprovedClasses` is the resolved set and is what the
@@ -491,6 +591,12 @@ func Load(lookup Lookup) (Config, error) {
 		if !present || strings.TrimSpace(raw) == "" {
 			if f.structural {
 				raw = f.structuralVal
+			} else if f.when != "" && !conditionHolds(lookup, f.when) {
+				// W1-4: the variable is genuinely not required by this run, and
+				// the absence is recorded as satisfied rather than as an error. It
+				// is marked `seen` above, so the dead-variable check still fires
+				// on one nobody reads.
+				return "", false
 			} else {
 				errs = append(errs, &MissingError{Var: name, Consequence: f.Consequence, Remedy: f.Remedy})
 				return "", false
@@ -610,6 +716,16 @@ func Load(lookup Lookup) (Config, error) {
 	str(&cfg.AIAddr, "SP_POC_AI_ADDR")
 	str(&cfg.AIModel, "SP_POC_AI_MODEL")
 	str(&cfg.SidecarScript, "SP_POC_SIDECAR_SCRIPT")
+	str(&cfg.TriggerMode, "SP_POC_TRIGGER_MODE")
+	str(&cfg.VLMProvider, "SP_POC_VLM_PROVIDER")
+	str(&cfg.VLMRegion, "SP_POC_VLM_REGION")
+	str(&cfg.VLMAPIKey, "SP_POC_VLM_API_KEY")
+	str(&cfg.VLMModel, "SP_POC_VLM_MODEL")
+	num(&cfg.VLMDailyCap, "SP_POC_VLM_DAILY_CAP")
+	flt(&cfg.NoveltyThreshold, "SP_POC_NOVELTY_THRESHOLD")
+	flt(&cfg.NoveltyRelease, "SP_POC_NOVELTY_RELEASE")
+	num(&cfg.NoveltySustain, "SP_POC_NOVELTY_SUSTAIN")
+	num(&cfg.NoveltyGrid, "SP_POC_NOVELTY_GRID")
 	num(&cfg.AIFPS, "SP_POC_AI_FPS")
 	dur(&cfg.AIDeadline, "SP_POC_AI_DEADLINE_MS")
 	dur(&cfg.AIBudget, "SP_POC_AI_BUDGET_MS")
@@ -678,6 +794,34 @@ func Load(lookup Lookup) (Config, error) {
 		return cfg, err
 	}
 	return cfg, nil
+}
+
+// conditionHolds reports whether a `<VAR>=<value>` condition is satisfied by the
+// environment.
+//
+// It panics rather than returning false for an unparseable condition, for the same
+// reason `get` panics for an unknown variable: a typo in a condition must be a
+// startup failure, not a requirement that quietly stopped applying. A condition
+// that silently never holds would make every field behind it unconditionally
+// required again — which is the exact defect W1-4 closed.
+func conditionHolds(lookup Lookup, cond string) bool {
+	name, want, ok := strings.Cut(cond, "=")
+	if !ok {
+		panic("config: condition " + cond + " is not VAR=value")
+	}
+	name = strings.TrimSpace(name)
+	f, known := schemaByName[name]
+	if !known {
+		panic("config: condition " + cond + " names a variable that is not in the schema")
+	}
+	raw, present := lookup(name)
+	if !present || strings.TrimSpace(raw) == "" {
+		if !f.structural {
+			return false
+		}
+		raw = f.structuralVal
+	}
+	return strings.TrimSpace(raw) == strings.TrimSpace(want)
 }
 
 // LoadEnv is Load against the process environment.
@@ -751,6 +895,51 @@ func (c Config) Validate() error {
 	case SourceLoop, SourceRTSP, SourceURL:
 	default:
 		add("SP_POC_SOURCE_KIND", "%q is not one of loop, rtsp, url; ffmpeg would be given an input we do not understand, and the failure would surface as a hang in preflight", c.SourceKind)
+	}
+
+	// --- the trigger and the verifier (W1-4, W1-7) ---
+	//
+	// Validated before anything else about the run, because a misconfiguration here
+	// is the one that produces a report claiming a model verified something it did
+	// not.
+	switch strings.ToLower(strings.TrimSpace(c.TriggerMode)) {
+	case "novelty", "sidecar":
+	default:
+		add("SP_POC_TRIGGER_MODE", "%q is not one of novelty, sidecar; the run would not be able to say where its boxes came from, "+
+			"and the cost argument has no subject", c.TriggerMode)
+	}
+	switch strings.ToLower(strings.TrimSpace(c.VLMProvider)) {
+	case "none":
+		// Not a failure. The novelty trigger measures and proposes on its own, and
+		// an unverified proposal is a real thing an operator can want.
+	case "hafnia":
+		switch strings.ToLower(strings.TrimSpace(c.VLMRegion)) {
+		case "eu", "us":
+		default:
+			add("SP_POC_VLM_REGION", "%q is not eu or us; footage has no declared destination, and there is deliberately NO failover "+
+				"between regions — during an outage a silent failover is a sovereignty breach", c.VLMRegion)
+		}
+	default:
+		add("SP_POC_VLM_PROVIDER", "%q is not one of none, hafnia; the report cannot say who verified the events", c.VLMProvider)
+	}
+	if c.NoveltyThreshold <= 0 || c.NoveltyThreshold > 1 {
+		add("SP_POC_NOVELTY_THRESHOLD", "%g is not in (0,1]; it is the FRACTION of the frame that must change, and a bar of zero "+
+			"is a detector that fires on every frame", c.NoveltyThreshold)
+	}
+	if c.NoveltyRelease < 0 || c.NoveltyRelease > c.NoveltyThreshold {
+		add("SP_POC_NOVELTY_RELEASE", "%g is not in [0, threshold]; a release above the trigger is an upside-down hysteresis band "+
+			"and the trigger can never reset", c.NoveltyRelease)
+	}
+	if c.NoveltySustain < 1 {
+		add("SP_POC_NOVELTY_SUSTAIN", "%d is not positive; one frame of difference would be an incident, and one frame is a car, "+
+			"a shadow or a compression artefact", c.NoveltySustain)
+	}
+	if c.NoveltyGrid < 8 {
+		add("SP_POC_NOVELTY_GRID", "%d is too small to locate anything, and the score would not be comparable between runs", c.NoveltyGrid)
+	}
+	if c.VLMDailyCap < 0 {
+		add("SP_POC_VLM_DAILY_CAP", "%d is negative; the site's spend against the contract is unbounded by anything local, and the "+
+			"cost argument depends on a local cap existing", c.VLMDailyCap)
 	}
 	if c.SourceKind == SourceLoop && (strings.HasPrefix(c.SourceArg, "rtsp://") || strings.HasPrefix(c.SourceArg, "http://") || strings.HasPrefix(c.SourceArg, "https://")) {
 		add("SP_POC_SOURCE_ARG", "kind=loop was given a URL; a loop run is a measured run over recorded material and a live URL would be presented as one")
