@@ -349,7 +349,7 @@ func run() error {
 		RunID: runID, DataRoot: cfg.DataRoot, Spec: spec, Store: st, Evidence: ev,
 		Client: aic, XProtect: push, Engine: engine, Recorder: rec,
 		TriggerMode: cfg.TriggerMode, Trigger: trigger, Observer: observer,
-		Detector: detector, DetIdentity: detIdentity,
+		Detector: detector, DetIdentity: detIdentity, BoxLogFrames: cfg.BoxLogFrames,
 		DetDecode: soak.DetDecode{
 			NMSClass: cfg.DetNMSClass, NMSGlobal: cfg.DetNMSGlobal,
 			EmitScore: cfg.DetScore, MaxBoxes: cfg.DetMaxBoxes, MinBoxArea: cfg.MinBoxArea,

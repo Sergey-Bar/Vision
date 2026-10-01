@@ -170,6 +170,10 @@ type RunnerOptions struct {
 	// identity so a precision number can be traced to the thresholds that produced
 	// it.
 	DetDecode DetDecode
+	// BoxLogFrames bounds the per-frame box log (SP_POC_BOX_LOG_FRAMES). At the cap
+	// every crossing frame is kept and every Nth of the rest, and the run records
+	// box_log_sampled with both counts.
+	BoxLogFrames int
 	// Observer is the VLM. Nil means nobody to ask, which is `not_asked` and not
 	// a degraded answer.
 	Observer Observer
@@ -229,6 +233,12 @@ type Runner struct {
 	// identical lines and bury everything else.
 	refusalCount int
 	refusalTotal int
+	// boxLog is the bounded per-frame box log, and boxLogSampled says whether it is
+	// currently discarding frames. See boxlog.go for why the bound is a sampler and
+	// why crossings are exempt from it.
+	boxLog         *BoxLog
+	boxLogSampled  bool
+	boxLogReported bool
 }
 
 // DetectorTally is the run's detector arithmetic, as the report needs it.
@@ -309,13 +319,41 @@ func NewRunner(opt RunnerOptions) (*Runner, error) {
 		// and it produces `not_asked` rather than a zero detection count.
 		opt.TriggerMode = TriggerNovelty
 	}
-	return &Runner{opt: opt, log: opt.Logf, lat: ai.NewLatencies(200000), stopPush: make(chan struct{}), cpu: NewCPUSampler(func() []int {
-		if opt.ChildPIDs == nil {
-			return nil
-		}
-		return opt.ChildPIDs()
-	})}, nil
+	// `detector` mode with no detector is REFUSED, and this is the last place it can
+	// be refused cheaply. Left as it is, the frame loop falls through to
+	// `measureTrigger`, which returns nothing because there is no trigger either,
+	// and the run reports an empty road at full health: the exact defect this
+	// project exists to end, and the one the previous build shipped.
+	if UsesDetector(opt.TriggerMode) && opt.Detector == nil {
+		return nil, fmt.Errorf("soak: SP_POC_TRIGGER_MODE=%s but no detector was wired into the "+
+			"runner, so every frame would be decoded into nothing and the run would report a "+
+			"detection rate of zero over a road with traffic on it", TriggerDetector)
+	}
+	// The same for the sidecar, which has always been implied rather than stated.
+	if UsesSidecar(opt.TriggerMode) && opt.Client == nil {
+		return nil, fmt.Errorf("soak: SP_POC_TRIGGER_MODE=%s but no sidecar client was wired into "+
+			"the runner, so every frame would be answered `not_asked` and a run of it would look "+
+			"like a camera fault", TriggerSidecar)
+	}
+	return &Runner{opt: opt, log: opt.Logf, lat: ai.NewLatencies(200000), stopPush: make(chan struct{}),
+		boxLog: NewBoxLog(opt.BoxLogFrames), cpu: NewCPUSampler(func() []int {
+			if opt.ChildPIDs == nil {
+				return nil
+			}
+			return opt.ChildPIDs()
+		})}, nil
 }
+
+// BoxLogStats exposes the per-frame box log's arithmetic, so the run record and the
+// report can say whether this run's replay reads a COMPLETE log or a sampled one.
+//
+// It is exported on the runner rather than reached through a field because a
+// reader that can see the counters can also see that they exist, and a reader who
+// does not know the log is bounded cannot ask whether it was.
+func (r *Runner) BoxLogStats() BoxLogStats { return r.boxLog.Stats() }
+
+// BoxLogSampled reports whether the per-frame box log dropped anything.
+func (r *Runner) BoxLogSampled() bool { return r.boxLog.Sampled() }
 
 // logf writes a line, tolerating a runner that was built without a logger. A
 // run loop that crashes because nobody supplied a log function is a run that
@@ -622,6 +660,31 @@ func (r *Runner) process(ctx context.Context, f recorder.Frame) {
 	// clip and 9000 identical lines is how a real signal gets lost in a log.
 	if detRefusal != nil {
 		r.noteRefusal(f.Seq, detRefusal)
+	}
+	// The per-frame box log. It is written for EVERY measured frame, not only the
+	// ones that produced a crossing, because a frame with no boxes is what tells a
+	// replay "the model saw nothing" as distinct from "the pipeline never asked" —
+	// and that distinction is the defect class this repository has shipped twice.
+	//
+	// The sampling rule is applied here rather than inside the store because it is
+	// a property of the RUN (SP_POC_BOX_LOG_FRAMES) and not of the database, and
+	// because it is testable without one.
+	if r.boxLog != nil && f.Seq >= 0 {
+		keep, because := r.boxLog.ShouldKeep(len(crossings))
+		if keep {
+			obs := boxObservationsFor(r.opt.RunID, int64(f.Seq), f.At, boxes, telemetry,
+				SourceFor(r.opt.TriggerMode))
+			r.writeBoxObservations(ctx, obs)
+			if r.boxLogSampled && len(crossings) > 0 {
+				r.logf("frame %d kept in the box log: %s", f.Seq, because)
+			}
+		} else if !r.boxLogReported {
+			// The FIRST sampled-out frame says so once, because a log that goes
+			// silent without saying so is a log a reader assumes is complete.
+			r.logf("the per-frame box log has reached its cap of %d frames; further frames are "+
+				"sampled and this run's replay reads a sampled log. Crossings are never dropped.", r.boxLog.Cap)
+			r.boxLogReported = true
+		}
 	}
 	// The measurement's state is recorded with the detection, so the report can say
 	// whether a crossing came from a frame something actually measured.
