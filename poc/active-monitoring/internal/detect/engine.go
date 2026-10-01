@@ -75,7 +75,60 @@ type Track struct {
 	// recomputed from a box that has already moved on: a track is the thing that
 	// remembers, so it is the thing that remembers this.
 	allowed bool
+	// aged is whether this track has EVER reached SP_POC_TRACK_MIN_FRAMES
+	// sightings. Unlike `allowed` it is NEVER cleared.
+	//
+	// The two flags answer different questions and conflating them is why the
+	// two-stage ghost association could not work at all:
+	//
+	//   - `allowed` is per FRAME — "can this track emit a crossing right now". It is
+	//     cleared every frame and set only by an APPROVED box, because "an object we
+	//     used to see" is not "an object we can see now".
+	//   - `aged` is per TRACK — "has this object existed long enough to be real". It
+	//     persists, because an object half-occluded by a pole is still the object we
+	//     have been watching, and the frame it dipped in is not the frame it was
+	//     invented.
+	//
+	// The ghost pass gates on `aged`. Gating it on `allowed` made it dead code: a
+	// frame containing nothing but ghosts has no approved box, so nothing sets
+	// `allowed`, so nothing can be resumed — which is precisely the frame the pass
+	// exists for.
+	aged bool
+	// kalman is this track's position filter. It is EMBEDDED rather than a pointer so
+	// copying a Track — which the overlay does once per frame per track — cannot
+	// leave two objects sharing one filter, and a shared filter is a box that jumps
+	// between two objects.
+	kalman Kalman
+	// lastKF is when the filter was last updated, for the dt the prediction needs.
+	// Zero means never, which is how the first frame is told from the second.
+	lastKF time.Time
+	// resumed counts how many frames this track was held alive by a ghost rather
+	// than by an approved box.
+	//
+	// It is on the track rather than in the frame's Stats because it is a property of
+	// the TRACK's history: a report that says "12 tracks resumed on the last frame"
+	// is about one frame, and a report that says "track 7 survived 31 dips" is the
+	// sentence that tells an operator the score threshold is right for this material.
+	resumed int
 }
+
+// FilteredCentre returns this track's filtered centre and whether the filter has a
+// state at all.
+//
+// A track with no filter state yet returns its raw centre, so a one-frame track is
+// indistinguishable from an unfiltered one — which is the honest answer and what
+// keeps the first frame of every track identical to what it was before the filter
+// existed.
+func (t *Track) FilteredCentre() (cx, cy float64, ok bool) {
+	if c, d, has := t.kalman.Centre(); has {
+		return c, d, true
+	}
+	cx, cy = t.Box.Centre()
+	return cx, cy, false
+}
+
+// Resumed is how many frames this track was held alive by a refused box.
+func (t *Track) Resumed() int { return t.resumed }
 
 // family is the track's class family, resolved once so the screen's table does
 // not recompute the taxonomy per row and cannot disagree with the report about
@@ -106,6 +159,18 @@ type Stats struct {
 	// operator told "19 rejected" would look at a threshold when the answer is
 	// "wait".
 	DroppedTooNew int
+	// Resumed is how many tracks were held alive this frame by a REFUSED box rather
+	// than by an approved one — a score dip that did not split an object in two.
+	//
+	// It is here because it is the number that tells an operator whether their score
+	// threshold suits the material. A scene full of occlusion with Resumed near zero
+	// is a threshold set above what this detector actually produces for this footage,
+	// and the fix is the threshold rather than the detector.
+	Resumed int
+	// GhostResumed is the same count by refusal reason, so a reader can see whether
+	// the dips are score dips or something the two-stage pass cannot help with —
+	// an area refusal, say, which is a different problem with a different fix.
+	GhostResumed map[string]int
 }
 
 // Config are the decision parameters. Every one of them is set from the
@@ -113,6 +178,26 @@ type Stats struct {
 type Config struct {
 	ScoreThreshold float64
 	Classes        []string
+	// Kalman is the position filter's tuning, and its zero value means
+	// "[DefaultKalman]".
+	//
+	// It is in Config rather than a constructor argument because it is a property of
+	// the ENGINE and there is one place a caller already declares every other engine
+	// property. A separate `WithKalman` would be a second place, and a second place
+	// is where a default ends up disagreeing with itself.
+	Kalman KalmanParams
+	// KalmanOn turns the position filter off, and its zero value is ON.
+	//
+	// It exists because the filter CHANGES the crossing box, so anybody reproducing
+	// an older measurement needs the older behaviour available by name rather than by
+	// reverting a commit and discovering which of several changes mattered.
+	//
+	// The zero value being ON is a Go wart rather than a choice — a bool that means
+	// "enabled" cannot default to true — so the field is named for DISABLING and
+	// read as "not disabled". A caller cannot switch the filter off by omitting the
+	// field, and cannot switch it on by setting it, which is exactly the pair of
+	// mistakes this arrangement prevents.
+	KalmanDisabled bool
 	// Approve is the decision "may this class produce a crossing event", handed in
 	// rather than reconstructed from Classes.
 	//
@@ -188,6 +273,36 @@ type Engine struct {
 	// lastSplit is the previous frame's split, after the track-minimum-frames
 	// check, for the screen to draw.
 	lastSplit Split
+	// kalmanP is the position filter's tuning, and it is a FIELD with a default
+	// rather than a constant so a test and a caller can supply their own without
+	// the engine having to know why.
+	kalmanP KalmanParams
+	// kalmanOn is whether the filter runs at all. It defaults ON and there is a
+	// switch because the filter changes the crossing box, so a caller reproducing an
+	// older measurement needs the older behaviour available by name rather than by
+	// reverting a commit.
+	kalmanOn bool
+}
+
+// kalmanOrDefault resolves a zero Config into the declared tuning.
+//
+// A struct's zero value is not the same as "the operator chose nothing", and
+// resolving it here rather than at each use is what makes the resolution auditable:
+// there is one function that decides, and a caller can see it.
+func (c Config) kalmanOrDefault() KalmanParams {
+	if c.Kalman.ProcessNoise > 0 && c.Kalman.MeasurementNoise > 0 {
+		return c.Kalman
+	}
+	return DefaultKalman()
+}
+
+// kalmanParams returns the tuning in use, so the default is decided in one place.
+func (e *Engine) kalmanParams() KalmanParams {
+	if !e.kalmanOn {
+		return KalmanParams{ProcessNoise: 1e12, MeasurementNoise: 1e12,
+			InitialVelocityNoise: 1e12}
+	}
+	return e.kalmanP
 }
 
 // New builds an engine. It refuses an empty approved class list, because an
@@ -223,6 +338,13 @@ func New(zone Zone, cfg Config) (*Engine, error) {
 		live:     map[int]*Track{},
 		cooldown: map[string]time.Time{},
 		counters: NewCounters(),
+		// The filter is ON by default and tuned by [DefaultKalman]. It is on by
+		// default because a jittery crossing box produces duplicate events for one
+		// stationary object, which is a defect in the shipped path rather than a
+		// setting somebody chose. The zero Config means "default tuning", and the
+		// KalmanOn flag is read as "not explicitly disabled".
+		kalmanP:  cfg.kalmanOrDefault(),
+		kalmanOn: !cfg.KalmanDisabled,
 		tally:    NewTally(),
 	}, nil
 }
@@ -364,6 +486,22 @@ func (e *Engine) associate(at time.Time, approved []Box) ([]Box, int) {
 		t.Box = approved[bi]
 		t.Seen++
 		t.Last = at
+		// The filter is updated HERE, on the measurement, and NOT from the ghost pass
+		// and not from the crossing. That is the whole of the filter's contract: it
+		// sees what the MODEL measured and nothing else.
+		cx, cy := t.Box.Centre()
+		dt := 0.0
+		if !t.lastKF.IsZero() {
+			dt = at.Sub(t.lastKF).Seconds()
+		}
+		t.kalman.Update(cx, cy, dt, e.kalmanParams())
+		t.lastKF = at
+		// `aged` is set here and NEVER cleared — see the field's comment. It is the
+		// track's own answer to "have I existed long enough", and it is the flag the
+		// ghost pass gates on.
+		if t.Seen >= e.cfg.TrackMinFrames {
+			t.aged = true
+		}
 	}
 
 	attached := make([]Box, 0, len(approved))
@@ -500,6 +638,35 @@ func (e *Engine) FeedAnswered(at time.Time, in Answer) ([]Crossing, []Track, Sta
 	e.lastSplit.Approved = tracked
 	e.lastSplit.Ghosts = append(append([]Ghost{}, split.Ghosts...), tooNew...)
 
+	// 3b. The SECOND association pass, over the GHOSTS.
+	//
+	// A detector's confidence is not constant across the frames of one object, and
+	// a vehicle half-occluded by a pole scores below the approval bar while the same
+	// vehicle unoccluded scores above it. Under a one-stage tracker that frame is
+	// simply refused, the approved boxes on either side have no track to join, and
+	// one object becomes two tracks each too young to cross — which reads on a
+	// report as a detector that found nothing, and is the single most likely reason
+	// a real detector with a real model produces zero crossings on real footage.
+	//
+	// It runs HERE, after step 3 and not immediately after the approved association,
+	// and the position is load-bearing: it checks `t.allowed`, and that flag is set
+	// by step 3. Placed before it, the pass read a flag the same frame had not yet
+	// written and resumed nothing at all — which is the failure this ordering
+	// comment exists to prevent, and it looked exactly like the feature not working.
+	//
+	// It is still after the approved association, so an approved box has already
+	// claimed its track and a ghost cannot steal it. See [Engine.associateGhosts] for
+	// the three bounds that stop a ghost doing any harm.
+	resumed := e.associateGhosts(at, split.Ghosts)
+	st.Resumed = len(resumed)
+	st.GhostResumed = map[string]int{}
+	for _, m := range resumed {
+		st.GhostResumed[m.Reason]++
+		if t, ok := e.live[m.TrackID]; ok {
+			t.resumed++
+		}
+	}
+
 	// 4. The line-cross machine, on what survived all three checks.
 	//
 	// `step` runs for EVERY live track, not only the ones old enough to emit.
@@ -609,8 +776,40 @@ func (e *Engine) Tally() Tally { return e.tally }
 func (e *Engine) LastSplit() Split { return e.lastSplit }
 
 // step runs the line-crossing state machine for one track against every line.
+// CrossingBox is the box the line test is DECIDED on, and it is the track's
+// FILTERED box.
+//
+// This is the decision the Kalman filter exists for, and it is deliberately made
+// once, here, rather than inside [step].
+//
+// A single frame's box jitters by a few pixels, and a jittery box flips sides of a
+// line it is sitting on: a car parked across a line emits a crossing, then a second
+// one a frame later as the box breathes, and the report shows two events for one
+// stationary vehicle. Deciding on the filtered centre removes that, because the
+// filtered centre of an object that is not moving does not move.
+//
+// The size is NOT filtered — see [FilteredBox] — so the box that reaches the report
+// and the evidence store has the width the MODEL reported. A reader comparing a
+// crossing against the picture should find the same extent they can see.
+//
+// And this is why replay cannot read the decisions table: the box on a Crossing is
+// now a function of the frames AROUND it. Replay re-runs the whole track from
+// `box_observations`.
+func (e *Engine) crossingBox(t *Track) Box {
+	if fx, fy, ok := t.FilteredCentre(); ok {
+		return FilteredBox(t.Box, fx, fy)
+	}
+	return t.Box
+}
+
 func (e *Engine) step(at time.Time, t *Track) []Crossing {
+	// The centre the test is decided on is the track's FILTERED centre, while the
+	// box on the event carries the same filtered centre with the model's own width.
+	// See [Engine.crossingBox] for why the split is in that order.
 	cx, cy := t.Box.Centre()
+	if fx, fy, ok := t.FilteredCentre(); ok {
+		cx, cy = fx, fy
+	}
 	var out []Crossing
 	for _, l := range e.zone.Lines {
 		if !e.lineApplies(l, t.Class) {
@@ -653,7 +852,10 @@ func (e *Engine) step(at time.Time, t *Track) []Crossing {
 		e.cooldown[cooldownKey(l.Name, t.Class)] = at
 		out = append(out, Crossing{
 			TrackID: t.ID, Class: t.Class, Line: l.Name, Direction: l.Direction,
-			At: at, Box: t.Box, Frames: t.Seen, Score: t.Box.Score,
+			// The FILTERED box, not the measured one. This is the single line where
+			// that decision is made, and it is the reason a Crossing's box can no
+			// longer be recomputed from this row alone — see [Engine.crossingBox].
+			At: at, Box: e.crossingBox(t), Frames: t.Seen, Score: t.Box.Score,
 		})
 		t.Side[l.Name] = sign
 	}
