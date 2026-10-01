@@ -1,0 +1,10 @@
+# Raw provider responses land here and are not in git.
+#
+# `pocctl vlm-probe` writes `raw/<UTC timestamp>-<region>-<status>.txt`: the host,
+# the request line, the status, the model's claimed name and the raw bytes, above a
+# marked separator. A file here is evidence for whoever ran the probe, and a raw
+# response is a provider's own words about a customer's clip.
+#
+# Read one, decide whether it says anything about the customer's footage, and only
+# then copy the sentence that settles a row in contracts/hafnia/README.md into that
+# README. The `.txt` stays here.

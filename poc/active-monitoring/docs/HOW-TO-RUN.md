@@ -83,15 +83,41 @@ The demo runs, in this order, and refuses to continue if a step fails:
 | command | what it does |
 |---|---|
 | `pocctl cap` | the measured capability table: codec, decoders, decode cost, disk budget, and the AI round-trip p99 on **this** machine |
-| `pocctl probe` | the Milestone contract confidence table |
+| `pocctl probe` | the contract confidence table. `--live` dials the instance read-only and reports per route |
+| `pocctl vlm-probe` | **one** call against the pinned VMS host. No clip. The raw body lands in `contracts/hafnia/raw/` whatever happened, including a failure |
 | `pocctl preflight` | the full preflight table; refuses to start by name |
 | `pocctl rehearse` | the fault rehearsal on its own |
 | `pocctl soak start` | preflight, then gate D, then tells you the `watch` command |
 | `pocctl soak status` | the live state of the newest run, from the store |
 | `pocctl soak faults` | the six LOCAL fault classes, as against the seven provider ones |
 | `pocctl report` | regenerates the report from the store |
+| `pocctl search <text>` | what the model **said**, with the clip ref and its attribution, plus the four absence states of the window |
+| `pocctl brief` | one row per hour for a run: frames read, proposals, and whether the model was asked |
+| `pocctl mark <tag>` | one human verdict on one pushed event; this is what turns the false-positive rate from `NOT RUN` into a number |
 | `pocctl zone --pick <clip>` | a still with a coordinate grid, to draw a line on |
 | `pocctl sim` | the push-target simulator on its own |
+
+### The two probes
+
+Both are short, both are meant to be run **before** a demonstration rather than after
+one, and neither changes `status: asserted_not_verified` in any contract file.
+
+```powershell
+# The host, the path and the auth scheme. ONE call, no footage, no quota.
+$env:SP_POC_VLM_API_KEY='...'      # never a flag: a credential on a command line is
+$env:SP_POC_VLM_MODEL='...'        # a credential in a shell history and a screenshot
+.\bin\pocctl.exe vlm-probe --print-body
+
+# The VMS: credentials, the event-type list, the tag filter, the bookmark read-back.
+# READ-ONLY. There is no flag that makes it write.
+.\bin\pocctl.exe probe --live
+```
+
+`vlm-probe` refuses to run without `SP_POC_VLM_API_KEY`, because a probe that echoed
+the configuration back would be indistinguishable from one that reached the host. It
+spends nothing against the daily cap, so running it three times costs nothing either.
+A 401 is recorded with its body, in a file, under its own name: the failing probe is
+usually the one that settles the question.
 
 ## A seven-day run
 
@@ -99,10 +125,12 @@ The demo runs, in this order, and refuses to continue if a step fails:
 $env:SP_POC_MODE='live'
 $env:SP_POC_SOURCE_KIND='loop'
 $env:SP_POC_SOURCE_ARG='testdata\loop.mp4'
+$env:SP_POC_CAMERA_INTEGRITY='false'     # required: which trigger this run carries
 $env:SP_POC_SOAK_TARGET='168h'
 $env:SP_POC_LABEL='week-1'
 .\bin\pocctl.exe soak start      # preflight + gate D
 .\bin\watch.exe                  # the long one; ctrl-C to stop
+.\bin\pocctl.exe brief --data-root <root>
 .\bin\pocctl.exe report --data-root <root>
 ```
 
@@ -124,6 +152,13 @@ sees a first frame and the run cannot start; set it to a file path or a URL
 `watch --config` prints the configuration the process will use, with the three
 secrets — the VMS client secret, the VMS password and the camera password —
 replaced by `<redacted: present>`.
+
+`SP_POC_CAMERA_INTEGRITY` is in that table and is **required**, not defaulted. It
+decides whether the run carries the `camera_integrity` trigger beside the alarm one,
+and that trigger pins a reference view on disk which every later reference-mode
+measurement is made against. It was read by `os.Getenv` in `cmd/watch` until
+2026-10-01 and is now a schema row like the rest: refused by name, printed by
+`watch --config`, and covered by a test.
 
 ## The screen
 

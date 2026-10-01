@@ -18,9 +18,14 @@
 
 | | |
 |---|---|
-| [`docs/verify-live.md`](docs/verify-live.md) | **the five minutes a judge watches**, with the answer to each question that follows it |
+| [`docs/verify-live.md`](docs/verify-live.md) | **the five minutes a judge watches**, with the answer to each question that follows it, and a `live-vms` variant of each of the five |
 | [`docs/demo-live.md`](docs/demo-live.md) | the run against a **live** camera and a **live** XProtect, and the four refusals that must be in place before it |
-| [`contracts/hafnia/README.md`](contracts/hafnia/README.md) | what the VLM client assumes, which assumption is **contested by the provider's own documentation**, and what settles it |
+| [`contracts/hafnia/README.md`](contracts/hafnia/README.md) | what the VLM client assumes, which assumption is **contested by the provider's own documentation**, and what settles it — `pocctl vlm-probe`, which now exists |
+| [`docs/architecture.md`](docs/architecture.md) | the system on one page, with the AI plane drawn as optional and its absence as a first-class state |
+| [`docs/probes.md`](docs/probes.md) | what the two probes answer, and what is `NOT RUN` and why |
+| [`docs/gap-ledger.md`](docs/gap-ledger.md) | every gap: built and tested, or blocked on a person with the reason |
+| [`docs/provenance.md`](docs/provenance.md) | which clip came from where, why `car-crossing.mp4` is cleared and the YouTube clip is not, and what "not shown outside this machine" means |
+| [`docs/vss-mapping.md`](docs/vss-mapping.md) | the VSS 4.2 mapping, and where it stops being a mapping |
 | [`docs/one-pager.md`](docs/one-pager.md) | one page, for handing to somebody |
 
 ### What changed, and what it cost
@@ -51,7 +56,16 @@ pocctl audit seal              sign the chain head, or verify a seal
 pocctl audit seals             verify every seal against a trusted public key
 pocctl audit decisions         the stored decision inputs: score, threshold, measured region
 pocctl audit observations      every model's answer, with its attribution and reason code
+pocctl probe --live           read-only dial of the XProtect instance; per route: reachable / contradicted / unauthenticated / absent
+pocctl vlm-probe              ONE call to the pinned VMS host, no clip; the raw body lands in contracts/hafnia/raw/
+pocctl mark <tag>             one human verdict on one pushed event; this is what makes the false-positive rate measurable
+pocctl search <text>          what the model SAID, with its clip ref and its attribution
+pocctl brief                  one line per hour: frames read, proposals, and whether the model was asked at all
 ```
+
+| | |
+|---|---|
+| [`docs/vss-mapping.md`](docs/vss-mapping.md) | how the class and family columns relate to VSS 4.2, and the four places the mapping is **not** one |
 
 ---
 

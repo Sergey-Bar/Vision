@@ -1,6 +1,7 @@
 package config
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -96,12 +97,14 @@ func complete(t *testing.T) map[string]string {
 		// TestTheSidecarIsNotRequiredByTheShippedTrigger, which is the assertion
 		// that an operator running the pipeline does not have to declare an ONNX
 		// model and a Python script it will never execute.
-		"SP_POC_TRIGGER_MODE":  "sidecar",
-		"SP_POC_VLM_PROVIDER":  "hafnia",
-		"SP_POC_VLM_REGION":    "eu",
-		"SP_POC_VLM_API_KEY":   "test-key-not-a-secret",
-		"SP_POC_VLM_MODEL":     "cosmos-3-nano-16b",
-		"SP_POC_VLM_DAILY_CAP": "500",
+		"SP_POC_TRIGGER_MODE": "sidecar",
+		// Required, and not defaulted: the reference trigger pins a view on disk.
+		"SP_POC_CAMERA_INTEGRITY": "false",
+		"SP_POC_VLM_PROVIDER":     "hafnia",
+		"SP_POC_VLM_REGION":       "eu",
+		"SP_POC_VLM_API_KEY":      "test-key-not-a-secret",
+		"SP_POC_VLM_MODEL":        "cosmos-3-nano-16b",
+		"SP_POC_VLM_DAILY_CAP":    "500",
 	}
 }
 
@@ -831,6 +834,91 @@ func TestVariableNamesArePrefixed(t *testing.T) {
 		if !strings.HasPrefix(name, EnvPrefix) {
 			t.Fatalf("%s does not carry the %s prefix; an unprefixed variable could shadow a platform variable", name, EnvPrefix)
 		}
+	}
+}
+
+// TestCameraIntegrityIsOnlyNamedByConfig is the 0.4 regression guard, narrowed to
+// the variable it moved.
+//
+// SP_POC_CAMERA_INTEGRITY was read by `os.Getenv` in cmd/watch and validated
+// there. It changed what the run measured, it was in no schema, so
+// TestEveryVariableIsRequiredByName never covered it, `watch --config` never
+// printed it, and nothing in this repository could have failed if it stopped
+// working. Now that it is in the schema it is named in exactly three places: the
+// schema row, the flag table, and `pocctl demo`'s list of variables the demo
+// clears and re-stamps. A fourth is a second reader.
+//
+// This is deliberately a check on ONE variable and not a sweep for every
+// `os.Getenv`. The sweep is the right gate eventually and would be a large
+// refactor of the operator tools; asserting it here would fail on forty
+// pre-existing reads and teach everyone to skip the gate.
+func TestCameraIntegrityIsOnlyNamedByConfig(t *testing.T) {
+	root := filepath.Join("..", "..")
+	allowed := map[string]bool{
+		filepath.Join("internal", "config", "config.go"):      true,
+		filepath.Join("internal", "config", "flags.go"):       true,
+		filepath.Join("cmd", "pocctl", "demo.go"):             true,
+		filepath.Join("internal", "config", "config_test.go"): true,
+	}
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			switch d.Name() {
+			case ".git", "testdata", "pyworker", "models", "contracts":
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(d.Name(), ".go") {
+			return nil
+		}
+		rel, _ := filepath.Rel(root, path)
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if !strings.Contains(string(body), "SP_POC_CAMERA_INTEGRITY") {
+			return nil
+		}
+		if allowed[filepath.Clean(rel)] {
+			return nil
+		}
+		t.Errorf("%s names SP_POC_CAMERA_INTEGRITY. The schema is the only reader; a second "+
+			"one is a value that is required in one place and defaulted in another", rel)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestTheCameraIntegrityTriggerIsRequiredByName is 0.4's own triple, for the one
+// variable it moved: absent fails by name, `true` carries the reference trigger,
+// and the refusal says what pins to disk.
+func TestTheCameraIntegrityTriggerIsRequiredByName(t *testing.T) {
+	m := complete(t)
+	delete(m, "SP_POC_CAMERA_INTEGRITY")
+	_, err := Load(lookupFrom(m))
+	if names := MissingNames(err); len(names) != 1 || names[0] != "SP_POC_CAMERA_INTEGRITY" {
+		t.Fatalf("names = %v, want [SP_POC_CAMERA_INTEGRITY]", names)
+	}
+	if !strings.Contains(err.Error(), "pins a view on disk") {
+		t.Fatalf("the refusal does not say what pins to disk: %v", err)
+	}
+
+	m["SP_POC_CAMERA_INTEGRITY"] = "true"
+	cfg, err := Load(lookupFrom(m))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.CameraIntegrity {
+		t.Fatal("SP_POC_CAMERA_INTEGRITY=true did not reach the configuration")
+	}
+	m["SP_POC_CAMERA_INTEGRITY"] = "maybe"
+	if _, err := Load(lookupFrom(m)); err == nil || !strings.Contains(err.Error(), "SP_POC_CAMERA_INTEGRITY") {
+		t.Fatalf("a non-boolean was accepted, or the refusal did not name the variable: %v", err)
 	}
 }
 

@@ -33,6 +33,15 @@ __pycache__/
 /fixtures/private/
 /testdata/private/
 
+# Downloaded footage of somebody else's camera, at the repository root or under
+# `poc/active-monitoring`. Every clip here is unrecorded licence and several are
+# 96-294 MB; `testdata/labels.json` names the clips that may be committed and
+# none of these are among them. See poc/active-monitoring/.gitignore for the
+# same rule inside the module.
+/testdata/live/
+/poc/*/testdata/live/
+/record*.log
+
 # Tooling
 /tools/bin/
 /.protoc/

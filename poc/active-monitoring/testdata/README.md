@@ -8,7 +8,7 @@ This directory is not decoration: an unlabelled measurement is a claim.
 
 | File | Provenance | What it is |
 |---|---|---|
-| `car-crossing.mp4` | **`synthetic`** — licence **not recorded** | a coloured rectangle crossing a `testsrc` frame. It exercises the line-cross machine; a COCO model sees nothing in it (measured, below) |
+| `car-crossing.mp4` | **`synthetic`** — licence **cleared 2026-10-01** | a coloured rectangle crossing a `testsrc` frame. It exercises the line-cross machine; a COCO model sees nothing in it (measured, below) |
 | `bird-synthetic.mp4` | **`synthetic`** | a bright rectangle travelling left to right, built by `scripts/make-bird-clip.sh` |
 | `groundtruth.json` | — | the human review: which pushed events were false. Empty `marks` means **NOT RUN**, not zero |
 | `labels.json` | — | the provenance record: source, licence, retention, expected windows |
@@ -23,23 +23,24 @@ end on material whose every property is known and reproducible. It is **not**
 evidence that the system detects birds, and `CONTRACT.md` §12 and the report both
 say so. If this material is ever quoted as a detection claim, that is a defect.
 
-**The real-motion slot is empty, and the licence is a second, separate hole.**
-`labels.json` has three `REPLACE-ME` fields on `car-crossing.mp4` and the YouTube
-clip is labelled *NOT cleared for redistribution, publication or demonstration to
-anyone outside this machine*. Until the licence fields are filled in, a clip may be
-read on the machine that has it and **may not be shown to anyone else** — not in a
-demonstration, not in a screenshot, not committed.
+**The real-motion slot is empty. The licence half of it is now closed.**
 
-These are two different problems and fixing one does not fix the other:
+`labels.json`'s three `REPLACE-ME` fields were on `car-crossing.mp4`, and they are
+filled: that clip is an `ffmpeg` `testsrc` pattern with a `drawbox` rectangle over it,
+so it has **no rights holder to ask** and the licence is this repository's own. The
+YouTube clip is a different animal and stays shut — the camera belongs to a public
+body, the footage is theirs, and watching it live and storing clips of it are
+different acts. It may be read on the machine that has it and **may not be shown to
+anyone else**, and `cleared_for_external_use: false` says so in a field rather than
+in prose.
 
-| | what is missing | what fixes it |
-|---|---|---|
-| **licence** | three fields, on both clips | a licence recorded verbatim. No code fixes this. |
-| **real motion** | there is no real footage at all | record `testdata/street.mp4`: 60–90 s, **daylight**, phone fixed or on a tripod, one real car or pedestrian crossing a horizontal line, 1080p |
+These were two different problems and closing one did not close the other:
 
-The intended replacement is a hand-recorded clip, because it is the shortest path
-to footage that is legally clear, carries no third-party rights, and that a COCO
-model actually detects. Every other source has a licence attached to it.
+| | what is missing | what fixes it | state |
+|---|---|---|---|
+| **licence** on the committed material | three fields | a licence recorded verbatim from what is known about the material | **CLOSED 2026-10-01** — `docs/provenance.md` |
+| **licence** on the YouTube clip | permission from a public body | the camera operator. Not the uploader, not us, not an agent | **open**, and not recoverable from this file |
+| **real motion** | there is no real footage at all | record `testdata/street.mp4`: 60–90 s, **daylight**, phone fixed or on a tripod, one real car or pedestrian crossing a horizontal line, 1080p | **open** — a person with a phone |
 
 **Do not lower the threshold to make this footage detect.** If a daytime street
 recording produces nothing, the recording is wrong — too dark, nothing on the line,

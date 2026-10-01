@@ -179,6 +179,19 @@ var schema = []field{
 		Consequence: "the sidecar is fed frames of unknown size, so it would have to guess and a wrong guess is a corrupted letterbox",
 		Remedy:      "set SP_POC_AI_INPUT_WIDTH=640"},
 
+	// --- the second trigger: which detector is beside the alarm one ---
+	//
+	// It was read by `os.Getenv` in cmd/watch and validated there, which is the
+	// defect this table exists to prevent: a variable that changes behaviour and
+	// is in no schema is not required by name, is not printed by `watch --config`,
+	// and is covered by no test. It is REQUIRED and not defaulted, on the same
+	// reasoning as SP_POC_SOURCE_RELAY: the default here is the dangerous one, and
+	// a whole-view trigger pins a reference view on disk for every later run, so
+	// "did the operator mean to carry it" has to be a thing they said.
+	{Name: "SP_POC_CAMERA_INTEGRITY", kind: kindBool,
+		Consequence: "the run does not say whether it carries the camera_integrity trigger beside the alarm one, so a reference-mode run that pins a view on disk and one that does not are indistinguishable afterwards",
+		Remedy:      "set SP_POC_CAMERA_INTEGRITY=true to carry the camera_integrity trigger, which pins a reference view on disk; or false for the alarm trigger alone"},
+
 	// --- the verifier: which model, which region ---
 	//
 	// The provider defaults to `none`, so a run that never asks a model says so
@@ -435,6 +448,13 @@ type Config struct {
 	// per-frame ONNX classifier, kept as a threshold-selection tool).
 	TriggerMode string
 
+	// CameraIntegrity says whether this run carries the REFERENCE trigger beside
+	// the alarm one. It is required and not defaulted because the default would
+	// be the dangerous one: the reference trigger pins a view on disk, and a view
+	// that was pinned by a run which did not mean to is a view every later
+	// measurement was made against.
+	CameraIntegrity bool
+
 	// The verifier. W1-4 through W1-7: the hosted model that confirms what the
 	// local measurement proposed.
 	//
@@ -512,9 +532,19 @@ type Config struct {
 	// between the two: a cache that survives being copied, or a Config nobody can
 	// pass. The cache is behind a pointer precisely so the copy carries the cache
 	// with it instead of copying the lock.
-	approvedOnce  *sync.Once
-	approvedSet   map[string]bool
-	approvedErr   error
+	// approved is the resolved SP_POC_CLASSES cache.
+	//
+	// It is behind a POINTER, and the reason is specific and was learned the hard
+	// way. `Config` is passed by value to every reader in this module — `watch`
+	// alone hands it to seven of them — so a cache written into `Config`'s own
+	// fields is written into whichever copy happened to resolve first, and every
+	// later copy reads it empty. `TestTheResolutionIsStableAcrossCopies` is that
+	// failure: the first reader approved `car`, the second did not.
+	//
+	// A `*approvedCache` behind a pointer makes every copy carry the same cache
+	// rather than a copy of the cache, which is also why the sync.Once inside it is
+	// safe to copy around: the pointer is copied, the struct behind it is not.
+	approved      *approvedCache
 	TrackMaxAge   time.Duration
 	TrackIoU      float64
 	LineTolerance float64
@@ -717,6 +747,7 @@ func Load(lookup Lookup) (Config, error) {
 	str(&cfg.AIModel, "SP_POC_AI_MODEL")
 	str(&cfg.SidecarScript, "SP_POC_SIDECAR_SCRIPT")
 	str(&cfg.TriggerMode, "SP_POC_TRIGGER_MODE")
+	boolean(&cfg.CameraIntegrity, "SP_POC_CAMERA_INTEGRITY")
 	str(&cfg.VLMProvider, "SP_POC_VLM_PROVIDER")
 	str(&cfg.VLMRegion, "SP_POC_VLM_REGION")
 	str(&cfg.VLMAPIKey, "SP_POC_VLM_API_KEY")
@@ -793,6 +824,14 @@ func Load(lookup Lookup) (Config, error) {
 	if err := cfg.Validate(); err != nil {
 		return cfg, err
 	}
+	// The class cache is created HERE, by the loader, and not lazily by the reader.
+	//
+	// `Config` is passed by value, so a cache a reader creates for itself belongs to
+	// that reader's copy and is invisible to the next one: `watch` hands this Config
+	// to seven functions and only the first of them would have approved anything.
+	// The loader is the one place that hands out copies, so it is the one place that
+	// can hand out a shared cache with them.
+	cfg.approved = &approvedCache{}
 	return cfg, nil
 }
 
@@ -1192,39 +1231,93 @@ func (c Config) IsLiveVMS() bool {
 // approved list that silently approved nothing would produce a run with zero
 // events and no error, and that is the most expensive silence in this module.
 func (c Config) ApprovedClasses() (map[string]bool, error) {
-	// A Config built by hand rather than by Load has no cache. Building one here
-	// gives it the shared cache and costs a copy of a pointer; NOT building one
-	// would make the set resolve on every call, which is the thing the cache
-	// exists to prevent.
-	once := c.approvedOnce
-	if once == nil {
-		once = &sync.Once{}
+	classes, _, err := c.approvedSets()
+	return classes, err
+}
+
+// approvedSets resolves SP_POC_CLASSES ONCE and returns both halves: the expanded
+// class names, and the family names that were NAMED rather than expanded.
+//
+// Both come out of ONE resolution and are returned together, because they share one
+// cache and two functions each doing their own `Once.Do` is a cache that fills once
+// for the first caller and never again for the second — which is a class filter that
+// approves nothing depending on which function the caller happened to reach for.
+//
+// That failure is not hypothetical: it is what the first version of this did, and
+// TestAClassListIsResolvedOnceAndNotPerFrame caught it immediately.
+func (c Config) approvedSets() (classes, families map[string]bool, err error) {
+	cache := c.approved
+	if cache == nil {
+		cache = &approvedCache{}
 	}
-	once.Do(func() {
-		resolved, err := classify.Resolve(c.Classes)
-		if err != nil {
-			c.approvedErr = err
+	cache.once.Do(func() {
+		resolved, rerr := classify.Resolve(c.Classes)
+		if rerr != nil {
+			cache.err = rerr
 			return
 		}
 		set := make(map[string]bool, len(resolved))
 		for _, k := range resolved {
 			set[k] = true
 		}
-		c.approvedSet, c.approvedErr = set, nil
+		// The families NAMED in the list, kept beside the classes they expand to.
+		//
+		// This is not a second, looser way to approve a class. It is the only way a
+		// class can be approved at all when it is not in the taxonomy, and the
+		// shipped trigger's class is exactly that case: the novelty engine emits
+		// `motion`, `classify.FamilyOf("motion")` returns `other`, and `other` is
+		// not a member of any family in the table because it IS the family.
+		//
+		// Before this, `SP_POC_CLASSES=other` expanded to the COCO classes whose
+		// family is `other` and `IsApproved` did an exact lookup against that set —
+		// so `motion` was refused, every candidate was dropped as `class not on the
+		// approved list`, and the shipped path could not produce one box in a run
+		// configured by its own demo. Naming `motion` did not help either:
+		// `classify.Resolve` refuses a name that is neither a family nor a class,
+		// by name, and it was right to.
+		fams := make(map[string]bool, 4)
+		for _, e := range c.Classes {
+			if classify.IsFamily(e) {
+				fams[strings.ToLower(strings.TrimSpace(e))] = true
+			}
+		}
+		cache.classes, cache.families, cache.err = set, fams, nil
 	})
-	if c.approvedErr != nil {
-		return nil, c.approvedErr
+	if cache.err != nil {
+		return nil, nil, cache.err
 	}
-	out := make(map[string]bool, len(c.approvedSet))
-	for k, v := range c.approvedSet {
+	out := make(map[string]bool, len(cache.classes))
+	for k, v := range cache.classes {
 		out[k] = v
 	}
-	return out, nil
+	fout := make(map[string]bool, len(cache.families))
+	for k, v := range cache.families {
+		fout[k] = v
+	}
+	return out, fout, nil
+}
+
+// approvedCache is what Config.approved points at.
+type approvedCache struct {
+	once     sync.Once
+	classes  map[string]bool
+	families map[string]bool
+	err      error
 }
 
 // IsApproved reports whether a class may produce a crossing event.
+//
+// A class is approved when it is NAMED in SP_POC_CLASSES, or when its FAMILY is
+// named there. The second half is what makes the shipped trigger usable at all: the
+// novelty engine emits `motion`, which is not a class in the COCO taxonomy, so the
+// only thing it can be matched on is the family `FamilyOf` assigns it — `other`.
+//
+// Both halves live in this one function rather than in a sibling the caller has to
+// remember, because a class filter with two halves and one caller is a filter with
+// two halves and a bug: the run would approve a class in one path and refuse it in
+// another, and the refusal is the half that produces silence.
 func (c Config) IsApproved(class string) bool {
-	set, err := c.ApprovedClasses()
+	set, fams, err := c.approvedSets()
 	if err != nil {
 		// An unresolvable class list approves NOTHING, and Load refuses such a
 		// configuration before a run starts. Reaching here means something built
@@ -1232,7 +1325,22 @@ func (c Config) IsApproved(class string) bool {
 		// dangerous answer, so this refuses.
 		return false
 	}
-	return set[strings.ToLower(strings.TrimSpace(class))]
+	if set[strings.ToLower(strings.TrimSpace(class))] {
+		return true
+	}
+	return fams[strings.ToLower(string(classify.FamilyOf(class)))]
+}
+
+// IsApprovedFamily reports whether a family was NAMED in SP_POC_CLASSES.
+//
+// It answers the family question on its own, for a caller that has a family and no
+// class — a report grouping by family, or a screen deciding what to draw per family.
+func (c Config) IsApprovedFamily(class string) bool {
+	_, fams, err := c.approvedSets()
+	if err != nil {
+		return false
+	}
+	return fams[strings.ToLower(string(classify.FamilyOf(class)))]
 }
 
 // isLiveSource reports whether the source is real-time. It is the boundary at

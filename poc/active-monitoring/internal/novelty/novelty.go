@@ -229,6 +229,65 @@ func Fired(score, threshold float64) bool { return score >= threshold }
 // is a moved camera, and this is that hundred.
 func Sustained(streak, sustain int) bool { return sustain > 0 && streak >= sustain }
 
+// Unchanged reports whether a score means "the view did not change", and it is a
+// function because the alternative is a status page deciding which reasons count as
+// a negative and getting one of them wrong.
+//
+// It is FALSE for every reason that means the measurement never happened, and that
+// distinction is the whole of RC-11:
+//
+//   - `unpinned` — a reference-mode run with no reference view has compared this
+//     frame with NOTHING. "The camera has not moved" is a fabricated negative about
+//     a physical object.
+//   - `first_frame` and `no_previous` — the baseline, which is not a comparison.
+//   - `corrupt_frame` — a frame that could not be read is not a camera that is fine.
+//
+// "Nothing changed" and "nothing was compared" print the same two words, and only
+// one of them is a fact about a camera.
+func (s Score) Unchanged() bool {
+	switch s.Reason {
+	case ReasonUnpinned, ReasonFirstFrame, ReasonNoPrevious, ReasonCorrupt:
+		return false
+	}
+	return true
+}
+
+// IntegrityState is what a reference-mode run may be SAID to be.
+//
+// It is a closed set of three and not a boolean, because the interesting case is
+// the one a boolean cannot hold: `Unpinned` is not `Unchanged` and not `Changed`.
+type IntegrityState string
+
+const (
+	IntegrityUnpinned  IntegrityState = "unpinned"
+	IntegrityUnchanged IntegrityState = "unchanged"
+	IntegrityChanged   IntegrityState = "changed"
+)
+
+// IntegrityStateFor is the reference-mode status of an engine.
+//
+// The refusal it enforces is RC-11: an engine with no pinned reference reports
+// `unpinned` and can never report `unchanged`, however quiet the frames are. A
+// camera that was never pinned is not a camera that is fine, and the difference is
+// the difference between a measurement and an assumption about a physical object.
+func (e *Engine) IntegrityState() IntegrityState {
+	if e.cfg.Mode != ModeReference {
+		// A temporal engine has no reference and no integrity claim to make; saying
+		// anything here would be a status about the wrong detector.
+		return IntegrityUnpinned
+	}
+	// REDCHECK RC-11, durable half: no pinned reference, no `unchanged` verdict.
+	// Deleting this guard makes a quiet camera read as an intact one, which is the
+	// one answer this trigger must never produce by accident.
+	if !e.Pinned() {
+		return IntegrityUnpinned
+	}
+	if e.last.Reason == ReasonChanged || Fired(e.last.Value, e.cfg.Threshold) {
+		return IntegrityChanged
+	}
+	return IntegrityUnchanged
+}
+
 // luma converts one RGB triple to luma.
 //
 // The weights are the usual ones. They matter here only for consistency: the

@@ -27,6 +27,16 @@ func main() {
 		err = cmdCap(os.Args[2:])
 	case "probe":
 		err = cmdProbe(os.Args[2:])
+	case "vlm-probe":
+		err = cmdVLMProbe(os.Args[2:])
+	case "mark":
+		err = cmdMark(os.Args[2:])
+	case "review":
+		err = cmdReview(os.Args[2:])
+	case "search":
+		err = cmdSearch(os.Args[2:])
+	case "brief":
+		err = cmdBrief(os.Args[2:])
 	case "preflight":
 		err = cmdPreflight(os.Args[2:])
 	case "rehearse":
@@ -69,7 +79,12 @@ func usage() {
 	fmt.Print(`pocctl — the active-monitoring POC's operator tool
 
   cap                      the measured capability table (codec, decoders, GPU, decode cost, disk budget)
-  probe                    the Milestone contract confidence table
+  probe                    the contract confidence table; --live dials the instance and reports per route
+  vlm-probe                ONE call against the pinned VMS host, raw body to contracts/hafnia/raw/
+  mark <tag>               record a human verdict on one pushed event; this is what makes AC6 measurable
+  review                    a page of every pushed event, its clip and its mark command
+  search <text>            search what the model SAID, with its clip ref and attribution
+  brief                    one line per hour for a run: what happened, and what was never asked
   preflight                the full preflight table; refuses to start by name
   rehearse [all|<fault>]   inject each rehearsable provider fault against xpsim and record what happened
   soak start               preflight + gate D; refuses to launch a week on code that has not been rehearsed

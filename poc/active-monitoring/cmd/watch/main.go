@@ -168,6 +168,14 @@ func run() error {
 	engine, err := detect.New(zone, detect.Config{
 		ScoreThreshold: cfg.ScoreThreshold, Classes: cfg.Classes, IoU: cfg.TrackIoU,
 		MaxAge: cfg.TrackMaxAge, Cooldown: cfg.Cooldown, Tolerance: cfg.LineTolerance,
+		// The ONE place the "may this class cross" question is answered. The engine
+		// used to rebuild the answer from `Classes`, and its rebuild did not know that
+		// a family entry approves classes outside the taxonomy — so with
+		// `SP_POC_CLASSES=other` it refused `motion`, the novelty engine's own class,
+		// and every candidate was dropped as `class not on the approved list`. The
+		// engine's own map is still built and still used when there is no predicate,
+		// so the package behaves exactly as before for every other caller.
+		Approve: cfg.IsApproved,
 		// The approved/rejected split's four numbers. They arrived with the split
 		// and the family taxonomy, they are REQUIRED by the configuration with no
 		// defaults, and they were being validated and then thrown away: the engine
@@ -271,7 +279,7 @@ func run() error {
 	}
 
 	// The trigger. Pure Go, licence-free, and it owns the region.
-	trigger, err := buildTrigger(cfg, st, ev, provenanceFor(cfg, spec))
+	trigger, err := buildTrigger(cfg, st, ev)
 	if err != nil {
 		return err
 	}
@@ -635,7 +643,7 @@ func (o vlmObserver) PromptIDFor(class string) (string, string, error) {
 // and not to a default inside the runner: a detector that silently became a
 // different detector would change what the report is about without changing the
 // report's text.
-func buildTrigger(cfg config.Config, st *store.Store, ev *evidence.Store, provenance string) (soak.Trigger, error) {
+func buildTrigger(cfg config.Config, st *store.Store, ev *evidence.Store) (soak.Trigger, error) {
 	if soak.UsesSidecar(cfg.TriggerMode) {
 		return nil, nil
 	}
@@ -644,9 +652,11 @@ func buildTrigger(cfg config.Config, st *store.Store, ev *evidence.Store, proven
 		Sustain: cfg.NoveltySustain, GridWidth: cfg.NoveltyGrid,
 		Cooldown: cfg.Cooldown,
 	}
-	if integrity, err := integrityEnabled(provenance); err != nil {
-		return nil, err
-	} else if integrity {
+	// The trigger is the operator's declared mode and not a value read from the
+	// environment behind the configuration's back. It was `os.Getenv` until this
+	// commit: a variable that changes what the run measures, was in no schema,
+	// was printed by no `watch --config`, and was covered by no test.
+	if cfg.CameraIntegrity {
 		nc := base
 		nc.Mode = novelty.ModeReference
 		nc.Class = "camera_integrity"
@@ -668,25 +678,6 @@ func buildTrigger(cfg config.Config, st *store.Store, ev *evidence.Store, proven
 		return nil, err
 	}
 	return soak.NewNoveltyTrigger(eng, st, ev, cfg.DataRoot), nil
-}
-
-// integrityEnabled reports whether this run should carry the camera_integrity
-// trigger beside the alarm one.
-//
-// It is off by default and on with `SP_POC_CAMERA_INTEGRITY=1`, because a whole-view
-// trigger needs a PINNED REFERENCE and pinning one changes what is on disk for
-// every future run. That is a decision to make deliberately, not one to make in a
-// default.
-func integrityEnabled(provenance string) (bool, error) {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("SP_POC_CAMERA_INTEGRITY"))) {
-	case "1", "true", "yes":
-		return true, nil
-	case "", "0", "false", "no":
-		return false, nil
-	default:
-		return false, fmt.Errorf("SP_POC_CAMERA_INTEGRITY is not a yes/no value; a camera_integrity trigger pins a " +
-			"reference view on disk and that has to be a decision, not a typo")
-	}
 }
 
 // verifierLabel is what the picture prints for the verifier, so a screenshot says

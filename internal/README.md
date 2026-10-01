@@ -396,6 +396,13 @@ Then run the four verification commands from `AGENTS.md`:
 Every item here was verified in the working tree. If one stops being true, fix
 this section rather than trusting it.
 
+**Three of these were stale before 2026-10-01 and were corrected in place** —
+4, 6 and 11. They are kept, marked, because a trap list that silently deletes its
+outdated entries is a trap list with no audit trail: the next reader cannot tell
+the difference between "this was never true" and "this was true and was fixed".
+Each says what it was and what replaced it. If you add a trap, mark it the same
+way when it is resolved rather than removing it.
+
 1. **`-p 1` is not optional.** `Makefile:43-51` and
    `internal/schemalaws/schemalaws_test.go:20-23`: the database-backed suites
    share one database and rebuild the schema, so two package test binaries
@@ -417,14 +424,16 @@ this section rather than trusting it.
    downstream branches on the flag. If you find yourself reading `Malformed` as
    if it already suppresses an incident, it does not.
 
-4. **`KnownMilestoneEventTypes` is keyed on spellings `normalizeEventType` never
-   emits.** Nine canonical names the function produces — `motion`, `analytics`,
-   `recording.started`, `recording.stopped`, `bookmark`, `metadata`,
-   `access.granted`, `access.denied`, `gate` — are absent from the map, and
-   twelve map keys are unreachable. So most real events are marked
-   `Malformed`, and by trap 3 nothing happens because of it. This is the
-   adapter defect the root `README.md` already names. The repo's own
-   `README.md:82-84` is the citation.
+4. **[RESOLVED 2026-10-01 — do not read this as a current defect.]
+    `KnownMilestoneEventTypes` is now derived from the functions that produce it.**
+    The table used to be a hand-written list keyed on the vendor's PascalCase
+    spellings, so nine normalized names were missing and twelve keys were
+    unreachable, and every real motion event arrived flagged `Malformed`.
+    `internal/milestone/adapter.go` now builds it with `buildKnownEventTypes()`
+    from `normalizedEventTypes`, and `adapter_test.go` asserts both directions. If
+    you add an arm to `normalizeEventType` or `deriveEventType`, add the name there
+    or the table stops matching its producer — which is now a failing test rather
+    than a stream of false alarms.
 
 5. **`internal/policy` does not exist.** There is a `policy.proto` and a
    `0005_ai_and_policy.expand.sql` migration, and there is no Go package. M3's
@@ -432,11 +441,14 @@ this section rather than trusting it.
    tree. Do not go looking for it, and do not assume a `policy` table means a
    policy engine.
 
-6. **`securityctl adapter probe` does not exist.** `internal/milestone/routes.go:16`
-   names it as the first thing to run on a real installation, and it is
-   referenced repeatedly across `docs/roadmap/`. The command tree in
-   `cmd/securityctl/main.go:53-69` registers no `adapter` command. The eight
-   `Unverified` route flags therefore have no way to be cleared.
+6. **[RESOLVED — this trap was wrong and said so too confidently.]
+    `securityctl adapter probe` **exists**: `cmd/securityctl/adapter_probe.go:25`,
+    registered at `cmd/securityctl/main.go:66`. It is read-only, it reports per
+    route, and it prints the number of routes still marked `Unverified`. What it
+    deliberately does **not** do is flip a flag: promotion is a human editing
+    `internal/milestone/routes.go` after reading the output, because a tool that
+    could clear its own `Unverified` claims would be worth nothing as evidence.
+    So the eight flags *can* be cleared — by a person, with a date.
 
 7. **`TestSymlinkEscapeIsRefused` skips on Windows**
    (`internal/evidence/evidence_test.go:74-77`), because symlink creation needs
@@ -464,12 +476,12 @@ this section rather than trusting it.
     is generated. The only file directly in `internal/contracts` is
     `contractcompat_test.go`.
 
-11. **Replay parity today is byte-parity, not timing-parity.**
-    `internal/milestone/replay.go:104` computes the scenario epoch and discards
-    it (`_ = epoch`), so `ReplayTransport.WithEpoch` does not shift the
-    timestamps a fixture replays with. A scenario replays with the same
-    relative timing it was authored with, which is a weaker property than
-    Definition of Done item 1 requires.
+11. **[RESOLVED 2026-10-01 — do not read this as a current defect.] Replay parity
+     is now timing-parity.** `internal/milestone/replay.go` used to compute the
+     scenario epoch and discard it (`_ = epoch`), so `WithEpoch` did not shift
+     anything. It now calls `rebaseEnvelope(ev.Envelope, epoch.Add(offset))` on
+     every event, so a scenario replays at the instant you asked for with its
+     relative timing intact — which is the property DoD item 1 asks for.
 
 12. **`.gitignore` covers `/coverage` and `__pycache__/`.** `go test
     -coverprofile=coverage` writes a plain file at the repo root that is easy to

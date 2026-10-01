@@ -1,0 +1,41 @@
+{
+  "source": "qa/fixtures/crossing.mp4",
+  "frame": { "width": 1280, "height": 720 },
+  "$comment": [
+    "The line every fixture in qa/fixtures/ shares.",
+    "",
+    "IT IS VERTICAL, and that is not a typo. Every fixture moves LEFT TO RIGHT, so a",
+    "horizontal line would never be crossed by anything and every run would report",
+    "zero events with no error at all — which is the single most expensive silence in",
+    "this module, and the one this lab exists to make impossible to mistake for a",
+    "pass.",
+    "",
+    "`classes` contains `motion` and it is not a typo either. It is the class the",
+    "novelty engine emits for a region it measured with pure-Go arithmetic, and a zone",
+    "declares WHICH CLASSES MAY CROSS IT. With `car,truck,bus` here and the shipped",
+    "trigger emitting `motion`, every candidate was refused as `outside every permitted",
+    "polygon` — the same silence as before, one layer down.",
+    "",
+    "The taxonomy has no word for a localised change, so a reference-mode fixture's zone",
+    "names `camera_integrity` and this one names `motion`. Both are the detector's own",
+    "word for what it found, and the zone file is where an operator says which of those",
+    "words counts as an incident at this camera."
+  ],
+  "note": "Vertical, at the middle. Read off the frame, and verified by S1 producing an event.",
+  "lines": [
+    {
+      "name": "carriageway",
+      "a": [0.5, 0.0],
+      "b": [0.5, 1.0],
+      "direction": "left-to-right",
+      "classes": ["motion", "car", "truck", "bus"]
+    }
+  ],
+  "polygons": [
+    {
+      "name": "frame",
+      "points": [[0, 0], [1, 0], [1, 1], [0, 1]],
+      "classes": ["motion", "car", "truck", "bus", "bird", "person"]
+    }
+  ]
+}

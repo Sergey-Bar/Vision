@@ -613,6 +613,49 @@ func classifyPushStatus(status int) string {
 	return "retry"
 }
 
+// getInto performs a READ-ONLY GET and decodes the response.
+//
+// It is separate from `do` because `do` requires 200/201/202, and a probe has to be
+// able to see a 401, a 404 and a 500 as ANSWERS rather than as errors it must sort
+// out afterwards: the whole point is to find out what the server did.
+//
+// The decode is LENIENT, unlike `do`'s. Everywhere else a response is being
+// validated into a value this client will act on; here it is being read to see what
+// shape the server actually used, and a server that adds a field has not produced a
+// broken response — it has produced a different shape than the document claims, which
+// is the thing a probe exists to discover.
+func (c *Client) getInto(ctx context.Context, path string, query map[string]string, out any) (int, error) {
+	if strings.TrimSpace(c.token) == "" {
+		return 0, errors.New("xprotect: no access token; a read-only probe still authenticates, because whether the credentials work is one of the four questions")
+	}
+	endpoint := strings.TrimRight(c.cfg.BaseURL, "/") + path
+	if len(query) > 0 {
+		q := url.Values{}
+		for k, v := range query {
+			q.Set(k, v)
+		}
+		endpoint += "?" + q.Encode()
+	}
+	// `attempt` rather than `do`: `attempt` returns the status and the body whatever
+	// the server said, and a probe needs the 401 and the 404 back as answers. The
+	// classification below is the probe's own, because `do`'s is about a PUSH —
+	// whether to retry a detection — and a probe has no detection to retry.
+	status, body, err := c.attempt(ctx, http.MethodGet, endpoint, c.token, nil, "")
+	if err != nil {
+		return status, err
+	}
+	if status < 200 || status >= 300 {
+		return status, &RefusedError{Status: status, Detail: "the route answered " + firstLine(body), Body: body}
+	}
+	if out == nil {
+		return status, nil
+	}
+	if derr := json.Unmarshal([]byte(body), out); derr != nil {
+		return status, fmt.Errorf("xprotect: GET %s returned %d with a body this build cannot read: %w", path, status, derr)
+	}
+	return status, nil
+}
+
 // FindByTag reads an event back by its tag. This is the idempotency mechanism:
 // the API has no idempotency key, so "have I already pushed this?" is answered
 // by asking the server.

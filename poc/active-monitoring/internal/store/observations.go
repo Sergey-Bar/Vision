@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Sergey-Bar/ai-captain-poc/internal/aistate"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/vlm"
 )
 
@@ -86,7 +87,7 @@ func (s *Store) PutObservation(ctx context.Context, o Observation) error {
 	}
 	// REDCHECK RC-1, durable half: nothing but an answered ask may carry a
 	// verdict.
-	if o.AIState != aistateAsked && vlm.Verdict(o.Verdict) != vlm.VerdictNone {
+	if o.AIState != aistate.Asked && vlm.Verdict(o.Verdict) != vlm.VerdictNone {
 		return fmt.Errorf("store: refusing to record the verdict %q against the ask state %q; a verdict without an answered "+
 			"ask is a fabricated negative and this table is the one a proof chain reads", o.Verdict, o.AIState)
 	}
@@ -185,7 +186,7 @@ func (s *Store) ObservationTally(ctx context.Context, runID string) (Observation
 			return c, err
 		}
 		c.Total++
-		if state == aistateAsked {
+		if state == aistate.Asked {
 			c.Asked++
 		} else {
 			c.Absent++
@@ -258,13 +259,41 @@ func scanObservation(row interface{ Scan(...any) error }) (*Observation, error) 
 	return &o, nil
 }
 
-// aistateAsked is the one ai-state this package needs to name, and it is written
-// as a literal rather than imported.
+// The wire spellings this package filters on, as literals.
 //
-// internal/store must not import internal/vlm's vocabulary module: the store is
-// below the pipeline and knows about rows, and a row validator that imports the
-// package that produces the values is a package that cannot be read on its own.
-const aistateAsked = "asked_answered"
+// internal/store must not import internal/vlm: the store is below the pipeline and
+// knows about rows, and a row validator that imports the package that produces the
+// values is a package that cannot be read on its own.
+//
+// The AI STATES are not literals and never were. `internal/aistate` is the
+// vocabulary package both `internal/ai` and `internal/detect` already share, and it
+// imports nothing — so `pocctl search` and `pocctl brief` take the four absence
+// states from there rather than declaring a fifth copy. A copy is a drift waiting to
+// happen, and a drift in these words is not a compile error: it is a brief that
+// reports zero confirmations and no failure.
+//
+// The VERDICTS and the PROMPT ID stay literals, because their owner is `internal/vlm`
+// and there is no vocabulary package below it for them to live in.
+// `TestTheStoredSpellingsMatchTheVerifierClosedSets` in spelling_test.go fails if any
+// of them drifts from the verifier.
+const (
+	// verdictConfirmed, verdictNoObjects and verdictNeedsReview are the three
+	// verdicts a brief or a search counts separately. `none` is a NEGATIVE answer
+	// and is the only one of the four that means "the model was asked and saw
+	// nothing"; `needs_review` is a refusal to decide and is never folded into
+	// confirmed.
+	verdictConfirmed   = "confirmed"
+	verdictNoObjects   = "none"
+	verdictNeedsReview = "needs_review"
+	// promptAlarm is the only prompt class `pocctl search` returns. A
+	// `camera_integrity` answer is a sentence about the VIEW ("moved", "covered"),
+	// and matching it against an operator's search for a car would be a match on
+	// the word "the". The prompt id is in `internal/vlm/prompts/manifest.json`;
+	// renaming the file is a manifest edit there and a literal here, and
+	// `TestTheStoredSpellingsMatchTheVerifierClosedSets` is what makes the two
+	// agree.
+	promptAlarm = "alarm"
+)
 
 // Decision is the stored decision input for one detection.
 type Decision struct {

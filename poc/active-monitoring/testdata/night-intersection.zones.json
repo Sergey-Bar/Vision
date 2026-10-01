@@ -24,7 +24,15 @@
     "The clip itself is NOT in git — testdata/youtube*/ is gitignored — and its",
     "licence is NOT recorded. See testdata/labels.json. This file is in git because",
     "it is the measurement, and it is useless without the footage; the reverse is",
-    "also true."
+    "also true.",
+    "",
+    "`motion` is in `classes` and it is not a typo. It is the class the shipped",
+    "novelty trigger emits for a region it measured with pure-Go arithmetic, and a",
+    "zone declares WHICH CLASSES MAY CROSS IT. The file listed only car/truck/bus/",
+    "person, which is the COCO vocabulary, and every one of the 291 regions this",
+    "clip produces was refused with no event and no error. Measured on 2026-10-01:",
+    "peak changed fraction 0.209, 291 regions, and not one of them was allowed to",
+    "cross a line because none of them was a class the line had heard of."
   ],
 
   "source": "testdata/youtube/sTF-6_xinUU.mp4",
@@ -36,7 +44,7 @@
       "a": [0.65, 0.44],
       "b": [0.65, 0.64],
       "direction": "right-to-left",
-      "classes": ["car", "truck", "bus", "person"]
+      "classes": ["motion", "car", "truck", "bus", "person"]
     }
   ]
 }

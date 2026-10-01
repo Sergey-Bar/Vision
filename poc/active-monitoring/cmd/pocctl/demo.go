@@ -15,6 +15,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Sergey-Bar/ai-captain-poc/internal/config"
+	"github.com/Sergey-Bar/ai-captain-poc/internal/soak"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/xprotect"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/xpsim"
@@ -114,9 +116,7 @@ func cmdDemo(args []string) error {
 		fmt.Printf("  data   %s\n\n", dataRoot)
 		fmt.Printf("  source %s %s\n", os.Getenv("SP_POC_SOURCE_KIND"), redactSource(os.Getenv("SP_POC_SOURCE_ARG")))
 		fmt.Println()
-		fmt.Println("  trigger: the local novelty engine. model: pure Go, no ONNX, no Python, no")
-		fmt.Println("  sidecar. The verifier is the model in SP_POC_VLM_MODEL, called ONCE per event.")
-		fmt.Println()
+		// DERIVED, not asserted. See printTriggerBanner.
 	} else {
 		for _, p := range []string{clip, zones, model, anchors, filepath.Join(root, "pyworker", "server.py")} {
 			if _, err := os.Stat(p); err != nil {
@@ -138,6 +138,13 @@ func cmdDemo(args []string) error {
 		fmt.Println("  it. Its licence is NOT recorded (testdata/labels.json): it may be read on THIS")
 		fmt.Println("  machine and may NOT be shown to anyone outside it. A screenshot of this demo is")
 		fmt.Println("  a screenshot of that footage.")
+		fmt.Println()
+		// The banner is printed for BOTH paths, and it reads the mode out of the
+		// environment slice this command builds. It used to be a literal in the live
+		// branch only, saying "pure Go, no ONNX, no Python, no sidecar" whatever the
+		// run did.
+		printTriggerBanner(demoEnv(root, dataRoot, clip, zones, model, anchors,
+			flags["sim-addr"], flags["ui-addr"], seconds, &relay{}))
 		fmt.Println()
 	}
 
@@ -793,14 +800,61 @@ func demoEnv(root, dataRoot, clip, zones, model, anchors, simAddr, uiAddr string
 		// sidecar reads this variable itself; without it an anchored export is
 		// refused by name rather than answered with no objects for the whole run.
 		"SP_POC_AI_ANCHORS=" + anchors,
-		"SP_POC_SCORE_THRESHOLD=0.4",
-		"SP_POC_CLASSES=car,bird,person,truck,bus",
+		// W1-4 retired the sidecar from the trigger path and this line says so where
+		// the run reads it. It was ABSENT from this slice, and the slice is merged
+		// over the operator's environment, so the mode came from the shell. A shell
+		// with `SP_POC_TRIGGER_MODE=sidecar` set produced a per-frame ONNX run whose
+		// banner still read "pure Go, no ONNX, no Python, no sidecar" — the only
+		// measured claim in this project that was printed without being derived from
+		// the measurement.
+		//
+		// Hardcoded rather than defaulted, for the reason the rest of this slice is
+		// hardcoded: `pocctl demo` demonstrates the SHIPPED path. Somebody who wants
+		// the sidecar runs `watch` with their own environment.
+		"SP_POC_TRIGGER_MODE=novelty",
+		// The score threshold is on a DIFFERENT SCALE for each trigger, and this demo
+		// now always runs the novelty one, so this is a novelty number and not the
+		// sidecar's 0.4.
+		//
+		// The sidecar emits a model CONFIDENCE in (0,1]: 0.4 means "believe this
+		// object is a car with 40% confidence". The novelty engine emits the FRACTION
+		// OF THE FRAME THAT CHANGED, which for anything a novelty detector can
+		// reasonably be asked about is small: a full-height object crossing a
+		// 1280-wide frame measures 0.23, and a car-sized one measures 0.005. At 0.4
+		// the shipped trigger could not clear its own bar on any material, and every
+		// candidate was dropped as `below the score threshold`.
+		//
+		// 0.02 is two percent of the frame. It is deliberately low, because the point
+		// of the bar is to reject JPEG speckle and not to express scepticism about
+		// whether something moved — that is `SP_POC_NOVELTY_MIN_CELLS` and the
+		// minimum-component size, which are the knobs about shape. Whether 0.02 is
+		// too low on a real camera is a question for `pocctl mark`, not for a demo
+		// that has to produce an event to show anything at all.
+		"SP_POC_SCORE_THRESHOLD=0.02",
+		// `motion` is the class the novelty engine emits and nothing else, and it
+		// was MISSING from this list. `detect.Apply` checks the class BEFORE the
+		// score, so every candidate the shipped trigger produced was refused as
+		// `class not on the approved list` — a filter that no material and no line
+		// can satisfy. The shipped path could not approve one box in a run configured
+		// by its own demo.
+		//
+		// It is spelled `other` and NOT `motion`, because `classify.Resolve` refuses
+		// a name that is neither one of the four families nor a class in the taxonomy
+		// — and `motion` is the detector's own word for a measurement, not a COCO
+		// class. `other` is the family `FamilyOf` already returns for it, and it is
+		// the honest answer: a novelty region is a localised change, which is a
+		// thing this taxonomy has no word for. `bird` and `car` stay for the
+		// sidecar, which is the mode that does emit them.
+		"SP_POC_CLASSES=other,car,bird,person,truck,bus",
 		// These four arrived with the approved/rejected split and the family
 		// taxonomy, and they are REQUIRED with no defaults. The demo had never
 		// been updated for them, which means `pocctl demo` — the headline command
 		// of the whole module — died in `config.Load` before it printed a step.
-		"SP_POC_MIN_BOX_AREA=0.0005",
-		"SP_POC_GHOST_MIN_SCORE=0.10",
+		"SP_POC_GHOST_MIN_SCORE=0.005",
+		// `SP_POC_MIN_BOX_AREA` is in NORMALISED area (fraction of the frame), not
+		// thousandths, and a novelty region is measured rather than drawn by a model,
+		// so it is small. 0.0001 is a hundredth of a percent of the frame.
+		"SP_POC_MIN_BOX_AREA=0.0001",
 		"SP_POC_TRACK_MIN_FRAMES=3",
 		"SP_POC_MAX_BOXES_DRAWN=12",
 		"SP_POC_REPORT_METRICS=events",
@@ -843,6 +897,11 @@ func demoEnv(root, dataRoot, clip, zones, model, anchors, simAddr, uiAddr string
 		// D-5, in the configuration as well as on the screen: the relay is
 		// declared here and nowhere else, and `source.Label` derives the sentence.
 		"SP_POC_SOURCE_RELAY=false",
+		// Required and not defaulted, so the demo has to say which trigger it is
+		// running. The demo is the ALARM trigger: the reference trigger needs a
+		// camera that was genuinely moved, covered and restored, and a demo that
+		// pinned a reference view would be asserting integrity it did not measure.
+		"SP_POC_CAMERA_INTEGRITY=false",
 	}
 	if !r.on {
 		return env
@@ -942,14 +1001,82 @@ func showLanded(root string, env []string, dataRoot, simAddr string, r *relay) e
 
 func run(dir, name string, args ...string) error { return runEnv(dir, nil, name, args...) }
 
+// runEnv runs a child with THIS command's environment, not the shell's.
+//
+// `cmd.Env = append(os.Environ(), env...)` was here, and `demoEnv`'s own comment
+// said it must not be: a demo that inherits an operator's SP_POC_* runs a
+// configuration the operator cannot see, and the report belongs to a run nobody
+// watched. It is not a theoretical hazard — `SP_POC_TRIGGER_MODE` was absent from
+// the slice, so it came from the shell, and a shell carrying `sidecar` produced a
+// per-frame ONNX run whose banner claimed pure Go.
+//
+// Every SP_POC_ variable is therefore dropped from the parent's environment, and
+// `env` is the whole truth. `PATH` and the rest of the platform stay: a child
+// cannot find ffmpeg without them, and no SP_POC_ value can decide whether a run
+// is honest.
 func runEnv(dir string, env []string, name string, args ...string) error {
 	cmd := exec.Command(name, args...)
 	cmd.Dir = dir
 	if env != nil {
-		cmd.Env = append(os.Environ(), env...)
+		cmd.Env = append(withoutPOC(os.Environ()), env...)
 	}
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	return cmd.Run()
+}
+
+// withoutPOC drops every SP_POC_ variable from an environment slice.
+func withoutPOC(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		if name, _, ok := strings.Cut(kv, "="); ok && strings.HasPrefix(name, config.EnvPrefix) {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
+}
+
+// printTriggerBanner prints what the trigger WILL BE, read out of the environment
+// slice this command is about to run the child with.
+//
+// It was a literal. It said "pure Go, no ONNX, no Python, no sidecar" and that
+// sentence was printed whether or not the run agreed: `SP_POC_TRIGGER_MODE` was
+// absent from the slice, the slice was merged over the operator's shell, and a
+// shell carrying `sidecar` produced a per-frame ONNX run under a banner denying
+// one. It was the only measured claim in this project that was not derived from a
+// measurement, and a screen that lies about its own cost model is worse than no
+// screen: every number on it is discounted once the reader knows.
+//
+// It also prints the approved classes, because that list is the other half of the
+// same claim. A run whose trigger emits `motion` and whose class list omits
+// `motion` approves nothing, silently, and a reader of the screen cannot tell that
+// from a quiet road.
+func printTriggerBanner(env []string) {
+	mode := envValue(env, "SP_POC_TRIGGER_MODE")
+	switch mode {
+	case soak.TriggerSidecar:
+		fmt.Println("  trigger: the per-frame ONNX sidecar. The model runs on EVERY frame at 5 fps,")
+		fmt.Println("  not once per event, and the report says which mode produced the boxes.")
+	case soak.TriggerNovelty:
+		fmt.Println("  trigger: the local novelty engine. model: pure Go, no ONNX, no Python, no")
+		fmt.Println("  sidecar. The verifier is the model in SP_POC_VLM_MODEL, called ONCE per event.")
+	default:
+		// An unrecognised mode is not a third sentence to print. `config.Load` refuses
+		// it by name moments later; this says so first and names the value it saw,
+		// rather than describing a run that is not configured.
+		fmt.Printf("  trigger: %q — not a mode this build operates. The run will refuse by name.\n", mode)
+	}
+	fmt.Printf("  approved classes %s\n", envValue(env, "SP_POC_CLASSES"))
+}
+
+// envValue reads one value out of a NAME=value slice.
+func envValue(env []string, name string) string {
+	for _, kv := range env {
+		if k, v, ok := strings.Cut(kv, "="); ok && k == name {
+			return v
+		}
+	}
+	return ""
 }
 
 func httpGet(url string) (string, error) {

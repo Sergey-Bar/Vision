@@ -54,6 +54,7 @@ var FlagSet = map[string]string{
 	"sim-url":           "SP_POC_SIM_URL",
 	"xprotect-base-url": "SP_POC_XPROTECT_BASE_URL",
 	"camera-guid":       "SP_POC_CAMERA_GUID",
+	"camera-integrity":  "SP_POC_CAMERA_INTEGRITY",
 	"device-path":       "SP_POC_DEVICE_PATH",
 	"event-type-guid":   "SP_POC_EVENT_TYPE_GUID",
 	"push-max-attempts": "SP_POC_PUSH_MAX_ATTEMPTS",

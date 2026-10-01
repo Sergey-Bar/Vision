@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os"
@@ -196,14 +197,24 @@ func measureAI() ([3]time.Duration, int, error) {
 // cmdProbe is the contract confidence table. Every path is labelled
 // `documented` or `untested-against-real-vms`, and the tool never promotes a
 // path on its own.
+//
+// `--live` dials the configured instance and replaces the last column with what the
+// server actually did. It never writes: the probe is read-only, because the fastest
+// way to lose an operator's trust is a confidence tool that posts a real event into
+// a live VMS.
 func cmdProbe(args []string) error {
-	fmt.Println("# Milestone contract confidence")
+	flags, err := flagSet("probe", map[string]string{"live": boolSpec, "tag": ""}, args)
+	if err != nil {
+		return err
+	}
+	fmt.Println("# Contract confidence")
 	fmt.Println()
-	fmt.Println("`documented` means a line of Milestone's own downloaded specification backs")
+	fmt.Println("`documented` means a line of the vendor's own downloaded specification backs")
 	fmt.Println("the path and every field sent. `untested-against-real-vms` means the shape is")
 	fmt.Println("checked but no real server has ever answered it: no XProtect server has been")
-	fmt.Println("reachable from this repository. Reading this table and then claiming an event")
-	fmt.Println("reached an operator is the mistake this table exists to prevent.")
+	fmt.Println("reachable from this repository unless you have just run `pocctl probe --live`.")
+	fmt.Println("Reading this table and then claiming an event reached an operator is the")
+	fmt.Println("mistake this table exists to prevent.")
 	fmt.Println()
 	rows := []struct {
 		op      string
@@ -234,7 +245,111 @@ func cmdProbe(args []string) error {
 	fmt.Println("Every call in this module is additionally checked against the downloaded")
 	fmt.Println("specification by a test (internal/xprotect/contract_test.go). Change a path or")
 	fmt.Println("a field in the client and that test fails; it needs no VMS to fail.")
+	fmt.Println()
+
+	if flags["live"] != "true" {
+		fmt.Println("Run `pocctl probe --live` against the configured instance to replace the")
+		fmt.Println("last column with what the server actually did. That probe is READ-ONLY:")
+		fmt.Println("it never pushes an event and never promotes a row to verified.")
+		return nil
+	}
+	return probeLive(flags["tag"])
+}
+
+// probeLive is 0.3: dial the instance and report per route.
+//
+// The four questions are answered in order of how badly a judge will ask them, and
+// two of them cannot be answered from a REST probe at all — which is printed as
+// NOT RUN rather than as a guess. A probe that answered them would be worse than
+// one that admits it cannot.
+func probeLive(tag string) error {
+	base := strings.TrimSpace(os.Getenv("SP_POC_XPROTECT_BASE_URL"))
+	if base == "" || base == "http://127.0.0.1:8098" {
+		return fmt.Errorf("SP_POC_XPROTECT_BASE_URL is %q. A live probe against the simulator would report the simulator's own "+
+			"answers, which is the one thing this command must not do", orNoneString(base, "unset"))
+	}
+	timeout := 10 * time.Second
+	client, err := xprotect.New(xprotect.Config{
+		BaseURL: base, Timeout: timeout,
+		Credentials: xprotect.Credentials{
+			ClientID:     os.Getenv("SP_POC_XPROTECT_CLIENT_ID"),
+			ClientSecret: os.Getenv("SP_POC_XPROTECT_CLIENT_SECRET"),
+			Username:     os.Getenv("SP_POC_XPROTECT_USERNAME"),
+			Password:     os.Getenv("SP_POC_XPROTECT_PASSWORD"),
+		},
+	})
+	if err != nil {
+		return err
+	}
+	if tag == "" {
+		tag = os.Getenv("SP_POC_PROBE_TAG")
+	}
+	fmt.Printf("probing %s (read-only)\n\n", base)
+	rows, err := client.Probe(context.Background(), xprotect.ProbeInput{
+		CameraGUID:    os.Getenv("SP_POC_CAMERA_GUID"),
+		EventTypeGUID: os.Getenv("SP_POC_EVENT_TYPE_GUID"),
+		Tag:           tag,
+	})
+	if err != nil {
+		return err
+	}
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "route\tmethod\tpath\tstate\tdetail")
+	for _, r := range rows {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", r.Op, r.Method, r.Path, r.State, oneLine(r.Detail))
+	}
+	tw.Flush()
+
+	fmt.Println()
+	fmt.Println("## the four questions")
+	cameraGUID, typeGUID := os.Getenv("SP_POC_CAMERA_GUID"), os.Getenv("SP_POC_EVENT_TYPE_GUID")
+	fmt.Printf("  live stream / RTSP:  NOT RUN. REST says nothing about stream availability. Open the camera URL with " +
+		"ffplay and record what happened; a probe that answered this would be guessing.\n")
+	if typesReachable(rows) {
+		fmt.Printf("  analytics event type: MEASURED above. SP_POC_EVENT_TYPE_GUID is %s; put the Analytics GUID from the "+
+			"event-type list here, and this build does NOT verify it against the list — it pushes and reads back.\n",
+			orNoneString(typeGUID, "UNSET"))
+	} else {
+		fmt.Printf("  analytics event type: NOT MEASURED — the event-type route did not answer. SP_POC_EVENT_TYPE_GUID is %s.\n",
+			orNoneString(typeGUID, "UNSET"))
+	}
+	fmt.Printf("  camera GUID:          %s. There is no published cameras route in this build's downloaded specification, "+
+		"so this probe cannot check it and does not pretend to. SP_POC_CAMERA_GUID is %s.\n",
+		"NOT MEASURED", orNoneString(cameraGUID, "UNSET"))
+	if tagQueryReachable(rows) {
+		fmt.Printf("  tag query:            MEASURED above, for a tag this run never pushed. The read-back in 1.1 uses a tag " +
+			"that DOES exist, and that is the only way to learn whether a push landed.\n")
+	} else {
+		fmt.Printf("  tag query:            NOT MEASURED — see the table above.\n")
+	}
+	fmt.Println()
+	fmt.Println("A route marked reachable is NOT verified. Verification is a human flipping a row in")
+	fmt.Println("contracts/xprotect/contract.json after reading the evidence, with a date on it.")
 	return nil
+}
+
+func typesReachable(rows []xprotect.RouteProbe) bool {
+	return anyRoute(rows, xprotect.PathEventTypes, xprotect.RouteReachable)
+}
+
+func tagQueryReachable(rows []xprotect.RouteProbe) bool {
+	return anyRoute(rows, xprotect.PathEvents, xprotect.RouteReachable)
+}
+
+func anyRoute(rows []xprotect.RouteProbe, path string, want xprotect.RouteState) bool {
+	for _, r := range rows {
+		if r.Path == path && r.State == want {
+			return true
+		}
+	}
+	return false
+}
+
+func orNoneString(s, fallback string) string {
+	if strings.TrimSpace(s) == "" {
+		return fallback
+	}
+	return s
 }
 
 // runSim starts the simulator and refuses to start if something is already

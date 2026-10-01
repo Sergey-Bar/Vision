@@ -113,9 +113,24 @@ type Stats struct {
 type Config struct {
 	ScoreThreshold float64
 	Classes        []string
-	IoU            float64
-	MaxAge         time.Duration
-	Cooldown       time.Duration
+	// Approve is the decision "may this class produce a crossing event", handed in
+	// rather than reconstructed from Classes.
+	//
+	// The engine used to build its own map from Classes, which put the answer in two
+	// places that did not agree: `config.IsApproved` accepts a class whose FAMILY is
+	// approved, and the engine's private map did not. The shipped trigger's class is
+	// `motion` — not a COCO class, family `other` — so `watch` configured with
+	// `SP_POC_CLASSES=other` approved it while the engine refused every candidate as
+	// `class not on the approved list`. A predicate and not a second copy of the
+	// list, because a list resolved in two places is a list that will be resolved in
+	// two different ways.
+	//
+	// Nil keeps the old exact-name behaviour, so every existing caller and every
+	// test in this package behaves exactly as it did.
+	Approve  func(class string) bool
+	IoU      float64
+	MaxAge   time.Duration
+	Cooldown time.Duration
 	// Tolerance is the band around a line, in normalised perpendicular
 	// distance, inside which a track's side does not change. Without it a track
 	// sitting on the line would flip on floating-point noise and the crossing
@@ -154,9 +169,12 @@ type Engine struct {
 	zone Zone
 	cfg  Config
 	ok   map[string]bool
-	mu   sync.Mutex // guards nextID only, so tests can run in parallel
-	next int
-	live map[int]*Track
+	// approve is the caller's answer to "may this class cross", when it supplied one.
+	// See Config.Approve.
+	approve func(class string) bool
+	mu      sync.Mutex // guards nextID only, so tests can run in parallel
+	next    int
+	live    map[int]*Track
 	// cooldown is per (line, class), not per track: a new track for the same
 	// object after a brief occlusion should not get a second event inside the
 	// window, and a per-track key would let it.
@@ -191,10 +209,17 @@ func New(zone Zone, cfg Config) (*Engine, error) {
 	for _, c := range cfg.Classes {
 		ok[strings.ToLower(strings.TrimSpace(c))] = true
 	}
+	approve := cfg.Approve
+	if approve == nil {
+		// A Config built by hand keeps the old behaviour, so the package's own tests
+		// and any caller that never had a Config still approve by exact name.
+		approve = func(class string) bool { return ok[strings.ToLower(strings.TrimSpace(class))] }
+	}
 	return &Engine{
 		zone:     zone,
 		cfg:      cfg,
 		ok:       ok,
+		approve:  approve,
 		live:     map[int]*Track{},
 		cooldown: map[string]time.Time{},
 		counters: NewCounters(),
@@ -283,13 +308,39 @@ func (e *Engine) associate(at time.Time, approved []Box) ([]Box, int) {
 		box   int
 		score float64
 	}
+	// A track matches a box when the boxes OVERLAP or TOUCH.
+	//
+	// Touching is the second half and it is not a loosened threshold. The novelty
+	// engine's component is the changed AREA, which for an object moving D px per
+	// frame is a D-px strip: frame N occupies [a, a+D] and frame N+1 occupies
+	// [a+D, a+2D]. Those two boxes share an edge and no interior, so their IoU is
+	// exactly zero, no threshold below 1.0 matches them, and every frame started a
+	// new track. `seen` never reached `TrackMinFrames`, nothing was ever old enough
+	// to cross, and `pocctl demo` reported 189 approved boxes and zero crossings
+	// with no error.
+	//
+	// Touching is also the tightest rule that fixes it. It admits a box whose centre
+	// is within half the two boxes' combined width and height — exactly the case
+	// where two regions abut — and refuses everything with a gap between them. Two
+	// objects that are near each other therefore do not merge: association below is
+	// greedy and one-to-one, so each box joins its single nearest track and a
+	// second box gets a second track. The cost of a looser gate here is identity
+	// SWITCHING when two objects cross closely, which is the ordinary trade in every
+	// tracker and is bounded by the gap this rule refuses.
 	var pairs []pair
 	for _, t := range e.live {
 		for bi, b := range approved {
 			if !strings.EqualFold(t.Class, b.Class) {
 				continue
 			}
-			if v := iou(t.Box, b); v >= e.cfg.IoU {
+			v := iou(t.Box, b)
+			switch {
+			case v >= e.cfg.IoU:
+				// Scored above 1 so any overlap outranks any touch: where both
+				// rules would match, the overlapping track is the better answer
+				// and the ordering below has to say so.
+				pairs = append(pairs, pair{track: t.ID, box: bi, score: 1 + v})
+			case touching(t.Box, b):
 				pairs = append(pairs, pair{track: t.ID, box: bi, score: v})
 			}
 		}
@@ -329,6 +380,29 @@ func (e *Engine) associate(at time.Time, approved []Box) ([]Box, int) {
 		attached = append(attached, b)
 	}
 	return attached, len(e.live)
+}
+
+// touching reports whether two boxes abut: their centres are within half their
+// combined width and height.
+//
+// The epsilon is one grid cell's worth at a 64-wide grid, because the novelty
+// engine measures on exactly that grid and two abutting cells can be a rounding
+// step apart. Without it a pair that is exactly touching fails on floating-point
+// dust, and the failure is silent and total: no track, no crossing, no error.
+func touching(a, b Box) bool {
+	acx, acy := a.Centre()
+	bcx, bcy := b.Centre()
+	const eps = 1.0 / 64
+	dx := absf(acx - bcx)
+	dy := absf(acy - bcy)
+	return dx <= (a.X2-a.X1+b.X2-b.X1)/2+eps && dy <= (a.Y2-a.Y1+b.Y2-b.Y1)/2+eps
+}
+
+func absf(v float64) float64 {
+	if v < 0 {
+		return -v
+	}
+	return v
 }
 
 // Feed is one frame's worth of boxes at one instant. It returns the crossings
@@ -517,6 +591,9 @@ func (e *Engine) thresholds() Thresholds {
 }
 
 func (e *Engine) isApproved(class string) bool {
+	if e.approve != nil {
+		return e.approve(class)
+	}
 	return e.ok[strings.ToLower(strings.TrimSpace(class))]
 }
 

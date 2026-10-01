@@ -1,18 +1,19 @@
-// Package aistate is the sidecar's answer vocabulary, and nothing else.
+// Package aistate is the answer vocabulary, and nothing else.
 //
-// It exists because two packages need these five words and neither may depend on
-// the other. `internal/ai` speaks them to the wire; `internal/detect` counts them
-// when it folds a frame into its run-level counters. A shared vocabulary that
-// only one of them can see has to be declared twice, and a vocabulary declared
-// twice is a vocabulary that drifts — and a drift here is not a compile error, it
-// is a run that counts `degraded` frames as `asked_answered` and reports an
-// invented detection rate.
+// It exists because three packages need these five words and none of them may
+// depend on the other. `internal/ai` speaks them to the wire; `internal/detect`
+// counts them when it folds a frame into its run-level counters; `internal/store`
+// filters on them when `pocctl search` and `pocctl brief` report what was asked
+// and what was not. A shared vocabulary that only some of them can see has to be
+// declared twice, and a vocabulary declared twice is a vocabulary that drifts — and
+// a drift here is not a compile error, it is a run that counts `degraded` frames as
+// `asked_answered` and reports an invented detection rate, or a shift brief whose
+// hours silently stop matching the model's answers.
 //
-// So the words live here, below both, in a package that imports nothing. That is
-// the same shape as `internal/classify` and for the same reason: it is the
-// vocabulary the other packages agree on, so a vocabulary package that reached
-// for the store or the wire would make the agreement depend on the thing it
-// describes.
+// So the words live here, below all three, in a package that imports nothing. That
+// is the same shape as `internal/classify` and for the same reason: it is the
+// vocabulary the other packages agree on, so a vocabulary package that reached for
+// the store or the wire would make the agreement depend on the thing it describes.
 //
 // These are CONTRACT.md §2.2's four states plus the one this module adds. The
 // wire adds no sixth: a sidecar that cannot describe its own decode says

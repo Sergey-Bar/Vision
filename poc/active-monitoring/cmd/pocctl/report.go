@@ -91,6 +91,25 @@ func modelName() string {
 // AUTHOR in the sentence: a rate with no author is a number somebody typed, and
 // `soak` already refuses to print one as a measurement.
 func applyGroundTruth(st *store.Store, runID string, c context.Context) *soak.HumanMarking {
+	// The STORE first, always.
+	//
+	// It used to read only `testdata/groundtruth.json`, so the two ways a human can
+	// mark an event did not talk to each other: `pocctl mark` wrote to the store and
+	// the report ignored it, and the file was the only source that counted. A person
+	// who marked ten events with the command beside them on the review sheet, then ran
+	// the report and saw `false positives: NOT RUN`, was being told the truth about
+	// the file and nothing at all about their own work.
+	//
+	// The file remains the fallback because it is what the regression fixtures use,
+	// and because a review somebody committed is a real thing. It is second because a
+	// mark made against THIS run's own pushed tags is fresher than any file on disk.
+	if marks, err := st.GroundTruth(c, runID); err != nil {
+		fmt.Printf("false positives: NOT RUN: the marks recorded against this run could not be read (%v)\n", err)
+		return nil
+	} else if len(marks) > 0 {
+		return markingFromMarks(st, runID, c, marks, "this run's own recorded marks")
+	}
+
 	path := groundTruthFile()
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -153,6 +172,35 @@ func applyGroundTruth(st *store.Store, runID string, c context.Context) *soak.Hu
 	precision := float64(tp) / float64(tp+fp)
 	fmt.Printf("false positives: %d/%d (precision %.2f), marked by %s\n", fp, tp+fp, precision, orUnstated(by))
 	return &soak.HumanMarking{Examined: tp + fp, False: fp, By: by, When: time.Now().UTC(), Note: note}
+}
+
+// markingFromMarks turns marks already IN THE STORE into a HumanMarking.
+//
+// It does not re-apply them: `MarkGroundTruth` refuses a tag the run never pushed, so
+// the rows that exist are the rows that matched. It counts from the store's own
+// `Precision`, which is the same arithmetic the marking command printed, so the
+// number in the report and the number the person saw cannot differ.
+func markingFromMarks(st *store.Store, runID string, c context.Context, marks []store.GroundTruthMark, source string) *soak.HumanMarking {
+	tp, fp, measured, err := st.Precision(c, runID)
+	if err != nil || !measured {
+		fmt.Println("false positives: NOT RUN: the recorded marks could not be counted, so no rate is printed")
+		return nil
+	}
+	by, note, when := "", "", time.Time{}
+	for _, m := range marks {
+		if by == "" {
+			by, note, when = m.By, m.Note, m.At
+		}
+	}
+	if !when.IsZero() {
+		when = when.UTC()
+	} else {
+		when = time.Now().UTC()
+	}
+	precision := float64(tp) / float64(tp+fp)
+	fmt.Printf("false positives: %d/%d (precision %.2f), marked by %s on %s — %d mark(s) from %s\n",
+		fp, tp+fp, precision, orUnstated(by), when.Format("2006-01-02"), len(marks), source)
+	return &soak.HumanMarking{Examined: tp + fp, False: fp, By: by, When: when, Note: note}
 }
 
 func orUnstated(s string) string {

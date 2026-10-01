@@ -50,6 +50,38 @@ pipe is blocked longer than the configured deadline, `ffmpeg` is killed and a
 `fault` is recorded with reason `ai_pipe_backpressure`. Frames are never dropped
 quietly; quiet dropping is exactly what the seven-day run is supposed to find.
 
+**R7 — A retrieval is not a verdict.** Anything that reads what was already
+stored — `pocctl search`, `pocctl brief`, the report, the audit commands —
+holds no observer and no `*vlm.Client`, and calls no provider. It reads columns
+and prints them. Two consequences follow and both are the rule:
+
+- It must report the four absence states **of the window, not of the hits**. A
+  query that returns eleven rows and one that returns none are the same query when
+  eleven proposals in the window were never asked, and a surface that prints only
+  the hits cannot tell those apart. So `SearchObservations` returns a
+  `SearchSummary` beside the rows and `Unsearchable()` refuses the sentence "the
+  model found nothing" whenever any proposal was `not_asked` or `degraded`
+  (RC-9).
+- A reference-mode run with no pinned view reports `unpinned` and never
+  `unchanged` (RC-11). `IntegrityUnchanged` is unreachable from an unpinned
+  engine; `novelty.Engine.IntegrityState` is the only way to get one.
+
+**R8 — A caption is a claim, and a claim carries its attribution.** Every
+sentence the model produced that a surface renders must be renderable *with* the
+clip it is about and the identity of who produced it, or the surface must refuse
+to render it. Concretely, a rendered line carries: the stored `summary` verbatim
+(no paraphrase — a paraphrase of a model's sentence is a sentence this repository
+invented), the `evidence.storage_ref` and `sha256` a person can open, the
+`model_identity` the provider *claimed*, the `contract_version`, the `temperature`
+and the `output_hash`.
+
+There is no `model_hash`. A hosted model has no weights to hash, and inventing one
+is the failure R8 exists to prevent. What is stored is the provider's claim, the
+contract version — a hash of prompt text plus output schema plus model name plus
+region — and the hash of the four validated output fields. Those three together
+are what makes a caption checkable; a weight hash would have been a fourth thing
+that looked stronger and was not.
+
 ---
 
 ## 2. Vocabulary

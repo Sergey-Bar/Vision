@@ -711,7 +711,7 @@ func (r *Runner) handleIncident(ctx context.Context, ev TriggerEvent, aiState st
 	r.storeSnapshot(ctx, id, ev, aiState, frameSeq)
 
 	// Step 4: the clip.
-	ref, clipErr := r.cutAndStore(ctx, ev.At)
+	ref, clipErr := r.cutAndStore(ctx, id, ev.At)
 	if clipErr != nil {
 		_ = r.opt.Store.Transition(ctx, id, store.StatusClipRefused, "", clipErr.Error())
 		_ = r.opt.Store.RecordFault(ctx, r.opt.RunID, store.Fault{
@@ -934,7 +934,20 @@ type EvidenceResult struct {
 	Bytes      int64
 }
 
-func (r *Runner) cutAndStore(ctx context.Context, at time.Time) (EvidenceResult, error) {
+// cutAndStore cuts the clip around `at` and records it against `detectionID`.
+//
+// `detectionID` is the detection's OWN id, passed in by the caller. It used to be
+// minted here — `cutDetectionID(sha, at)` — and that was wrong in a way no test
+// caught: the evidence table's `detection_id` is a FOREIGN KEY, and a freshly minted
+// `ev-<hash>` names a row that does not exist. Every `PutEvidence` therefore failed
+// with `FOREIGN KEY constraint failed`, the clip was recorded as `clip_refused`, and
+// **AC3 — evidence intact — could never pass in any run, ever.** The run carried on,
+// because a refused clip is a legitimate outcome, and printed ten detections and zero
+// stored evidence with no other symptom.
+//
+// The evidence row's `id` is derived from the detection id and the clip hash, so two
+// clips for one detection get two rows and one clip for two detections cannot.
+func (r *Runner) cutAndStore(ctx context.Context, detectionID string, at time.Time) (EvidenceResult, error) {
 	from := at.Add(-r.opt.ClipBefore)
 	to := at.Add(r.opt.ClipAfter)
 	staging := filepath.Join(r.opt.DataRoot, "staging")
@@ -950,9 +963,8 @@ func (r *Runner) cutAndStore(ctx context.Context, at time.Time) (EvidenceResult,
 		return EvidenceResult{}, err
 	}
 	ref := r.opt.Evidence.StorageRef(stored.Hash)
-	id := cutDetectionID(stored.Hash, at)
 	if err := r.opt.Store.PutEvidence(ctx, store.Evidence{
-		ID: id + "-ev", DetectionID: id,
+		ID: evidenceID(detectionID, stored.Hash), DetectionID: detectionID,
 		SHA256: stored.Hash, StorageRef: ref, Bytes: stored.Bytes, Trim: cut.Trim,
 		TimeBegin: from, TimeEnd: to, ReadbackOK: true,
 	}); err != nil {
@@ -961,15 +973,11 @@ func (r *Runner) cutAndStore(ctx context.Context, at time.Time) (EvidenceResult,
 	return EvidenceResult{StorageRef: ref, SHA256: stored.Hash, TimeBegin: from, TimeEnd: to, Trim: cut.Trim, Bytes: stored.Bytes}, nil
 }
 
-// cutDetectionID is the evidence row's foreign key.
-//
-// It is derived from the clip's CONTENT rather than from the detection, because
-// the evidence table is keyed by detection and a resumed run may cut the same
-// clip twice. Two cuts of the same interval produce the same id and therefore one
-// row, which is what the unique index on sha256 was already enforcing one level
-// up.
-func cutDetectionID(sha string, at time.Time) string {
-	return "ev-" + store.HashOf([]byte(sha + "|" + at.UTC().Format(time.RFC3339Nano)))[:20]
+// evidenceID is the evidence ROW's own primary key: the detection it belongs to plus
+// the bytes it proves. The detection id is the foreign key and the detection's own
+// id; the two must not be confused, and confusing them is what made AC3 unreachable.
+func evidenceID(detectionID, sha string) string {
+	return "ev-" + store.HashOf([]byte(detectionID + "|" + sha))[:20]
 }
 
 func (r *Runner) enqueueEvent(ctx context.Context, ev TriggerEvent, evidence EvidenceResult, obs vlm.Observation, tag string) error {

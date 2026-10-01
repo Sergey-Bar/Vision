@@ -17,8 +17,8 @@
                     root does not build this module
     6. test         go test -race -p 1 -count=1 ./...
     7. python       py -3 -m unittest on the sidecar
-    8. red-check    the same suite with three controls removed, each of which
-                    must turn at least one test red
+8. red-check    the same suite with each control removed, each of which
+                     must turn at least one test red
 
   Step 8 is the one that makes the other seven mean something. A suite that
   passes because the thing it was supposed to catch is not there any more is a
@@ -86,15 +86,31 @@ if ($gcc) {
   Pass "gcc at $gcc and CGO_ENABLED=1 (the race detector needs both)"
 } else { Skip "gcc was not found, so the race detector cannot run. Install MSYS2 (C:\msys64) or MinGW. The -race step below is SKIPPED, not passed." }
 
-$mediamtx = Find-Tool 'mediamtx' @()
-if ($mediamtx) { Pass "mediamtx at $mediamtx (`pocctl demo --rtsp` can publish an rtsp relay)" }
+# mediamtx is an ARCHIVE package: `winget install` extracts the binary into its own
+# Packages folder and adds a PATH entry that the shell that ran the install has not
+# inherited. The candidate below is that folder, found by a glob rather than a
+# version-pinned literal — a hardcoded version path would go stale on the next
+# upgrade and make this gate print a SKIP about a tool that IS installed.
+$mtCandidates = @()
+$mtRoot = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages'
+if (Test-Path $mtRoot) {
+  $mtCandidates = @(Get-ChildItem -Path $mtRoot -Filter 'mediamtx.exe' -Recurse -ErrorAction SilentlyContinue |
+                    Select-Object -First 1 -ExpandProperty FullName)
+}
+$mediamtx = Find-Tool 'mediamtx' $mtCandidates
+if ($mediamtx) {
+  # Put it on PATH, or the `pocctl demo --rtsp` step below would refuse by name for
+  # the same reason this one used to print a skip.
+  $env:Path = (Split-Path $mediamtx) + ";" + $env:Path
+  Pass "mediamtx at $mediamtx (`pocctl demo --rtsp` can publish an rtsp relay)"
+}
 else {
   # A SKIP and never a Fail, and the distinction is load-bearing. `pocctl demo`
   # without --rtsp loops a file and is a complete gate on its own; D-4 made the
   # relay opt-in for exactly this reason. A missing OPTIONAL tool that turned the
   # gate red would train everyone to ignore the gate, which is the exact failure
   # this module treats as a defect everywhere else.
-  Skip "mediamtx is not on PATH, so `pocctl demo --rtsp` will refuse by name. Install it with `winget install --id Bluenviron.MediaMTX -e` (MIT) from https://github.com/bluenviron/mediamtx/releases. This is a SKIP, not a pass: the loop demo is still a full gate, and nothing below measured the rtsp path."
+  Skip "mediamtx is not installed, so `pocctl demo --rtsp` will refuse by name. Install it with `winget install --id Bluenviron.MediaMTX -e` (MIT) from https://github.com/bluenviron/mediamtx/releases. This is a SKIP, not a pass: the loop demo is still a full gate, and nothing below measured the rtsp path."
 }
 
 $ffmpeg = Get-Command ffmpeg -ErrorAction SilentlyContinue
@@ -107,9 +123,16 @@ else { Fail "ffprobe is not on PATH; the capability table cannot measure the sou
 
 $py = Get-Command py -ErrorAction SilentlyContinue
 if ($py) { Pass "py at $($py.Source)" }
-else { $py = Get-Command python -ErrorAction SilentlyContinue }
-if ($py) { Pass "python at $($py.Source)" }
-else { Fail "no Python interpreter was found. The AI sidecar needs numpy and onnxruntime and is a hard dependency (D2)." }
+else {
+  # `else if`, not two `if`s. This used to be two `if`s, so `Pass "python at"`
+  # printed even when NEITHER `py` nor `python` existed and then `Fail` fired on
+  # the next line: the gate claimed to have found an interpreter it had not
+  # found. A PASS line followed by a FAIL for the same fact is the exact shape
+  # of a gate nobody reads, and this gate is read.
+  $py = Get-Command python -ErrorAction SilentlyContinue
+  if ($py) { Pass "python at $($py.Source)" }
+  else { Fail "no Python interpreter was found. The AI sidecar needs numpy and onnxruntime and is a hard dependency (D2)." }
+}
 
 # --- 2. build ---------------------------------------------------------------
 Step "build"
@@ -294,7 +317,7 @@ if ($py) {
 } else { Skip "no Python interpreter, so the sidecar's tests did not run" }
 
 # --- 8. red check -----------------------------------------------------------
-Step "red check (eleven controls removed from the CODE, each must turn the suite red)"
+Step "red check (each control removed from the CODE, each must turn the suite red; the count is printed by the step below, not here)"
 
 if ($SkipRedCheck) {
   Skip "the red check was skipped with -SkipRedCheck. A release check must run it."
@@ -342,7 +365,7 @@ if ($SkipRedCheck) {
     @{
       name = 'RC-1 the same rule, at write time'
       file = 'internal\store\observations.go'
-      from = 'if o.AIState != aistateAsked && vlm.Verdict(o.Verdict) != vlm.VerdictNone {'
+      from = 'if o.AIState != aistate.Asked && vlm.Verdict(o.Verdict) != vlm.VerdictNone {'
       to   = 'if false { // REDCHECK RC-1: the durable half was removed'
       pkg  = './internal/store'
       why  = 'a second writer that forgot the parser would put a fabricated negative into the one table a proof chain reads'
@@ -394,6 +417,14 @@ if ($SkipRedCheck) {
       to   = 'if !c.pinned(host) && false { // REDCHECK RC-7: the cross-region refusal was removed'
       pkg  = './internal/vlm'
       why  = "a site in the EU ships footage to the US host; there is deliberately no failover, and this is the line that refuses it"
+    },
+    @{
+      name = 'RC-9 an unasked window is not searchable'
+      file = 'cmd\pocctl\search.go'
+      from = 'unsearchable := s.NotAsked + s.Degraded'
+      to   = 'unsearchable := 0 // REDCHECK RC-9: the unsearchable-window refusal was removed'
+      pkg  = './cmd/pocctl'
+      why  = 'pocctl search prints "no matches" for a window whose verifier was never consulted, which is a negative answer nobody gave. R7.'
     }
   )
   Push-Location $PWD
@@ -431,9 +462,21 @@ if ($SkipRedCheck) {
         [System.IO.File]::WriteAllText($full, $original)
       }
     }
-    & $go test -count=1 ./... *> $null
-    if ($LASTEXITCODE -ne 0) { Fail 'the suite is red after the controls were restored, so the restore did not work' }
+    # The output is printed on failure. A red that says only "the suite is red"
+    # sends the reader to run the suite by hand to find out which package, and a
+    # red with a name in it is the difference between a five-minute investigation
+    # and a guess. The whole point of this gate is that its failures are legible.
+    $restored = & $go test -count=1 ./... 2>&1
+    if ($LASTEXITCODE -ne 0) {
+      $restored | Select-String -Pattern '^FAIL|^---|^\s+---|_test\.go:' | ForEach-Object { Write-Host "    $_" }
+      Fail 'the suite is red after the controls were restored, so the restore did not work'
+    }
     else { Pass 'the suite is green again with the controls restored' }
+    # The count is DERIVED from the table, never written into the step title. A
+    # title that says "eleven" is a sentence that goes stale the moment someone
+    # adds a twelfth control, and a stale count in a gate is worse than no count.
+    $ran = @($controls | Where-Object { $_ }).Count
+    Pass "$ran control(s) in the table above; the count is this line, not a constant in the step title"
   } finally { Pop-Location }
 }
 

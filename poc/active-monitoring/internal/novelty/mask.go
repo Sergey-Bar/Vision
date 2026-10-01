@@ -46,12 +46,32 @@ func components(m mask, minCells int) []component {
 		for len(stack) > 0 {
 			i := stack[len(stack)-1]
 			stack = stack[:len(stack)-1]
-			c.cells++
 			x, y := i%m.W, i/m.W
-			c.box.X1 = minf(c.box.X1, float64(x)/float64(m.W))
-			c.box.Y1 = minf(c.box.Y1, float64(y)/float64(m.H))
-			c.box.X2 = maxf(c.box.X2, float64(x+1)/float64(m.W))
-			c.box.Y2 = maxf(c.box.Y2, float64(y+1)/float64(m.H))
+			// The FIRST cell seeds the box; the rest widen it.
+			//
+			// It used to be `minf(c.box.X1, x)` on a zero-value Box, and a zero Box
+			// has X1 == 0 — so X1 and Y1 were pinned to the frame's top-left corner
+			// for EVERY component, forever, and only X2 and Y2 moved. Every region
+			// this engine proposed was a rectangle stretching from (0,0) to wherever
+			// the change ended.
+			//
+			// Three things were wrong at once and all of them looked like something
+			// else. On an operator's screen the box was the wrong shape. The tracker's
+			// consecutive boxes all shared the left edge, their IoU collapsed, and
+			// every frame started a NEW track — so `pocctl demo` produced 189 approved
+			// boxes and zero crossings with no error. And a component's AREA, which
+			// is what `SP_POC_MIN_BOX_AREA` is compared against, was the area of the
+			// whole top-left corner rather than of the change.
+			if c.cells == 0 {
+				c.box.X1, c.box.Y1 = float64(x)/float64(m.W), float64(y)/float64(m.H)
+				c.box.X2, c.box.Y2 = float64(x+1)/float64(m.W), float64(y+1)/float64(m.H)
+			} else {
+				c.box.X1 = minf(c.box.X1, float64(x)/float64(m.W))
+				c.box.Y1 = minf(c.box.Y1, float64(y)/float64(m.H))
+				c.box.X2 = maxf(c.box.X2, float64(x+1)/float64(m.W))
+				c.box.Y2 = maxf(c.box.Y2, float64(y+1)/float64(m.H))
+			}
+			c.cells++
 			for _, n := range neighbours(m.W, m.H, x, y) {
 				if m.cells[n] && !seen[n] {
 					seen[n] = true

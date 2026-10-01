@@ -44,35 +44,7 @@ func TestTheProbeOutputNeverClaimsAVMSLanding(t *testing.T) {
 
 func captureProbe(t *testing.T) string {
 	t.Helper()
-	old := os.Args
-	os.Args = []string{"pocctl", "probe"}
-	defer func() { os.Args = old }()
-
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	orig := os.Stdout
-	os.Stdout = w
-	done := make(chan string, 1)
-	go func() {
-		buf := make([]byte, 0, 64*1024)
-		tmp := make([]byte, 8192)
-		for {
-			n, err := r.Read(tmp)
-			buf = append(buf, tmp[:n]...)
-			if err != nil {
-				break
-			}
-		}
-		done <- string(buf)
-	}()
-	if err := cmdProbe(nil); err != nil {
-		t.Fatal(err)
-	}
-	w.Close()
-	os.Stdout = orig
-	return <-done
+	return capture(t, nil, cmdProbe)
 }
 
 // TestTheXProtectClientNeverMentionsTheSimulator is the boundary the table's

@@ -9,9 +9,9 @@ against what the provider *publishes*, and four of its assertions are marked
 directory: a claim that has been read in a document and a claim that has been seen
 on the wire look identical in a report and are not the same claim.
 
-A live call settles the open questions. `pocctl vlm-probe` makes one and records
-the raw response here. Until then, `pocctl preflight` prints this status, not a
-green tick.
+A live call settles the open questions. `pocctl vlm-probe` makes one — it exists as
+of 2026-10-01 and has never been run against a key — and records the raw response
+under `raw/`. Until then, `pocctl preflight` prints this status, not a green tick.
 
 ## What the client assumes
 
@@ -133,11 +133,37 @@ A third class is a file plus one manifest entry. It is not a code change, and
 ```powershell
 # One live call. Records the raw response into contracts/hafnia/raw/ and prints
 # which host answered, which model the API claims, and what it actually returned.
-pocctl vlm-probe
+#
+# The API key and the model name come from the ENVIRONMENT and have no flag: a
+# credential typed on a command line ends up in a shell history and a screenshot,
+# and the reason to probe is to check the configuration you already have.
+$env:SP_POC_VLM_API_KEY='...'
+$env:SP_POC_VLM_MODEL='cosmos-3-nano-16b'
+pocctl vlm-probe --print-body
 
 # Then set the status in this file by hand and record what changed:
 #   ASSERTED -> VERIFIED, with the date and the raw response beside it.
 ```
+
+What the probe does and does not do, because the difference is the whole of it:
+
+- It makes **one** request, with **no asset**: a text-only message carrying the
+  required output shape. The open question is whether this host, this path and this
+  auth scheme answer, and answering it with a clip would ship a site's video to
+  settle a question about spelling.
+- It refuses to follow a redirect, and the refusal is in the report rather than
+  assumed — a probe is run by hand against a host a person typed.
+- It spends **nothing** against the daily cap. Run it as often as you like.
+- It writes the raw body **whatever happened**, including on a 401, into a file named
+  `<UTC timestamp>-<region>-<status>.txt` with the host, the request line and the
+  error above the bytes. The failing probe is usually the one that settles the
+  question.
+- It does **not** change `contract.json` and neither should you, by hand, without
+  reading that file. Flipping `status` to `verified` is a human decision with a date
+  on it.
+
+`raw/` is gitignored until somebody has read one, because a raw response is a
+provider's own words about a customer's clip.
 
 Until `raw/` is non-empty, every row in the table above that says ASSERTED is a
 claim about a document, and this build's preflight says so out loud.
