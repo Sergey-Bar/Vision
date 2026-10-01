@@ -218,11 +218,21 @@ func isFieldCount(d int64) bool { return d >= 5 && d <= maxFields }
 func sprintDims(d []int64) string { return fmt.Sprint(d) }
 
 // mustLetterbox fails the test rather than returning a zero geometry.
+//
+// NHWC by default, because it is the order a packed RGB frame already has — so the
+// geometry tests are about the letterbox and not about memory order. The
+// NCHW-specific behaviour has its own test.
 func mustLetterbox(t *testing.T, rgb []byte, w, h, iw, ih int) ([]float32, Geometry) {
 	t.Helper()
-	tensor, g, err := Letterbox(rgb, w, h, iw, ih)
+	return mustLetterboxLayout(t, rgb, w, h, iw, ih, "nhwc")
+}
+
+// mustLetterboxLayout is the layout-aware form.
+func mustLetterboxLayout(t *testing.T, rgb []byte, w, h, iw, ih int, layout string) ([]float32, Geometry) {
+	t.Helper()
+	tensor, g, err := Letterbox(rgb, w, h, iw, ih, layout)
 	if err != nil {
-		t.Fatalf("Letterbox(%dx%d -> %dx%d) refused: %v", w, h, iw, ih, err)
+		t.Fatalf("Letterbox(%dx%d -> %dx%d, %s) refused: %v", w, h, iw, ih, layout, err)
 	}
 	if len(tensor) != iw*ih*3 {
 		t.Fatalf("Letterbox returned %d values, want %d", len(tensor), iw*ih*3)

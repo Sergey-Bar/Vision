@@ -11,9 +11,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Sergey-Bar/ai-captain-poc/internal/ai"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/detect"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/evidence"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/novelty"
+	"github.com/Sergey-Bar/ai-captain-poc/internal/ortdetect"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/vlm"
 )
@@ -44,6 +46,62 @@ type Trigger interface {
 	LastFinding() novelty.Finding
 	// Pinned reports whether a reference view is pinned.
 	Pinned() bool
+}
+
+// Detector is the per-frame object detector, in the trigger path's currency.
+//
+// It is a SEPARATE interface from [Trigger] rather than a third implementation of
+// it, and the reason is worth writing down because the plan expected the detector
+// to implement [Trigger] and the expectation looked reasonable.
+//
+// [Trigger.Candidates] returns `[]novelty.Candidate`, and `Runner.measureTrigger`
+// builds each box from `c.Box` while assigning `Class: r.triggerClass()` — ONE
+// class, from configuration, for every box on the frame. That is correct for the
+// novelty engine, which measures a whole-frame change-fraction and genuinely has no
+// class to report, and it would DISCARD every class a real detector produces. A bus
+// and a pedestrian would both carry the configured word, in exactly the right place,
+// and no reader could catch it by looking at the picture.
+//
+// So the detector gets the shape it actually has — per-frame, with the classes it
+// found and the arithmetic that produced them — and the novelty trigger is left
+// exactly as it was. Its twenty-odd tests still pass against it, which is the
+// evidence that this was an addition rather than a refactor.
+type Detector interface {
+	// Detect measures one frame and reports what it found and what it cost.
+	//
+	// `seq` is the frame's sequence number and it is echoed on the answer, because
+	// a refusal has to be traceable to the frame it happened on. A run that reports
+	// "14 degraded frames" cannot be acted on; a run that reports "14 degraded
+	// frames, at 3011, 3012, 3017" can.
+	Detect(seq uint64, rgb []byte, w, h int) DetectAnswer
+}
+
+// DetectAnswer is one frame's measurement.
+//
+// The three fields a caller must not confuse. Boxes is what the model found, State
+// is whether the pipeline actually looked, and Telemetry is what the decoder did on
+// the way there. A report printing only the first has told its reader nothing
+// actionable, because "the model found nothing" and "the decoder threw it all away"
+// print identically and need opposite fixes.
+type DetectAnswer struct {
+	// Boxes is normalised against the FRAME, never against the model's input, so a
+	// model running at 640x640 and a camera at 1920x1080 produce the same numbers.
+	Boxes []ai.Box
+	// State is one of the four words the contract fixes: asked_answered,
+	// no_objects, degraded, not_asked. It is DERIVED by the detector rather than
+	// set by the caller, because a caller that sets it can set it wrong and these
+	// four words are the whole of this module's vocabulary.
+	State string
+	// Telemetry is the decoder's own arithmetic: the DECLARED tensor shape, the
+	// record layout, the candidate counts at each stage, the letterbox geometry, and
+	// the reason for any refusal.
+	Telemetry ortdetect.Telemetry
+	// LatencyMS is this frame's inference cost in wall-clock milliseconds.
+	LatencyMS float64
+	// Refusal is non-nil when the frame could not be measured. A refusal is not a
+	// zero and not a degraded run: it is a named reason, and it is what makes a
+	// detection rate of zero diagnosable instead of merely observable.
+	Refusal *ortdetect.Refusal
 }
 
 // NoveltyTrigger adapts internal/novelty.Engine to [Trigger] and owns the two
@@ -330,7 +388,23 @@ func toTriggerEvent(c detect.Crossing, promptID string, score novelty.Score) Tri
 // the model verified an alert that was already raised, and the decision to raise
 // it was made from the score and the threshold alone. That is what makes the
 // replay in W3-4 possible with zero provider calls.
-func decisionFrom(t TriggerEvent, runID string, cfg novelty.Config, frameSeq uint64, refSHA string) store.Decision {
+//
+// `attr` is the RC-18 bundle and it is a PARAMETER rather than something read from
+// the runner, so that this function stays pure and its replay does not depend on
+// run state. It is the zero value for a motion-mode decision, and every field of it
+// is a pointer, so the zero value writes NULL for all eleven columns — which is the
+// honest record that no model produced this decision.
+//
+// `runTriggerMode` is the RUN's mode, and it is a parameter for the same reason. It
+// used to be taken from `cfg.Mode`, which is the novelty ENGINE's mode, and the two
+// happened to agree — which is a coincidence that hid the whole RC-18 problem. A
+// motion-mode decision wrote `temporal`, so no row would ever say `detector`, and
+// the check "did a detector-mode decision name its model" could not be written
+// against the column at all. A detector decision now writes `detector`, and
+// store.PutDecision refuses a row in that mode with no model hash — which is what
+// makes the refusal reachable.
+func decisionFrom(t TriggerEvent, runID string, cfg novelty.Config, frameSeq uint64, refSHA string,
+	runTriggerMode string, attr Attribution) store.Decision {
 	top := int(t.Box[1] * 1000)
 	left := int(t.Box[0] * 1000)
 	bottom := int(t.Box[3] * 1000)
@@ -341,14 +415,26 @@ func decisionFrom(t TriggerEvent, runID string, cfg novelty.Config, frameSeq uin
 		// for "everything changed".
 		top, left, bottom, right = 0, 0, 1000, 1000
 	}
+	triggerMode := runTriggerMode
+	if triggerMode == "" {
+		triggerMode = string(cfg.Mode)
+	}
 	return store.Decision{
 		DetectionID: t.DetectionIDFor(""), RunID: runID,
-		TriggerMode: string(cfg.Mode), TriggerClass: t.DetectionClass,
+		TriggerMode: triggerMode, TriggerClass: t.DetectionClass,
 		Score: t.Novelty.Value, Threshold: cfg.Threshold, Release: cfg.Release,
 		Sustain: cfg.Sustain, Streak: t.Streak, ScoreReason: string(t.Novelty.Reason),
 		RegionSource: string(t.RegionSource),
 		RegionTop:    top, RegionLeft: left, RegionBottom: bottom, RegionRight: right,
 		FrameSeq: int64(frameSeq), ReferenceSHA: refSHA,
+		ModelIdentity: attr.ModelIdentity, ModelSHA256: attr.ModelSHA256,
+		ModelLicence: attr.ModelLicence, InputSize: attr.InputSize,
+		NMSClassIOU: attr.NMSClassIOU, NMSGlobalIOU: attr.NMSGlobalIOU,
+		InferMS:         attr.InferMS,
+		DetLatencyP50MS: attr.DetLatencyP50MS,
+		DetLatencyP95MS: attr.DetLatencyP95MS,
+		DetLatencyP99MS: attr.DetLatencyP99MS,
+		TrackID:         attr.TrackID,
 	}
 }
 

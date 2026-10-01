@@ -52,7 +52,19 @@ func (g Geometry) FrameH() int { return g.ContentH }
 func (g Geometry) Content() (w, h int) { return g.ContentW, g.ContentH }
 
 // Letterbox resizes an RGB frame into a square canvas of inputW by inputH,
-// preserving aspect ratio and padding the remainder with black.
+// preserving aspect ratio and padding the remainder with black, and returns it in
+// the model's OWN memory order.
+//
+// The layout is a MODEL property and not a convention: ONNX exports both, Ultralytics
+// writes NCHW and the ONNX model zoo writes NHWC, and the first model this
+// repository measured wanted NHWC. Feeding NCHW to an NHWC input produces confident
+// nonsense -- boxes on whatever the convolution happens to align with -- which is worse
+// than an error because it generates crossings on objects that are not there.
+//
+// The order is produced HERE rather than transposed afterwards on purpose. At
+// 640x640 that is 1,228,800 floats; a per-frame transpose of 4.9 MB is real work at
+// the frame rate this package has to hold, and the write loop emits either order
+// for free by changing where it puts the index.
 //
 // The input is packed RGB, three bytes per pixel, row-major, exactly the shape
 // recorder.Frame.RGB carries — so no conversion happens here and no bytes are
@@ -64,12 +76,19 @@ func (g Geometry) Content() (w, h int) { return g.ContentW, g.ContentH }
 // mAP contest, and nearest-neighbour keeps the dependency list to the standard
 // library and cgo. A bilinear path is a second pass over this function when
 // somebody needs the last two points of recall.
-func Letterbox(rgb []byte, frameW, frameH, inputW, inputH int) (tensor []float32, g Geometry, err error) {
+func Letterbox(rgb []byte, frameW, frameH, inputW, inputH int, layout string) (tensor []float32, g Geometry, err error) {
 	if frameW <= 0 || frameH <= 0 {
 		return nil, Geometry{}, errBadFrame(frameW, frameH)
 	}
 	if inputW <= 0 || inputH <= 0 {
 		return nil, Geometry{}, errBadInput(inputW, inputH)
+	}
+	if layout != "nchw" && layout != "nhwc" {
+		return nil, Geometry{}, &Refusal{
+			What: sprintf("the input layout %q is not one this build writes", layout),
+			Detail: "expected nchw or nhwc. A layout with a capital letter in it is not a layout, and " +
+				"guessing between the two hands the model a tensor it reads as a different picture",
+		}
 	}
 	if len(rgb) < frameW*frameH*3 {
 		// A short buffer is not a zero frame and must not be read past. This is
@@ -104,20 +123,37 @@ func Letterbox(rgb []byte, frameW, frameH, inputW, inputH int) (tensor []float32
 	// conventional letterbox value and the one the model's own training used.
 	// Anything else — a mean colour, a mirrored edge — shifts every activation
 	// near the border and the boxes near the edge with it.
-	tensor = make([]float32, inputW*inputH*3)
+	plane := inputW * inputH
+	tensor = make([]float32, plane*3)
+	// The two layouts differ in TWO strides, not one, and getting the second wrong
+	// is a panic rather than a wrong pixel:
+	//
+	//   nhwc: index = (y*inputW + x)*3 + c   -> a row is 3*inputW floats, and a
+	//                                        pixel's three channels are adjacent
+	//   nchw: index = c*plane + y*inputW + x -> a row is inputW floats, a pixel is
+	//                                        one float, and channels are a whole
+	//                                        plane apart
+	//
+	// Using inputW for the NHWC row stride (or 3*inputW for NCHW) reads past the
+	// end of the buffer on any non-square frame, which is every frame a 16:9 camera
+	// produces.
+	pixelStride, rowStride, chanStride := 3, inputW*3, 1
+	if layout == "nchw" {
+		pixelStride, rowStride, chanStride = 1, inputW, plane
+	}
 	for y := 0; y < contentH; y++ {
 		// Nearest-neighbour source row, clamped to the last real row so a
 		// rounding error at the far edge cannot index past the frame.
 		sy := min(frameH-1, max(0, int(float64(y)/scale+0.5)))
 		srcRow := sy * frameW * 3
-		dstRow := ((padY+y)*inputW + padX) * 3
+		dstRow := (padY+y)*rowStride + padX*pixelStride
 		for x := 0; x < contentW; x++ {
 			sx := min(frameW-1, max(0, int(float64(x)/scale+0.5)))
 			s := srcRow + sx*3
-			d := dstRow + x*3
+			d := dstRow + x*pixelStride
 			tensor[d] = float32(rgb[s]) / 255
-			tensor[d+1] = float32(rgb[s+1]) / 255
-			tensor[d+2] = float32(rgb[s+2]) / 255
+			tensor[d+chanStride] = float32(rgb[s+1]) / 255
+			tensor[d+2*chanStride] = float32(rgb[s+2]) / 255
 		}
 	}
 

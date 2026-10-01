@@ -737,14 +737,15 @@ func errBadInput(w, h int) *Refusal {
 }
 
 // errAnchored names the one decoder family this build does not implement.
-func errAnchored(dims []int64) *Refusal {
+func errAnchored(dims [][]int64) *Refusal {
 	return &Refusal{
 		What: "this export is a multi-scale ANCHORED head and the in-process decoder reads only fused outputs",
-		Detail: sprintf("the session declares %d outputs, and an anchored darknet head publishes one tensor per "+
-			"stride with coordinates that are offsets from anchor boxes living in the model's .cfg rather than in the "+
-			"ONNX graph. Run `pocctl demo` with SP_POC_TRIGGER_MODE=sidecar for an anchored export: the Python sidecar "+
-			"implements this family, and pointing this decoder at it would mean guessing an anchor set, which produces "+
-			"boxes in the right place with the wrong sizes.", dims),
+		Detail: sprintf("the session declares %d outputs, and an anchored darknet head publishes one tensor "+
+			"per stride with coordinates that are offsets from anchor boxes living in the model's .cfg rather "+
+			"than in the ONNX graph — so there is nothing in the file to recover them from. Run `pocctl demo` "+
+			"with SP_POC_TRIGGER_MODE=sidecar for an anchored export: the Python sidecar implements that family, "+
+			"and pointing this decoder at it instead would mean guessing an anchor set, which produces boxes in "+
+			"the right place with the wrong sizes — the worst of both answers. Output shapes: %v", len(dims), dims),
 	}
 }
 

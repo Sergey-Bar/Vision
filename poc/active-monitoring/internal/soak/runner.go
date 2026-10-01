@@ -19,6 +19,7 @@ import (
 	"github.com/Sergey-Bar/ai-captain-poc/internal/detect"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/evidence"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/novelty"
+	"github.com/Sergey-Bar/ai-captain-poc/internal/ortdetect"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/recorder"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/source"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
@@ -150,8 +151,25 @@ type RunnerOptions struct {
 	// frame for a model it says it calls per event.
 	TriggerMode string
 
-	// Trigger is the local novelty engine. Nil in `sidecar` mode.
+	// Trigger is the local novelty engine. Nil in `sidecar` and `detector` modes.
 	Trigger Trigger
+	// Detector is the in-process ONNX detector. Nil unless TriggerMode is
+	// `detector`, and nil in `detector` mode is a refusal at startup rather than a
+	// run that finds nothing — see the mode validation below.
+	//
+	// It is a separate field from Trigger rather than a field on it, for the reason
+	// the [Detector] interface documents: the novelty trigger's candidate type
+	// carries no class per box, and routing real detections through it would
+	// discard the one thing that makes a detection measurable.
+	Detector Detector
+	// DetIdentity is what every decision made from a detected box must name: the
+	// model path, its SHA-256, its recorded licence and the input size it ran at.
+	// RC-18 is this bundle reaching the database.
+	DetIdentity DetIdentity
+	// DetDecode is the decode configuration, recorded on every decision beside the
+	// identity so a precision number can be traced to the thresholds that produced
+	// it.
+	DetDecode DetDecode
 	// Observer is the VLM. Nil means nobody to ask, which is `not_asked` and not
 	// a degraded answer.
 	Observer Observer
@@ -197,6 +215,20 @@ type Runner struct {
 	// the only thing in this run that can answer "why zero detections".
 	detectorsMu sync.Mutex
 	detectors   detect.Counters
+	// attribution is the RC-18 bundle for the decision currently being recorded.
+	//
+	// It is a field rather than a parameter because `handleIncident` reaches
+	// `decisionFrom` through several layers, and threading it through each of them
+	// would be a change to code that has nothing to do with model attribution. It
+	// is set immediately before the call and read immediately inside it, on the one
+	// frame loop goroutine, and the runner's own mutex makes that safe if a second
+	// consumer is ever added.
+	attribution Attribution
+	// refusalCount and refusalTotal drive the refusal log's rate limit: the first
+	// refusal, then every hundredth, so a misconfigured model does not write 9000
+	// identical lines and bury everything else.
+	refusalCount int
+	refusalTotal int
 }
 
 // DetectorTally is the run's detector arithmetic, as the report needs it.
@@ -479,6 +511,43 @@ func UsesSidecar(m string) bool { return m == TriggerSidecar }
 // UsesDetector reports whether the run's boxes come from the in-process detector.
 func UsesDetector(m string) bool { return m == TriggerDetector }
 
+// DetIdentity is what a decision made from a detected box must name.
+//
+// It is the RC-18 bundle. A detection rate is a CLAIM about a specific file run
+// with specific settings, and a claim that cannot name its weights describes a
+// build nobody can reconstruct.
+//
+// Every field is a POINTER where it reaches the store row, because a `motion`-mode
+// decision legitimately has none of them and NULL is that fact — where NOT NULL
+// DEFAULT ” would be a fabricated measurement, saying a model was involved and
+// produced nothing.
+type DetIdentity struct {
+	ModelPath string
+	SHA256    string
+	Licence   string
+	InputSize int
+	// Threads is recorded beside every latency number, because a p99 without its
+	// thread count describes no build: ORT otherwise picks from the machine's core
+	// count, so the same run differs between a four-core laptop and a server.
+	Threads int
+	// RuntimeVersion is whatever the loaded runtime reported, when it reported
+	// anything. It is a claim about the LIBRARY, not about the weights.
+	RuntimeVersion string
+}
+
+// DetDecode is the decode configuration a decision was made under.
+//
+// Recorded per decision rather than once per run, because a run's configuration is
+// read at startup and a decision is written later — and a decision that cannot name
+// the thresholds under which it was made is a threshold chosen by nobody.
+type DetDecode struct {
+	NMSClass   float64
+	NMSGlobal  float64
+	EmitScore  float64
+	MaxBoxes   int
+	MinBoxArea float64
+}
+
 // process handles one frame: measure, decide, and for each incident record first
 // and then act.
 func (r *Runner) process(ctx context.Context, f recorder.Frame) {
@@ -489,11 +558,22 @@ func (r *Runner) process(ctx context.Context, f recorder.Frame) {
 	var boxes []ai.Box
 	telemetry := ai.Telemetry{}
 	// aiState is the four-word vocabulary state, and it defaults to `not_asked`
-	// — the honest reading when no client is configured at all, rather than an
+	// — the honest reading when no model is configured at all, rather than an
 	// empty string that the screen would render as "fine".
 	aiState := ai.StateNotAsked
+	// detRefusal is this frame's named failure, if the detector had one. It is kept
+	// apart from telemetry because a refusal is not telemetry: it is the reason the
+	// answer is missing, and it has to reach the log and the screen as its own
+	// thing rather than as a count.
+	var detRefusal *ortdetect.Refusal
+	// detLatency and detLatPercentiles are this frame's cost and the distribution
+	// so far, both of which reach the decision record.
+	detLatency := 0.0
+	var detP50, detP95, detP99 *float64
 
 	switch {
+	case r.opt.Detector != nil:
+		boxes, aiState, telemetry, detRefusal, detLatency, detP50, detP95, detP99 = r.runDetector(f)
 	case r.opt.Trigger != nil:
 		boxes, aiState = r.measureTrigger(f)
 	default:
@@ -532,10 +612,23 @@ func (r *Runner) process(ctx context.Context, f recorder.Frame) {
 		// reassurance and means nothing.
 		hook(f, boxes, nil, telemetry, aiState)
 	}
+	// A detector refusal is LOGGED, once per frame, with its name. It is not folded
+	// into a count because a count is unactionable: a run that says "14 degraded
+	// frames" sends its reader to a profiler, and a run that logs the reason each
+	// time sends them to the line that says it.
+	//
+	// Logged at most a few times a second rather than every frame, because a
+	// misconfigured model produces the same refusal on all 9000 frames of a
+	// clip and 9000 identical lines is how a real signal gets lost in a log.
+	if detRefusal != nil {
+		r.noteRefusal(f.Seq, detRefusal)
+	}
 	// The measurement's state is recorded with the detection, so the report can say
 	// whether a crossing came from a frame something actually measured.
 	for _, c := range crossings {
-		r.handleIncident(ctx, toTriggerEvent(c, r.defaultPromptID(), r.triggerScore()), aiState, f.Seq)
+		ev := toTriggerEvent(c, r.defaultPromptID(), r.triggerScore())
+		r.attribution = r.nextAttribution(ev, aiState, detLatency, detP50, detP95, detP99, detRefusal)
+		r.handleIncident(ctx, ev, aiState, f.Seq)
 	}
 	_ = tracks
 
@@ -544,6 +637,176 @@ func (r *Runner) process(ctx context.Context, f recorder.Frame) {
 	// here, on the same spine — record, evidence, ask, push, bookmark — and the only
 	// thing that differs is which arithmetic produced the trigger.
 	r.handleSentinels(ctx, f)
+}
+
+// runDetector measures one frame with the in-process ONNX detector.
+//
+// It exists as a function rather than as three lines inline in `process` because of
+// what it has to guarantee: that the CLASS the model produced survives all the way
+// to the tracker. That is the whole reason the detector has its own interface —
+// `measureTrigger` assigns one configured class per frame, which is right for a
+// change-fraction and would discard every class a model finds.
+//
+// It also returns seven values, which is ugly and is stated rather than hidden: a
+// detector's answer is genuinely seven facts, and bundling them into a struct that
+// the frame loop immediately unpacks would be the same information with a second
+// type to keep in sync.
+func (r *Runner) runDetector(f recorder.Frame) (boxes []ai.Box, state string, tel ai.Telemetry,
+	refusal *ortdetect.Refusal, latencyMS float64, p50, p95, p99 *float64) {
+
+	ans := r.opt.Detector.Detect(f.Seq, f.RGB, f.Width, f.Height)
+	state = ans.State
+	latencyMS = ans.LatencyMS
+	refusal = ans.Refusal
+	tel = ans.Telemetry.ToAITelemetry()
+	r.lat.Add(time.Duration(ans.LatencyMS * float64(time.Millisecond)))
+
+	// The percentiles come from the DETECTOR, not from here. The runner's own `lat`
+	// is a running figure over every measured frame; the throughput gate needs the
+	// detector's own p99 over its own bounded window, and a p99 cannot be computed
+	// from a mean at all.
+	p50, p95, p99 = percentilesFor(r.opt.Detector)
+
+	if len(ans.Boxes) == 0 {
+		// `no_objects` and `degraded` both land here and both are correct: the
+		// STATE carries the difference and the boxes are empty either way. What must
+		// not happen is the boxes being empty for a third reason and the state
+		// saying `asked_answered`.
+		return nil, state, tel, refusal, latencyMS, p50, p95, p99
+	}
+
+	out := make([]ai.Box, 0, len(ans.Boxes))
+	for _, b := range ans.Boxes {
+		if !b.Valid() {
+			// The decoder already refuses an invalid box, so reaching here means
+			// something between the decoder and here changed one. Dropping it is
+			// right; logging it is also right, because it is a bug in this module
+			// rather than in the model.
+			r.logf("frame %d: the detector produced a box this build refuses to pass on: %+v", f.Seq, b)
+			continue
+		}
+		// The class goes through UNCHANGED. Every field of the box is the model's
+		// own, in the model's own coordinates, and the tracker reads them without
+		// rescaling — which is why this is a copy of the struct rather than a
+		// reconstruction field by field. A reconstruction is a second place for a
+		// coordinate to be rescaled.
+		out = append(out, ai.Box(b))
+	}
+	return out, state, tel, refusal, latencyMS, p50, p95, p99
+}
+
+// noteRefusal logs a detector refusal by name, no more than a few times a second.
+//
+// The rate limit is the point rather than a courtesy. A misconfigured model
+// produces the SAME refusal on every one of a clip's 9000 frames, and 9000 identical
+// lines is how one real signal gets lost in a log. The first occurrence and then
+// every hundredth is enough to see a refusal that persists and to notice when it
+// stops, without filling the log with it.
+func (r *Runner) noteRefusal(seq uint64, refusal *ortdetect.Refusal) {
+	r.mu.Lock()
+	if r.refusalCount == 0 || r.refusalCount%100 == 1 {
+		r.mu.Unlock()
+		r.logf("frame %d: the detector refused to answer: %s. (%d frames refused so far; every 100th is logged)",
+			seq, refusal.What, r.refusalTotal)
+		r.mu.Lock()
+	}
+	r.refusalCount++
+	r.refusalTotal++
+	n := r.refusalTotal
+	r.mu.Unlock()
+	_ = n
+}
+
+// nextAttribution builds the RC-18 bundle for a decision made from a detected box.
+//
+// It is a method rather than a free function because it reads the run's identity,
+// and returning a `store.Decision`-shaped value from here would be two types for the
+// same thing. What it returns is the FIELD SET, and `decisionFrom` puts it on the
+// row.
+//
+// Every field is a POINTER or nil. A `motion`-mode decision passes through here
+// with no detector, and its attribution is entirely nil — which is the honest
+// record that no model was involved, and is why those columns are nullable.
+func (r *Runner) nextAttribution(ev TriggerEvent, state string, latencyMS float64,
+	p50, p95, p99 *float64, refusal *ortdetect.Refusal) Attribution {
+
+	var a Attribution
+	if !UsesDetector(r.opt.TriggerMode) || r.opt.Detector == nil {
+		return a
+	}
+	id := r.opt.DetIdentity
+	// The identity is copied into POINTERS so the store row can carry NULL for the
+	// fields that do not apply, and so a caller cannot mutate the run's identity
+	// after a decision has been written from it.
+	if id.ModelPath != "" {
+		p := id.ModelPath
+		a.ModelIdentity = &p
+	}
+	if id.SHA256 != "" {
+		s := id.SHA256
+		a.ModelSHA256 = &s
+	}
+	if id.Licence != "" {
+		l := id.Licence
+		a.ModelLicence = &l
+	}
+	if id.InputSize > 0 {
+		sz := id.InputSize
+		a.InputSize = &sz
+	}
+	if latencyMS > 0 {
+		ms := latencyMS
+		a.InferMS = &ms
+	}
+	a.DetLatencyP50MS, a.DetLatencyP95MS, a.DetLatencyP99MS = p50, p95, p99
+	if ev.TrackID >= 0 {
+		tid := ev.TrackID
+		a.TrackID = &tid
+	}
+	dec := r.opt.DetDecode
+	if dec.NMSClass > 0 {
+		v := dec.NMSClass
+		a.NMSClassIOU = &v
+	}
+	if dec.NMSGlobal > 0 {
+		v := dec.NMSGlobal
+		a.NMSGlobalIOU = &v
+	}
+	// The measured state goes on the row beside the identity, and a decision whose
+	// frame was NOT measured says so. `asked_answered` is the only state that means
+	// a model produced this box.
+	a.MeasuredState = state
+	if refusal != nil {
+		a.Refusal = refusal.What
+	}
+	return a
+}
+
+// Attribution is what a decision made from a detected box carries beside its own
+// arithmetic: which model, which thresholds, what it cost, and whether the frame it
+// came from was actually measured.
+//
+// It is a separate type from `store.Decision` because it is the SAME information
+// seen from the runner's side, and one type per side keeps each package from
+// importing the other's structure.
+type Attribution struct {
+	ModelIdentity   *string
+	ModelSHA256     *string
+	ModelLicence    *string
+	InputSize       *int
+	NMSClassIOU     *float64
+	NMSGlobalIOU    *float64
+	InferMS         *float64
+	DetLatencyP50MS *float64
+	DetLatencyP95MS *float64
+	DetLatencyP99MS *float64
+	TrackID         *int
+	// MeasuredState is the four-word state of the frame this decision came from,
+	// and Refusal is the NAME of the failure if there was one. Both are on the row
+	// so a reader can tell a decision made from a measured frame from one made from
+	// a frame the model was asked about and could not answer.
+	MeasuredState string
+	Refusal       string
 }
 
 // measureTrigger runs the local novelty engine over one frame.
@@ -714,13 +977,43 @@ func (r *Runner) handleIncident(ctx context.Context, ev TriggerEvent, aiState st
 
 	// Step 2: the decision inputs, stored from the same values the arithmetic
 	// used. A decision whose inputs cannot be replayed is a claim.
-	if r.opt.Trigger != nil {
-		d := decisionFrom(ev, r.opt.RunID, r.opt.Trigger.Config(), frameSeq, r.opt.ReferenceSHA)
+	//
+	// The gate is EITHER producer, not just the novelty trigger. It used to be
+	// `Trigger != nil` alone, and in `detector` mode the trigger is nil — so every
+	// detector incident would have been recorded as a detection with NO decision row
+	// behind it. That is worse than not recording it: `detect.Detection` with no
+	// `store.Decision` is an alert nobody can replay and nobody can check, and RC-4
+	// and RC-20 both read that row. The detector path is exactly where replay
+	// matters most, because the crossing box is Kalman-derived.
+	switch {
+	case r.opt.Trigger != nil:
+		d := decisionFrom(ev, r.opt.RunID, r.opt.Trigger.Config(), frameSeq, r.opt.ReferenceSHA,
+			r.opt.TriggerMode, r.attribution)
 		d.DetectionID = id
 		if err := r.opt.Store.PutDecision(ctx, d); err != nil {
 			_ = r.opt.Store.RecordFault(ctx, r.opt.RunID, store.Fault{
 				At: ev.At, Reason: store.FaultDBUnavailable,
 				Detail: "the decision inputs could not be recorded, so this incident cannot be replayed from facts: " + err.Error(),
+			})
+		}
+	case r.opt.Detector != nil:
+		// In detector mode there is no novelty engine and therefore no
+		// novelty.Config. The thresholds on the row are the DETECTOR's, not the
+		// engine's, and the class on the row is the model's own — which is the
+		// whole point of this path.
+		attr := r.attribution
+		d := decisionFrom(ev, r.opt.RunID, novelty.Config{}, frameSeq, r.opt.ReferenceSHA,
+			TriggerDetector, attr)
+		d.DetectionID = id
+		if err := r.opt.Store.PutDecision(ctx, d); err != nil {
+			// A refusal here is almost always RC-18: a detector-mode decision that
+			// named no model. That is refused ON PURPOSE by store.PutDecision, and
+			// recording it as a generic database fault would bury the reason.
+			r.logf("frame %d: the detector's decision for %s was NOT recorded: %v", frameSeq, id, err)
+			_ = r.opt.Store.RecordFault(ctx, r.opt.RunID, store.Fault{
+				At: ev.At, Reason: store.FaultDecisionNotReplayable,
+				Detail: "a detector-mode decision naming no model was refused, so this incident " +
+					"cannot be replayed from facts: " + err.Error(),
 			})
 		}
 	}

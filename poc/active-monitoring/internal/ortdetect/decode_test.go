@@ -169,15 +169,117 @@ func TestAPortraitFrameIsNotSilentlyMadeLandscape(t *testing.T) {
 // corrupt frame, and it matters more here: a decoder handed zeros produces a clean
 // picture of an empty road and a report saying nothing was there.
 func TestAShortBufferIsRefusedNotRead(t *testing.T) {
-	_, _, err := Letterbox(make([]byte, 10), 640, 640, 640, 640)
+	_, _, err := Letterbox(make([]byte, 10), 640, 640, 640, 640, "nhwc")
 	if err == nil {
 		t.Fatal("a 10-byte buffer for a 640x640 frame was accepted")
 	}
 	if !strings.Contains(err.Error(), "shorter than") {
 		t.Fatalf("the refusal does not say what is wrong: %v", err)
 	}
-	if _, _, err := Letterbox(flatFrame(10, 10), 0, 0, 640, 640); err == nil {
+	if _, _, err := Letterbox(flatFrame(10, 10), 0, 0, 640, 640, "nhwc"); err == nil {
 		t.Fatal("a frame declaring 0x0 was accepted")
+	}
+	// A layout this build does not write is refused rather than defaulted. Guessing
+	// between NCHW and NHWC hands the model a tensor it reads as a different
+	// picture, and that produces boxes rather than an error.
+	for _, bad := range []string{"", "NCHW", "channels_first", "nhwc "} {
+		if _, _, err := Letterbox(flatFrame(64, 64), 64, 64, 64, 64, bad); err == nil {
+			t.Errorf("the layout %q was accepted", bad)
+		}
+	}
+}
+
+// TestTheTensorIsWrittenInTheModelsOwnMemoryOrder is the NCHW half of the
+// letterbox, and it is a separate test because it is a separate guarantee.
+//
+// NHWC is the natural order of a packed RGB frame — three adjacent bytes per
+// pixel — so it is what the geometry tests above exercise. NCHW puts each channel's
+// whole plane together, and getting it wrong is the D1 failure in its purest form:
+// a model fed a transposed tensor does not error, it produces boxes on whatever the
+// convolution happens to align with.
+//
+// The test is a pixel-level check on a 3x2 image with six DISTINCT colours, because
+// a uniform frame would pass under either layout.
+func TestTheTensorIsWrittenInTheModelsOwnMemoryOrder(t *testing.T) {
+	// 3x2 frame, six different pixels.
+	rgb := []byte{
+		255, 0, 0, 0, 255, 0, 0, 0, 255,
+		255, 255, 0, 0, 255, 255, 128, 128, 128,
+	}
+	const w, h, size = 3, 2, 3
+
+	hwc, _ := mustLetterboxLayout(t, rgb, w, h, size, size, "nhwc")
+	nchw, _ := mustLetterboxLayout(t, rgb, w, h, size, size, "nchw")
+
+	// NHWC: value (y, x, c) at (y*size + x)*3 + c
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			for c := 0; c < 3; c++ {
+				want := float32(rgb[(y*w+x)*3+c]) / 255
+				got := hwc[(y*size+x)*3+c]
+				if math.Abs(float64(got-want)) > 1e-6 {
+					t.Errorf("nhwc at (%d,%d,%d) = %v, want %v", y, x, c, got, want)
+				}
+			}
+		}
+	}
+
+	// NCHW: value (c, y, x) at c*size*size + y*size + x
+	plane := size * size
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			for c := 0; c < 3; c++ {
+				want := float32(rgb[(y*w+x)*3+c]) / 255
+				got := nchw[c*plane+y*size+x]
+				if math.Abs(float64(got-want)) > 1e-6 {
+					t.Errorf("nchw at (c=%d,y=%d,x=%d) = %v, want %v", c, y, x, got, want)
+				}
+			}
+		}
+	}
+
+	// The two must be PERMUTATIONS of each other, not different pictures. If they
+	// were not, one of them lost or invented a pixel.
+	if len(hwc) != len(nchw) || len(nchw) != plane*3 {
+		t.Fatalf("lengths %d and %d, want %d", len(hwc), len(nchw), plane*3)
+	}
+	same := 0
+	for _, v := range hwc {
+		for _, u := range nchw {
+			if v == u {
+				same++
+				break
+			}
+		}
+	}
+	if same != len(hwc) {
+		t.Errorf("only %d of %d values appear in both layouts", same, len(hwc))
+	}
+
+	// The padding must be ZERO in both layouts — black, which is what the model was
+	// trained with. A mean colour would shift every activation near the border.
+	//
+	// The padding is found from the GEOMETRY rather than assumed: a 3x2 frame in a
+	// 3x3 canvas pads the bottom row only, so checking row 0 would be checking a
+	// row of real pixels.
+	_, geom := mustLetterboxLayout(t, rgb, w, h, size, size, "nchw")
+	for y := 0; y < size; y++ {
+		if y >= geom.PadY && y < geom.PadY+geom.ContentH {
+			continue // inside the content
+		}
+		for c := 0; c < 3; c++ {
+			for x := 0; x < size; x++ {
+				if got := nchw[c*plane+y*size+x]; got != 0 {
+					t.Errorf("nchw padding at (c=%d,y=%d,x=%d) = %v, want 0: a non-black letterbox "+
+						"shifts every activation near the border", c, y, x, got)
+				}
+			}
+		}
+	}
+	// And there is at least one padding row, or the test is checking nothing.
+	padded := size - geom.ContentH
+	if padded < 1 {
+		t.Skip("the canvas is exactly the content size; there is no padding to check")
 	}
 }
 

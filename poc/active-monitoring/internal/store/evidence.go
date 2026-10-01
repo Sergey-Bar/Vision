@@ -143,6 +143,20 @@ const (
 	// different fixes: blaming the clip for a locked database sends an operator
 	// to look at the video instead of at the process holding the lock.
 	FaultDBUnavailable = "db_unavailable"
+	// FaultDecisionNotReplayable is a decision that REFUSED to be written because it
+	// did not name the model that produced it (RC-18).
+	//
+	// It is its own reason and not a `db_unavailable`, because the database is fine
+	// and the retry would never succeed: the row was refused for saying nothing about
+	// its own provenance. Counting these under a database fault would send an
+	// operator to look at a lock file when the thing to fix is the detector's
+	// identity, and it would average the count into the storage-slice of the report.
+	FaultDecisionNotReplayable = "decision_not_replayable"
+	// FaultDetectorRefused is a frame the decoder could not turn into boxes, by
+	// name. Not a database fault and not an `ai_unreadable`: nothing arrived that
+	// was unreadable — the OUTPUT TENSOR was not a detector's output, which is a
+	// fact about the model or the export.
+	FaultDetectorRefused = "detector_refused"
 	// FaultWorkerExit is the outbox pump ending. The rows it was holding stay
 	// pending, and a pump that comes back resumes them rather than re-sending a
 	// push whose result was already recorded.
