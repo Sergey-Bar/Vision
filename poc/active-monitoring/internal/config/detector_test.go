@@ -186,10 +186,14 @@ func TestEveryTriggerModeIsAcceptedAndNothingElse(t *testing.T) {
 
 	// An EMPTY value is not a fourth mode: this module treats empty as unset and
 	// falls back to the declared structural default. That is the rule that keeps
-	// "a variable set to nothing has said nothing" true for every variable, and
-	// this test pins the fallback so the default can be flipped deliberately in one
-	// place rather than appearing to change in several.
-	world := complete(t)
+	// "a variable set to nothing has said nothing" true for every variable.
+	//
+	// The world is the DETECTOR one, because the declared default is now `detector`
+	// and falling back to it genuinely requires the eight detector variables. Testing
+	// the fallback against a sidecar world would have passed for the wrong reason —
+	// it would have been testing the sidecar default's requirement set, and the flip
+	// would have passed unnoticed.
+	world := detectorWorld(t)
 	world["SP_POC_TRIGGER_MODE"] = ""
 	cfg, err := Load(lookupFrom(world))
 	if err != nil {
@@ -200,5 +204,21 @@ func TestEveryTriggerModeIsAcceptedAndNothingElse(t *testing.T) {
 	}
 	if !ValidTriggerMode(cfg.TriggerMode) {
 		t.Fatalf("the declared default %q is not a mode this build operates", cfg.TriggerMode)
+	}
+
+	// And the fallback world is REQUIRED to carry its own variables. A default that
+	// selects a mode whose variables are not otherwise demanded would be a default
+	// that produces a run which cannot be configured — so a detector default with no
+	// detector variables present must fail by name.
+	bare := complete(t)
+	for name := range conditionalValues() {
+		delete(bare, name)
+	}
+	bare["SP_POC_TRIGGER_MODE"] = ""
+	if _, err := Load(lookupFrom(bare)); err == nil {
+		t.Fatalf("the default resolved to %q with none of its variables present, so a run using the "+
+			"default would fail at startup rather than at configuration", schemaByName["SP_POC_TRIGGER_MODE"].structuralVal)
+	} else if !strings.Contains(err.Error(), "SP_POC_DET_MODEL") {
+		t.Fatalf("the refusal does not name a missing variable: %v", err)
 	}
 }

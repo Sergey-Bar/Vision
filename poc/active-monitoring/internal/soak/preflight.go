@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Sergey-Bar/ai-captain-poc/internal/ai"
+	"github.com/Sergey-Bar/ai-captain-poc/internal/config"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/recorder"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/source"
 )
@@ -76,6 +77,31 @@ type PreflightInput struct {
 	GateDPrevious string
 	// RehearsalAge is how long ago that rehearsal ran.
 	RehearsalAge time.Duration
+	// DetectorModel and DetectorLibrary are what `detector` mode is about to load.
+	// Both are NAMED rather than discovered: SP_POC_ORT_LIB is a path because two
+	// ONNX Runtime versions can be installed on one machine and they are not
+	// ABI-compatible with each other's Go bindings.
+	DetectorModel   string
+	DetectorLibrary string
+	// DetectorThreads is SP_POC_ORT_THREADS. It is in the check's own text because a
+	// p99 without its thread count describes no build.
+	DetectorThreads int
+	// DetectorP99MS is the MEASURED p99 from a calibration run, and AIFPS is the
+	// declared detection rate.
+	//
+	// The throughput gate is one comparison: det_p99 x ai_fps < 1000. It exists
+	// because `internal/recorder`'s bounded queue BLOCKS rather than dropping frames,
+	// so a detector slower than the frame interval does not degrade — it produces
+	// backpressure and fails AC1. Discovering that at minute three of a demo is the
+	// worst possible time.
+	//
+	// A P99MS of zero means no calibration has been measured, and the gate says so
+	// rather than passing on a multiplication by zero.
+	DetectorP99MS float64
+	// AIFPS is SP_POC_AI_FPS. Zero means EVERY DECODED FRAME, and the measured
+	// source FPS stands in for it — refusing the spelling here would have made the
+	// most demanding mode unexpressable, and the arithmetic is the same either way.
+	AIFPS int
 }
 
 // StreamFacts is the measured source, kept as plain numbers so preflight does
@@ -133,7 +159,13 @@ func Preflight(ctx context.Context, in PreflightInput) (PreflightResult, error) 
 	// reference can be written, because a camera_integrity trigger with nowhere to
 	// pin its reference measures against nothing.
 	switch {
-	case in.TriggerMode == "sidecar" || (in.TriggerMode == "" && in.Client != nil):
+	case in.TriggerMode == config.TriggerModeDetector:
+		add(Check{Name: "the in-process detector is named, hashed, and can hold the declared frame rate",
+			Pass:     detectorPreflightOK(in),
+			Why:      detectorWhy,
+			Measured: detectorMeasured(in),
+			Detail:   detectorDetail(in)})
+	case in.TriggerMode == config.TriggerModeSidecar || (in.TriggerMode == "" && in.Client != nil):
 		if in.Client == nil {
 			add(Check{Name: "sidecar ready with the model loaded", Pass: false,
 				Why:      sidecarWhy,

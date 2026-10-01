@@ -151,9 +151,9 @@ var schema = []field{
 	// needs no ONNX model, no Python worker and no anchors. They are kept, because
 	// `trigger-mode=sidecar` is still a real mode and a useful one — it is how a
 	// threshold gets chosen — and a tool with one path is a tool with one opinion.
-	{Name: "SP_POC_TRIGGER_MODE", kind: kindString, structural: true, structuralVal: "novelty",
+	{Name: "SP_POC_TRIGGER_MODE", kind: kindString, structural: true, structuralVal: "detector",
 		Consequence: "the run would not say where its boxes come from, and the cost argument (one call per event against one per frame) has no subject",
-		Remedy:      "set SP_POC_TRIGGER_MODE=detector (the shipped in-process ONNX detector), SP_POC_TRIGGER_MODE=novelty (pure-Go whole-frame change measurement, licence-free, no class vocabulary) or SP_POC_TRIGGER_MODE=sidecar (the older per-frame Python classifier, kept as a threshold-selection and parity tool)"},
+		Remedy:      "set SP_POC_TRIGGER_MODE=detector (the shipped in-process ONNX detector, which needs weights and an ONNX Runtime library), SP_POC_TRIGGER_MODE=novelty (pure-Go whole-frame change measurement: licence-free, no weights, no class vocabulary) or SP_POC_TRIGGER_MODE=sidecar (the older per-frame Python classifier, kept as a threshold-selection and parity tool)"},
 	{Name: "SP_POC_AI_ADDR", kind: kindString, when: "SP_POC_TRIGGER_MODE=sidecar",
 		Consequence: "there is no sidecar to send frames to, and every detection would be not_asked",
 		Remedy:      "set SP_POC_AI_ADDR=127.0.0.1:8099"},

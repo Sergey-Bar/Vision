@@ -811,7 +811,40 @@ func demoEnv(root, dataRoot, clip, zones, model, anchors, simAddr, uiAddr string
 		// Hardcoded rather than defaulted, for the reason the rest of this slice is
 		// hardcoded: `pocctl demo` demonstrates the SHIPPED path. Somebody who wants
 		// the sidecar runs `watch` with their own environment.
-		"SP_POC_TRIGGER_MODE=novelty",
+		//
+		// THE MODE IS NOW DETECTOR, and this is the line that had to change with it.
+		// The demo used to hardcode `novelty` while the configuration's structural
+		// default was also `novelty`, so the two agreed by coincidence rather than by
+		// being the same declaration. Flipping the default alone would have left the
+		// demo overriding it back, and the headline command would have demonstrated
+		// a trigger this module is being retired from.
+		//
+		// `novelty` remains available and still works; it is licence-free and needs no
+		// weights, which is a real virtue on a machine with no ONNX Runtime. It is
+		// just no longer the shipped path, and a demo that showed it while claiming
+		// to show the shipped path was the last thing standing between this project
+		// and an honest report.
+		"SP_POC_TRIGGER_MODE=detector",
+		// The model and the runtime library, by PATH.
+		//
+		// The library is named rather than discovered from PATH because two ONNX
+		// Runtime versions can be installed on one machine, they are not
+		// ABI-compatible with each other's Go bindings, and the SHA-256 recorded
+		// beside the weights names one specific build. Both paths come from
+		// `pocctl fetch-model` and `pocctl fetch-runtime`, which verify what they
+		// write.
+		//
+		// The demo REFUSES if either is missing rather than falling back to
+		// `novelty`. A fallback here would be the worst version of this: the run
+		// would report zero vehicles, zero people and zero animals at full health
+		// and every number in it would be true.
+		"SP_POC_DET_MODEL=" + model,
+		"SP_POC_ORT_LIB=" + filepath.Join(root, "models", ortLibraryName()),
+		// The model's DECLARED input size, cross-checked against the session at
+		// startup. It is a model property rather than a preference: letterboxing a
+		// frame into a square the model was not exported for produces boxes, not an
+		// error, and those boxes are in the wrong place by a scale factor.
+		"SP_POC_DET_INPUT=640",
 		// The score threshold is on a DIFFERENT SCALE for each trigger, and this demo
 		// now always runs the novelty one, so this is a novelty number and not the
 		// sidecar's 0.4.
@@ -833,19 +866,48 @@ func demoEnv(root, dataRoot, clip, zones, model, anchors, simAddr, uiAddr string
 		"SP_POC_SCORE_THRESHOLD=0.02",
 		// `motion` is the class the novelty engine emits and nothing else, and it
 		// was MISSING from this list. `detect.Apply` checks the class BEFORE the
-		// score, so every candidate the shipped trigger produced was refused as
+		// score, so every candidate the novelty trigger produced was refused as
 		// `class not on the approved list` — a filter that no material and no line
-		// can satisfy. The shipped path could not approve one box in a run configured
-		// by its own demo.
+		// can satisfy.
 		//
 		// It is spelled `other` and NOT `motion`, because `classify.Resolve` refuses
 		// a name that is neither one of the four families nor a class in the taxonomy
-		// — and `motion` is the detector's own word for a measurement, not a COCO
-		// class. `other` is the family `FamilyOf` already returns for it, and it is
-		// the honest answer: a novelty region is a localised change, which is a
-		// thing this taxonomy has no word for. `bird` and `car` stay for the
-		// sidecar, which is the mode that does emit them.
+		// — and `motion` is the novelty engine's own word for a measurement, not a
+		// COCO class. `other` is the family `FamilyOf` already returns for it, and it
+		// is the honest answer: a novelty region is a localised change, which is a
+		// thing this taxonomy has no word for.
+		//
+		// In DETECTOR mode the COCO names are what the model actually emits, so the
+		// list below is the one that matters: a zone naming no real COCO class gives
+		// zero crossings and no error, and that is the most likely way a demo with a
+		// real detector finds nothing.
 		"SP_POC_CLASSES=other,car,bird,person,truck,bus",
+		// The score CHAIN, which must read left to right:
+		//
+		//	DET_SCORE (0.05) <= GHOST_MIN_SCORE (0.005) <= SCORE_THRESHOLD (0.02)
+		//
+		// An inverted chain lies in BOTH directions at once, which is why it cannot be
+		// caught downstream: a box the model never emitted is drawn as a ghost, and a
+		// box it did emit is refused. The picture shows objects that are not there and
+		// omits objects that are, and every number in the report is computed over that.
+		//
+		// The emit floor is deliberately LOW and the approval bar is well above it, so
+		// the band between them is where the two-stage ghost recovery reads from.
+		"SP_POC_DET_SCORE=0.05",
+		// The detector's own knobs. The two NMS thresholds are SEPARATE and the global
+		// one is looser on purpose: class-aware suppression at 0.45 collapses duplicates
+		// of one class, and the class-agnostic pass at 0.75 is the only thing that can
+		// collapse a `car` and a `truck` box on ONE object — a pair the class-aware pass
+		// cannot compare at all.
+		"SP_POC_DET_NMS_CLASS=0.45",
+		"SP_POC_DET_NMS_GLOBAL=0.75",
+		"SP_POC_DET_MAX_BOXES=100",
+		"SP_POC_ORT_THREADS=4",
+		// The per-frame box log. At the cap every crossing frame is kept and every Nth
+		// of the rest, and the run records box_log_sampled with both counts — because
+		// once the crossing box is Kalman-filtered, replay reads THIS table and not the
+		// decisions table.
+		"SP_POC_BOX_LOG_FRAMES=20000",
 		// These four arrived with the approved/rejected split and the family
 		// taxonomy, and they are REQUIRED with no defaults. The demo had never
 		// been updated for them, which means `pocctl demo` — the headline command
@@ -1092,3 +1154,19 @@ var (
 	_ = xpsim.Name
 	_ = time.Now
 )
+
+// ortLibraryName is the shared library's filename on this platform.
+//
+// It is written out here rather than imported because `pocctl demo` builds an
+// ENVIRONMENT for a child process and never loads the library itself — it is
+// spelling a path, and spelling it from a constant keeps the two spellings from
+// drifting.
+func ortLibraryName() string {
+	switch runtime.GOOS {
+	case "windows":
+		return "onnxruntime.dll"
+	case "darwin":
+		return "libonnxruntime.dylib"
+	}
+	return "libonnxruntime.so"
+}

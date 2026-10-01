@@ -39,18 +39,58 @@ import (
 //	go build -o bin/fixtureprobe.exe ./cmd/fixtureprobe
 //	bin\fixtureprobe.exe qa\fixtures\crossing.mp4
 func main() {
+	mode := flag.String("detector", "", "probe the in-process ONNX detector over these clips instead of the novelty engine")
+	fLibrary := flag.String("ort", "", "path to the ONNX Runtime shared library (SP_POC_ORT_LIB)")
+	fModel := flag.String("model", "", "path to the detector's ONNX model (SP_POC_DET_MODEL)")
+	fThreads := flag.Int("threads", 0, "ORT intra-op thread count (SP_POC_ORT_THREADS)")
+	fContract := flag.String("contract", contractFile, "where to write the machine-readable contract record")
+	fEmit := flag.Float64("emit", 0.05, "the model's emit floor, SP_POC_DET_SCORE")
+	fNMSClass := flag.Float64("nms-class", 0.45, "class-aware suppression IoU, SP_POC_DET_NMS_CLASS")
+	fNMSGlobal := flag.Float64("nms-global", 0.75, "class-agnostic suppression IoU, SP_POC_DET_NMS_GLOBAL")
+	fMaxBoxes := flag.Int("max-boxes", 100, "ceiling on boxes per frame, SP_POC_DET_MAX_BOXES")
 	flag.Parse()
+
 	paths := flag.Args()
 	if len(paths) == 0 {
 		paths, _ = filepath.Glob(filepath.Join("qa", "fixtures", "*.mp4"))
 	}
+
+	// The detector mode is a different question about a different component, and it
+	// is a flag rather than a second binary because a person diagnosing a zero wants
+	// both answers about the same clip without running two tools.
+	if *mode != "" {
+		if len(paths) == 0 {
+			fmt.Println("the detector mode needs at least one clip")
+			os.Exit(1)
+		}
+		ok := runDetector(paths, detectorFlags{
+			library:   envOr("SP_POC_ORT_LIB", *fLibrary),
+			model:     envOr("SP_POC_DET_MODEL", *fModel),
+			threads:   envInt("SP_POC_ORT_THREADS", *fThreads),
+			contract:  *fContract,
+			emit:      envFloat("SP_POC_DET_SCORE", *fEmit),
+			nmsClass:  envFloat("SP_POC_DET_NMS_CLASS", *fNMSClass),
+			nmsGlobal: envFloat("SP_POC_DET_NMS_GLOBAL", *fNMSGlobal),
+			maxBoxes:  envInt("SP_POC_DET_MAX_BOXES", *fMaxBoxes),
+			minArea:   envFloat("SP_POC_MIN_BOX_AREA", 0.0005),
+		})
+		if !ok {
+			os.Exit(1)
+		}
+		return
+	}
+
 	if len(paths) == 0 {
-		fmt.Println("usage: fixtureprobe <clip.mp4>...   (or run it with no arguments to scan qa/fixtures)")
+		fmt.Println("usage: fixtureprobe [-detector -model ...] <clip.mp4>...   (or no arguments to scan qa/fixtures)")
 		fmt.Println()
 		fmt.Println("  says whether each clip can produce a candidate at all, by running the")
 		fmt.Println("  novelty engine over its real frames and reporting the peak changed fraction")
 		fmt.Println("  against the bar. A clip whose peak is below the bar will produce zero")
 		fmt.Println("  detections with no error, and that is a fact about the MATERIAL, not a pass.")
+		fmt.Println()
+		fmt.Println("  -detector probes the in-process ONNX detector instead and prints the five")
+		fmt.Println("  facts that make a zero diagnosable: the declared output shape, the record")
+		fmt.Println("  layout, the field count, the raw candidate count, and the per-class histogram.")
 		return
 	}
 
@@ -65,6 +105,44 @@ func main() {
 		// cannot tell a usable one from an unusable one is a lab that passes.
 		os.Exit(1)
 	}
+}
+
+// envOr, envInt and envFloat read a fallback from the environment.
+//
+// This file is a diagnostic tool and not part of the runtime, which is why it reads
+// the environment at all. The runtime reads nothing outside internal/config; a
+// probe that went through the configuration layer could not be pointed at a model
+// whose variables are not yet in the schema, which is exactly the situation it
+// exists for.
+func envOr(name, fallback string) string {
+	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
+		return v
+	}
+	return fallback
+}
+
+func envInt(name string, fallback int) int {
+	v := envOr(name, "")
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return fallback
+	}
+	return n
+}
+
+func envFloat(name string, fallback float64) float64 {
+	v := envOr(name, "")
+	if v == "" {
+		return fallback
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		return fallback
+	}
+	return f
 }
 
 // report prints one clip's measurement and reports whether it can produce a CROSSING.
