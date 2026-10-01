@@ -256,6 +256,29 @@ $boundaries = @(
     why = 'internal/proposal is aliased BY internal/ai, internal/detect and internal/novelty, so it must import none of them and nothing at all. A shared vocabulary that depends on one of its consumers is not a shared vocabulary.'
   },
   @{
+    # The detector's decoder, and a leaf for the same reason internal/vlm is one.
+    #
+    # It must not reach the database, and the reason is the parity claim: the
+    # cross-decoder test asserts that this decoder and pyworker's decoder agree on
+    # the same tensor. A decoder that could read a recorded answer would make that
+    # comparison unfalsifiable, exactly as a verifier that can read the store would
+    # make RC-4 unfalsifiable.
+    #
+    # `internal/novelty` is permitted and `internal/ai` is required: the absence
+    # states are the four the contract fixes and they must not drift between the
+    # sidecar path and the detector path, so both name them from one place.
+    pkg = './internal/ortdetect'
+    forbid = @('modernc.org/sqlite',
+               'github.com/Sergey-Bar/ai-captain-poc/internal/store',
+               'github.com/Sergey-Bar/ai-captain-poc/internal/soak',
+               'github.com/Sergey-Bar/ai-captain-poc/internal/detect',
+               'github.com/Sergey-Bar/ai-captain-poc/internal/evidence',
+               'github.com/Sergey-Bar/ai-captain-poc/internal/xprotect',
+               'github.com/Sergey-Bar/ai-captain-poc/internal/ui',
+               'github.com/Sergey-Bar/ai-captain-poc/internal/classify')
+    why = 'internal/ortdetect decodes a tensor and nothing else. It may import internal/proposal for the box type, internal/novelty for the candidate shape the Trigger interface hands back, and internal/ai for the absence states; anything that reaches storage or the pipeline would let a measurement be taken from a record instead of from a tensor.'
+  },
+  @{
     # The taxonomy is a leaf too, and for the opposite reason: it is the vocabulary
     # every other package agrees on, so a classify that reached for the store or
     # the wire would make the vocabulary depend on the thing it describes.
