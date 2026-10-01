@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Sergey-Bar/ai-captain-poc/internal/aistate"
+	"github.com/Sergey-Bar/ai-captain-poc/internal/config"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/vlm"
 )
 
@@ -315,7 +316,54 @@ type Decision struct {
 	FrameSeq     int64
 	ReferenceSHA string
 	CreatedAt    time.Time
+	// Model attribution. Every field here is a POINTER, and that is the design
+	// rather than an inconvenience.
+	//
+	// A `motion`-mode decision was made by comparing two frames and a threshold.
+	// No model produced it. A `detector`-mode decision was made by one specific
+	// file with one specific hash under one specific licence, and a number that
+	// cannot name that file describes a build nobody can reconstruct.
+	//
+	// A pointer is what separates those two states. `ModelSHA256 string` with a
+	// zero value records an EMPTY HASH, which is a claim — that something was
+	// hashed and it hashed to nothing. A nil pointer records "no model", which is
+	// the truth for a pixel diff. RC-18 is one comparison made possible by that
+	// distinction: a decision in `detector` mode must have a non-nil
+	// ModelSHA256, and a decision in `motion` mode must have a nil one.
+	ModelIdentity *string
+	ModelSHA256   *string
+	ModelLicence  *string
+	InputSize     *int
+	NMSClassIOU   *float64
+	NMSGlobalIOU  *float64
+	// InferMS is this frame's own inference cost, and the three percentiles are
+	// the distribution the detector had reached when this decision was made.
+	// Recorded per decision rather than only in a report because the report is
+	// derived and this is the record.
+	InferMS         *float64
+	DetLatencyP50MS *float64
+	DetLatencyP95MS *float64
+	DetLatencyP99MS *float64
+	// TrackID is the tracker identity of the object that crossed, nil for a
+	// trigger that does not track.
+	TrackID *int
 }
+
+// NamesModel reports whether this decision names a model that produced it.
+//
+// The single predicate RC-18 is written against, and the one place the rule lives
+// so the gate and the writer cannot disagree about what "named" means.
+func (d Decision) NamesModel() bool {
+	return d.TriggerMode == TriggerModeDetector &&
+		d.ModelSHA256 != nil && *d.ModelSHA256 != "" &&
+		d.ModelIdentity != nil && *d.ModelIdentity != ""
+}
+
+// TriggerModeDetector is the trigger mode whose decisions must name a model. It
+// is an alias of the canonical set in `internal/config`, which owns
+// SP_POC_TRIGGER_MODE; a string compared in two packages is a string one of them
+// will stop updating.
+const TriggerModeDetector = config.TriggerModeDetector
 
 // Region is the measured region in 0..1000 thousandths, matching the scale
 // detections.box_* and the pushed event already use.
@@ -344,32 +392,63 @@ func (s *Store) PutDecision(ctx context.Context, d Decision) error {
 	if d.CreatedAt.IsZero() {
 		d.CreatedAt = time.Now().UTC()
 	}
+	// RC-18, on the WRITE path rather than only in a test. A decision written in
+	// `detector` mode that names no model is refused here, so the defect cannot
+	// reach the database at all — a reader of the table is entitled to assume
+	// every row in it names the model that produced it, and a row that does not
+	// is not a weaker claim, it is a false one.
+	//
+	// This is deliberately stricter than the test that checks it. The test proves
+	// the gate goes red; this makes the gate true.
+	if d.TriggerMode == TriggerModeDetector && !d.NamesModel() {
+		return fmt.Errorf("store: refusing to record a %s-mode decision for %s that names no model: "+
+			"a precision number that cannot name the model that produced it describes a build nobody can rebuild",
+			TriggerModeDetector, d.DetectionID)
+	}
 	_, err := s.exec(ctx, `
 		INSERT INTO decisions (
 			detection_id,run_id,trigger_mode,trigger_class,score,threshold,release,sustain,streak,
-			score_reason,region_source,region_top,region_left,region_bottom,region_right,frame_seq,reference_sha,created_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+			score_reason,region_source,region_top,region_left,region_bottom,region_right,frame_seq,reference_sha,created_at,
+			model_identity,model_sha256,model_licence,input_size,nms_class_iou,nms_global_iou,
+			infer_ms,det_latency_p50_ms,det_latency_p95_ms,det_latency_p99_ms,track_id)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(detection_id) DO UPDATE SET
 			trigger_mode=excluded.trigger_mode, trigger_class=excluded.trigger_class,
 			score=excluded.score, threshold=excluded.threshold, release=excluded.release,
 			sustain=excluded.sustain, streak=excluded.streak, score_reason=excluded.score_reason,
 			region_source=excluded.region_source, region_top=excluded.region_top,
 			region_left=excluded.region_left, region_bottom=excluded.region_bottom,
-			region_right=excluded.region_right, frame_seq=excluded.frame_seq, reference_sha=excluded.reference_sha`,
+			region_right=excluded.region_right, frame_seq=excluded.frame_seq, reference_sha=excluded.reference_sha,
+			model_identity=excluded.model_identity, model_sha256=excluded.model_sha256,
+			model_licence=excluded.model_licence, input_size=excluded.input_size,
+			nms_class_iou=excluded.nms_class_iou, nms_global_iou=excluded.nms_global_iou,
+			infer_ms=excluded.infer_ms, det_latency_p50_ms=excluded.det_latency_p50_ms,
+			det_latency_p95_ms=excluded.det_latency_p95_ms, det_latency_p99_ms=excluded.det_latency_p99_ms,
+			track_id=excluded.track_id`,
 		d.DetectionID, d.RunID, d.TriggerMode, d.TriggerClass, d.Score, d.Threshold, d.Release, d.Sustain, d.Streak,
 		d.ScoreReason, d.RegionSource, d.RegionTop, d.RegionLeft, d.RegionBottom, d.RegionRight, d.FrameSeq,
-		d.ReferenceSHA, nowUTC(d.CreatedAt))
+		d.ReferenceSHA, nowUTC(d.CreatedAt),
+		d.ModelIdentity, d.ModelSHA256, d.ModelLicence, d.InputSize, d.NMSClassIOU, d.NMSGlobalIOU,
+		d.InferMS, d.DetLatencyP50MS, d.DetLatencyP95MS, d.DetLatencyP99MS, d.TrackID)
 	if err != nil {
 		return fmt.Errorf("store: cannot record the decision for %s: %w", d.DetectionID, err)
 	}
 	return nil
 }
 
+// decisionColumns is the one column list the three decision queries share. It
+// used to be written out three times, which is how a column gets added to the
+// INSERT and forgotten in one of the SELECTs — and a forgotten column reads as a
+// NULL rather than as a bug.
+const decisionColumns = `detection_id,run_id,trigger_mode,trigger_class,score,threshold,release,sustain,streak,
+		       score_reason,region_source,region_top,region_left,region_bottom,region_right,frame_seq,reference_sha,
+		       model_identity,model_sha256,model_licence,input_size,nms_class_iou,nms_global_iou,
+		       infer_ms,det_latency_p50_ms,det_latency_p95_ms,det_latency_p99_ms,track_id,created_at`
+
 // DecisionFor reads one decision's inputs.
 func (s *Store) DecisionFor(ctx context.Context, detectionID string) (*Decision, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT detection_id,run_id,trigger_mode,trigger_class,score,threshold,release,sustain,streak,
-		       score_reason,region_source,region_top,region_left,region_bottom,region_right,frame_seq,reference_sha,created_at
+		SELECT `+decisionColumns+`
 		FROM decisions WHERE detection_id=?`, detectionID)
 	d, err := scanDecision(row)
 	if err != nil {
@@ -381,8 +460,7 @@ func (s *Store) DecisionFor(ctx context.Context, detectionID string) (*Decision,
 // Decisions lists a run's decision inputs.
 func (s *Store) Decisions(ctx context.Context, runID string) ([]Decision, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT detection_id,run_id,trigger_mode,trigger_class,score,threshold,release,sustain,streak,
-		       score_reason,region_source,region_top,region_left,region_bottom,region_right,frame_seq,reference_sha,created_at
+		SELECT `+decisionColumns+`
 		FROM decisions WHERE run_id=? ORDER BY created_at, detection_id`, runID)
 	if err != nil {
 		return nil, fmt.Errorf("store: cannot read the decisions for %s: %w", runID, err)
@@ -399,16 +477,63 @@ func (s *Store) Decisions(ctx context.Context, runID string) ([]Decision, error)
 	return out, rows.Err()
 }
 
+// scanDecision reads the shared column list in the shared order.
+//
+// The eleven model-attribution columns are scanned into sql.Null* and then
+// converted to pointers. Scanning them straight into `*float64` fields would
+// work through database/sql's reflection, but it would make the difference
+// between "recorded as zero" and "never recorded" invisible at the call site —
+// and that difference is the entire reason they are nullable.
 func scanDecision(row interface{ Scan(...any) error }) (*Decision, error) {
 	var d Decision
 	var created string
+	var identity, sha, licence sql.NullString
+	var trackID, inputSize sql.NullInt64
+	var infer, p50, p95, p99, nmsClass, nmsGlobal sql.NullFloat64
 	if err := row.Scan(&d.DetectionID, &d.RunID, &d.TriggerMode, &d.TriggerClass, &d.Score, &d.Threshold,
 		&d.Release, &d.Sustain, &d.Streak, &d.ScoreReason, &d.RegionSource, &d.RegionTop, &d.RegionLeft,
-		&d.RegionBottom, &d.RegionRight, &d.FrameSeq, &d.ReferenceSHA, &created); err != nil {
+		&d.RegionBottom, &d.RegionRight, &d.FrameSeq, &d.ReferenceSHA,
+		&identity, &sha, &licence, &inputSize, &nmsClass, &nmsGlobal,
+		&infer, &p50, &p95, &p99, &trackID, &created); err != nil {
 		return nil, fmt.Errorf("store: cannot read a decision: %w", err)
 	}
+	d.ModelIdentity = strPtr(identity)
+	d.ModelSHA256 = strPtr(sha)
+	d.ModelLicence = strPtr(licence)
+	d.InputSize = intPtr(inputSize)
+	d.NMSClassIOU = floatPtr(nmsClass)
+	d.NMSGlobalIOU = floatPtr(nmsGlobal)
+	d.InferMS = floatPtr(infer)
+	d.DetLatencyP50MS = floatPtr(p50)
+	d.DetLatencyP95MS = floatPtr(p95)
+	d.DetLatencyP99MS = floatPtr(p99)
+	d.TrackID = intPtr(trackID)
 	d.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
 	return &d, nil
+}
+
+func strPtr(v sql.NullString) *string {
+	if !v.Valid {
+		return nil
+	}
+	s := v.String
+	return &s
+}
+
+func intPtr(v sql.NullInt64) *int {
+	if !v.Valid {
+		return nil
+	}
+	i := int(v.Int64)
+	return &i
+}
+
+func floatPtr(v sql.NullFloat64) *float64 {
+	if !v.Valid {
+		return nil
+	}
+	f := v.Float64
+	return &f
 }
 
 // Reference is a pinned reference view for one camera in one run.

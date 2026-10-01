@@ -507,6 +507,92 @@ CREATE TABLE IF NOT EXISTS ledger (
   prev_hash TEXT NOT NULL,
   hash      TEXT NOT NULL
 );
+
+-- Per-frame box observations: what the detector measured on every frame it was
+-- asked about, whether or not that frame produced an event.
+--
+-- This table exists because the tracker now has MEMORY. A crossing box is
+-- Kalman-filtered, so it is a function of the frames around it and cannot be
+-- recomputed from the decisions table alone. Replay therefore reads this table
+-- and re-runs the whole track from stored per-frame boxes, which is a STRONGER
+-- claim than the one it replaces: "a decision replays from stored facts" at
+-- track granularity rather than at row granularity.
+--
+-- The measured column is what tells "the model saw nothing" apart from "the
+-- pipeline never asked". A frame the detector was not asked about is stored with
+-- measured=0 and carries no boxes, and a reader counting rows instead of reading
+-- that column will compute a recall of zero out of a run that never ran.
+--
+-- The source column says which decoder produced the row -- detector or sidecar --
+-- so a measurement made by the Python process is never presented as one made by
+-- the shipped path.
+--
+-- NOTE: this blob is a Go raw string literal. A backtick in one of these comments
+-- terminates the string at the backtick and the rest of the schema is parsed as
+-- Go. That is not a style rule here, it is the reason every comment in this blob
+-- spells a column name in plain words.
+CREATE TABLE IF NOT EXISTS box_observations (
+  run_id     TEXT NOT NULL REFERENCES runs(id),
+  frame_seq  INTEGER NOT NULL,
+  at         TEXT NOT NULL,
+  track_id   INTEGER NOT NULL DEFAULT -1,
+  class      TEXT NOT NULL DEFAULT '',
+  family     TEXT,
+  score      REAL NOT NULL DEFAULT 0,
+  box_top    INTEGER NOT NULL DEFAULT 0,
+  box_left   INTEGER NOT NULL DEFAULT 0,
+  box_bottom INTEGER NOT NULL DEFAULT 0,
+  box_right  INTEGER NOT NULL DEFAULT 0,
+  source     TEXT NOT NULL DEFAULT '',
+  measured   INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (run_id, frame_seq, track_id, class, box_top, box_left, box_bottom, box_right)
+);
+CREATE INDEX IF NOT EXISTS box_observations_run_frame ON box_observations(run_id, frame_seq);
+
+-- A human's judgement about one proposed box: accepted or rejected.
+--
+-- This is the only source of a false-positive rate, and it is a row rather than
+-- a number in a report because the number is only recomputable while the
+-- judgements behind it are kept. A run whose labels table is empty has a
+-- false-positive rate of NOT RUN, and says so.
+--
+-- The primary key is the run, the frame and the box itself, so marking the same
+-- box twice is one judgement updated rather than two rows that disagree.
+CREATE TABLE IF NOT EXISTS labels (
+  run_id    TEXT NOT NULL REFERENCES runs(id),
+  frame_seq INTEGER NOT NULL,
+  box_key   TEXT NOT NULL,
+  verdict   TEXT NOT NULL,
+  class     TEXT NOT NULL DEFAULT '',
+  by        TEXT NOT NULL,
+  note      TEXT NOT NULL DEFAULT '',
+  at        TEXT NOT NULL,
+  PRIMARY KEY (run_id, frame_seq, box_key)
+);
+
+-- Objects a human DREW for what the detector missed.
+--
+-- Without this table recall is not measurable at all: a frame with no detection
+-- carries no information, because "the detector found nothing" and "there was
+-- nothing" are the same row. A drawn box is the only thing that tells them
+-- apart, which is why the labelling tool has a drag gesture and not only a
+-- verdict key.
+--
+-- The idx column is the human's own index within the frame, so two objects at
+-- the same place on two different frames are two rows and not a collision.
+CREATE TABLE IF NOT EXISTS label_objects (
+  run_id     TEXT NOT NULL REFERENCES runs(id),
+  frame_seq  INTEGER NOT NULL,
+  idx        INTEGER NOT NULL,
+  class      TEXT NOT NULL,
+  box_top    INTEGER NOT NULL,
+  box_left   INTEGER NOT NULL,
+  box_bottom INTEGER NOT NULL,
+  box_right  INTEGER NOT NULL,
+  by         TEXT NOT NULL,
+  at         TEXT NOT NULL,
+  PRIMARY KEY (run_id, frame_seq, idx)
+);
 `
 
 func (s *Store) migrate(ctx context.Context) error {
@@ -572,10 +658,34 @@ var addedColumns = []struct {
 	{"detections", "snapshot_kind", "TEXT"},
 	// W2-6: the attempt budget, beside the attempt counter it bounds.
 	{"outbox", "max_attempts", "INTEGER NOT NULL DEFAULT 0"},
+	// Model attribution on `decisions`. EVERY one of these is NULLABLE, and the
+	// null is the honest value rather than a missing one: a `motion`-mode decision
+	// was made from a pixel diff and a threshold, and no model produced it, so
+	// NULL says "no model" where 0 or '' would say "a model was involved and
+	// measured zero", which is a fabricated measurement.
+	//
+	// That distinction is the whole reason RC-18 can be a red check. The check is
+	// one comparison — a decision written in `detector` mode must name its model
+	// and its SHA-256 — and it is meaningful precisely because a motion-mode
+	// decision legitimately names nothing. Were these columns NOT NULL DEFAULT
+	// '', every row would name a model that never ran.
+	{"decisions", "model_identity", "TEXT"},
+	{"decisions", "model_sha256", "TEXT"},
+	{"decisions", "model_licence", "TEXT"},
+	{"decisions", "input_size", "INTEGER"},
+	{"decisions", "nms_class_iou", "REAL"},
+	{"decisions", "nms_global_iou", "REAL"},
+	{"decisions", "infer_ms", "REAL"},
+	{"decisions", "det_latency_p50_ms", "REAL"},
+	{"decisions", "det_latency_p95_ms", "REAL"},
+	{"decisions", "det_latency_p99_ms", "REAL"},
+	// The track this crossing belongs to. -1 would be a fabricated track number;
+	// NULL is "this decision came from a trigger that does not track".
+	{"decisions", "track_id", "INTEGER"},
 }
 
 // schemaVersion is bumped whenever a migration is added above.
-const schemaVersion = 7
+const schemaVersion = 8
 
 func (s *Store) ensureColumns(ctx context.Context) error {
 	for _, c := range addedColumns {

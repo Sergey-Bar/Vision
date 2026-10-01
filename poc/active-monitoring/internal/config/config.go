@@ -153,7 +153,7 @@ var schema = []field{
 	// threshold gets chosen — and a tool with one path is a tool with one opinion.
 	{Name: "SP_POC_TRIGGER_MODE", kind: kindString, structural: true, structuralVal: "novelty",
 		Consequence: "the run would not say where its boxes come from, and the cost argument (one call per event against one per frame) has no subject",
-		Remedy:      "set SP_POC_TRIGGER_MODE=novelty (shipped) or SP_POC_TRIGGER_MODE=sidecar (the older per-frame ONNX classifier)"},
+		Remedy:      "set SP_POC_TRIGGER_MODE=detector (the shipped in-process ONNX detector), SP_POC_TRIGGER_MODE=novelty (pure-Go whole-frame change measurement, licence-free, no class vocabulary) or SP_POC_TRIGGER_MODE=sidecar (the older per-frame Python classifier, kept as a threshold-selection and parity tool)"},
 	{Name: "SP_POC_AI_ADDR", kind: kindString, when: "SP_POC_TRIGGER_MODE=sidecar",
 		Consequence: "there is no sidecar to send frames to, and every detection would be not_asked",
 		Remedy:      "set SP_POC_AI_ADDR=127.0.0.1:8099"},
@@ -274,6 +274,42 @@ var schema = []field{
 	{Name: "SP_POC_LINE_TOLERANCE", kind: kindFloat,
 		Consequence: "a track touching the line would flip state on floating-point noise, and the crossing count would not be reproducible",
 		Remedy:      "set SP_POC_LINE_TOLERANCE=0.01"},
+
+	// --- in-process detector (SP_POC_TRIGGER_MODE=detector) ---
+	//
+	// Every entry below is gated on `when: SP_POC_TRIGGER_MODE=detector`, so a
+	// motion run is not asked about an ONNX file it will never open. They are all
+	// required rather than defaulted WITHIN the schema: the defaults below are
+	// what `pocctl fetch-runtime` writes into the manifest and what the demo sets
+	// explicitly, and a detector run that silently picked a model would be a run
+	// whose precision number names a file nobody chose.
+	{Name: "SP_POC_DET_MODEL", kind: kindString, when: "SP_POC_TRIGGER_MODE=detector",
+		Consequence: "the run has no detector. `detector` mode without a model is a run that decodes frames, draws nothing, and reports a zero detection rate with no error — which is what the previous build did for two real runs",
+		Remedy:      "set SP_POC_DET_MODEL=models\\yolov8n.onnx, and record its licence and SHA-256 with `pocctl fetch-runtime`"},
+	{Name: "SP_POC_DET_INPUT", kind: kindInt, when: "SP_POC_TRIGGER_MODE=detector",
+		Consequence: "the model has no input size to be letterboxed into. This is a model property and not a preference: a wrong value produces a session error or a silently wrong scale, and the second is the one that ships",
+		Remedy:      "set SP_POC_DET_INPUT=640 — read it from the session, not from a filename; `pocctl fixtureprobe` prints the declared shape"},
+	{Name: "SP_POC_DET_NMS_CLASS", kind: kindFloat, when: "SP_POC_TRIGGER_MODE=detector",
+		Consequence: "there is no class-aware suppression pass, so one object emitted as both a car and a bus becomes two boxes, two tracks and two crossings",
+		Remedy:      "set SP_POC_DET_NMS_CLASS=0.45 — the class-aware pass; the global pass below is separate and is not a substitute for it"},
+	{Name: "SP_POC_DET_NMS_GLOBAL", kind: kindFloat, when: "SP_POC_TRIGGER_MODE=detector",
+		Consequence: "there is no class-agnostic pass. Class-aware NMS structurally CANNOT collapse a car box and a truck box on the same object, because it never compares them; one object then becomes two boxes and two crossings",
+		Remedy:      "set SP_POC_DET_NMS_GLOBAL=0.75 — higher than the class-aware threshold on purpose; it is the pass that catches the cross-class pair"},
+	{Name: "SP_POC_DET_MAX_BOXES", kind: kindInt, when: "SP_POC_TRIGGER_MODE=detector",
+		Consequence: "there is no ceiling on boxes per frame, so a frame of noise can produce thousands of tracks and the tracker does association work on all of them. The count of what the cap removed is reported, because a cap that silently drops is a cap that lies",
+		Remedy:      "set SP_POC_DET_MAX_BOXES=100"},
+	{Name: "SP_POC_DET_SCORE", kind: kindFloat, when: "SP_POC_TRIGGER_MODE=detector",
+		Consequence: "there is no model emit floor, so every raw candidate above zero becomes a box and the ghost band below has nothing to sit in. The floor must be at or below SP_POC_GHOST_MIN_SCORE, and the validator refuses an inverted chain by name",
+		Remedy:      "set SP_POC_DET_SCORE=0.05 — this is the model's emit floor, not the approval bar; that is SP_POC_SCORE_THRESHOLD"},
+	{Name: "SP_POC_ORT_LIB", kind: kindString, when: "SP_POC_TRIGGER_MODE=detector",
+		Consequence: "no path to the ONNX Runtime shared library, so the session cannot be created. It is named by path rather than discovered from PATH because two versions can be installed and only one of them is the one the SHA-256 was recorded against",
+		Remedy:      "run `pocctl fetch-runtime`, which writes the path and the SHA-256 it verified into the manifest"},
+	{Name: "SP_POC_ORT_THREADS", kind: kindInt, when: "SP_POC_TRIGGER_MODE=detector",
+		Consequence: "the intra-op thread count is whatever ORT picks from the machine's core count, so the same run on a 4-core laptop and a 16-core server has different latency and the measured p99 describes neither of them",
+		Remedy:      "set SP_POC_ORT_THREADS=4 — it is recorded with every measurement, because a latency number without its thread count does not describe a build"},
+	{Name: "SP_POC_BOX_LOG_FRAMES", kind: kindInt,
+		Consequence: "the per-frame box log is unbounded. SQLite here runs synchronous=FULL on one connection, so at 30 fps an unbounded log is the thing that makes AC1 fail on storage latency rather than on anything about detection",
+		Remedy:      "set SP_POC_BOX_LOG_FRAMES=20000 — at the cap every crossing frame is kept and every Nth of the rest, and the run records box_log_sampled with both counts"},
 
 	// --- evidence ---
 	{Name: "SP_POC_CLIP_BEFORE_MS", kind: kindDuration,
@@ -407,6 +443,45 @@ var schemaByName = func() map[string]field {
 	return m
 }()
 
+// The three trigger modes, as the one canonical declaration.
+//
+// `config` owns this vocabulary because it owns SP_POC_TRIGGER_MODE, the variable
+// whose value selects one. It is a leaf package — it imports `classify` and
+// nothing else internal — so `soak` and `store` both alias these constants rather
+// than repeating the literals.
+//
+// They were literals in three places before. A fourth mode added to one of them
+// would have produced a build that validated a mode it could not run, or ran one
+// it could not validate. A closed set is worth exactly one declaration.
+const (
+	// TriggerModeDetector is the in-process ONNX detector: real classes and real
+	// scores per frame, which is the only thing that makes a precision number
+	// possible at all. It is the shipped path.
+	TriggerModeDetector = "detector"
+	// TriggerModeNovelty is the whole-frame change trigger: licence-free, no
+	// weights, and no class vocabulary at all.
+	TriggerModeNovelty = "novelty"
+	// TriggerModeSidecar is the per-frame Python classifier, kept as the
+	// cross-decoder parity reference.
+	TriggerModeSidecar = "sidecar"
+)
+
+// ValidTriggerMode reports whether m names a mode this build operates.
+func ValidTriggerMode(m string) bool {
+	switch m {
+	case TriggerModeDetector, TriggerModeNovelty, TriggerModeSidecar:
+		return true
+	}
+	return false
+}
+
+// usesDetector reports whether this run's boxes come from the in-process
+// detector. Every detector precondition is gated on this one predicate, for the
+// reason the sidecar predicate gives: separate conditionals are separate places
+// to leave a gate hard-on and demand an ONNX file from a run that never opens
+// one.
+func (c Config) usesDetector() bool { return c.TriggerMode == TriggerModeDetector }
+
 // Config is the whole runtime configuration. Nothing else in the module reads
 // the environment.
 type Config struct {
@@ -443,9 +518,11 @@ type Config struct {
 	AIBackpressure time.Duration
 	AIInputWidth   int
 
-	// TriggerMode is where the boxes come from: `novelty` (the shipped path —
-	// pure-Go measurement, one model call per event) or `sidecar` (the older
-	// per-frame ONNX classifier, kept as a threshold-selection tool).
+	// TriggerMode is where the boxes come from. One of [TriggerModeDetector] (the
+	// shipped in-process ONNX detector), [TriggerModeNovelty] (pure-Go
+	// whole-frame change measurement, licence-free, no class vocabulary) or
+	// [TriggerModeSidecar] (the per-frame Python classifier, kept as a
+	// threshold-selection and parity tool).
 	TriggerMode string
 
 	// CameraIntegrity says whether this run carries the REFERENCE trigger beside
@@ -522,6 +599,46 @@ type Config struct {
 	ReportMetrics string
 	ZonesPath     string
 	Cooldown      time.Duration
+
+	// --- the in-process ONNX detector ---
+	//
+	// Only read when TriggerMode is `detector`. See the `--- in-process
+	// detector ---` block in the schema for why each one is required by name
+	// rather than defaulted here.
+	DetModel string
+	// DetInput is the model's square input size. It is a MODEL property and it is
+	// cross-checked against the shape the session declares: a mismatch is a
+	// refusal, because letterboxing a frame into the wrong square is the single
+	// most productive way to produce confident nonsense.
+	DetInput int
+	// DetNMSClass and DetNMSGlobal are the TWO suppression passes and they are
+	// separate settings rather than one, because they do different jobs. The
+	// class-aware pass at a low IoU collapses duplicates of one class; the
+	// class-agnostic pass at a high IoU collapses a `car` and a `truck` box on the
+	// same object, which the first pass structurally cannot do — it never compares
+	// across classes.
+	DetNMSClass  float64
+	DetNMSGlobal float64
+	// DetMaxBoxes is the ceiling on boxes per frame, before association. What it
+	// removed is counted and reported.
+	DetMaxBoxes int
+	// DetScore is the MODEL'S EMIT FLOOR: a raw candidate below it is never
+	// turned into a box at all. It is not the approval bar — SP_POC_SCORE_THRESHOLD
+	// is that. The three form an ordered chain and the validator refuses it
+	// inverted:
+	//
+	//	DET_SCORE <= GHOST_MIN_SCORE <= SCORE_THRESHOLD
+	//	 emit floor      draw floor        approval bar
+	DetScore float64
+	// ORTLib is the path to the ONNX Runtime shared library, named by path rather
+	// than resolved from PATH so the recorded SHA-256 names one file.
+	ORTLib string
+	// ORTThreads is the intra-op thread count. Recorded with every latency
+	// measurement, because a p99 without its thread count describes no build.
+	ORTThreads int
+	// BoxLogFrames bounds the per-frame box log. At the cap every frame that
+	// produced a crossing is kept and every Nth of the rest.
+	BoxLogFrames int
 
 	// approved guards the resolved class set. See ApprovedClasses.
 	//
@@ -771,6 +888,15 @@ func Load(lookup Lookup) (Config, error) {
 	str(&cfg.ReportMetrics, "SP_POC_REPORT_METRICS")
 	str(&cfg.ZonesPath, "SP_POC_ZONES")
 	dur(&cfg.Cooldown, "SP_POC_COOLDOWN_MS")
+	str(&cfg.DetModel, "SP_POC_DET_MODEL")
+	num(&cfg.DetInput, "SP_POC_DET_INPUT")
+	flt(&cfg.DetNMSClass, "SP_POC_DET_NMS_CLASS")
+	flt(&cfg.DetNMSGlobal, "SP_POC_DET_NMS_GLOBAL")
+	num(&cfg.DetMaxBoxes, "SP_POC_DET_MAX_BOXES")
+	flt(&cfg.DetScore, "SP_POC_DET_SCORE")
+	str(&cfg.ORTLib, "SP_POC_ORT_LIB")
+	num(&cfg.ORTThreads, "SP_POC_ORT_THREADS")
+	integer(&cfg.BoxLogFrames, "SP_POC_BOX_LOG_FRAMES")
 	dur(&cfg.TrackMaxAge, "SP_POC_TRACK_MAX_AGE_MS")
 	flt(&cfg.TrackIoU, "SP_POC_TRACK_IOU")
 	flt(&cfg.LineTolerance, "SP_POC_LINE_TOLERANCE")
@@ -942,9 +1068,9 @@ func (c Config) Validate() error {
 	// is the one that produces a report claiming a model verified something it did
 	// not.
 	switch strings.ToLower(strings.TrimSpace(c.TriggerMode)) {
-	case "novelty", "sidecar":
+	case TriggerModeDetector, TriggerModeNovelty, TriggerModeSidecar:
 	default:
-		add("SP_POC_TRIGGER_MODE", "%q is not one of novelty, sidecar; the run would not be able to say where its boxes came from, "+
+		add("SP_POC_TRIGGER_MODE", "%q is not one of detector, novelty, sidecar; the run would not be able to say where its boxes came from, "+
 			"and the cost argument has no subject", c.TriggerMode)
 	}
 	switch strings.ToLower(strings.TrimSpace(c.VLMProvider)) {
@@ -1059,9 +1185,16 @@ func (c Config) Validate() error {
 		add("SP_POC_SOURCE_KIND", "mode=demo-replay with a non-loop source is a contradiction: a demo replay must play labelled recorded material")
 	}
 
-	if c.AIFPS <= 0 {
+	if c.AIFPS < 0 {
 		add("SP_POC_AI_FPS", "%d frames per second is not a rate", c.AIFPS)
 	}
+	// ZERO IS A RATE, and it means "every decoded frame". It used to be refused
+	// here as "not a rate", which left the most demanding mode — full-rate
+	// detection — the one mode the configuration could not express. The demand is
+	// real and it is enforced where the arithmetic exists: preflight refuses by
+	// name with `det_p99 x ai_fps < 1000` when the detector cannot hold the rate.
+	// Refusing the spelling here would have made the check unreachable rather
+	// than strict.
 	if c.AIDeadline <= 0 {
 		add("SP_POC_AI_DEADLINE_MS", "a non-positive deadline makes every answer late")
 	}
@@ -1087,6 +1220,58 @@ func (c Config) Validate() error {
 	// cannot express and the reader cannot see.
 	if c.GhostMinScore > c.ScoreThreshold {
 		add("SP_POC_GHOST_MIN_SCORE", "%v is above SP_POC_SCORE_THRESHOLD (%v), so the rejected band is upside down: everything between them would be drawn dimmed and approved at once. The ghost floor must be at or below the approval threshold", c.GhostMinScore, c.ScoreThreshold)
+	}
+	// The LEFT-hand link of the same chain, and it is checked only in detector
+	// mode because the other two floors belong to a trigger that has no model
+	// emit stage.
+	//
+	// RC-19. An inverted chain lies in BOTH directions at once, which is why it
+	// cannot be caught downstream: with DET_SCORE above GHOST_MIN_SCORE, a box
+	// the model never emitted is drawn as a ghost, and a box the model did emit
+	// is refused. The picture shows objects that are not there and omits objects
+	// that are, and every downstream number is computed over that. Neither half
+	// is individually detectable — only the ordering is.
+	if c.usesDetector() {
+		if c.DetScore < 0 || c.DetScore > 1 {
+			add("SP_POC_DET_SCORE", "%v is not a probability", c.DetScore)
+		}
+		if c.DetScore > c.GhostMinScore {
+			add("SP_POC_DET_SCORE", "%v is above SP_POC_GHOST_MIN_SCORE (%v), so the score chain is inverted: "+
+				"candidates the model scored below its own emit floor would still be drawn as ghosts, and candidates above it "+
+				"would be refused. The chain must read DET_SCORE (%v) <= GHOST_MIN_SCORE (%v) <= SCORE_THRESHOLD (%v)",
+				c.DetScore, c.GhostMinScore, c.DetScore, c.GhostMinScore, c.ScoreThreshold)
+		}
+		if strings.TrimSpace(c.DetModel) == "" {
+			add("SP_POC_DET_MODEL", "SP_POC_TRIGGER_MODE=detector and no model named; a detector run that silently opened no file is a run that reports zero detections with no error")
+		}
+		if c.DetInput < 32 || c.DetInput > 4096 {
+			add("SP_POC_DET_INPUT", "%d is not a plausible square input size. Read it from the session: `pocctl fixtureprobe` prints the declared shape, and a wrong value here letterboxes the frame into a square the model was not exported for", c.DetInput)
+		}
+		if c.DetNMSClass <= 0 || c.DetNMSClass >= 1 {
+			add("SP_POC_DET_NMS_CLASS", "%v is not an IoU in (0,1)", c.DetNMSClass)
+		}
+		if c.DetNMSGlobal <= 0 || c.DetNMSGlobal >= 1 {
+			add("SP_POC_DET_NMS_GLOBAL", "%v is not an IoU in (0,1)", c.DetNMSGlobal)
+		}
+		// The global pass is the pass that collapses a `car` and a `truck` on one
+		// object, and it only does that if it is the LOOSER of the two. Inverted,
+		// it is redundant with the class-aware pass and a cross-class pair survives
+		// as two boxes and two crossings.
+		if c.DetNMSGlobal < c.DetNMSClass {
+			add("SP_POC_DET_NMS_GLOBAL", "%v is tighter than SP_POC_DET_NMS_CLASS (%v). The class-agnostic pass exists to catch the pair a class-aware pass cannot compare, so it must be the looser of the two; inverted it is redundant and one object becomes two boxes", c.DetNMSGlobal, c.DetNMSClass)
+		}
+		if c.DetMaxBoxes < 1 {
+			add("SP_POC_DET_MAX_BOXES", "%v; a cap of zero draws nothing and reports a zero detection rate that reads like an empty road", c.DetMaxBoxes)
+		}
+		if strings.TrimSpace(c.ORTLib) == "" {
+			add("SP_POC_ORT_LIB", "SP_POC_TRIGGER_MODE=detector and no runtime library named; `pocctl fetch-runtime` writes the path it verified")
+		}
+		if c.ORTThreads < 1 {
+			add("SP_POC_ORT_THREADS", "%v threads; at least one is required, and the number is recorded with every latency measurement because a p99 without it describes no build", c.ORTThreads)
+		}
+	}
+	if c.BoxLogFrames < 1 {
+		add("SP_POC_BOX_LOG_FRAMES", "%v; a cap of zero logs nothing and the replay that a Kalman crossing depends on has no per-frame boxes to read", c.BoxLogFrames)
 	}
 	if c.TrackMinFrames < 1 {
 		add("SP_POC_TRACK_MIN_FRAMES", "%v frames; at least one is required, because a track that has been seen zero times is not an object", c.TrackMinFrames)

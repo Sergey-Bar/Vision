@@ -38,6 +38,8 @@ import (
 	"fmt"
 	"math"
 	"sort"
+
+	"github.com/Sergey-Bar/ai-captain-poc/internal/proposal"
 )
 
 // Mode is which comparison the engine makes.
@@ -57,53 +59,16 @@ func ValidMode(m Mode) bool { return m == ModeTemporal || m == ModeReference }
 
 // Box is a measured region, normalised 0..1 against the FRAME.
 //
-// The same coordinate space as detect.Box and overlay.Box, and the 0..1000
-// thousandths scale is produced at the two places that need it, so no third scale
-// can drift.
-type Box struct {
-	X1, Y1, X2, Y2 float64
-}
-
-// NonEmpty reports whether the box names an actual region.
+// An ALIAS of [proposal.Box], the same type `detect.Box` and `ai.Box` name. It
+// carries a class and a score that this package never fills in, because a
+// connected component has not been told what it is yet; it reads one engine's
+// vocabulary and another's when a detector fills them.
 //
-// A full-frame box is non-empty; an all-zero box is not, and an all-zero box on a
-// pushed event is the defect the plan calls the worst thing in a demo.
-func (b Box) NonEmpty() bool {
-	return b.X2 > b.X1 && b.Y2 > b.Y1
-}
-
-// Area is the fraction of the frame the box covers.
-func (b Box) Area() float64 {
-	if !b.NonEmpty() {
-		return 0
-	}
-	return (b.X2 - b.X1) * (b.Y2 - b.Y1)
-}
-
-// Union merges two boxes, which is how several components in one region become
-// one region rather than several overlapping boxes on the operator's screen.
-func (b Box) Union(o Box) Box {
-	if !b.NonEmpty() {
-		return o
-	}
-	if !o.NonEmpty() {
-		return b
-	}
-	m := b
-	if o.X1 < m.X1 {
-		m.X1 = o.X1
-	}
-	if o.Y1 < m.Y1 {
-		m.Y1 = o.Y1
-	}
-	if o.X2 > m.X2 {
-		m.X2 = o.X2
-	}
-	if o.Y2 > m.Y2 {
-		m.Y2 = o.Y2
-	}
-	return m
-}
+// [Box.NonEmpty] — the predicate this package actually uses — moved to `proposal`
+// with the type. Valid is deliberately NOT the predicate this package uses: Valid
+// requires a class, and a mask component has none, so checking a mask with Valid
+// would refuse every region the novelty engine ever found.
+type Box = proposal.Box
 
 // Reason names why a score is what it is, in a fixed vocabulary rather than a
 // sentence. Nothing in this module matches on prose.

@@ -227,6 +227,35 @@ $boundaries = @(
     why = 'internal/overlay is the leaf the screen and the runner BOTH draw with, so it may import only the standard library and internal/classify. Anything else is the import cycle this package exists to avoid, and a package that has begun to be a dumping ground is a package whose boundary has stopped being enforced.'
   },
   @{
+    # The shared box type, and the strictest leaf in the module: `ai.Box`,
+    # `detect.Box` and `novelty.Box` are ALIASES of `proposal.Box`, so all three
+    # of those packages import it and it may import none of them back.
+    #
+    # That is the whole reason this package exists. Three packages each declared
+    # their own Box, and a fourth — the detector — could not be written without
+    # importing one of them. A type that three packages alias can only stay one
+    # type while it stays below all three; the moment it imports one of them, the
+    # aliases stop being assignable and every existing call site becomes a
+    # conversion, which is a place a coordinate gets rescaled by accident.
+    #
+    # It must also stay free of `math` at the edges: the predicates here decide
+    # whether a box is real, and a predicate that needed the store to answer
+    # would be a predicate about the database rather than about the picture.
+    pkg = './internal/proposal'
+    forbid = @('modernc.org/sqlite',
+               'github.com/Sergey-Bar/ai-captain-poc/internal/ai',
+               'github.com/Sergey-Bar/ai-captain-poc/internal/detect',
+               'github.com/Sergey-Bar/ai-captain-poc/internal/novelty',
+               'github.com/Sergey-Bar/ai-captain-poc/internal/soak',
+               'github.com/Sergey-Bar/ai-captain-poc/internal/store',
+               'github.com/Sergey-Bar/ai-captain-poc/internal/overlay',
+               'github.com/Sergey-Bar/ai-captain-poc/internal/classify',
+               'github.com/Sergey-Bar/ai-captain-poc/internal/evidence',
+               'github.com/Sergey-Bar/ai-captain-poc/internal/config',
+               'onnxruntime_go')
+    why = 'internal/proposal is aliased BY internal/ai, internal/detect and internal/novelty, so it must import none of them and nothing at all. A shared vocabulary that depends on one of its consumers is not a shared vocabulary.'
+  },
+  @{
     # The taxonomy is a leaf too, and for the opposite reason: it is the vocabulary
     # every other package agrees on, so a classify that reached for the store or
     # the wire would make the vocabulary depend on the thing it describes.

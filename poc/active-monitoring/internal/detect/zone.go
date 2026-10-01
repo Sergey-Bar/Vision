@@ -15,41 +15,21 @@ import (
 	"os"
 	"sort"
 	"strings"
+
+	"github.com/Sergey-Bar/ai-captain-poc/internal/proposal"
 )
 
 // Box is a detection in normalised coordinates: 0..1 against the frame. The
 // coordinates are the frame's, not the model's input's, so a model that runs at
 // 640x640 and a camera at 1920x1080 produce the same numbers.
-type Box struct {
-	Class string
-	Score float64
-	X1    float64
-	Y1    float64
-	X2    float64
-	Y2    float64
-}
-
-// Centre is the point the line-crossing test uses. A box that straddles a line
-// with its centre on the line has not crossed it.
-func (b Box) Centre() (float64, float64) { return (b.X1 + b.X2) / 2, (b.Y1 + b.Y2) / 2 }
-
-// Width and Height are the box's size in normalised units, which is what the
-// sidecar overlay draws.
-func (b Box) Width() float64  { return b.X2 - b.X1 }
-func (b Box) Height() float64 { return b.Y2 - b.Y1 }
-
-// Valid reports whether the box is usable. A degenerate or out-of-range box is
-// refused rather than clamped: clamping would move an object that the model put
-// somewhere it is not.
-func (b Box) Valid() bool {
-	if b.Class == "" || math.IsNaN(b.Score) {
-		return false
-	}
-	if b.X2 <= b.X1 || b.Y2 <= b.Y1 {
-		return false
-	}
-	return b.X1 >= -0.5 && b.Y1 >= -0.5 && b.X2 <= 1.5 && b.Y2 <= 1.5
-}
+//
+// It is an ALIAS of [proposal.Box]. The five methods that used to be declared
+// here — Centre, Width, Height, Valid, and the type's own definition — live in
+// `proposal` now and reach every call site in this package through the alias, so
+// not one of the package's tests needed editing. An alias rather than a wrapper
+// is the point: a wrapper would have put a conversion on each of them, and a
+// conversion on a coordinate is a place to rescale one by accident.
+type Box = proposal.Box
 
 // Line is a crossing line in normalised coordinates.
 type Line struct {

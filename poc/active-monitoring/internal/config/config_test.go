@@ -54,10 +54,14 @@ func complete(t *testing.T) map[string]string {
 		// a picture, which metric set its report is written against, and where
 		// this model's anchor boxes live has not made those decisions, and a
 		// default would be this module making them silently.
-		"SP_POC_MIN_BOX_AREA":           "0.0005",
-		"SP_POC_GHOST_MIN_SCORE":        "0.10",
-		"SP_POC_TRACK_MIN_FRAMES":       "3",
-		"SP_POC_MAX_BOXES_DRAWN":        "12",
+		"SP_POC_MIN_BOX_AREA":     "0.0005",
+		"SP_POC_GHOST_MIN_SCORE":  "0.10",
+		"SP_POC_TRACK_MIN_FRAMES": "3",
+		"SP_POC_MAX_BOXES_DRAWN":  "12",
+		// Required in EVERY mode, not only in detector mode: the per-frame box log
+		// is written by the tracker, and a Kalman crossing cannot be replayed
+		// without it. So a novelty run needs the bound too.
+		"SP_POC_BOX_LOG_FRAMES":         "20000",
 		"SP_POC_REPORT_METRICS":         "events",
 		"SP_POC_AI_ANCHORS":             anchorsFile(t),
 		"SP_POC_CLASSES":                "bird,car,person",
@@ -452,6 +456,45 @@ func TestTheNewNumbersHaveBoundsWorthHaving(t *testing.T) {
 	}
 }
 
+// conditionalValues is a complete, VALID value for every schema variable that is
+// gated on a condition and is not already present in the base `complete` world.
+//
+// It exists because TestEveryVariableIsRequiredByName removes ONE variable and
+// asserts that exactly that one is named as missing. When a condition is flipped
+// and nothing else changes, every gated variable goes missing at once and the
+// assertion is worthless — it would pass for any of them while testing none. So
+// the world has to be complete except for the one under test.
+//
+// The values are mutually consistent on purpose: the score chain reads
+// DET_SCORE (0.05) <= GHOST_MIN_SCORE (0.10) <= SCORE_THRESHOLD (0.45), and
+// DET_NMS_GLOBAL (0.75) is looser than DET_NMS_CLASS (0.45). A fixture with an
+// accidental inversion would test the wrong refusal and pass for the wrong
+// reason.
+func conditionalValues() map[string]string {
+	return map[string]string{
+		"SP_POC_DET_MODEL":      `models\yolov8n.onnx`,
+		"SP_POC_DET_INPUT":      "640",
+		"SP_POC_DET_NMS_CLASS":  "0.45",
+		"SP_POC_DET_NMS_GLOBAL": "0.75",
+		"SP_POC_DET_MAX_BOXES":  "100",
+		"SP_POC_DET_SCORE":      "0.05",
+		"SP_POC_ORT_LIB":        `models\onnxruntime.dll`,
+		"SP_POC_ORT_THREADS":    "4",
+	}
+}
+
+// detectorWorld is the base world with SP_POC_TRIGGER_MODE=detector and every
+// gated variable present and consistent.
+func detectorWorld(t *testing.T) map[string]string {
+	t.Helper()
+	m := complete(t)
+	m["SP_POC_TRIGGER_MODE"] = TriggerModeDetector
+	for k, v := range conditionalValues() {
+		m[k] = v
+	}
+	return m
+}
+
 // TestEveryVariableIsRequiredByName is the T4 test: remove one variable, get a// refusal that names that variable and states the consequence. A variable that
 // silently defaults is the defect this whole package exists to prevent.
 func TestEveryVariableIsRequiredByName(t *testing.T) {
@@ -467,13 +510,38 @@ func TestEveryVariableIsRequiredByName(t *testing.T) {
 		// variable to the value that makes it required, then remove this one.
 		m := complete(t)
 		if f.when != "" {
-			want := strings.TrimPrefix(f.when, "")
 			condName, condVal, ok := strings.Cut(f.when, "=")
 			if !ok {
 				t.Fatalf("%s has the unparseable condition %q", name, f.when)
 			}
 			m[condName] = condVal
-			_ = want
+			// Every variable sharing this condition has to be present in the world
+			// we remove one variable FROM. The variable under test included:
+			// without it the world does not even load, the removal changes nothing,
+			// and "Load failed" would be satisfied by a refusal that has nothing to
+			// do with the variable being tested.
+			//
+			// Filling siblings from one table is what keeps this honest as
+			// variables are added to a condition later — a new gated variable with
+			// no fixture value fails the table loudly instead of silently
+			// weakening every assertion under that condition.
+			for other, of := range schemaByName {
+				if of.when != f.when {
+					continue
+				}
+				if _, present := m[other]; present {
+					// The base world already satisfies this sibling (the VLM
+					// variables are all in `complete`), so there is nothing to fill.
+					continue
+				}
+				v, known := conditionalValues()[other]
+				if !known {
+					t.Fatalf("%s is gated on %q, is absent from the base world, "+
+						"and the fixture has no value for it: the table would name several "+
+						"variables as missing and assert nothing", other, f.when)
+				}
+				m[other] = v
+			}
 		}
 		// And the world it sits in must otherwise satisfy that condition, so a
 		// table entry whose condition its own world does not meet is testing
@@ -481,6 +549,13 @@ func TestEveryVariableIsRequiredByName(t *testing.T) {
 		if f.when != "" && !conditionHolds(lookupFrom(m), f.when) {
 			t.Fatalf("%s requires %q, which the complete world does not satisfy; this table would be testing nothing",
 				name, f.when)
+		}
+		// The world must otherwise LOAD. Without this the table would happily
+		// assert "removing X is refused by name" for a world that is refused for a
+		// different reason entirely, and the removal changes nothing.
+		if _, err := Load(lookupFrom(m)); err != nil {
+			t.Fatalf("%s: the world it is tested in does not load, so removing one variable from it proves nothing: %v",
+				name, err)
 		}
 		t.Run(name, func(t *testing.T) {
 			delete(m, name)

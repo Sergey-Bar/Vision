@@ -15,6 +15,7 @@ import (
 
 	"github.com/Sergey-Bar/ai-captain-poc/internal/ai"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/classify"
+	"github.com/Sergey-Bar/ai-captain-poc/internal/config"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/detect"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/evidence"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/novelty"
@@ -438,20 +439,35 @@ func (r *Runner) frameLoop(ctx context.Context) error {
 	}
 }
 
-// Trigger modes. The shipped path is `novelty`; `sidecar` is the older local
-// classifier, kept as a measurement tool rather than in the trigger path.
+// Trigger modes. `detector` is the shipped path: an in-process ONNX detector at
+// the frame rate. `novelty` is the whole-frame change trigger it replaced, kept
+// because it is licence-free and needs no weights. `sidecar` is the per-frame
+// Python classifier, kept as the calibration cross-check that earns its place.
+//
+// These are ALIASES of the constants in `internal/config`, which owns
+// SP_POC_TRIGGER_MODE and is therefore the package that owns the vocabulary.
+// They are declared here because `runner.go` is where the switch that dispatches
+// on them lives, and a reader should not have to open another file to see the
+// three cases of that switch.
 const (
+	// TriggerDetector is the in-process ONNX Runtime detector. It produces real
+	// classes and real scores per frame, which is what makes a precision number
+	// possible at all: the two most recent real runs approved 6,578 and 297 boxes
+	// and recorded zero vehicles, zero people and zero animals, because a
+	// whole-frame change-fraction has no vocabulary.
+	TriggerDetector = config.TriggerModeDetector
 	// TriggerNovelty is the local novelty engine: measured regions, one model
 	// call per event, licence-free.
-	TriggerNovelty = "novelty"
-	// TriggerSidecar is the per-frame ONNX sidecar. It is a measurement tool now:
-	// useful for choosing a threshold, wrong for the trigger path because it
-	// costs a call per frame and answers about frames nobody asked about.
-	TriggerSidecar = "sidecar"
+	TriggerNovelty = config.TriggerModeNovelty
+	// TriggerSidecar is the per-frame Python ONNX sidecar. It is a measurement
+	// tool now: useful for choosing a threshold and for the cross-decoder parity
+	// test, wrong for the shipped trigger path because it costs a process and a
+	// socket round trip per frame.
+	TriggerSidecar = config.TriggerModeSidecar
 )
 
 // ValidTriggerMode refuses a mode this build does not operate.
-func ValidTriggerMode(m string) bool { return m == TriggerNovelty || m == TriggerSidecar }
+func ValidTriggerMode(m string) bool { return config.ValidTriggerMode(m) }
 
 // UsesSidecar reports whether the run's boxes come from the per-frame sidecar.
 //
@@ -459,6 +475,9 @@ func ValidTriggerMode(m string) bool { return m == TriggerNovelty || m == Trigge
 // separate conditionals is three places where the gate was left hard-on and the
 // ONNX model was required by a run that never called it.
 func UsesSidecar(m string) bool { return m == TriggerSidecar }
+
+// UsesDetector reports whether the run's boxes come from the in-process detector.
+func UsesDetector(m string) bool { return m == TriggerDetector }
 
 // process handles one frame: measure, decide, and for each incident record first
 // and then act.

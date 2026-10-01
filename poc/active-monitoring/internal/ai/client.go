@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/Sergey-Bar/ai-captain-poc/internal/aistate"
+	"github.com/Sergey-Bar/ai-captain-poc/internal/proposal"
 )
 
 // State is the AI absence vocabulary from CONTRACT.md §2.2. These are the only
@@ -55,14 +56,13 @@ func AbsenceOf(state string) bool {
 
 // Box is one detection, in normalised coordinates so the model input size
 // cannot change what a box means.
-type Box struct {
-	Class string  `json:"cls"`
-	Score float64 `json:"score"`
-	X1    float64 `json:"x1"`
-	Y1    float64 `json:"y1"`
-	X2    float64 `json:"x2"`
-	Y2    float64 `json:"y2"`
-}
+//
+// It is an ALIAS of [proposal.Box], which is where the struct and its JSON tags
+// now live. The tags are the sidecar's wire format: `ai` decodes with
+// `DisallowUnknownFields`, so these four names are a published contract and not a
+// naming preference. Declaring a fourth box type here instead would have been
+// the easy thing to do and would have been the wrong one.
+type Box = proposal.Box
 
 // Result is one sidecar answer.
 type Result struct {
