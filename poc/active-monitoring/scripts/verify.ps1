@@ -279,6 +279,43 @@ $boundaries = @(
     why = 'internal/ortdetect decodes a tensor and nothing else. It may import internal/proposal for the box type, internal/novelty for the candidate shape the Trigger interface hands back, and internal/ai for the absence states; anything that reaches storage or the pipeline would let a measurement be taken from a record instead of from a tensor.'
   },
   @{
+    # The benchmark's arithmetic, and it is a leaf for the reason it matters.
+    #
+    # `metrics.go` is the only file here that the gate allows to import
+    # `internal/ortdetect`, and it is allowed to import it for the BOX TYPE ALONE —
+    # via `internal/proposal`, which it imports directly. So the effective rule is
+    # what this checks: the arithmetic must not be able to reach a session, a store,
+    # or the pipeline.
+    #
+    # The reason is falsifiability. The golden test works because `metrics.go`
+    # imports nothing that could agree with it: a metric that read the database
+    # could not be checked against hand-computed arithmetic, and a report whose
+    # numbers come from the same code it is measuring is unfalsifiable.
+    pkg = './internal/bench'
+    forbid = @('modernc.org/sqlite',
+               'github.com/Sergey-Bar/ai-captain-poc/internal/store',
+               'github.com/Sergey-Bar/ai-captain-poc/internal/soak',
+               'github.com/Sergey-Bar/ai-captain-poc/internal/detect',
+               'github.com/Sergey-Bar/ai-captain-poc/internal/ortdetect',
+               'github.com/Sergey-Bar/ai-captain-poc/internal/evidence',
+               'github.com/yalue/onnxruntime_go')
+    why = 'internal/bench/metrics.go is the pure half of the benchmark and must stay pure, or its golden test is checking the implementation against itself. The half that holds a session is cmd/pocctl/bench.go, which is a command and not a package.'
+  },
+  @{
+    # The marking tool's storage and page. It reads the store and draws boxes; it
+    # must not reach a detector or a pipeline.
+    #
+    # A marking tool that could re-run the detector would be measuring the model
+    # rather than the judgement, and the false-positive rate it produced would be
+    # the model's opinion of itself.
+    pkg = './internal/labelui'
+    forbid = @('github.com/Sergey-Bar/ai-captain-poc/internal/ortdetect',
+               'github.com/Sergey-Bar/ai-captain-poc/internal/detect',
+               'github.com/Sergey-Bar/ai-captain-poc/internal/soak',
+               'github.com/yalue/onnxruntime_go')
+    why = 'internal/labelui marks what a run RECORDED. It may hold the store and serve a page; it must not hold a model, because a marking tool that re-runs the detector is asking the model to grade its own work.'
+  },
+  @{
     # The taxonomy is a leaf too, and for the opposite reason: it is the vocabulary
     # every other package agrees on, so a classify that reached for the store or
     # the wire would make the vocabulary depend on the thing it describes.

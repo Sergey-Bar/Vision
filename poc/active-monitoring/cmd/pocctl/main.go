@@ -63,6 +63,12 @@ func main() {
 		err = cmdFetchModel(os.Args[2:])
 	case "fetch-runtime":
 		err = cmdFetchRuntime(os.Args[2:])
+	case "fetch-groundtruth":
+		err = cmdFetchGroundtruth(os.Args[2:])
+	case "bench":
+		err = cmdBench(os.Args[2:])
+	case "label":
+		err = cmdLabel(os.Args[2:])
 	case "-h", "--help", "help":
 		usage()
 		return
@@ -109,6 +115,13 @@ func usage() {
   fetch-runtime            download the ONNX Runtime library, record its sha256 and licence,
                            and refuse a digest that does not match. --verify re-checks what
                            is already on disk against models/runtime.json, offline.
+  fetch-groundtruth        download the Open Images annotations a benchmark needs and record
+                           the licence of the images and of the annotations SEPARATELY
+  bench                    measure the detector. --images <dir> drives it over a labelled
+                           still set and holds a session; --run <id> measures a finished run
+                           from its store and opens no model
+  label                    mark a run's proposed boxes: accept or reject each one, and draw
+                           the objects the detector missed. Serves a page on --addr.
 
 Run 'pocctl <subcommand> --help' for a subcommand's own flags.
 

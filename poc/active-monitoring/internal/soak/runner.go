@@ -673,7 +673,7 @@ func (r *Runner) process(ctx context.Context, f recorder.Frame) {
 		keep, because := r.boxLog.ShouldKeep(len(crossings))
 		if keep {
 			obs := boxObservationsFor(r.opt.RunID, int64(f.Seq), f.At, boxes, telemetry,
-				SourceFor(r.opt.TriggerMode))
+				tracks, SourceFor(r.opt.TriggerMode))
 			r.writeBoxObservations(ctx, obs)
 			if r.boxLogSampled && len(crossings) > 0 {
 				r.logf("frame %d kept in the box log: %s", f.Seq, because)

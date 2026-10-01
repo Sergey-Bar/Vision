@@ -145,7 +145,7 @@ func TestTheMeasuredFlagIsTheDifferenceTheTableExistsFor(t *testing.T) {
 	src := SourceFor(TriggerDetector)
 
 	// Asked, and the model published candidates but none cleared the floor.
-	asked := boxObservationsFor("r1", 11, zeroTime(), nil, ai.Telemetry{Candidates: 8400}, src)
+	asked := boxObservationsFor("r1", 11, zeroTime(), nil, ai.Telemetry{Candidates: 8400}, nil, src)
 	if len(asked) != 1 {
 		t.Fatalf("a measured frame with no boxes produced %d rows, want 1", len(asked))
 	}
@@ -154,7 +154,7 @@ func TestTheMeasuredFlagIsTheDifferenceTheTableExistsFor(t *testing.T) {
 	}
 
 	// Never asked: no candidates, no boxes, no pre-NMS count.
-	notAsked := boxObservationsFor("r1", 11, zeroTime(), nil, ai.Telemetry{}, src)
+	notAsked := boxObservationsFor("r1", 11, zeroTime(), nil, ai.Telemetry{}, nil, src)
 	if len(notAsked) != 1 {
 		t.Fatalf("an unasked frame produced %d rows, want 1", len(notAsked))
 	}
@@ -179,7 +179,7 @@ func TestTheBoxScaleIsTheOneTheRestOfTheStoreUses(t *testing.T) {
 	obs := boxObservationsFor("r1", 1, zeroTime(), []ai.Box{
 		{Class: "car", Score: 0.91, X1: 0.1, Y1: 0.2, X2: 0.3, Y2: 0.4},
 		{Class: "person", Score: 0.5, X1: 0, Y1: 0, X2: 1, Y2: 1},
-	}, ai.Telemetry{Candidates: 100}, SourceFor(TriggerDetector))
+	}, ai.Telemetry{Candidates: 100}, nil, SourceFor(TriggerDetector))
 	if len(obs) != 2 {
 		t.Fatalf("rows = %d, want 2", len(obs))
 	}
@@ -198,7 +198,7 @@ func TestFamilyIsAlwaysRecordedAndNeverInvented(t *testing.T) {
 	obs := boxObservationsFor("r1", 1, zeroTime(), []ai.Box{
 		{Class: "car", Score: 0.9, X1: 0.1, Y1: 0.1, X2: 0.3, Y2: 0.3},
 		{Class: "zzzz-not-a-coco-class", Score: 0.9, X1: 0.1, Y1: 0.1, X2: 0.3, Y2: 0.3},
-	}, ai.Telemetry{Candidates: 2}, SourceFor(TriggerDetector))
+	}, ai.Telemetry{Candidates: 2}, nil, SourceFor(TriggerDetector))
 	if len(obs) != 2 {
 		t.Fatalf("rows = %d, want 2 - an unplaceable class is still a measured box", len(obs))
 	}
@@ -227,7 +227,7 @@ func TestFamilyIsAlwaysRecordedAndNeverInvented(t *testing.T) {
 func TestTrackIDIsMinusOneAndNotZero(t *testing.T) {
 	obs := boxObservationsFor("r1", 1, zeroTime(),
 		[]ai.Box{{Class: "car", Score: 0.9, X1: 0.1, Y1: 0.1, X2: 0.3, Y2: 0.3}},
-		ai.Telemetry{Candidates: 1}, SourceFor(TriggerDetector))
+		ai.Telemetry{Candidates: 1}, nil, SourceFor(TriggerDetector))
 	if obs[0].TrackID != -1 {
 		t.Fatalf("track_id = %d, want -1: 0 would be a track number nobody has, and a reader "+
 			"grouping by it would find a thousand-box track that does not exist", obs[0].TrackID)

@@ -30,6 +30,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Sergey-Bar/ai-captain-poc/internal/detect"
+
 	"github.com/Sergey-Bar/ai-captain-poc/internal/ai"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/classify"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
@@ -164,7 +166,7 @@ func SourceFor(mode string) string {
 
 // boxObservationsFor builds the rows one frame contributes.
 //
-// Three things are worth stating, because each is a way a replay could silently
+// Four things are worth stating, because each is a way a replay could silently
 // read the wrong thing:
 //
 //   - a frame with NO boxes still gets a row, and its `measured` flag says whether
@@ -175,23 +177,46 @@ func SourceFor(mode string) string {
 //   - family is nil for a class the taxonomy does not place, and nil means "not
 //     recorded" rather than "no family". An empty string would read as a recorded
 //     absence.
-//   - track_id is -1 for every box, which is a SPECIFIC claim — "this box is not
-//     yet attached to a track" — rather than 0, which would be a track number
-//     nobody has. The per-frame box-to-track mapping arrives with the Kalman
-//     association, and a row that guessed one would be worse than a row that says
-//     it does not have one.
+//   - track_id is the tracker's own identity, recovered from the live tracks by
+//     matching the box. It is -1 when no track claimed the box, which is a
+//     SPECIFIC claim rather than a placeholder — 0 would be a track number nobody
+//     has.
+//   - the track id matters more than it looks. `store.ProposedBoxCount` counts
+//     rows with `track_id >= 0`, and that count is the marking session's whole
+//     denominator — so a log that wrote -1 on every row would leave the reviewer
+//     with nothing to judge and the false-positive rate NOT RUN forever, with no
+//     error anywhere. That is the shape of this bug the first time it existed.
 func boxObservationsFor(runID string, seq int64, at time.Time, boxes []ai.Box,
-	tel ai.Telemetry, source string) []store.BoxObservation {
+	tel ai.Telemetry, tracks []detect.Track, source string) []store.BoxObservation {
 
 	measured := tel.Candidates > 0 || tel.PreNms > 0 || len(boxes) > 0
 	if !measured || len(boxes) == 0 {
-		// One row either way, and the flag is the whole difference between "asked
-		// and found nothing" and "never asked".
 		return []store.BoxObservation{{
 			RunID: runID, FrameSeq: seq, At: at, TrackID: -1,
 			Source: source, Measured: measured,
 		}}
 	}
+
+	// The live tracks, indexed by class, so a box can be attributed to one.
+	//
+	// Matching is by class plus overlap, and it is the SAME rule the engine's own
+	// permission loop uses — so a box the engine would let cross is the same box
+	// this attributes to that track. A second rule here would be a second answer to
+	// "which track is this", and the two would disagree exactly where it mattered.
+	byClass := map[string][]detect.Track{}
+	for _, t := range tracks {
+		byClass[strings.ToLower(t.Class)] = append(byClass[strings.ToLower(t.Class)], t)
+	}
+	attr := func(b ai.Box) int {
+		best, bestIou := -1, 0.0
+		for _, t := range byClass[strings.ToLower(b.Class)] {
+			if v := detect.Overlap(t.Box, b); v > bestIou {
+				best, bestIou = t.ID, v
+			}
+		}
+		return best
+	}
+
 	out := make([]store.BoxObservation, 0, len(boxes))
 	for _, b := range boxes {
 		var family *string
@@ -200,7 +225,7 @@ func boxObservationsFor(runID string, seq int64, at time.Time, boxes []ai.Box,
 			family = &fam
 		}
 		out = append(out, store.BoxObservation{
-			RunID: runID, FrameSeq: seq, At: at, TrackID: -1,
+			RunID: runID, FrameSeq: seq, At: at, TrackID: attr(b),
 			Class: b.Class, Family: family, Score: b.Score,
 			Top: int(b.Y1 * 1000), Left: int(b.X1 * 1000),
 			Bottom: int(b.Y2 * 1000), Right: int(b.X2 * 1000),

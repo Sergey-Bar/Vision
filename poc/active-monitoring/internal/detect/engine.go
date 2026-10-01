@@ -922,6 +922,18 @@ func sortedTracks(m map[int]*Track) []*Track {
 	return out
 }
 
+// Overlap is [Engine]'s association IoU, exported for the runner's box log.
+//
+// It is EXPORTED rather than duplicated because the runner attributes each frame's
+// boxes to a track by matching them against the live tracks, and a second
+// implementation of IoU is a second answer to 'which track is this'. The two
+// disagreeing would put a box on one track in the table and another in the
+// tracker's head, and the box log is what replay reads.
+//
+// Its name is Overlap rather than IoU because the package's own iou stays private
+// and a renamed export would have been a second name for one thing.
+func Overlap(a, b Box) float64 { return iou(a, b) }
+
 func iou(a, b Box) float64 {
 	ix1, iy1 := maxF(a.X1, b.X1), maxF(a.Y1, b.Y1)
 	ix2, iy2 := minF(a.X2, b.X2), minF(a.Y2, b.Y2)
