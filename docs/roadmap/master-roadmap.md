@@ -89,6 +89,18 @@ authoritative item-level plan.
 4. A production VLM profile has passed its promotion gates on a real GPU, in
    shadow mode, for at least 14 consecutive days at a design-partner site, with
    the evaluation report attached.
+5. **The 14-day run records events ingested → canonical events → incidents
+   raised, per camera, and the ratio is published in the release notes.**
+
+Gate 5 was added on 2026-10-02 and it is the cheapest line in this document. The
+designed load is 20 events/second — 1.73M events a day — and the North Star is
+*Human Attention Minutes per 1,000 security events*, so the fraction of events
+that becomes an incident is the number every commercial claim rests on. It is
+stated nowhere. At 0.01% that is 173 incidents a day, a staffed 24/7 desk; at
+0.001%, twelve, a shift. Gate 4 already produces the number for free, as a
+byproduct nobody was required to write down, and M2's MTTI gate needs it as its
+own baseline. **The line adds a requirement and removes none**, so it cannot
+weaken this gate.
 
 **Reduced scope if slipping, in two tiers.** The first tier is a real M1. The
 second is an M1 that has slipped its date, and it is named here so the decision
@@ -135,26 +147,57 @@ cheaper but unprovable competitor loses.
 **Mission.** Move from "AI helps verify one alarm" to "AI investigates security
 incidents."
 
-Scope, in this order:
+**Re-baselined 2026-10-02, on an E1 signature.** The scope below was originally
+~46 engineer-weeks against a capacity law of ~31 (26 weeks × 2 engineers × 60%),
+so 1.5× oversubscribed. M1 was caught at 2.5× and corrected by separating committed
+scope from the pool; the same correction applies here, and the full inventory is now
+the **ordered pool** while the committed set is named and sized.
 
-1. **Evidence intelligence.** Given an incident, the platform identifies relevant
-   cameras, retrieves the right time windows across them, pulls snapshots and
-   clips, gathers metadata, and correlates neighbouring cameras, access events
-   and sensor events. The operator stops searching cameras by hand.
-2. **VLM profile library.** Ten profiles, each with a structured observation
-   schema, a pinned prompt version, a pinned model version, an evaluation
-   dataset, a promotion gate, and shadow-then-production stages. A profile that
-   has not passed its gate runs in shadow and cannot affect authoritative state.
-3. **Investigation orchestration.** A local LLM plans an investigation —
-   "what happened around Door 18" becomes a plan over related alarms, cameras,
-   time, access events, observations and history — and returns an
-   evidence-backed answer. The LLM orchestrates; it never asserts.
-4. **Natural-language search and semantic search.** Operators ask in plain
-   language; every result carries an evidence reference. `pgvector` for derived
-   data only. PostgreSQL stays authoritative.
-5. **Incident summaries.** What happened, when, where, supporting evidence,
-   contradicting evidence, and unresolved questions. Derived, clearly marked,
-   never authoritative.
+| Committed | ew | Why it survived the cut |
+|---|---|---|
+| Evidence intelligence — snapshots, clips, range probe | **6** | The blocker. Nothing else in this milestone works without evidence, and it is the largest single item and the one with unbounded vendor risk |
+| `eventTypes` resolution + `analyticData` normalisation | **2** | The M1 incident class becomes deterministic. `analyticData` is already on the Events API this adapter calls — no new transport, no new protocol family |
+| Camera adjacency — schema, graph relation, backfill | **2** | The highest-value retrieval input, and the roadmap already recommends pulling it from M6 |
+| One VLM profile end to end — prompt, eval set, promotion gate, shadow | **2** | The M1 class only |
+| **Committed** | **12** | **19 ew of float** |
+| Incident summaries | — | Deferred to the float. The roadmap's own reduced scope says *"ship the evidence engine before the summaries"* |
+| Semantic search (`pgvector`) | — | **Cut.** The operator's real question is "Door 18, 14:00–15:00, the 3rd", and that is SQL over `canonical_events_site_time_idx`, which exists. Also a new datastore, which the capacity law gates behind an ADR. Gate on keyword search being the measured bottleneck |
+| LLM investigation planner | — | **Cut.** See below |
+| VLM profiles 2–10 | — | **Cut to the float**, reinstated in the order the first real trial asks for, not the order the taxonomy implies |
+
+**The float is the point, not padding.** It is the budget for the vendor risk in
+evidence retrieval, and the budget for responding to what the first two real trials
+tell us — which is a thing a 46-week plan has no room to do.
+
+**Why the planner is cut, and it is not a size argument.** Invariant 2: decisions
+replay from stored facts and the stored `AIObservation`, and a
+`replayedFromStoredFacts` response that re-inferred anything is a bug. **An agentic
+planner generates the investigation plan at read time — that is inference.** To
+satisfy invariant 2 the plan must be stored as a first-class artifact and verified
+to replay, which is a real design cost this document did not name. A fixed,
+versioned investigation template per incident class is auditable, trivially
+replayable, and a tenth of the build. A planner earns its place when templates
+demonstrably cannot express a class — knowable after two trials.
+
+**What the analytics actually gives, and its limit.** `analyticData` carries
+`object.vendor` (**which engine produced this**), `object.value`, `object.data` and
+`rule.name` (the VMS-side rule that fired), all server-side filterable. Two
+consequences: a decision whose provenance reads *"Axis camera analytics asserted
+this"* is a categorically different thing from one that reads *"our model said so"*,
+and `restricted-person` becomes a geometric test on a typed event — deterministic,
+no VLM, no GPU, no 8-second inference, and a geometric test cannot hallucinate a
+person who is not there.
+
+**Three things that bound it, and they are not hedges.** A published document is
+not a server: every one of those fields is sourced to Milestone's docs as of
+2026-10-02 and is `Unverified` until a probe runs. Analytics is per-site
+configuration and is frequently not enabled. And **`analyticData.object.value`
+carries licence-plate text, which is personal data** — M2 targets object class and
+counts, and LPR is an M3 item routed to the compliance track first, with a
+data-residency consequence, before any code. A filter that happened to exist is not
+a decision. Analytics is an additional signal source, never a required one: the
+platform degrades to "VMS alarms only" when it is absent, which is invariant 3 and
+already the design.
 
 **Exit gate.** The M1 incident class plus two more, with:
 
@@ -165,9 +208,17 @@ Scope, in this order:
 - A replayed incident reproduces its summary from stored facts and the stored
   observation, with no model call. A test asserts this.
 
-**Reduced scope if slipping.** Four VLM profiles instead of ten; keyword search
-before semantic search; orchestration over cameras and access only, deferring
-sensors. Ship the evidence engine before the summaries.
+The gate is **unchanged**, and two of its three classes are now cheap because
+`analyticData` made them deterministic rather than modelled.
+
+**Pre-declared cuts, in order, if the float is spent.** Incident summaries, then
+VLM profiles 2–10. **The evidence engine is the last thing to cut**, and that is
+the one reversal of the previous reduced-scope list.
+
+**One known blocker, stated rather than assumed.** `evaluation.Evaluate`
+hard-codes the `restricted-person` field (self-critique C4), so every other
+profile scores recall 0 and cannot pass a gate. The second M2 class is therefore
+blocked on that defect, not on the profile work.
 
 **Commercial state.** Paid pilot. Design-partner sites convert to a paid pilot
 at a founding rate. First external customer who is not personally known. The
@@ -197,7 +248,17 @@ workflow."
 5. **Bounded auto-resolution.** A strictly enumerated set of incident classes
    close without an operator, where the playbook's preconditions are
    deterministic. Every automated decision is audited with the same rigour as a
-   human one.
+   human one. **With `analyticData` doing the deterministic work, the bounded
+   classes are the analytic ones** — line-crossed, badge-denied, zone. Auto-closing
+   on a badge denial and a crossing is defensible; auto-closing on a model's
+   judgement is not.
+6. **Licence-plate recognition — gated on the compliance track, not on build.**
+   `analyticData.object.value` already carries plate text and M2 deliberately does
+   not target it. Plates are personal data under GDPR: a different category from
+   the face imagery this platform refuses outright, and the compliance track draws a
+   hard line at person models. LPR therefore starts here, **after** that track has
+   ruled on it and named the data-residency consequence, and not before. A filter
+   that happened to exist in the vendor's API is not a decision.
 
 **Exit gate.**
 
@@ -225,13 +286,21 @@ for capacity rather than for trust.
 **Mission.** Stop being "AI for XProtect" and become "AI for physical security
 infrastructure."
 
-1. **ONVIF.** Profile T and Profile M: discovery, events, analytics metadata
-   (people, vehicles, licence plates, object counters), PTZ, and streaming
-   capability discovery. Profile M is where the free signal density is.
-2. **Second full VMS adapter.** Chosen by customer pipeline, not by preference.
-   Genetec, FLIR, Avigilon and the Axis ecosystem are the candidates. This is
-   the real architecture test: **nothing outside the adapter may require
-   rewriting.** The test that proves it is a diff of the non-adapter trees
+1. **ONVIF.** Profile T and Profile S, imaging, and analytics *configuration*.
+   **Profile M stays out of M2**, and that was checked rather than assumed
+   (2026-10-02): XProtect *is* Profile M conformant, but in XProtect that metadata
+   comes from a **third-party analytics appliance** — a separate box, per the
+   Milestone developer forum — while XProtect's own built-in analytics surface as
+   events on the Events API instead. The common design-partner site therefore has
+   zero Profile M devices, and pulling it forward would have displaced real work to
+   buy nothing. What M2 uses instead is `analyticData` on the Events API it already
+   calls. LPR arrives as an M3 item once the compliance track has ruled on it.
+2. **Second full VMS adapter.** **Chosen for analytics-metadata richness, not by
+   customer pipeline count** (2026-10-02). Genetec and Milestone both ship
+   analytics; a third VMS with none would not test the layer M2 just made
+   load-bearing, and a smaller M4 beats a broader one that exercises nothing new.
+   This is still the real architecture test: **nothing outside the adapter may
+   require rewriting.** The test that proves it is a diff of the non-adapter trees
    across the two adapters, reviewed.
 3. **Adapter SDK.** Canonical event, device, evidence and action contracts;
    conformance tests; a fixture framework; a source simulator; a certification
@@ -241,7 +310,9 @@ infrastructure."
    denied, forced open, held open. Forced-door and held-open events are among
    the highest-value correlations in the whole product.
 5. **Sensors and IoT.** Intrusion, perimeter, environmental, intercom,
-   gate/barrier, LPR, BMS signals. Multimodal.
+   gate/barrier, BMS signals. Multimodal. LPR is **not** in this list: it is an M3
+   item, blocked on the compliance track, and arriving here after M3 has already
+   built it is not a second implementation.
 
 **Exit gate.** The second VMS adapter is in production at one site, with a
 non-adapter diff of zero behavioural changes; the Adapter SDK v1 is public with
@@ -250,7 +321,9 @@ conformance suite is a published artifact.
 
 **Reduced scope if slipping.** ONVIF events and PTZ without Profile M
 analytics. Access control before sensors. A second VMS adapter is not
-cuttable — without it, M4 is a claim, not a layer.
+cuttable — without it, M4 is a claim, not a layer. PTZ is a *later* cut than
+auto-resolution, not an earlier one: it is the most dangerous feature on this
+page, not the least.
 
 **Commercial state.** Platform expansion. First partner conversations with VMS
 OEMs and regional integrators. An OEM conversation is not a sale and is not
@@ -266,21 +339,23 @@ a site depend on our central plane.
 1. **Optional central control plane.** Sites stay autonomous. Central
    connectivity disappearing changes nothing about site operation. This is a
    hard architectural constraint with a fault-injection test, not a feature.
-2. **Fleet management.** Site versions, adapter versions, rule bundles, model
+2. **Multi-site correlation.** The same credential denied at Site A, denied at
+   Site B, attempted at Site C is one incident, not three. The Security Graph
+   becomes organisation-wide. **Built second in this milestone** (2026-10-02) —
+   it moved up from sixth, and out of last place in the cut order, because it is
+   what turns a 40-site renewal into a platform decision.
+3. **Fleet management.** Site versions, adapter versions, rule bundles, model
    versions, health, storage, licences, configuration drift.
-3. **Enterprise identity.** OIDC, Microsoft Entra ID, Active Directory, LDAP,
+4. **Enterprise identity.** OIDC, Microsoft Entra ID, Active Directory, LDAP,
    SCIM. Local authentication remains available for isolated sites, always.
-4. **RBAC graduating to RBAC + ABAC.** View one site; export evidence as
+5. **RBAC graduating to RBAC + ABAC.** View one site; export evidence as
    supervisor; see all regions as director; manage devices but not evidence as
    integrator.
-5. **High availability.** Core failover, database HA, adapter restart and
+6. **High availability.** Core failover, database HA, adapter restart and
    recovery, evidence-storage redundancy, site backup, DR. The DR drill must
    still surface the real finding from M1: a restored ledger is provably behind
    the seal, because a backup is a snapshot of an earlier moment. That gap gets
    designed around, not explained away.
-6. **Multi-site correlation.** The same credential denied at Site A, denied at
-   Site B, attempted at Site C is one incident, not three. The Security Graph
-   becomes organisation-wide.
 
 **Exit gate.** A three-site customer running production with the control plane
 pulled mid-incident and no site degradation; OIDC and SCIM provisioning tested
@@ -288,8 +363,12 @@ against two real identity providers; an HA failover demonstrated under load with
 measured RTO and RPO that match what we published.
 
 **Reduced scope if slipping.** OIDC and SCIM before local-federation breadth.
-ABAC before HA. Multi-site correlation last within the milestone, though it is
-the most differentiated piece and the one enterprise buyers ask about first.
+ABAC before HA. **Multi-site correlation is built second and cut last** — the
+reverse of what this document said before 2026-10-02. Credential-denied-here-there
+is the first thing enterprise buyers ask about, and it is what turns a 40-site
+renewal from a per-site purchase into a platform decision. This document already
+called it "the most differentiated piece", and that argues for building it early,
+not for cutting it late.
 
 **Commercial state.** Enterprise GA. Credible for corporate campuses, logistics,
 healthcare, manufacturing, critical infrastructure, large retail, government and
@@ -303,12 +382,18 @@ multi-site organisations.
 genuinely different from anything a VMS vendor ships.
 
 1. **Site model.** Tenant → campus → building → floor → zone → door → camera →
-   sensor, with camera adjacency, field-of-view relationships, allowed movement
-   paths, entrances and exits, and restricted areas.
+   sensor. The schema, the graph relation and the backfill for **camera adjacency**
+   were pulled forward into M2 on 2026-10-02 — it is the highest-value input to
+   evidence retrieval, and leaving it until M6 meant M2 retrieved evidence without
+   knowing which cameras are next to which. Field-of-view relationships, allowed
+   movement paths, entrances and exits, and restricted areas stay here.
 2. **Behavioural baselines.** Normal occupancy, movement, vehicle arrival, door
    activity, day/night, weekday/weekend, seasonal. The output is
    *"differs significantly from this site's baseline"*, never *"abnormal =
-   dangerous."* The distinction is a product requirement, not a nuance.
+   dangerous."* The distinction is a product requirement, not a nuance. **Where the
+   camera already computes it, prefer the vendor's number**: `analyticData` carries
+   object classes, counts and the engine that produced them, and re-deriving
+   occupancy from pixels is rebuilding what the installed base already has.
 3. **Site memory.** Long-term derived knowledge: repeated false alarms, common
    operator decisions, maintenance patterns, recurring incidents, site
    exceptions, historical response outcomes.
@@ -500,6 +585,23 @@ owners in [the risk register](company/risk-register.md).
 4. **GA was dated before its own exit gate.** GA and the M3 window are now both
    2028-03-31, and the coupling is explicit.
 5. **An M4 → M5 gap of 13 days was unlabelled.** Now a declared holiday buffer.
+6. **M2 was oversubscribed by ~1.5×** — ~46 engineer-weeks against ~31. Corrected
+   on 2026-10-02 the way M1 was: committed scope is now 12 ew with a named 19 ew
+   float, and the four cut items (incident summaries, `pgvector`, the LLM
+   investigation planner, VLM profiles 2–10) are recorded as cuts rather than
+   quietly dropped. The planner's cut is a **correctness** cut, not a size one: an
+   agentic planner generates the investigation plan at read time, and invariant 2
+   says decisions replay from stored facts.
+7. **ONVIF Profile M was assumed to be free signal density on a Milestone site.**
+   Checked on 2026-10-02 and it is not: in XProtect that metadata comes from a
+   third-party analytics appliance, and XProtect's own analytics surface as Events
+   API events. Profile M stays in M4. What M2 uses instead is `analyticData` on the
+   route the adapter already calls.
+8. **The event-to-incident ratio was an unstated commercial assumption.** The
+   North Star is measured per 1,000 security events and no document said what
+   fraction becomes an incident. M1's gate now requires the 14-day run to publish
+   it, per camera. One line, zero build, and it is the baseline M2's MTTI gate
+   needs anyway.
 
 **Defects in the code, found while grounding the plan, and not yet fixed.** These
 are more serious than anything above and are listed here because the plan is the

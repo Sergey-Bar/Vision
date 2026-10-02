@@ -38,7 +38,7 @@ func TestTheBearerIsNotReplayedToARedirectTarget(t *testing.T) {
 
 	// The configured Milestone, which redirects everything to elsewhere.
 	redir := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, elsewhere.URL+"/api/v1/Events", http.StatusFound)
+		http.Redirect(w, r, elsewhere.URL+"/api/rest/v1/events", http.StatusFound)
 	}))
 	defer redir.Close()
 

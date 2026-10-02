@@ -91,9 +91,6 @@ func TestCodedSizeStaysQuietOnAStaticSceneAndFiresOnMotion(t *testing.T) {
 	}
 }
 
-// TestCodedSizeStopsFiringOnSustainedMotion pins the behaviour the package
-// comment promises, because it is the one that decides whether a busy site gets
-// a quiet trigger or a permanently firing one.
 // TestCodedSizeDoesNotLetAKeyframeRedefineNormal names a defect this detector
 // had, because a test that only shows the current behaviour does not stop the
 // reasoning that produced it from being repeated.
@@ -194,6 +191,9 @@ func TestCodedSizeDoesNotDecideOnAPartiallyFilledWindow(t *testing.T) {
 	}
 }
 
+// TestCodedSizeStopsFiringOnSustainedMotion pins the behaviour the package
+// comment promises, because it is the one that decides whether a busy site gets
+// a quiet trigger or a permanently firing one.
 func TestCodedSizeStopsFiringOnSustainedMotion(t *testing.T) {
 	d := detector.NewCodedSize(detector.CodedSizeOptions{Threshold: 0.5, Consecutive: 2, Warmup: 25})
 	for i := 0; i < 25; i++ {
@@ -260,8 +260,8 @@ func TestCodedSizeResetDropsTheBaseline(t *testing.T) {
 
 // plane builds a uniformly filled luma frame.
 //
-// The parameter is named alue rather than ill because it shadows nothing
-// here and ill is the name of the rectangle helper below.
+// The parameter is named value rather than fill because it shadows nothing
+// here and fill is the name of the rectangle helper below.
 func plane(w, h int, value byte) detector.Luma {
 	out := detector.Luma{Width: w, Height: h, Stride: w, Plane: make([]byte, w*h)}
 	for i := range out.Plane {
@@ -434,11 +434,11 @@ func TestDecimateKeepsALowContrastChangeThatSubsamplingWouldDrop(t *testing.T) {
 	}
 }
 
-// subsample is the alternative this package does not use, kept so the claim
-// about it is measured rather than asserted.
 // planeFrame is an alias so this test file's helpers read in one vocabulary.
 type planeFrame = detector.Luma
 
+// subsample is the alternative this package does not use, kept so the claim
+// about it is measured rather than asserted.
 func subsample(l planeFrame, factor int) (planeFrame, error) {
 	w, h := l.Width/factor, l.Height/factor
 	if w < 1 || h < 1 {
@@ -461,8 +461,6 @@ func subsample(l planeFrame, factor int) (planeFrame, error) {
 // scene, and the false-positive rate goes to 1.0 on exactly the cameras - night,
 // IR - where it is hardest to see.
 func TestDecimateSaturatesABrightAverageRatherThanWrappingIt(t *testing.T) {
-	black := plane(64, 64, 0)
-	white := plane(64, 64, 255)
 	// A half-and-half split: the mean is ~128 and must survive a large factor
 	// intact. A factor of 16 makes the numerator 16x16 white pixels of 255,
 	// which is well past what a naive byte() narrowing of the sum would keep.
@@ -489,8 +487,6 @@ func TestDecimateSaturatesABrightAverageRatherThanWrappingIt(t *testing.T) {
 			}
 		}
 	}
-	_ = black
-	_ = white
 }
 
 func TestDecimateRefusesAnImpossibleReduction(t *testing.T) {

@@ -25,8 +25,19 @@ func (w *boxWriter) i32(v int32) {
 	//nolint:gosec // a signed 32-bit field written as its own two's complement
 	w.b = binary.BigEndian.AppendUint32(w.b, uint32(v))
 }
-func (w *boxWriter) u64(v uint64)  { w.b = binary.BigEndian.AppendUint64(w.b, v) }
-func (w *boxWriter) zeros(n int)   { w.b = append(w.b, make([]byte, n)...) }
+
+// zeroPad backs zeros(). Every call site asks for a fixed, small count, so
+// make() per call is a per-box allocation on a path that runs once per sample.
+var zeroPad [32]byte
+
+func (w *boxWriter) u64(v uint64) { w.b = binary.BigEndian.AppendUint64(w.b, v) }
+func (w *boxWriter) zeros(n int) {
+	if n <= len(zeroPad) {
+		w.b = append(w.b, zeroPad[:n]...)
+		return
+	}
+	w.b = append(w.b, make([]byte, n)...)
+}
 func (w *boxWriter) raw(p []byte)  { w.b = append(w.b, p...) }
 func (w *boxWriter) cstr(s string) { w.b = append(w.b, s...); w.b = append(w.b, 0) }
 
@@ -38,16 +49,22 @@ func (w *boxWriter) cstr(s string) { w.b = append(w.b, s...); w.b = append(w.b, 
 // read it disagrees with us about where the next box is.
 const MaxBoxBytes = 0xFFFFFFFF - 8
 
-// box writes a box of the given type around an already-built payload.
-func (w *boxWriter) box(typ string, payload []byte) {
-	if len(payload)+8 > MaxBoxBytes {
+// header writes a box's eight-byte size-and-type prefix for a payload of the
+// given length.
+func (w *boxWriter) header(typ string, payload int) {
+	if payload+8 > MaxBoxBytes {
 		// Unreachable through the recorder, which caps a clip far below this.
 		// Reached anyway, it is a programming error rather than a bad stream, so
 		// it stops the process instead of writing a file that cannot be read.
 		panic("mp4: box " + typ + " is larger than the format can describe")
 	}
-	w.u32(uint32(len(payload) + 8)) //nolint:gosec // bounded by MaxBoxBytes above
+	w.u32(uint32(payload + 8)) //nolint:gosec // bounded by MaxBoxBytes above
 	w.raw([]byte(typ))
+}
+
+// box writes a box of the given type around an already-built payload.
+func (w *boxWriter) box(typ string, payload []byte) {
+	w.header(typ, len(payload))
 	w.raw(payload)
 }
 
@@ -88,16 +105,12 @@ type fragmenter struct {
 }
 
 func newFragmenter(ts uint32, params *ParameterSets) (*fragmenter, error) {
-	rec, err := params.DecoderConfigRecord()
-	if err != nil {
-		return nil, err
-	}
-	sp, err := parseSPS(params.SPS)
+	rec, sp, err := params.decoderConfig()
 	if err != nil {
 		return nil, err
 	}
 	if ts == 0 {
-		ts = 90000
+		ts = DefaultTimescale
 	}
 	return &fragmenter{ts: ts, avcC: rec, width: sp.Width, height: sp.Height}, nil
 }
@@ -317,9 +330,12 @@ func (f *fragmenter) appendSample(p *Picture, duration uint32) {
 	binary.BigEndian.PutUint32(moof.b[offAt:], uint32(len(moof.b)+16))
 
 	f.w.box("moof", moof.b)
-	var mdat boxWriter
-	mdat.raw(data)
-	f.w.box("mdat", mdat.b)
+	// The mdat is written in place rather than through box(). box() takes an
+	// already-built payload, so routing the sample through it would copy every
+	// byte of every frame into a scratch buffer before copying them again into
+	// the file - twice the memory traffic, on the largest thing in the clip.
+	f.w.header("mdat", len(data))
+	f.w.raw(data)
 	f.seq++
 }
 

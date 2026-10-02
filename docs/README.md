@@ -150,6 +150,31 @@ Listed so nobody hunts for them.
 | An architecture document | [`../internal/README.md`](../internal/README.md) — the package map, dependency rules, three seams, reading order. There is no separate architecture document and none is planned |
 | An operator runbook | Nothing. The 02:00 operations playbook is specified inside [`roadmap/engineering/release-sre-and-support.md`](roadmap/engineering/release-sre-and-support.md) and has not been written as a standalone document |
 | An ADR directory | No `docs/adr/`. The ADR *process* is in [`roadmap/engineering/decisions-and-process.md`](roadmap/engineering/decisions-and-process.md), and it seeds a settled-decisions index from the code. Record a decision by following that process, not by inventing a file |
-| A fixtures document | `.gitignore` references `docs/fixtures.md` and the file does not exist. The fixture format and the sanitization rules are documented in the package doc comments of `internal/fixture` |
-| A CI or infrastructure document | No such document. `.github/workflows/ci.yml` is the artifact |
+| A fixtures document | There is none and there is no dangling reference to one: this row used to say `.gitignore` pointed at a missing `docs/fixtures.md`, which it does not. The fixture format and the sanitization rules are in the package doc comments of [`../internal/fixture`](../internal/fixture) |
+| A CI or infrastructure document | No such document, and `.github/workflows/ci.yml` **does not exist** — this row used to name it as the artefact. The pipeline was removed because Actions cannot start a job for this account, and [`../AGENTS.md`](../AGENTS.md) says what replaces it. This row was as stale as the one above it, in the opposite direction: it described a file that had been deleted |
+| Vendor API evidence | [`vendor/milestone/route-audit.md`](vendor/milestone/route-audit.md) — every Milestone route with a verdict against Milestone's own published documents, cited by line. The documents are in [`vendor/milestone/`](vendor/milestone/README.md); what a human still has to decide is in [`vendor/milestone/handover.md`](vendor/milestone/handover.md) |
 | An `internal/policy` package | Not a document and not a package. `policy.proto` and a `0005_ai_and_policy` migration exist; the Go package does not, and is an M3 dependency with no owner in the tree |
+
+## Two trees, one repository
+
+Everything indexed above is the **root Go module**, `github.com/Sergey-Bar/Ai-Captain`.
+
+`poc/active-monitoring/` is a **second Go module** — `github.com/Sergey-Bar/ai-captain-poc`,
+with its own `go.mod`, `go.sum` and `scripts/verify.ps1` — living in the same
+repository. It imports nothing from the root module and the root module imports
+nothing from it.
+
+The consequence is worth stating plainly, because it is invisible otherwise: the
+root gate cannot see it and its gate cannot see the root. `go build ./...`,
+`go vet ./...`, `golangci-lint`, `sonar-project.properties` and
+`scripts/verify.ps1` all resolve within one module, so **no document in this index
+describes the POC and none of the tests listed here cover it**. A change under
+`poc/` that breaks it is caught by `poc/active-monitoring/scripts/verify.ps1` and
+by nothing else; a change above that the POC depends on will not be caught there.
+
+The two documents that *do* cross the boundary are on purpose:
+
+| Document | Why it crosses |
+|---|---|
+| [`vendor/milestone/route-audit.md`](vendor/milestone/route-audit.md) | The root module's Milestone adapter, audited against Milestone's own published documents. The documents are committed under `vendor/milestone/` and duplicated inside the POC because its `contract_test.go` reads them from a relative path. |
+| [`../poc/active-monitoring/contracts/xprotect/README.md`](../poc/active-monitoring/contracts/xprotect/README.md) | The POC's own note on the three places the parent platform's Milestone code was wrong, which reached the same three conclusions as the audit above before it existed. |

@@ -18,12 +18,14 @@ import (
 // The password is deliberately not a parameter and not a flag. It is read from
 // the encrypted secret store at connect time, because a CLI that accepts a
 // password as an argument teaches operators to type it into a shell history.
+//
+// There is no localhost fallback, for the same reason `security-migrate` has none:
+// a command that quietly talks to the database compiled into the binary rather
+// than the one the operator meant is a command whose target nobody chose.
 func connect(ctx context.Context) (*dbx.Pool, error) {
-	cfg := dbx.DefaultConfig()
-	if v := os.Getenv("SP_DATABASE_URL"); v != "" {
-		if err := cfg.ApplyDSN(v); err != nil {
-			return nil, err
-		}
+	cfg, err := dbx.ConfigForTarget("", "SP_DATABASE_URL")
+	if err != nil {
+		return nil, err
 	}
 	pool, err := dbx.Open(ctx, cfg, os.Getenv("SP_DATABASE_PASSWORD"))
 	if err != nil {

@@ -1,177 +1,348 @@
-# JUDGE.md — five minutes, and what each step is actually proving
+# Judge script Ã¢â‚¬â€ five minutes
 
-This is the document to give somebody who has to decide whether this works, in
-five minutes, without reading the source.
+Everything a judge needs to know is here in the order they need it. The build is
+`poc/active-monitoring/`, it is a nested Go module, and this file is the only
+document you have to read before asking a question the source cannot answer.
 
-It replaces `docs/verify-live.md`, `docs/demo-live.md` and `docs/one-pager.md`.
-Those three disagreed with each other in places and two of them made claims about
-the machine that were false — one of them asserted `mediamtx` was not installed on
-a machine where it had been installed for months. A document that is wrong about
-its own prerequisites is worse than no document, because it is trusted.
-
-Read the FAILURES. Every step below says what it proves **and** what it does not,
-because the second half is where the interesting claims live.
+The one-line version: **a security camera asks a vision model whether an alert is
+real, refuses to push the model's answer without the model naming itself, keeps a
+signed record of what it pushed, and proves that record catches an edit.**
 
 ---
 
-## 0. Before you start
+## 0. Before you press anything (30 seconds)
 
 ```powershell
-$env:Path += ";C:\Program Files\Go\bin;C:\msys64\mingw64\bin;$env:USERPROFILE\go\bin"
 cd poc\active-monitoring
+$env:Path += ";C:\Program Files\Go\bin;C:\msys64\mingw64\bin;$env:USERPROFILE\go\bin"
 ```
 
-Three prerequisites, all hard: Go 1.26+, `ffmpeg`/`ffprobe` on PATH, and a Python
-interpreter. `gcc` is needed only for the race detector — without it the gate
-prints **SKIPPED** for that step and is otherwise green. A skip is not a pass, and
-the gate says so in its summary.
+The path line is in every document in this repository, and it is there because all
+five tools it names are installed and none of them is on `PATH` on a default Windows
+shell. A script that reports "go: not found" is telling you about the shell, not about
+the build.
+
+Three commands, in this order:
+
+| # | command | what it does | if it takes too long |
+|---|---|---|---|
+| 1 | `go build ./...` | compiles everything | Ã¢â‚¬â€ |
+| 2 | `pocctl demo` | runs the whole story on a labelled clip, against a local VMS simulator, in about 90 seconds | stop it, read Ã‚Â§1 |
+| 3 | `pocctl audit ledger --tamper` | changes one byte of one ledger row, watches the chain fail, puts it back | Ã¢â‚¬â€ |
+
+Number 2 is the demo. Number 3 is the proof the demo is not theatre. Everything
+after this is for the questions.
 
 ---
 
-## 1. The gate answers "is this thing internally honest?"
+## 1. The demo, narrated (90 seconds)
 
-```powershell
-.\scripts\verify.ps1
-```
+`pocctl demo` prints seven steps. Here is what each one is actually showing, because
+a judge watching output nobody explains is a judge watching output.
 
-**What it proves.** It builds, formats, vets, checks the module boundary, runs
-every test under the race detector, runs the sidecar's Python tests, checks the
-decoder's own parity harness and the benchmark's hand-computed arithmetic, and then
-**removes twenty controls from the production code one at a time and requires the
-suite to go red each time**.
-
-**What it does not prove.** That the system finds vehicles on real traffic. It
-proves the arithmetic holds and that the claims the code makes about itself are
-load-bearing. Those are different claims and the gate is only about the first.
-
-**Read the SKIPPED list.** The full cross-decoder comparison needs a running
-sidecar and a downloaded model, and the ground-truth benchmark needs a network
-fetch. On a machine without them the gate is **GREEN WITH SKIPS**, and a green
-with skips is not a green.
-
-There is no CI in this repository — Actions cannot start a job for it, because the
-repository is private, on the free plan, and the billing state blocks it. So a
-green branch here is a human claim. What command produced it is printed at the
-bottom of the gate's output.
-
----
-
-## 2. The detector answers "does it find anything at all?"
-
-This is the step that matters, and it is the one the previous build could not run:
-there was no detector. The last two real runs approved 6,578 and 297 boxes and
-recorded **zero vehicles, zero people and zero animals** — not because the detector
-was wrong, but because the trigger was a whole-frame change-fraction, which can
-say "the picture changed" and nothing else.
-
-```powershell
-.\bin\pocctl.exe fetch-runtime --url <onnxruntime-release-zip-url>
-.\bin\pocctl.exe fetch-model   --url <your-onnx-url>
-.\bin\fixtureprobe.exe -detector qa\fixtures\crossing.mp4
-```
-
-`fetch-runtime` computes the library's SHA-256 and prints it. **Read the number
-against the release page**, then re-run with `--sha256=` to confirm it. A digest
-nobody checked is not a provenance record, it is a number.
-
-`fixtureprobe -detector` prints the five facts that make a zero diagnosable:
-
-```
-DECLARED OUTPUT SHAPE  [1,84,8400] or [1,8400,84]
-RECORD WIDTH           84, and whether column 4 is an objectness
-RAW CANDIDATE COUNT    records before any filter
-PRE / POST NMS          what each suppression pass removed
-PER-CLASS COUNTS       which class the boxes actually carry
-```
-
-**What this proves.** Whether a model, with this export, produces a box on this
-material. **What it does not prove:** anything about your footage.
-
-**If it prints ZERO BOXES**, it then says the four things to check in order: the
-output shape (a fields-first tensor read as fields-last gives records of the wrong
-width), the objectness column (reading an 84-field record as 85 shifts every class
-by one, so a `truck` arrives as a `bench`), the coordinate space (a pixel-space
-model read as fractions draws every box 640× too small), and the emit floor (it is
-deliberately low, so a model emitting nothing means the weights are wrong, not the
-threshold).
-
----
-
-## 3. The demo answers "does the whole thing work end to end?"
-
-```powershell
-.\bin\pocctl.exe demo
-```
-
-Three minutes against a local simulator, on a synthetic clip. **What it proves:**
-the pieces are wired together and a crossing is detected, snapshotted, recorded,
-pushed and reported. **What it does not prove:** that any of it works on your
-camera. The material is a white block on a black frame.
-
-It also **refuses** rather than falling back if the model or the runtime library is
-missing — and that refusal is the important part. A fallback to the novelty trigger
-would produce a run reporting zero vehicles at full health, with every number in it
-true.
-
----
-
-## 4. The numbers answer "is it good enough?"
-
-There is no honest number yet. Two of the three cannot be produced without work
-that has not been done:
-
-| number | needs | status |
+| step | what happens | why it matters |
 |---|---|---|
-| throughput (det_p99 vs frame interval) | `fixtureprobe -detector` over real frames | obtainable now |
-| **precision** | a human marking each box: `pocctl label --run <id>` | needs a marking session |
-| **recall** | the same session, plus drawn objects the detector missed | needs a marking session |
-| false positives per hour | the marking session, over real footage | needs a marking session |
+| 1 | a synthetic clip is played and faked as a live camera | the demo says so on every line. It is not a camera. |
+| 2 | the local ONNX detector finds boxes | cheap arithmetic on pixels; it found that something changed and drew a box. It has no idea what. |
+| 3 | the crossing line is hit and an event is accepted | this is a *measurement*, and nothing has been pushed yet |
+| 4 | a clip is cut, stored, and **read back** | the clip's bytes are hashed on the way in and hashed again when read out. A clip that did not survive the round trip is refused. |
+| 5 | Hafnia's VLM is asked | **the only network call in the run** |
+| 6 | the verdict is stored with the model's own name | the whole product is in this step |
+| 7 | the event is pushed to Milestone XProtect | and read back |
 
-`pocctl bench --run <id>` reports the last two as **NOT RUN** and names what is
-missing. It does not report them as zero. A false-positive rate is a claim about
-what a human would have dismissed, and only a human can say.
+Two numbers matter at step 7 and both are labelled on screen:
 
-`pocctl label` serves a marking page on **loopback only** — it refuses any other
-interface including `0.0.0.0`, because it serves the footage and your judgements
-about it and neither belongs on a network somebody else is on. It has a drag
-gesture as well as accept/reject keys: without a way to draw an object the detector
-MISSED, a frame with no detection carries no information, and recall cannot be
-measured at all.
-
----
-
-## 5. The five questions, answered honestly
-
-**Does it detect vehicles?** Not yet demonstrated. The code path exists, the
-decoder is tested, and no real model has been run over real footage on this
-machine. `fixtureprobe -detector` is the next step and it is one command.
-
-**Is the code internally honest?** Yes, to the extent twenty red checks and ~1,900
-tests can show. Every claim the code makes about itself has a control whose removal
-turns the suite red.
-
-**Can I check its arithmetic?** Yes. `pocctl prove --detection <id>` recomputes a
-decision from stored facts with zero provider calls, and since the crossing box
-became Kalman-filtered it re-runs the whole track from the per-frame box log.
-
-**Does it cost what it claims?** Not yet measured on this machine. The throughput
-gate refuses before a run rather than during one: `det_p99 × ai_fps < 1000`, with
-the arithmetic printed. Four cores and no GPU.
-
-**Can I redistribute any of it?** The code, yes. The material — no, not until
-`testdata/labels.json` records it, and the current model file's licence is **NOT
-RECORDED**. `pocctl fetch-model` and `fetch-runtime` print what they wrote and say
-so when they cannot.
+- **`NOT RUN` / `PROVISIONAL`** if the run was shorter than its target. This module's
+  vocabulary is `PASS` / `FAIL` / `NOT RUN` and nothing else. A run short of its
+  target is `PROVISIONAL`, which is not a soft pass Ã¢â‚¬â€ it is an admission that the
+  acceptance arithmetic was not evaluated.
+- **`provenance: synthetic`** beside every number derived from the clip. The demo clip
+  is colour bars and a rectangle. It is not evidence that this system works on a real
+  camera; it is evidence that the pipeline is honest about what it measured.
 
 ---
 
-## 6. Where the detail went
+## 2. What the VLM call actually sends (the sentence in the plan)
+
+Hafnia's `chat/completions` endpoint takes text plus images. This module sends the
+**prompt and the measured region**, and the prompt pins a closed four-field answer:
+
+```
+verdict, summary, confidence, insufficient_evidence
+verdict Ã¢Ë†Ë† { confirmed, false_positive, needs_review, none }
+```
+
+The decoder **refuses** anything else. A fifth verdict does not become a new word on
+a screen an operator acts on Ã¢â‚¬â€ it becomes `cannot_tell` with a reason. That is the
+first thing to ask about, and the answer is `internal/vlm/parse.go`.
+
+You will be asked: **"isn't trusting a VLM's verdict the whole problem?"**
+
+No, because the verdict is a *claim*, and a claim that cannot be checked is not a
+finding. Everything downstream of this point exists to make the claim checkable:
+
+- the answer is stored with the model identity **as the provider stated it**, the
+  contract version it was produced under, and the hash of the validated output
+- the pushed event carries all of it, so the operator reading Smart Client sees who
+  said what
+- the whole tuple is hash-chained and signed, so it cannot be quietly revised later
+
+There is **no model hash** and there never will be: this is a hosted model, it has no
+weights to hash, and inventing a field would be exactly the failure R8 exists to
+prevent.
+
+---
+
+## 3. The third incident class: the camera was moved (45 seconds)
+
+This is the one to lead with if you only show one thing, because it is the one a
+security buyer has not seen from anyone.
+
+XProtect has a `camera_integrity` state: the camera view moved. Somebody carrying a
+steering wheel, someone covering the lens. **The camera reports nothing when this
+happens** Ã¢â‚¬â€ it is a silent hole in coverage.
+
+```powershell
+$env:SP_POC_CAMERA_INTEGRITY = 'true'
+pocctl demo
+```
+
+What it does that nothing else does:
+
+- pins a **reference view** of the camera at setup and scores every frame against it
+- fires only when the whole view has stayed different for a *sustained* period, which
+  is what separates a moved camera from a car driving through the shot
+- the prompt asks **how**, not whether: `moved` / `covered` / `obscured_scene` /
+  `unchanged`
+- and the pushed event carries the measured box of what changed
+
+The test that makes it more than a claim:
+`TestAReferenceScoreDoesNotRiseOnAMovingObject` Ã¢â‚¬â€ a car driving through the frame
+does **not** raise the score. A moved camera does.
+
+---
+
+## 4. The tamper proof (30 seconds)
+
+```powershell
+pocctl audit ledger --tamper
+```
+
+It changes **one byte** of **one row** of the decision ledger, on your own data root:
+
+```
+BEFORE   PASS   57 rows from sequence 0 to 57 recomputed and chained
+TARGET   seq=57  kind=push_enqueued  subject=d-...
+         payload: "...score=0.700000"    ->   "...score=0.700001"
+DURING   FAIL   row 57 is the first one that does not chain
+AFTER    PASS   57 rows from sequence 0 to 57 recomputed and chained
+```
+
+Watch what it does *around* the edit, because that is the design:
+
+- it **refuses** to run against a chain that is already broken. Breaking a second one
+  hides the first, and the one already there is the one to look at.
+- it drops the two append-only triggers first, because that is what a person with a
+  `sqlite3` prompt does. The triggers exist to stop the accidental edit during an
+  incident review, not the deliberate one.
+- it **restores** the byte and the triggers, and then verifies a third time. A
+  demonstration that leaves the evidence broken is not a demonstration.
+- it prints `FAIL` for the broken state and nothing softer.
+
+If you ask *"why can you edit the database at all?"* Ã¢â‚¬â€ that is the honest answer: this
+is not a claim that the database is tamper-proof. It is a claim that an edit is
+**detected, located by row number, and survives a restart**. `onnxruntime` is not
+involved; this is SQLite.
+
+---
+
+## 5. The absence path: what happens when the model cannot be reached
+
+Every one of the four defect modes the plan lists, and the behaviour for each:
+
+| defect | what a naive system does | what this one does |
+|---|---|---|
+| provider 503 | pushes "no incident" | records `degraded`. **A missing answer is never a negative one.** |
+| latency spike | pushes "no incident" | records `degraded` |
+| provider down | pushes "no incident" | records `not_asked` |
+| clip missing | pushes with no evidence | records the clip as absent |
+| response unparseable | pushes a default | records `cannot_tell` |
+
+There are exactly **five** words for "we could not decide" and this module will not
+invent a sixth. Three of them Ã¢â‚¬â€ `not_asked`, `degraded`, `cannot_tell` Ã¢â‚¬â€ get their own
+Milestone Analytics Event Type, so *camera not assessed* is a **filterable XProtect
+alarm** rather than a word in a description field.
+
+And the arithmetic, which is the part worth asking about:
+
+> If the model is unreachable for an hour and 500 crossings happen, that is **one**
+> `not_asked` alarm carrying the number 500. Never 500 alarms.
+
+That is `internal/soak/absence.go`, and the test names the arithmetic:
+`TestFiveHundredUnaskedProposalsProduceOneEvent`. Each crossing still gets its own
+XProtect event with its own measured box Ã¢â‚¬â€ **the crossing happened; only the verdict
+is missing** Ã¢â‚¬â€ and the blindness is the thing that gets aggregated.
+
+What this does **not** claim: the analytics event types are not registered on any real
+Milestone instance. `SP_POC_EVENT_TYPE_GUIDS` maps them, and an account without the
+admin rights to register them gets a refusal naming the pair and a window that stays
+visible in `pocctl brief` as unsearchable. Nothing is pushed as if it were a crossing.
+
+---
+
+## 6. Prompt injection
+
+Worth raising yourself, because you will be asked and because nobody in this category
+does.
+
+```powershell
+go run ./cmd/injectionfixture     # regenerates testdata/injection-hostile.mp4
+go test ./internal/vlm/ ./internal/injectionfixture/
+```
+
+The fixture has four different attacks **rendered into the picture** Ã¢â‚¬â€ not pasted into
+a prompt, which would not be an attack at all. They differ in register on purpose: an
+imperative, a fake verdict policy, an attempt to set the negative case, and an
+impersonation of the operator. A banned-word list catches `ignore` and misses the rest.
+
+Both prompts were revised (**v1 Ã¢â€ â€™ v2**) to say that text in the frame is *evidence*,
+never an instruction, and to quote the attacks by their own words. The revision
+reason is in `internal/vlm/prompts/manifest.json` and it names the fixture, so the
+evidence for the change is findable from the change. Because a prompt revision is part
+of `contract_version`, an answer produced under v1 cannot be compared silently with one
+produced under v2.
+
+**What this proves, exactly:** the output shape is closed, so an injected instruction
+cannot introduce a fifth verdict; an injected sentence that *does* come back reaches
+the operator as the model's own words beside its output hash, which is the opposite of
+an instruction.
+
+**What it does not prove:** that any particular model refuses to comply with that text.
+That needs a live call with the frame attached. **A green test here is a statement about
+the shape of the answer, not about the model's judgement**, and this repository does not
+claim otherwise. If you ask "have you actually run this against Hafnia?" the answer is
+no, and the report will say `NOT RUN`.
+
+---
+
+## 7. The gate (30 seconds, run it if you want to be unimpressed)
+
+```powershell
+.\scripts\verify.ps1            # or -NoRace
+```
+
+`verify.ps1` is the gate. It builds, vets, checks formatting, checks the module
+boundary, runs `go test -race -p 1 -count=1 ./...`, and then Ã¢â‚¬â€ this is the part worth
+watching Ã¢â‚¬â€ **it deletes a line of production code, one control at a time, and checks
+that the suite goes red.** Every time. Then it puts the line back.
+
+| removed | the suite must then fail, because |
+|---|---|
+| the SHA-256 shape check | a reader-chosen name can be any object, and two bugs can point at one |
+| the terminal-state guard on a detection | a hidden detection can be moved again and one crossing gets two stories |
+| the novelty tolerance band | every frame is "on the line" Ã¢â‚¬â€ a run reports **zero events and no error** |
+| the VLM's "we did not ask" | the operator sees "nothing happened" because *we* could not reach it |
+| the ledger's hash comparison | "the ledger is intact" becomes an opinion |
+| the ledger's append-only triggers | a person with `sqlite3` edits a decision already recorded |
+| the reference frame | the "photo" is a real frame from the same camera at a *different* moment |
+| the box on the wire | every pushed event draws nothing on the operator's timeline |
+| a frame's MEASURED marker | "the model saw nothing" and "the pipeline never asked" become one row |
+| an open-ended ledger range | the audit prints "the ledger is empty" beside a verified chain |
+| the missing-state refusal | an event cannot be read as a finding or a gap |
+| the attribution refusal | a caption arrives with nobody named as its author |
+| a blindness window's key | the aggregated alarm loses its idempotency; a retry becomes a second event |
+| an aggregated alarm's key | the module reports `unknown` for a push that succeeded |
+| the `no_objects` refusal | an alarm that fires to say "nothing" arrives hundreds of times an hour |
+| an unmapped absence pair | an absence arrives wearing a crossing alarm type |
+| a CUDA spelling | a CPU latency is recorded as a GPU one |
+
+The gate prints `SKIPPED` for anything it could not measure on the machine it ran on Ã¢â‚¬â€
+it never passes silently.
+
+---
+
+## 8. The questions you should ask, and the honest answers
+
+**"What is your accuracy?"** Not measured against real footage. The committed
+material is synthetic; `testdata/labels.json` records that on every clip, and the
+report prints `provenance: synthetic` beside every number. The `false-positive` rate is
+`NOT RUN` until a person marks which detections are real.
+
+**"Does it work with a real camera?"** The source is RTSP-first and the relay/simulator
+path is exercised end to end. A real camera has not been run in this build. The
+architecture does not care Ã¢â‚¬â€ the source is a camera GUID and the frames Ã¢â‚¬â€ but claiming
+it has been demonstrated on real footage would be false.
+
+**"What if Hafnia changes its model?"** Then the model identity changes, the
+`contract_version` changes, and every stored decision says which version produced it.
+Old answers stay readable and are not silently comparable with new ones. This is the
+provider's contract and this module's response to it; it is not a claim that a hosted
+model is stable.
+
+**"Why not just search the footage later?"** `pocctl search` refuses to rank and prints
+why on every run: a similarity-ranked answer is not replayable from stored facts, so
+there are no embeddings here. What it gives you is an interval of instants and a count
+of what was actually decided about them Ã¢â‚¬â€ and an honest `cannot_tell` where there was
+no answer.
+
+**"What does it cost to run?"** The numbers are on screen during the demo and they name
+the thread count and the execution provider. A latency without its thread count and its
+device describes no build.
+
+**"Why did you build it for CPU then?"** Because that is what was available, and because
+the module refused to pretend otherwise. Every latency in this system is recorded with
+the execution provider it was measured on, and `SP_POC_ORT_EP=cuda` is **refused before
+the session opens** unless `nvidia-smi` reports the configured device â€” ONNX Runtime
+falls back to the CPU, logs it and returns success, so a run that asked for a GPU and got
+the CPU would produce real numbers under a label that says otherwise. That is the exact
+shape of defect this repository exists to end.
+
+A 4070 was then available, and it is **measured, not `NOT RUN`**:
+
+| provider | median | p95 | sustains |
+|---|---|---|---|
+| `cpu`, 4 threads | 241 ms | 265 ms | ~3 / s |
+| `cuda`, RTX 4070 | **17 ms** | **19 ms** | ~52 / s |
+
+Same model, same machine, same thread count, first frame excluded. You can run it:
+
+```powershell
+$env:SP_POC_ORT_LIB='models\onnxruntime.dll'; $env:SP_POC_DET_MODEL='models\yolov8n.onnx'
+$env:Path += ";$((Resolve-Path models).Path)"
+$env:SP_POC_ORT_EP='cuda'; pocctl detector --selftest --frames 30
+```
+
+The interesting part is not the 14x. It is that **the GPU made two silent defects
+fatal**, and both were the same shape as everything else in this repository is about: a
+fact the module recorded in every artefact and did not act on.
+
+- **The committed detector could not be run at all.** It declares its output dimensions
+  as `-1`, and the detector pre-allocated every declared output and refused the model
+  when it could not â€” with a message phrased as protection. It was declining every modern
+  YOLO export.
+- **The input tensor was laid out backwards.** The session worked out the layout from the
+  model's declared dimensions, recorded it in the report and in every screen this
+  repository shows, and then fed the tensor in a fixed order regardless. The visible
+  symptom was an error. The dangerous one is a tensor of exactly the right size fed in
+  the wrong order, which decodes to boxes that are plausible and wrong and errors on
+  nothing.
+
+Neither had a test, and that is the finding: the path from "the model declares X" to "the
+module does X" was untested in both directions. Opening one session found both.
+
+---
+
+## 9. Where the detail went
 
 | was | is now |
 |---|---|
-| `docs/HOW-TO-RUN.md` | this file, §0–§1 |
+| `docs/HOW-TO-RUN.md` | this file, Ã‚Â§0Ã¢â‚¬â€œÃ‚Â§1 |
 | `docs/verify-live.md`, `docs/demo-live.md`, `docs/one-pager.md` | this file |
 | `docs/architecture.md` | `README.md` |
-| `docs/gap-ledger.md` | `docs/STATUS.md` |
-| `docs/provenance.md`, `docs/vss-mapping.md`, `docs/probes.md`, `docs/findings.md` | `docs/STATUS.md` |
-| `CONTRACT.md` | unchanged — it is the law, not a description of it |
+| `docs/gap-ledger.md`, `docs/STATUS.md` | nothing. A hand-maintained status file goes stale the day somebody forgets it, and the honest substitute is generated: `CONTRACT.md` for the rules, `README.md` for the real-run findings, and the SKIPPED block the gate prints for what it could not measure |
+| `docs/vss-mapping.md` | nothing. There was no mapping behind it Ã¢â‚¬â€ the four families are `internal/classify`'s closed set over COCO-80, and calling that VSS 4.2 without a per-class table would be a claim this module cannot make. `internal/classify/classify.go` is the vocabulary, and it is in the source a judge can read |
+| `docs/provenance.md`, `docs/probes.md`, `docs/findings.md` | `README.md` (real-run findings), `testdata/labels.json` and `pyworker/fixtures/*.licence.json` (provenance), `pocctl probe` (contract confidence, live only) |
+| `CONTRACT.md` | unchanged Ã¢â‚¬â€ it is the law, not a description of it |
+
+Two of these rows say "nothing" and that is the finding, not an omission. Both files
+were linked from the submission documents and neither had ever been written.

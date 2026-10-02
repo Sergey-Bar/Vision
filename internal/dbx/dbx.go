@@ -61,6 +61,42 @@ func DefaultConfig() Config {
 	}
 }
 
+// ErrNoTarget is returned when no database was named and none was guessed.
+var ErrNoTarget = errors.New("dbx: no database target")
+
+// ConfigForTarget resolves which database to talk to, and refuses to guess.
+//
+// The compiled-in default names localhost:5432/security as user security_core.
+// Returning it when nothing was specified means `security-migrate up`, typed in a
+// shell that happens not to have SP_DATABASE_URL exported, migrates whatever
+// happens to be listening on the local port. That is the worst thing a migration
+// runner can do, and making it the default rather than an explicit choice is what
+// makes it likely.
+//
+// So the refusal names both ways to name a database and prints the default it
+// declined to use. `DSN` omits the password, so the message is safe to log.
+func ConfigForTarget(dsnFlag, envVar string) (Config, error) {
+	cfg := DefaultConfig()
+
+	dsn := dsnFlag
+	if dsn == "" {
+		dsn = os.Getenv(envVar)
+	}
+	if dsn == "" {
+		return cfg, fmt.Errorf("%w: pass -dsn, or set %s. Nothing named a database, and the "+
+			"compiled-in default is %s — which is a guess about which database on this host you "+
+			"meant, and applying migrations to it is not a guess this tool should make for you",
+			ErrNoTarget, envVar, cfg.DSN())
+	}
+	// A DSN may carry a user. It must not carry a password in the environment: an
+	// environment variable survives into child processes and diagnostic dumps, a
+	// flag does not. The password has its own dedicated variable.
+	if err := cfg.ApplyDSN(dsn); err != nil {
+		return cfg, err
+	}
+	return cfg, nil
+}
+
 // DSN renders the connection string with the password omitted. Safe to log.
 func (c Config) DSN() string {
 	u := url.URL{

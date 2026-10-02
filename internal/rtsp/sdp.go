@@ -42,14 +42,15 @@ var ErrNoMediaSection = errors.New("rtsp: the session description has no video m
 // main and a substream, and refusing the whole session because of the audio
 // track would be refusing a working camera.
 func parseSDP(body []byte) (*Description, error) {
-	desc := &Description{PacketizationMode: -1}
 	var (
-		inVideo bool
-		rtpmap  = map[int]string{}
-		fmtp    = map[int]string{}
-		framesz = map[int]string{}
-		fps     = map[int]string{}
-		control string
+		desc     Description
+		sawVideo bool
+		inVideo  bool
+		rtpmap   = map[int]string{}
+		fmtp     = map[int]string{}
+		framesz  = map[int]string{}
+		fps      = map[int]string{}
+		control  string
 	)
 	for _, raw := range strings.Split(string(body), "\n") {
 		line := strings.TrimRight(raw, "\r")
@@ -70,9 +71,12 @@ func parseSDP(body []byte) (*Description, error) {
 			if !inVideo {
 				continue
 			}
+			sawVideo = true
 			// The last format on a media line is the one a SETUP without an
 			// explicit payload type selects, and cameras list several so the
-			// client can pick.
+			// client can pick. Payload type 0 is legal in RTP, so it is carried
+			// as a value and never as a sentinel for "nothing was declared" -
+			// sawVideo is what says a media section was there at all.
 			if pt, err := strconv.Atoi(fields[3]); err == nil {
 				desc.PayloadType = pt
 			}
@@ -131,7 +135,7 @@ func parseSDP(body []byte) (*Description, error) {
 			}
 		}
 	}
-	if desc.PayloadType == 0 {
+	if !sawVideo {
 		return nil, ErrNoMediaSection
 	}
 
@@ -165,6 +169,8 @@ func parseSDP(body []byte) (*Description, error) {
 		desc.FPS, _ = strconv.Atoi(strings.TrimSpace(v))
 	}
 
+	// A camera that describes its stream with no packetization-mode at all is
+	// mode 1, which is the mode every camera that fragments at all uses.
 	desc.PacketizationMode = 1
 	if params, ok := fmtp[desc.PayloadType]; ok {
 		for _, kv := range strings.Split(params, ";") {
@@ -191,5 +197,5 @@ func parseSDP(body []byte) (*Description, error) {
 			}
 		}
 	}
-	return desc, nil
+	return &desc, nil
 }

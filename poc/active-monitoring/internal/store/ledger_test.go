@@ -93,6 +93,77 @@ func TestTheChainLinksAndVerificationFindsAnEditedRow(t *testing.T) {
 	}
 }
 
+// TestAnOpenEndedLedgerRangeMeansTheWholeChain is the test behind the open-ended
+// range, and it exists because `pocctl audit ledger` — the command whose whole job
+// is to show a person the rows and whether they chain — passed (0, 0) and got an
+// EMPTY slice back from a ledger holding fifty-seven rows. It printed
+//
+//	the ledger is empty. An empty chain is not an intact one
+//	PASS — 57 row(s) from sequence 0 to 57 recomputed and chained
+//
+// in consecutive sentences. VerifyLedger has always read (0, 0) as "to the end";
+// Ledger compared `seq <= to` literally. A tool that contradicts itself about
+// whether its evidence exists teaches its reader to read past it, and this one is
+// read by people deciding whether to trust a run.
+func TestAnOpenEndedLedgerRangeMeansTheWholeChain(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t)
+	for i := 0; i < 5; i++ {
+		if _, err := s.AppendLedger(ctx, LedgerEntry{Kind: LedgerVLMVerdict, Subject: "det-1", Payload: "{}"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.Ledger(ctx, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 5 {
+		t.Fatalf("Ledger(0,0) returned %d row(s) for a ledger of 5; an open-ended range means to the end", len(got))
+	}
+	// The two functions must agree about WHICH rows they are talking about, which
+	// is the property the caller actually depends on: it verifies (0,0) and prints
+	// (0,0), and a disagreement between them is exactly the bug.
+	rep, err := s.VerifyLedger(ctx, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Rows != len(got) {
+		t.Fatalf("VerifyLedger read %d row(s) and Ledger read %d; they are asked about the same range", rep.Rows, len(got))
+	}
+	// A bounded range is still bounded: the open-ended rule must not swallow it.
+	two, err := s.Ledger(ctx, 2, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(two) != 2 || two[0].Seq != 2 || two[1].Seq != 3 {
+		t.Fatalf("Ledger(2,3) = %+v, want sequences 2 and 3", two)
+	}
+	// And an empty ledger is empty rather than an error, because `audit ledger` on
+	// a fresh data root has to be able to say so.
+	empty, err := store2(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := empty.Ledger(ctx, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("an empty ledger returned %d row(s)", len(rows))
+	}
+}
+
+// store2 opens a second, empty store in its own temporary directory.
+func store2(t *testing.T) (*Store, error) {
+	t.Helper()
+	s, err := Open(t.TempDir())
+	if err != nil {
+		return nil, err
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	return s, nil
+}
+
 // TestTheLedgerIsAppendOnly is W3-2, and it is a claim about SQL rather than about
 // a Go function: the guard has to stop somebody who is not running this program.
 func TestTheLedgerIsAppendOnly(t *testing.T) {

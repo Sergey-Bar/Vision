@@ -8,14 +8,21 @@
 //
 // # Confidence in the wire format
 //
-// Milestone's public API surface is assumed, not verified. The plan names this
-// as the top project risk, and it is: a wrong endpoint or a wrong field name
-// shows up as an empty event feed on a real site, not as a failing test. Every
-// endpoint and field name therefore lives in one file, Route, with a comment
-// saying it is unverified, and the first thing to do on a real installation is
-// to run `securityctl adapter probe`, which lists what the server actually
-// returns next to what this adapter expects. Until that has been run against a
-// real server, treat the mapping as a hypothesis with tests.
+// Milestone's public API surface is *documented, not verified*. Both documents
+// Milestone publishes are committed in this repository, under
+// `docs/vendor/milestone/`, and every route below was checked against them in
+// `docs/vendor/milestone/route-audit.md` — which is where the citation for each
+// one lives. Reading a document fixed five of nine routes and left four needing a
+// probe. It cleared none of them, and it cannot: a published document is not a
+// running server, so `Unverified` stays true on every route until
+// `securityctl adapter probe` has run against a real installation and a human
+// has read the artifact it produced. The plan names this as the top project risk
+// and it is still the top project risk; what changed is that the hypothesis is
+// now written down and cited rather than remembered.
+//
+// The specific trap this package was written around is unchanged: a wrong
+// endpoint or a wrong field name shows up as an empty event feed on a real site,
+// not as a failing test.
 package milestone
 
 import (
@@ -24,6 +31,24 @@ import (
 	"fmt"
 	"time"
 )
+
+// APIPrefix is the documented root of the Milestone REST surface.
+//
+// It is one constant rather than a prefix written into eight paths, because the
+// mistake it replaces was made in eight places at once: the route table declared
+// `/api/v1/...`, which is not a Milestone prefix and appears in neither published
+// document, so every call would have been a 404 whose failure mode is a site that
+// looks quiet.
+//
+// **The two documents disagree on case and this does not resolve it.**
+// `events-rest-v1.reference.md` writes `/api/rest/v1/events` five times, and
+// `bookmarks-rest-v1.openapi.yaml:36-37` writes `https://localhost/API/rest/v1`.
+// This constant takes the lower-case form, because that is the one the events
+// reference uses for the resource family this adapter actually calls. If a probe
+// answers 404 on every route simultaneously, the case is the first thing to try
+// and this line is the only thing to change. See
+// `docs/vendor/milestone/route-audit.md` §2.1.
+const APIPrefix = "/api/rest/v1"
 
 // Route is one endpoint the adapter calls, and the place every assumption about
 // the Milestone API surface is written down.
@@ -36,6 +61,13 @@ type Route struct {
 	// that does not match is a probe failure, not a silently empty page.
 	Expect string
 	// Paginated says the endpoint returns a paged list rather than one object.
+	//
+	// It is also, in practice, the flag that says "this is a source feed":
+	// `Adapter.Poll` reads exactly the routes with it set. Those are one field
+	// doing two jobs, so both are written down here rather than discovered. A
+	// route that is a list but is not a *feed* of events leaves it clear - see
+	// `/eventTypes`, which is a vocabulary the adapter looks up rather than
+	// something a customer's cameras produce.
 	Paginated bool
 	// Unverified marks a route whose real behaviour has not been confirmed
 	// against a live server. It is a field rather than a comment so that
@@ -52,65 +84,138 @@ type Route struct {
 	// same reason: a clock reading has an uncertainty attached and a list item
 	// does not.
 	ClockProbe bool
-	// Notes says what is being assumed.
+	// Task is the vendor's `task` query parameter, and it is the only way this
+	// API selects an operation on a POST.
+	//
+	// It is a field because a `POST` with no `task` is a different operation from
+	// a `POST` with one, on the same path. `bookmarks-rest-v1.openapi.yaml:167-171`
+	// declares `task` as a *query* parameter and `:142-161` gives it four meanings,
+	// so the path alone does not name the call. A non-empty Task also marks the
+	// route as one that cannot be read with a GET, which is how the adapter knows
+	// to reach for BookmarkSearcher instead.
+	Task string
+	// Notes says what is being assumed, and for every route it is what the
+	// published documents in docs/vendor/milestone say about it.
 	Notes string
 }
 
 // Routes is the complete assumed Milestone API surface.
 //
-// Every entry is Unverified. That is accurate today: no Milestone server has
-// been reachable from this codebase. When `securityctl adapter probe` runs
-// against a real installation, the entries it confirms lose the flag, and the
-// ones it contradicts get fixed here and there - which is the whole point of
-// keeping them in one file.
+// Every entry is Unverified, and that stays true after the route audit. A
+// published document can refute an assumption and it did — five of these nine
+// routes were declared wrong and are corrected here — but refuting is all it can
+// do. No Milestone server has ever been reachable from this codebase, so when
+// `securityctl adapter probe` runs against a real installation, the entries it
+// confirms lose the flag, and the ones it contradicts get fixed here and there -
+// which is the whole point of keeping them in one file.
+//
+// Every entry carries a verdict in docs/vendor/milestone/route-audit.md, and
+// route_audit_test.go fails if one does not.
 var Routes = []Route{
 	{
-		Method: "GET", Path: "/api/v1/System/UserGroups", Expect: "array", Paginated: true,
+		Method: "GET", Path: APIPrefix + "/System/UserGroups", Expect: "array", Paginated: true,
 		Unverified: true,
-		Notes: "Used to enumerate cameras and resource groups. The platform does not " +
-			"store operator credentials from this; camera identity only.",
+		Notes: "Prefix documented (/api/rest/v1); the RESOURCE IS NOT. The audit verdict is " +
+			"NOT-ANSWERABLE-FROM-DOCS: neither published document mentions user groups, and " +
+			"events-rest-v1.reference.md:34 says cameras are enumerated with the Configuration " +
+			"REST API instead, so the kind of resource may be wrong as well as the name. Used " +
+			"for camera identity only; the platform stores no operator credentials from this.",
 	},
 	{
-		Method: "GET", Path: "/api/v1/Events", Expect: "array", Paginated: true,
+		Method: "GET", Path: APIPrefix + "/events", Expect: "object", Paginated: true,
 		Unverified: true,
-		Notes: "The event feed. Polled with a since-time cursor. Field names assumed: " +
-			"Id, Timestamp, Type, Source, Priority, TimeSpan, Message, ImagePath, " +
-			"VideoRecordingStartTime.",
+		Notes: "The event feed, and the whole product. Documented: filter time=gt:'<ISO8601>' " +
+			"(operators gt/lt only), orderBy=desc:'time', page>=0, size 1..2000, and an answer of " +
+			"{\"_links\":{\"prev\",\"next\"},\"array\":[...],\"eventCount\":N}. Unfiltered it " +
+			"returns the OLDEST stored events first, which is why the cursor is a filter and not " +
+			"an offset. Fields read off one item: id, time, type, source, localId, datatype, tag. " +
+			"`type` is a GUID, not a name, so nothing normalises yet - see the audit's H1.",
 	},
 	{
-		Method: "GET", Path: "/api/v1/Events/{eventId}", Expect: "object",
+		Method: "GET", Path: APIPrefix + "/events/{id}", Expect: "object",
 		Unverified: true,
-		Notes: "Full event detail, including the motion/analytics payload this adapter " +
-			"maps to the canonical event payload.",
+		Notes: "One event by id. The placeholder is `id` and is documented as a guid " +
+			"(events-rest-v1.reference.md:266-283). 404 means either no such event or one the " +
+			"event type's retention policy did not keep, which is a normal race. The motion and " +
+			"analytics payload this maps to lives under `data`, which the reference documents for " +
+			"events this adapter TRIGGERS rather than for events it reads.",
 	},
 	{
-		Method: "GET", Path: "/api/v1/Alarms", Expect: "array", Paginated: true,
+		Method: "GET", Path: APIPrefix + "/Alarms", Expect: "array", Paginated: true,
 		Unverified: true,
-		Notes: "Alarm feed. Alarm created/updated/acknowledged all arrive as a changing " +
-			"alarm state rather than distinct event types, so the adapter derives the " +
-			"state transition.",
+		Notes: "Prefix documented; the RESOURCE IS NOT - the audit verdict is " +
+			"NOT-ANSWERABLE-FROM-DOCS. Alarms appear in events-rest-v1.reference.md:49-50 as " +
+			"Configuration API objects that events trigger, never as a feed to read. The adapter " +
+			"already models an alarm as a state machine (adapter.go deriveEventType), which is " +
+			"consistent with that, and CapabilityAlarms is documented as best-effort.",
 	},
 	{
-		Method: "GET", Path: "/api/v1/Bookmarks", Expect: "array", Paginated: true,
+		Method: "POST", Path: APIPrefix + "/bookmarks", Task: "searchTime",
+		Expect: "object", Paginated: true,
 		Unverified: true,
-		Notes:      "Bookmarks, including those created by a rule action.",
+		Notes: "The bookmark feed. NOT a GET: bookmarks-rest-v1.openapi.yaml:45-46 says \"Bookmarks " +
+			"cannot be retrieved by use a GET .../bookmarks request\". task is a QUERY parameter " +
+			"(:167-171) and this is the searchTime task, whose body needs time and countLimit and " +
+			"needs either resourceTypes or devicePaths (:305-374). With time and no endTime the " +
+			"window is the documented 60-minute default. Reached through BookmarkSearcher, because " +
+			"a GET cannot express this call.",
 	},
 	{
-		Method: "GET", Path: "/api/v1/ResourceGroups", Expect: "array", Paginated: true,
+		Method: "GET", Path: APIPrefix + "/ResourceGroups", Expect: "array", Paginated: true,
 		Unverified: true,
-		Notes:      "Zone-equivalent topology. Mapped onto the ZONE graph nodes.",
+		Notes: "Prefix documented; the RESOURCE IS NOT - the audit verdict is " +
+			"NOT-ANSWERABLE-FROM-DOCS. Neither document contains the words \"resource group\" or " +
+			"\"zone\". Zone-equivalent topology, mapped onto the ZONE graph nodes.",
 	},
 	{
-		Method: "GET", Path: "/api/v1/Servlets", Expect: "array", Paginated: true,
+		Method: "GET", Path: APIPrefix + "/Servlets", Expect: "array", Paginated: true,
 		Unverified: true,
-		Notes:      "Device state, including online/offline and recording state.",
+		Notes: "Prefix documented; the resource name is CONTRADICTED - \"servlet\" appears nowhere " +
+			"in either document. The documented device vocabulary is cameras, microphones and " +
+			"speakers, and a device reference is \"cameras/<guid>\" " +
+			"(bookmarks-rest-v1.openapi.yaml:257; events-rest-v1.reference.md:291). Recorded rather " +
+			"than renamed, because no published document names a device-list endpoint to rename it " +
+			"to. Device state, including online/offline and recording state.",
 	},
 	{
-		Method: "GET", Path: "/api/v1/System/Time", Expect: "object",
+		Method: "GET", Path: APIPrefix + "/eventTypes",
 		Unverified: true,
-		Notes: "Server time. Read to measure clock drift between the VMS and this host; " +
-			"drift past the severe band excludes the source from time-windowed " +
-			"corroboration.",
+		// Two fields are deliberately different from every other entry, and both
+		// are refusals rather than oversights.
+		//
+		// `Paginated` is false because this is not a feed. That flag is what
+		// `Adapter.Poll` uses to decide what to poll, and an event-type list
+		// polled as a source feed would arrive with no `Type` field, dead-letter
+		// as unparsed items, and be stored as if it were evidence.
+		//
+		// `Expect` is empty because the response schema is not in either published
+		// document. EVENTs:40 and :42 name the resource and never show a body, so
+		// declaring a shape here would be a second guess written down as a fact,
+		// and the probe would then report a shape mismatch as a contradiction. The
+		// probe reads whatever arrived and reports it, which is the whole reason
+		// this route is worth declaring before the probe has ever run.
+		Notes: "The event-type vocabulary, and the route that unblocks `type` on an event. " +
+			"EVENTS:40 says \"You can list available event types or create new event types " +
+			"with the Configuration REST API: Event types\" and :42 names `GET /eventTypes`, " +
+			"so the resource is DOCUMENTED; the response schema is NOT - neither document shows " +
+			"a body, hence the empty Expect. Read per (tenant, site) and cached, because the " +
+			"GUIDs are per-site configuration, not global constants: 481d4d6c-... is an " +
+			"instance in one customer's VMS and the same conceptual type carries a different " +
+			"GUID at the next site. A compiled-in guid->name table would work at the design " +
+			"partner and dead-letter every event at customer two, invisibly, which is why the " +
+			"mapping is resolved from this site's own answer and never defaulted. The field " +
+			"names this reads (id/name) are an ASSUMPTION; the probe's sample is how it is " +
+			"settled. See docs/vendor/milestone/route-audit.md §2.8.",
+	},
+	{
+		Method: "GET", Path: APIPrefix + "/System/Time", Expect: "object", ClockProbe: true,
+		Unverified: true,
+		Notes: "Prefix documented; the RESOURCE IS NOT - the audit verdict is " +
+			"NOT-ANSWERABLE-FROM-DOCS. Neither document declares a clock endpoint, and neither " +
+			"declares a field name for a clock answer, so writeback.go's four tolerated spellings " +
+			"have nothing to be tolerant of yet. This means the clock-drift gate has no working " +
+			"input today: drift past the severe band is supposed to exclude a device from " +
+			"time-windowed corroboration, and drift cannot be measured. See the audit's §2.7.",
 	},
 }
 
@@ -135,6 +240,22 @@ func UnverifiedRoutes() []Route {
 		}
 	}
 	return out
+}
+
+// UnverifiedRoute reports whether the route at path is still awaiting a live
+// probe.
+//
+// It is a lookup rather than an index because the two facts it answers — "which
+// clock route" and "is it still unverified" — were previously written down twice
+// and could disagree, and the write-back's clock read was one of the two copies.
+// See mustFindRoute.
+func UnverifiedRoute(path string) bool {
+	for _, r := range Routes {
+		if r.Path == path {
+			return r.Unverified
+		}
+	}
+	return false
 }
 
 // Transport supplies raw responses to the adapter.

@@ -69,6 +69,21 @@ type ManifestPrompt struct {
 	// Class is the human label for the report and the screen. It is never a
 	// field on the wire.
 	Class string `json:"class"`
+	// Supersedes names the prompt revision this one replaced, and RevisionReason says
+	// WHY in words.
+	//
+	// Both are for a reader, not for the loader, and that is the point of putting them
+	// in the manifest rather than in a commit message. This repository's contract says
+	// a prompt revision is part of `contract_version`, which means an answer carries the
+	// fact that it was produced under a different prompt and not what CHANGED. Somebody
+	// comparing two answers has to be able to find the reason without leaving the tree,
+	// and the answer to "why does this verdict differ from last week's" is usually
+	// exactly here.
+	//
+	// They are optional because a first revision has nothing to supersede, and a
+	// required field would be a lie in that one case.
+	Supersedes     string `json:"supersedes,omitempty"`
+	RevisionReason string `json:"revision_reason,omitempty"`
 }
 
 // EmbeddedPrompts loads the embedded prompt set.

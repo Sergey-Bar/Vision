@@ -45,7 +45,14 @@ import (
 // event table's 2026 partitions.
 var epoch = time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC)
 
-const eventsRoute = "/api/v1/Events"
+// The adapter's real event route.
+//
+// It used to be "/api/v1/Events", which is not a Milestone prefix at all and
+// appears in neither published document — see docs/vendor/milestone/route-audit.md
+// §2.1. Every poll test here matched on it and passed, because the stub matches on
+// the same wrong string: a test double agreeing with the code under test about a
+// value the vendor contradicts is the definition of testing nothing.
+const eventsRoute = "/api/rest/v1/events"
 
 // stubTransport serves one feed page and nothing else, which is what a site with
 // one deployed feed looks like.
@@ -77,6 +84,10 @@ type harness struct {
 	tenant      string
 	site        string
 	integration string
+	// log is the buffer the loops' logger writes to. Exposed so a test can assert
+	// on what an operator would read, which for the SLO objectives is a log line
+	// and for everything else is a return value nothing returns.
+	log *bytes.Buffer
 }
 
 func setup(t *testing.T, bundleYAML string, feed string) harness {
@@ -192,6 +203,7 @@ func setup(t *testing.T, bundleYAML string, feed string) harness {
 	return harness{
 		loops: loops, transport: transport, registry: registry,
 		tenant: tenant, site: site, integration: integration,
+		log: &logBuf,
 	}
 }
 
@@ -555,12 +567,158 @@ func TestBacklogGaugeIsMeasuredNotLeftAtZero(t *testing.T) {
 	}
 }
 
+// The two incident gauges are read, not assumed.
+//
+// `GaugeIncidentOpen` and `GaugeIncidentDegraded` were declared in metrics.go and
+// written nowhere, and `ai_plane_availability` is an SLO that reads the second one —
+// so the objective reported "not measured" on every install and never once had an
+// opinion. A pilot could not measure how often the AI path was actually live, which
+// is the single number the `degraded` column exists to provide.
+func TestTheIncidentGaugesAreMeasuredNotLeftAtUnset(t *testing.T) {
+	h := setup(t, bundle, `[
+		{"Id":"e1","Type":"Motion","Timestamp":"2026-03-01T09:00:00Z","Source":"Cam [cam-1]"}
+	]`)
+	ctx := context.Background()
+
+	// Before anything has happened, the gauges are read and read zero. That is a
+	// measurement, and it is distinguishable from "never written" — which is the
+	// whole point, because a gauge that only updates when work arrives reports
+	// zero on a healthy idle site by never having been set.
+	h.loops.SampleGauges(ctx)
+	if !h.registry.Gauges.Measured(observability.GaugeIncidentOpen) {
+		t.Error("the open-incident gauge was never written, so a dashboard shows a flat line " +
+			"that reads as \"this has never happened\"")
+	}
+	if !h.registry.Gauges.Measured(observability.GaugeIncidentDegraded) {
+		t.Error("the degraded-incident gauge was never written, which leaves the AI-plane SLO " +
+			"permanently unmeasured")
+	}
+
+	// The rule raises an incident, so the open count becomes one and the SLO has a
+	// real input.
+	h.loops.PollOnce(ctx)
+	h.loops.ConsumeOnce(ctx)
+	h.loops.SampleGauges(ctx)
+
+	if got := h.gauge(observability.GaugeIncidentOpen); got < 1 {
+		t.Errorf("the open-incident gauge reads %v with an incident raised; a rule that raises "+
+			"nothing measurable is a rule whose effect cannot be told from a rule that raised "+
+			"nothing", got)
+	}
+	// This bundle's `proceed_without` means the AI plane was never invoked, so the
+	// degraded count is a measured zero and not a guess. The value is not asserted
+	// here — the fixture is not a degraded one — only that it is now a reading.
+	if !h.registry.Gauges.Measured(observability.GaugeIncidentDegraded) {
+		t.Error("the degraded-incident gauge stopped being measured")
+	}
+
+	// Which means the AI-plane objective can now have an opinion at all.
+	if state := h.registry.SLOs(); state.Evaluated == 0 {
+		t.Fatal("the incident gauges are written and no objective was evaluated")
+	}
+	for _, s := range observability.Breaches(h.registry,
+		observability.ReadingsFrom(h.registry)) {
+		if s.Name == "ai_plane_availability" && s.Measured == "" {
+			t.Error("the AI-plane objective reports no measurement at all")
+		}
+	}
+}
+
 func (h harness) gauge(name string) float64 {
 	g := h.registry.Gauges.Snapshot()
 	if v, ok := g[name]; ok {
 		return v
 	}
 	return -1
+}
+
+// The eight objectives in slo.go are the plan's M1 gate 3, and for as long as
+// `Breaches` existed it had no caller outside its own test: an objective only ever
+// evaluated by a test is a description of an intention. This asserts the running
+// loop evaluates them, and that a breach reaches an operator as a log line
+// carrying its remedy — because `SLO` carries a `Remedy` on every entry precisely
+// so that an alert is actionable, and a remedy nobody is shown is not one.
+func TestTheRunningPipelineEvaluatesTheSLOsAndSaysSo(t *testing.T) {
+	h := setup(t, bundle, "")
+	ctx := context.Background()
+
+	// One accepted event that reached no terminal state. The counters are set
+	// directly rather than by polling, because the poll's own increments would be
+	// mixed in and the objective under test is the arithmetic, not the ingest.
+	//
+	// The objective provoked is ingest_availability rather than the AI plane, and
+	// that is deliberate: every gauge the sampler writes is now written from the
+	// database, so a test cannot provoke one by setting the registry behind the
+	// loop's back. The AI plane's input is covered by
+	// TestTheIncidentGaugesAreMeasuredNotLeftAtUnset.
+	h.registry.Counters.Inc(observability.CounterInboxAccepted)
+	h.registry.Counters.Inc(observability.CounterInboxAccepted)
+	h.registry.Counters.Inc(observability.CounterInboxDeadLettered)
+
+	h.loops.SampleGauges(ctx)
+
+	state := h.registry.SLOs()
+	if state.Evaluated == 0 {
+		t.Fatal("the pipeline sampled its gauges and evaluated no objectives; " +
+			"Breaches still has no production caller")
+	}
+	var found bool
+	for _, name := range state.Breached {
+		if name == "ingest_availability" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("one accepted event with no terminal state did not breach ingest_availability; "+
+			"recorded %v. The objective is zero lost events, not a percentage", state.Breached)
+	}
+
+	logged := h.log.String()
+	if !strings.Contains(logged, "an SLO objective is not being met") {
+		t.Errorf("no SLO line reached the operator's log:\n%s", logged)
+	}
+	for _, want := range []string{"objective=ingest_availability", "remedy="} {
+		if !strings.Contains(logged, want) {
+			t.Errorf("the SLO log line has no %s; an alert with no remedy is one everybody "+
+				"learns to ignore:\n%s", want, logged)
+		}
+	}
+}
+
+// A permanently breached objective must not become a log line on every poll for
+// ever. The set is re-recorded to the registry on every evaluation — a reader sees
+// the current verdict — while the log only speaks when the verdict changes.
+func TestAnUnchangedBreachIsNotLoggedOnEveryPass(t *testing.T) {
+	h := setup(t, bundle, "")
+	ctx := context.Background()
+	h.registry.Counters.Inc(observability.CounterInboxAccepted)
+	h.registry.Counters.Inc(observability.CounterInboxAccepted)
+	h.registry.Counters.Inc(observability.CounterInboxDeadLettered)
+
+	h.loops.SampleGauges(ctx)
+	first := strings.Count(h.log.String(), "an SLO objective is not being met")
+	breached := h.registry.SLOs().Breached
+	if first != len(breached) {
+		t.Fatalf("the first evaluation logged %d breach lines for %d breached objectives %v",
+			first, len(breached), breached)
+	}
+	if len(breached) == 0 {
+		t.Fatal("nothing breached, so this test is asserting that a quiet site stays quiet")
+	}
+	for range 3 {
+		h.loops.SampleGauges(ctx)
+	}
+	if got := strings.Count(h.log.String(), "an SLO objective is not being met"); got != first {
+		t.Errorf("four identical evaluations logged %d breach lines, want %d; a gauge sampler "+
+			"turning one breach into a log line per interval is how an operator learns to ignore it",
+			got, first)
+	}
+	// And the verdict is still current on the read side, which is what makes the
+	// quiet log safe.
+	if state := h.registry.SLOs(); len(state.Breached) != len(breached) {
+		t.Errorf("the recorded verdict went stale while the log was quiet: %v, want %v",
+			state.Breached, breached)
+	}
 }
 
 func (h harness) countCanonical(ctx context.Context, t *testing.T) int {

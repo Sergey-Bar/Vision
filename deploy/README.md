@@ -231,7 +231,7 @@ archive, creates the program directory and applies the migrations.
 
 | Declares | Value |
 |---|---|
-| Type / notify | `Type=notify`, `NotifyAccess=main` — the service is meant to tell systemd when it is ready. |
+| Type | `Type=simple`. It was `Type=notify` with `NotifyAccess=main`, and nothing in the tree sends `READY=1` — see the caveat below. |
 | Ordering | `After=network.target`, and **nothing else**. No `Requires=` on Postgres or on a network mount, deliberately: "a service that refuses to start because a network mount is slow is a service that takes a site down at boot". |
 | Service account | `User=security`, `Group=security` — a dedicated unprivileged account, so a compromised core cannot read the signing keys or write the evidence root's parent. |
 | Program directory | `WorkingDirectory=/opt/security-platform`, `ExecStart=/opt/security-platform/bin/security-core`, `ExecReload=/bin/kill -HUP $MAINPID`. |
@@ -300,11 +300,17 @@ and mean nothing to Windows.
   and resident; the question the install still has to answer is where the camera
   loop runs - in this process, or beside it. `internal/dbx` still sets the
   Postgres `application_name` to `"security-core"`, which is the naming remnant.
-- **`Type=notify` has no notifier.** There is no `sd_notify` call and no
-  `NOTIFY_SOCKET` handling anywhere in the tree. A unit declaring `Type=notify`
-  whose process never sends `READY=1` waits out systemd's start timeout, is
-  killed, and burns a `StartLimitBurst=5` attempt — a service that never starts
-  for a reason that is invisible in the unit file.
+- **`Type=notify` is fixed: the unit now declares `Type=simple`.** The caveat was
+  that there is no `sd_notify` call and no `NOTIFY_SOCKET` handling anywhere in the
+  tree, so a unit declaring `Type=notify` whose process never sends `READY=1` waits
+  out systemd's start timeout, is killed, and burns a `StartLimitBurst=5` attempt —
+  a service that never starts for a reason that is invisible in the unit file.
+  `Type=simple` considers the process started once it is forked, and readiness is
+  then what `/v1/health/ready` is for. The `NotifyAccess` line went with it.
+  `cmd/securityctl`'s `deploy_unit_test.go` asserts both, so the unit cannot drift
+  back into a state where it waits for a message nothing sends. If a notifier is
+  ever added, the correct change is the notifier *and* `Type=notify`; a test will
+  then say so rather than this comment.
 - **Binding a model runtime into this unit requires revisiting the hardening.**
   `MemoryDenyWriteExecute=yes` forbids writable-executable mappings, which a GPU
   runtime or any JIT needs; `SystemCallFilter=@system-service` will not pass a

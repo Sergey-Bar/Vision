@@ -44,6 +44,37 @@ Five invariants that the rest of the code exists to protect.
 | `docs/` | Build status and threat model. Index: [`docs/README.md`](docs/README.md). |
 | `docs/roadmap/` | The full plan. Start at [`docs/roadmap/README.md`](docs/roadmap/README.md). |
 | `deploy/` | Windows Service, systemd, and the AI runtime. See [`deploy/README.md`](deploy/README.md). |
+| `poc/active-monitoring/` | **A second Go module.** See below. Not part of this build. |
+
+## Two trees, one repository
+
+`poc/active-monitoring/` declares its own module path,
+`github.com/Sergey-Bar/ai-captain-poc`, with its own `go.mod`, `go.sum` and
+`scripts/verify.ps1`. It imports nothing from the module above and the module above
+imports nothing from it.
+
+This matters more than it looks. `go build ./...`, `go vet ./...`, `golangci-lint`,
+`sonar-project.properties` and `scripts/verify.ps1` at the root **cannot** reach a
+line of it: `./...` does not cross a module boundary. So a change under `poc/` is
+not covered by this repository's gate and a change above is not covered by the POC's,
+and each of those facts is silent unless somebody says it out loud.
+
+The POC is a reference implementation with its own gate, kept for the reader who
+wants to see a Milestone client that was written from Milestone's published
+documents rather than from the parent platform's assumptions. It reached three of
+the same conclusions about the parent platform's Milestone code independently —
+including that `/api/v1` is not a Milestone prefix — which is recorded in
+[`poc/active-monitoring/contracts/xprotect/README.md`](poc/active-monitoring/contracts/xprotect/README.md)
+and in [`docs/vendor/milestone/route-audit.md`](docs/vendor/milestone/route-audit.md).
+
+Run its gate separately:
+
+```powershell
+cd poc/active-monitoring; .\scripts\verify.ps1
+```
+
+Nothing merges between them. The POC does not import the platform's contracts, and
+the platform does not read the POC's.
 
 ## Build
 

@@ -106,9 +106,10 @@ func NewAnnexBReader(r io.Reader, maxNALSize int) *AnnexBReader {
 
 // Next returns the next NAL unit, start code and trailing zero padding removed.
 //
-// The returned slice is owned by the reader and is valid only until the next
-// call, which is what lets the whole reader run without an allocation per
-// access unit on a 24/7 path.
+// The returned slice belongs to the caller. The reader reuses its own buffer for
+// the next read, so handing out a sub-slice of it would silently rewrite a NAL
+// unit that a pre-roll ring is still holding; the copy below is what makes the
+// ring safe, and it is the only copy on this path.
 func (a *AnnexBReader) Next() ([]byte, error) {
 	for {
 		if i, n, ok := findStartCode(a.pending, a.searched); ok {
@@ -255,12 +256,21 @@ func (r *bitReader) se() (int, error) {
 // rbsp strips emulation-prevention bytes. A 0x03 that follows 0x00 0x00 is not
 // part of the payload, and leaving it in shifts every subsequent bit position
 // by three.
-func rbsp(nal []byte) []byte {
+//
+// rbspInto writes into dst and returns it, grown as needed, so a caller reading
+// many NAL units in a row can hand the same buffer back every time. A slice
+// header is one Exp-Golomb value at the front of a NAL unit that can be tens of
+// kilobytes, so allocating a stripped copy of the whole unit to read that one
+// value is an allocation per slice on a path that runs for the life of the
+// process.
+func rbsp(nal []byte) []byte { return rbspInto(nil, nal) }
+
+func rbspInto(dst, nal []byte) []byte {
 	if len(nal) < 2 {
-		return nil
+		return dst[:0]
 	}
 	body := nal[1:]
-	out := make([]byte, 0, len(body))
+	out := dst[:0]
 	for i := 0; i < len(body); i++ {
 		if i >= 2 && body[i] == 0x03 && body[i-1] == 0 && body[i-2] == 0 {
 			continue
@@ -273,10 +283,15 @@ func rbsp(nal []byte) []byte {
 // SequenceParameters is what the banner, the avcC and the clip metadata all
 // read, parsed once from the SPS so the three can never disagree.
 type SequenceParameters struct {
-	Profile      int
-	Level        int
-	Width        int
-	Height       int
+	// Profile and Level are profile_idc and level_idc, which are one byte each in
+	// the bitstream. They are bytes here so that carrying them into the avcC is a
+	// copy rather than a narrowing somebody has to convince themselves is safe.
+	Profile byte
+	Level   byte
+	Width   int
+	Height  int
+	// ChromaFmt is chroma_format_idc, an Exp-Golomb value with no 8-bit ceiling
+	// in the syntax, so it stays an int.
 	ChromaFmt    int
 	FrameMBSOnly bool
 }
@@ -308,15 +323,15 @@ func parseSPS(sps []byte) (SequenceParameters, error) {
 	if len(sps) < 4 {
 		return sp, errors.New("mp4: SPS is shorter than its own header")
 	}
-	sp.Profile = int(sps[1])
-	sp.Level = int(sps[3])
+	sp.Profile = sps[1]
+	sp.Level = sps[3]
 	sp.ChromaFmt = 1 // 4:2:0 for everything that does not say otherwise
 	r := &bitReader{data: rbsp(sps)}
 
 	if _, err := r.ue(); err != nil { // seq_parameter_set_id
 		return sp, fmt.Errorf("mp4: SPS seq_parameter_set_id: %w", err)
 	}
-	if highProfiles[byte(sp.Profile)] { //nolint:gosec // profile_idc is a single byte in the bitstream
+	if highProfiles[sp.Profile] {
 		cf, err := r.ue()
 		if err != nil {
 			return sp, fmt.Errorf("mp4: SPS chroma_format_idc: %w", err)
@@ -489,10 +504,13 @@ func parseSPS(sps []byte) (SequenceParameters, error) {
 //
 // This is the single rule both producers - the RTP depacketiser and the file
 // reader - use to find picture boundaries, so the two paths cannot disagree
-// about where a frame starts.
-func firstMBInSlice(nal []byte) (uint, error) {
-	r := &bitReader{data: rbsp(nal)}
-	return r.ue()
+// about where a frame starts. The stripped copy it reads from is built in dst
+// and returned, so a caller that keeps the buffer pays for one allocation for
+// the largest NAL unit it has seen rather than one per slice.
+func firstMBInSlice(dst, nal []byte) (uint, []byte, error) {
+	buf := rbspInto(dst, nal)
+	first, err := (&bitReader{data: buf}).ue()
+	return first, buf, err
 }
 
 // Picture is one coded picture and the unit the pre-roll ring is built from.
@@ -523,6 +541,11 @@ type PictureBuilder struct {
 	cur     *Picture
 	pending [][]byte
 	damaged string
+	// scratch backs the stripped copy a slice header is read from. It is reused
+	// for every slice and holds nothing after the read that filled it, which is
+	// what makes reuse safe: a picture's NAL units are copied out below, and
+	// none of them points into this.
+	scratch []byte
 	// OnDamaged is called with a reason whenever a NAL could not be parsed. It
 	// is a field rather than a log line so the degradation is reported rather
 	// than printed and forgotten.
@@ -547,7 +570,8 @@ func (b *PictureBuilder) Push(nal []byte, decodeTime uint64, wall time.Time) *Pi
 		}
 		return nil
 	}
-	first, err := firstMBInSlice(nal)
+	first, scratch, err := firstMBInSlice(b.scratch[:0], nal)
+	b.scratch = scratch
 	if err != nil {
 		// A slice header we cannot read means we cannot tell where this picture
 		// starts. Guessing "same picture" would splice two pictures into one
@@ -621,6 +645,23 @@ type ParameterSets struct {
 // AVCC converts Annex-B NAL units to the length-prefixed form a sample entry
 // carries, in one allocation per call.
 func AVCC(nals [][]byte) []byte {
+	out := make([]byte, 0, AVCCLen(nals))
+	var l [4]byte
+	for _, n := range nals {
+		//nolint:gosec // bounded by the check in AVCCLen
+		binary.BigEndian.PutUint32(l[:], uint32(len(n)))
+		out = append(out, l[:]...)
+		out = append(out, n...)
+	}
+	return out
+}
+
+// AVCCLen is the length AVCC will produce for these NAL units.
+//
+// It exists because the recorder has to know a sample's size before deciding to
+// write it, and measuring by building the sample and throwing it away is an
+// allocation and a copy of every frame in the clip.
+func AVCCLen(nals [][]byte) int {
 	total := 0
 	for _, n := range nals {
 		if len(n) > math.MaxUint32-4 {
@@ -632,15 +673,7 @@ func AVCC(nals [][]byte) []byte {
 		}
 		total += 4 + len(n)
 	}
-	out := make([]byte, 0, total)
-	var l [4]byte
-	for _, n := range nals {
-		//nolint:gosec // bounded by the check above
-		binary.BigEndian.PutUint32(l[:], uint32(len(n)))
-		out = append(out, l[:]...)
-		out = append(out, n...)
-	}
-	return out
+	return total
 }
 
 // MaxParameterSetBytes bounds an SPS or a PPS.
@@ -659,24 +692,32 @@ const MaxParameterSetBytes = 0xFFFF
 // parameter set list is a file that no decoder will open and that our own
 // round-trip would happily accept.
 func (p *ParameterSets) DecoderConfigRecord() ([]byte, error) {
+	rec, _, err := p.decoderConfig()
+	return rec, err
+}
+
+// decoderConfig parses the SPS once and returns both answers: the avcC record
+// and the geometry that came out of the same bytes. parseSPS is pure, so a
+// caller that needs both and parses twice is doing the same work twice and can
+// disagree with itself if it ever stops being pure.
+func (p *ParameterSets) decoderConfig() (rec []byte, sp SequenceParameters, err error) {
 	if len(p.SPS) == 0 || len(p.PPS) == 0 {
-		return nil, ErrNoParameterSets
+		return nil, sp, ErrNoParameterSets
 	}
 	if len(p.SPS) > MaxParameterSetBytes || len(p.PPS) > MaxParameterSetBytes {
-		return nil, fmt.Errorf("%w: a %d-byte SPS or a %d-byte PPS, and the format's length field holds %d",
+		return nil, sp, fmt.Errorf("%w: a %d-byte SPS or a %d-byte PPS, and the format's length field holds %d",
 			ErrParameterSetTooLong, len(p.SPS), len(p.PPS), MaxParameterSetBytes)
 	}
-	sp, err := parseSPS(p.SPS)
+	sp, err = parseSPS(p.SPS)
 	if err != nil {
-		return nil, err
+		return nil, sp, err
 	}
-	rec := make([]byte, 0, 11+len(p.SPS)+len(p.PPS))
+	rec = make([]byte, 0, 11+len(p.SPS)+len(p.PPS))
 	rec = append(rec, 1) // configurationVersion
 	// Profile, constraint flags and level are single bytes in the bitstream and
-	// single bytes in avcC. They came out of the exp-Golomb reader as ints, and
-	// the value is taken straight from an SPS byte that is in range by
-	// construction.
-	rec = append(rec, byte(sp.Profile), p.SPS[2], byte(sp.Level)) //nolint:gosec // profile_idc and level_idc are single bytes in the bitstream
+	// single bytes in avcC, and they are typed as bytes all the way here, so
+	// this is a copy rather than a narrowing.
+	rec = append(rec, sp.Profile, p.SPS[2], sp.Level)
 	rec = append(rec,
 		0xFF, // 6 bits reserved, lengthSizeMinusOne = 3 (four-byte NAL length)
 		0xE1, // 3 bits reserved, numOfSequenceParameterSets = 1
@@ -688,7 +729,7 @@ func (p *ParameterSets) DecoderConfigRecord() ([]byte, error) {
 	rec = append(rec, 0x01)                                      // numOfPictureParameterSets = 1
 	rec = binary.BigEndian.AppendUint16(rec, uint16(len(p.PPS))) //nolint:gosec // bounded by MaxParameterSetBytes
 	rec = append(rec, p.PPS...)
-	return rec, nil
+	return rec, sp, nil
 }
 
 // ErrParameterSetTooLong is returned for a parameter set the avcC cannot

@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Sergey-Bar/ai-captain-poc/internal/aistate"
 )
 
 // TestAnAllZeroBoxIsRefused is RC-6, at the place where the box becomes a wire
@@ -25,6 +27,11 @@ func TestAnAllZeroBoxIsRefused(t *testing.T) {
 		return EventInput{
 			EventTypeGUID: "t", SourceGUID: "g", At: time.Now(), Tag: "aicap-alarm-abc",
 			Class: "motion", Value: "motion", Confidence: 0.5, RuleName: "alarm-l", Box: box,
+			// Attributed, so the box refusal is the one that fires. Without this the
+			// event would be refused earlier for no AI state and this test would pass
+			// while the box control was unreachable — which is the vacuous green the
+			// red check exists to prevent.
+			Provenance: Provenance{AIState: aistate.NotAsked},
 		}
 	}
 	if _, err := BuildEvent(base(Box{})); err == nil {
@@ -70,7 +77,8 @@ func TestTheBoxSurvivesTheBodyUnchanged(t *testing.T) {
 	in := EventInput{
 		EventTypeGUID: "t", SourceGUID: "g", At: time.Now(), Tag: "aicap-alarm-abc",
 		Class: "motion", Value: "motion", Confidence: 0.5, RuleName: "alarm-l",
-		Box: Box{Top: 120, Left: 200, Bottom: 460, Right: 520},
+		Box:        Box{Top: 120, Left: 200, Bottom: 460, Right: 520},
+		Provenance: Provenance{AIState: aistate.NotAsked},
 	}
 	body, err := BuildEvent(in)
 	if err != nil {

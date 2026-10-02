@@ -157,7 +157,7 @@ func (w *Writer) Write(ctx context.Context, opts WriteOptions) (Accepted, error)
 	var accepted Accepted
 	err := w.Pool.InTenant(ctx, dbx.TenantContext{
 		TenantID: opts.TenantID,
-		// pp.site_ids is set, not just the tenant. site_isolation has been
+		// app.site_ids is set, not just the tenant. site_isolation has been
 		// RESTRICTIVE since migration 21, so the effective policy is tenant AND
 		// site and a transaction that named only its tenant would be refused by the
 		// WITH CHECK on the very insert it is here to make.

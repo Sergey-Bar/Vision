@@ -45,7 +45,7 @@ func runCapture(
 	rep *pocReport,
 	onReading func(detector.Reading),
 	onReady func(),
-) (*pocRun, error) {
+) error {
 	// rcr is the muxer; rec is the recording of the session. Two different
 	// things that once shared a name, which is how one of them ended up wired
 	// into only one of the two sources.
@@ -59,8 +59,10 @@ func runCapture(
 		},
 	})
 	det := detector.NewCodedSize(detector.CodedSizeOptions{Threshold: o.threshold})
-
-	run := &pocRun{report: rep}
+	// The report names the detector that is actually running, from the detector
+	// itself. Asking the frame source would name whatever that source was written
+	// to say, which is a claim about the source rather than about the run.
+	rep.Detector = det.Name()
 	// The banner waits for the first picture; see below.
 	bannerPending := onReady != nil
 	var stopReason string
@@ -131,9 +133,17 @@ func runCapture(
 			// wrong: it looks like a flag that works.
 			rec.write(nal)
 			if err := rcr.PushNAL(nal, p.DecodeTime, wall); err != nil {
+				// The recorder refused the stream. That is a failure of the
+				// capture and not a quiet scene, so it is returned rather than
+				// folded into the outcome: a run that stops here has produced no
+				// clip, no evidence and no incident, and an operator reading
+				// "the run produced no report" is sent looking for a bug in the
+				// reporting rather than at the mid-stream parameter-set change
+				// that actually stopped it.
 				rep.Degradations = append(rep.Degradations, "elementary stream: "+err.Error())
 				stopReason = "the recorder refused the stream: " + err.Error()
-				return run, run.finish(o, store, rcr, rep, stopReason, nil)
+				_ = finishCapture(o, store, rep, stopReason, nil)
+				return fmt.Errorf("poc: %w", err)
 			}
 		}
 
@@ -168,12 +178,9 @@ func runCapture(
 		rep.EndedAt = time.Now().UTC()
 		//nolint:nilerr // an untriggered recorder is a completed run over a quiet
 		// scene, not a failure, and the run's outcome says so
-		return run, nil
+		return nil
 	}
-	if stopReason != "" && strings.HasPrefix(stopReason, "the recorder") {
-		return run, fmt.Errorf("poc: %s", stopReason)
-	}
-	return run, run.finish(o, store, rcr, rep, stopReason, clip)
+	return finishCapture(o, store, rep, stopReason, clip)
 }
 
 // errStreamEnd is the sentinel a frame source returns at the end of its input.
@@ -184,22 +191,23 @@ func isEndOfStream(err error) bool {
 		strings.Contains(err.Error(), "EOF") || strings.Contains(err.Error(), "use of closed network connection")
 }
 
-// finish stores the clip, records the degraded observation and the incident, and
-// writes both to disk.
+// finishCapture stores the clip, records the degraded observation and the
+// incident, and writes both to disk.
 //
 // The order is the point: the clip is stored and hashed before anything claims
 // it exists, and the observation and the incident both name the stored hash, so
 // there is no way to end up with an incident citing evidence that was never
 // written.
-func (r *pocRun) finish(
+//
+// A nil clip is a run that produced no artefact to store, and it writes nothing
+// and reports nothing: the caller has already decided what that outcome means.
+func finishCapture(
 	o pocOptions,
 	store *evidence.Store,
-	rec *mp4.Recorder,
 	rep *pocReport,
 	stopReason string,
 	clip *mp4.Clip,
 ) error {
-	_ = rec
 	if clip == nil {
 		return nil
 	}
@@ -208,10 +216,9 @@ func (r *pocRun) finish(
 
 	// The declared geometry is only used for the banner; the clip's own
 	// dimensions come out of the SPS, and where the two disagree the SPS is
-	// right and the camera's description was wrong.
-	if !rep.Source.DeclaredGeometry {
-		rep.Source.DeclaredGeometry = true
-	}
+	// right and the camera's description was wrong. So the resolution printed
+	// from here on is declared geometry whatever the source said before it.
+	rep.Source.DeclaredGeometry = true
 	rep.Source.Resolution = fmt.Sprintf("%dx%d", clip.Width, clip.Height)
 
 	obj, err := store.Put(o.tenant, bytes.NewReader(clip.Data))

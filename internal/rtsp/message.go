@@ -68,13 +68,15 @@ func readResponse(br *bufio.Reader) (*Response, error) {
 	}
 
 	used := len(line) + 2
+	complete := false
 	for i := 0; i < maxHeaderLines; i++ {
 		h, err := readLine(br, maxResponseHeaderBytes)
 		if err != nil {
 			return nil, err
 		}
 		if h == "" {
-			goto done
+			complete = true
+			break
 		}
 		used += len(h) + 2
 		if used > maxResponseHeaderBytes {
@@ -86,9 +88,10 @@ func readResponse(br *bufio.Reader) (*Response, error) {
 		}
 		resp.Header[strings.TrimSpace(h[:colon])] = strings.TrimSpace(h[colon+1:])
 	}
-	return nil, fmt.Errorf("%w: more than %d header lines", ErrMalformedResponse, maxHeaderLines)
+	if !complete {
+		return nil, fmt.Errorf("%w: more than %d header lines", ErrMalformedResponse, maxHeaderLines)
+	}
 
-done:
 	if n, err := strconv.Atoi(resp.Get("Content-Length")); err == nil && n > 0 {
 		if n > maxResponseHeaderBytes {
 			return nil, fmt.Errorf("%w: body of %d bytes exceeds the bound", ErrMalformedResponse, n)

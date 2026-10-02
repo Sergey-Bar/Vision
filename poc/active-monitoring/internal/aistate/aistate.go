@@ -72,3 +72,34 @@ func Valid(s string) bool {
 // zero detections per frame as though the road were empty — which is the most
 // expensive sentence this module can print.
 func IsAnswered(s string) bool { return s == Asked || s == NoObjects }
+
+// BlindnessStates are the three of the five that mean WE COULD NOT DECIDE:
+// Degraded, NotAsked and CannotTell.
+//
+// They live here rather than beside the Analytics Event Type map because they are
+// vocabulary and the map is configuration. Three packages need to ask "is this a
+// blindness?" — the wire client, which refuses to type an event it cannot name;
+// the config package, which refuses to register a type for a state that is not one;
+// and the report, which counts them. A predicate declared twice drifts, and a drift
+// here is not a compile error: it is an absence arriving in the VMS wearing a
+// detection's event type, which is the single most expensive confusion this module
+// has.
+//
+// `NoObjects` is deliberately NOT in this set, and that exclusion is the load-bearing
+// decision rather than an oversight. It is a negative ANSWER: the model ran, parsed,
+// and the array was empty. It already drives the `false_positive` verdict on the
+// detection's own event, so giving it its own Analytics Event Type would produce an
+// alarm that fires whenever a camera sees nothing — which is the alarm fatigue this
+// product exists to remove.
+var BlindnessStates = []string{Degraded, NotAsked, CannotTell}
+
+// IsBlindness reports whether a state is one of the three that mean we could not
+// decide.
+func IsBlindness(s string) bool {
+	for _, k := range BlindnessStates {
+		if k == s {
+			return true
+		}
+	}
+	return false
+}

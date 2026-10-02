@@ -35,12 +35,18 @@ var epoch = time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC)
 
 const siteID = "site-fixture"
 
+// The routes a scenario's `kind` names.
+//
+// These are the adapter's own route paths, which are the documented
+// `/api/rest/v1/...` forms — see docs/vendor/milestone/route-audit.md §1. A
+// fixture's `kind` is matched against `Route.Path`, so the two have to be the
+// same string or a scenario replays as an empty feed rather than as an error.
 const (
-	eventsRoute         = "/api/v1/Events"
-	alarmsRoute         = "/api/v1/Alarms"
-	bookmarksRoute      = "/api/v1/Bookmarks"
-	servletsRoute       = "/api/v1/Servlets"
-	resourceGroupsRoute = "/api/v1/ResourceGroups"
+	eventsRoute         = "/api/rest/v1/events"
+	alarmsRoute         = "/api/rest/v1/Alarms"
+	bookmarksRoute      = "/api/rest/v1/bookmarks"
+	servletsRoute       = "/api/rest/v1/Servlets"
+	resourceGroupsRoute = "/api/rest/v1/ResourceGroups"
 )
 
 // spec pairs a scenario with the behaviours it exists to prove. A scenario whose
@@ -234,7 +240,12 @@ func bookmarkAndMetadata() fixture.Scenario {
 	sc := base("bookmark-and-metadata",
 		"A bookmark and a metadata event, which are the two evidence-fetch triggers.")
 	sc.Events = []fixture.Event{
-		env(bookmarksRoute, 0, map[string]any{
+		// The method is POST because bookmarks are not readable with a GET in this
+		// API (`bookmarks-rest-v1.openapi.yaml:45-46`), so a fixture that recorded
+		// this read as a GET would state a method the vendor documents as returning
+		// nothing. The envelope shape below is still the platform's assumed one and
+		// is flagged as such in the manifest.
+		bookmarkRead(bookmarksRoute, 0, map[string]any{
 			"Id": "bm-0001", "Type": "Bookmark", "Timestamp": ts(0),
 			"Source": "Entrance Camera 01 [CAM-001]", "Message": "Contractor arrival",
 		}),
@@ -245,6 +256,17 @@ func bookmarkAndMetadata() fixture.Scenario {
 		}),
 	}
 	return sc
+}
+
+// bookmarkRead is one recorded bookmark-search read.
+//
+// The only difference from env is the method, and it is a named helper rather than
+// a field assignment at the call site so that a reader can see why this one event
+// is a POST.
+func bookmarkRead(kind string, offsetMS int64, body map[string]any) fixture.Event {
+	e := env(kind, offsetMS, body)
+	e.Method = "POST"
+	return e
 }
 
 func recordingState() fixture.Scenario {

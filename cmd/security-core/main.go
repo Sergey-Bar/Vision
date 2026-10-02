@@ -169,9 +169,12 @@ func run() error {
 		// marked the cookie Secure over a plaintext listener instead of letting
 		// config refuse the pairing. config refuses Secure=false on anything but a
 		// loopback listener, so this cannot silently hand a session to the network.
-		Secure:         cfg.SessionCookieSecure,
-		Pool:           pool,
-		HealthCheck:    readinessChecks(aiClient, store),
+		Secure:      cfg.SessionCookieSecure,
+		Pool:        pool,
+		HealthCheck: readinessChecks(aiClient, store),
+		// So the health endpoint can say which SLO objectives are not being met,
+		// by name. The pipeline is what evaluates them; this is the read side.
+		Metrics:        registry,
 		BehindProxy:    cfg.BehindProxy,
 		TrustedProxies: cfg.TrustedProxyCIDRs,
 	}

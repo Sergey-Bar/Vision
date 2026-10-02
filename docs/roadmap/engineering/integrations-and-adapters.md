@@ -149,9 +149,9 @@ will trip over, and finding them during the second adapter means the abstraction
 did not hold.
 
 **(a) `Adapter.Poll` never touches the two non-paginated routes.**
-`/api/v1/Events/{eventId}` and `/api/v1/System/Time` are `Paginated: false`
+`/api/rest/v1/events/{id}` and `/api/rest/v1/System/Time` are `Paginated: false`
 (`routes.go:72-76`, `100-105`). The filter at `adapter.go:132-137` skips them.
-Consequence: the `/api/v1/System/Time` route exists to "measure clock drift
+Consequence: the `/api/rest/v1/System/Time` route exists to "measure clock drift
 between the VMS and this host", and there is **no code path in the tree that
 calls it**, so `device_clocks` (`migrations/0003_events_and_graph.expand.sql`) is
 only ever populated by whatever a future clock worker writes. `normalize.loadDrift`
@@ -254,7 +254,7 @@ onto the existing set, or the platform declines to call it an event type.
 |---|---|---|---|
 | `motion` | `Motion`, `MotionDetected` | `tt:Motion` in Profile T | — |
 | `analytics` | `Analytics`, and — by assumption — `ObjectDetected`, `LineCrossed`, `Loitering` (`adapter.go:326`) | `tt:Analytics` Profile M: people, vehicles, licence plates, object counters | — |
-| `alarm.created` | `Alarm` with `AlarmState` default; also `/api/v1/Alarms` | `tt:StateEvent` entering an alarm state | — |
+| `alarm.created` | `Alarm` with `AlarmState` default; also `/api/rest/v1/Alarms` | `tt:StateEvent` entering an alarm state | — |
 | `alarm.acknowledged` | `Alarm` + `AlarmState ∈ {acknowledged, acked}` | same | — |
 | `alarm.closed` | `Alarm` + `AlarmState ∈ {closed, resolved}` | same | — |
 | `device.camera_offline` | `Servlets.State` / `ServiceState` with state ∈ {offline, unavailable, disconnected} | Profile T `tt:Source` / device heartbeat loss | — |
@@ -262,7 +262,7 @@ onto the existing set, or the platform declines to call it an event type.
 | `device_state` | same, anything else | same | reader, panel, environmental, BMS health |
 | `recording.started` | `RecordingStarted` | `tt:Recording` (not a standard ONVIF event; a configuration state) | — |
 | `recording.stopped` | `RecordingStopped` | as above | — |
-| `bookmark` | `Bookmark`, `/api/v1/Bookmarks` | — (no ONVIF equivalent; a platform concept) | — |
+| `bookmark` | `Bookmark`, `/api/rest/v1/bookmarks` | — (no ONVIF equivalent; a platform concept) | — |
 | `metadata` | `Metadata` | `tt:Analytics` metadata frames | — |
 | `access.granted` | `AccessGranted` | — | reader grant, credential presented and accepted |
 | `access.denied` | `AccessDenied` | — | reader denial, bad credential, anti-passback |
@@ -332,7 +332,7 @@ has a default that is wrong if left implicit.
    vendor's priority is currently only reachable through `payload.vendor`. See
    §3.4.
 6. **No canonical zone concept with a vendor identity.** `routes.go:91-95` says
-   `/api/v1/ResourceGroups` is "zone-equivalent topology. Mapped onto the ZONE
+   `/api/rest/v1/ResourceGroups` is "zone-equivalent topology. Mapped onto the ZONE
    graph nodes" — but `normalize.Input.ZoneID` is resolved by the *caller*, and
    the adapter's `toRecord` never produces one. Zone resolution does not exist
    yet at all, which blocks every rule in the production bundle that filters on
@@ -360,11 +360,11 @@ of the tree be diffed against a second adapter with no behavioural change."
 | 5 | **Vendor string reaching a rule as identity** | `field.path: vendor.Message` (which the shipped bundle does, twice) | A rule's `field.path` must resolve into the *canonical* half of `canonicalPayload` (`normalize.go:314-326`), which is five keys plus `unregisteredDevice`. Anything under `vendor` is untrusted vendor text | **PARTIAL.** `validFieldPath` (`semantic.go:337-343`) checks the *shape* of the path, not which half it addresses. **Recommended:** the semantic validator refuses any `field.path` whose first segment is `vendor`, with a diagnostic naming the canonical replacement. See §3.5. |
 | 6 | **Vendor device identity as a primary key** | `SourceDeviceRef` matching "Entrance Camera 01 [CAM-001]" being stored as `device_id` | The adapter emits an *opaque* `source_device_ref`; the caller resolves it to a registered `device_id`; an unresolvable reference stays empty and the event is marked `unregisteredDevice: true` (`normalize.go:321-325`) — "unattributable rather than attributed to something guessed" | **EXISTS in the adapter** (`sourceDeviceRef`, `adapter.go:95-110`, with the explicit refusal to treat a bare human-readable label as an id). **MISSING above it:** the resolver. No code maps `source_device_ref` → `device_id`; `normalize.Input.DeviceID` is set by a caller that does not exist yet. |
 | 7 | **Vendor event-type spelling in a bundle** | `eventType: [MotionDetected]` | `KnownEventTypes` + `knownEventType` (`rules/bundle.go:294`), error code `unknown_event_type` (`semantic.go:248-256`): "a rule that can never match is a rule an operator believes is running" | **EXISTS.** Plus the JSON Schema enum, so a bundle is refused at parse time too. `TestUnknownEventTypeIsRejected` (`compile_test.go:224`). |
-| 8 | **Vendor credential or host material** | A committed fixture containing a MAC address, a person image, an absolute path, or an unexpected header | Sanitize at capture time by `internal/fixture/sanitize.go`; keep only allow-listed headers (`fixture.go:154-159` rejects a non-allow-listed one); `/api/v1/System/UserGroups` is used for "camera identity only" (`routes.go:61-62`) | **EXISTS** and is enforced in the fixture format itself. `../security/trust-and-security-program.md` §3.7 is the owning policy. |
+| 8 | **Vendor credential or host material** | A committed fixture containing a MAC address, a person image, an absolute path, or an unexpected header | Sanitize at capture time by `internal/fixture/sanitize.go`; keep only allow-listed headers (`fixture.go:154-159` rejects a non-allow-listed one); `/api/rest/v1/System/UserGroups` is used for "camera identity only" (`routes.go:61-62`) | **EXISTS** and is enforced in the fixture format itself. `../security/trust-and-security-program.md` §3.7 is the owning policy. |
 | 9 | **Vendor error string as an alert** | "Milestone returned 500" paging an operator at 03:00 | Typed errors, per-feed isolation, and an explicit `adapter_feed_error` record type the console can group rather than surface | **EXISTS** (`adapter.go:145-153`, `Parse`'s status switch at `adapter.go:192-200`). `TestFeedFailureIsIsolated` (`adapter_test.go:208`). |
 | 10 | **Vendor route list in the core** | A `switch route.Path` in `internal/api` or `internal/incidents` | Routes are adapter data; the core never names a path. The core knows `integration_id` and nothing else about the source | **EXISTS structurally.** `rg 'milestone\.' --glob '*.go'` outside the package returns only `tools/fixturegen`, `cmd/securityctl/rules_simulate_support.go`, `internal/fixture/sanitize.go` and tests. Note the last two are fixture-side, not core-side. |
 | 11 | **Vendor concepts in the schema migrations** | A `milestone_alarm_id` column, a `genetec_device` enum | SQL lives in `migrations/`, forward-only, and a schema change is a contract decision (`decisions-and-process.md` §2.3) | **EXISTS.** No vendor-named table, column or enum in `0001`–`0012`. Verified by reading the `CREATE TABLE`/`CREATE INDEX` inventory. |
-| 12 | **Vendor *absence* becoming a fact** | A 404 from `/api/v1/ResourceGroups` recorded as "this site has no zones" | A not-deployed feed returns no records at all (`adapter.go:169-172`, `179-181`); absence of a feed is not evidence about the site | **EXISTS.** Worth a test at M4 for every new route. |
+| 12 | **Vendor *absence* becoming a fact** | A 404 from `/api/rest/v1/ResourceGroups` recorded as "this site has no zones" | A not-deployed feed returns no records at all (`adapter.go:169-172`, `179-181`); absence of a feed is not evidence about the site | **EXISTS.** Worth a test at M4 for every new route. |
 
 ### 3.3 The three highest-value tests that do not exist
 
@@ -459,11 +459,11 @@ source-native state."*
 
 | Capability | M1 (now → 2027-03) | M2 (2027 Q2–Q3) | M3 (2027 Q4 → 2028 Q1) | M4 (2028 Q2–Q4) |
 |---|---|---|---|---|
-| **Route coverage** | 8 assumed routes, all `Unverified:true`. 6 paginated feeds polled. 2 non-paginated routes unpolled. `securityctl adapter probe` — **referenced at `routes.go:16` and does not exist**; `newRootCommand` (`cmd/securityctl/main.go:53-69`) registers no `adapter` command | Probe becomes a real command; each confirmed route loses its `Unverified` flag; a test asserts the unverified list shrinks | Same; plus the `Servlets` route extended to cover maintenance state | 8 vendors × their event surfaces. `Unverified` per route per vendor, which is where the flag earns its keep |
-| **Evidence retrieval** | **Does not exist.** `routes.go:67-69` names `ImagePath` and `VideoRecordingStartTime` as assumed fields; nothing reads them. `fetch_evidence` is a legal dispatch type (`rules/bundle.go:307`) and a legal queue (`jobs.QueueEvidenceFetch`) and no producer or worker exists | **The M2 blocker.** Retrieval design in `ai-and-data.md` §5; adapter gains `FetchSnapshot`, `FetchClip`, `ProbeClipRange`. Clips need a start *and* end, and a VMS that offers only "clip covering the alarm" makes the end time a vendor concept that must be normalised | Evidence-completeness measurement; recording-extension as a fetched artifact | Per-vendor clip semantics, and ONVIF `Recording` search |
+| **Route coverage** | 10 routes: 9 in `Routes` plus the bookmark write-back, all `Unverified:true`. 6 paginated feeds polled, one of them — bookmarks — read over `POST ?task=searchTime` because a GET cannot retrieve them. **Every route has now been audited against Milestone's published documents** (`docs/vendor/milestone/route-audit.md`): five were wrong and are corrected, five the documents cannot answer (row 10 answers the resource but never shows a body), and `route_audit_test.go` gates both directions. The tenth route, `GET /eventTypes`, is a read but **not a feed**: the event `type` GUID is resolved per site from it, name-based and never defaulted, because the GUIDs are per-site configuration (`docs/vendor/milestone/route-audit.md` §2.8). The alias table on top of it is still undecided and is not writable until a probe has shown a real site's names. The probe below is still outstanding. `securityctl adapter probe` — **referenced at `routes.go:16` and does not exist**; `newRootCommand` (`cmd/securityctl/main.go:53-69`) registers no `adapter` command | Probe becomes a real command; each confirmed route loses its `Unverified` flag; a test asserts the unverified list shrinks | Same; plus the `Servlets` route extended to cover maintenance state | 8 vendors × their event surfaces. `Unverified` per route per vendor, which is where the flag earns its keep |
+| **Evidence retrieval** | **Does not exist.** The adapter used to *assume* `ImagePath` and `VideoRecordingStartTime` on an event; the audit shows neither field exists in the published Events API (`docs/vendor/milestone/route-audit.md` §3 — they belong to the older XProtect Event Manager shape, not to this one), so there is no assumed field to read, let alone a fetch. `fetch_evidence` is a legal dispatch type (`rules/bundle.go:307`) and a legal queue (`jobs.QueueEvidenceFetch`) and no producer or worker exists | **The M2 blocker.** Retrieval design in `ai-and-data.md` §5; adapter gains `FetchSnapshot`, `FetchClip`, `ProbeClipRange`. Clips need a start *and* end, and a VMS that offers only "clip covering the alarm" makes the end time a vendor concept that must be normalised | Evidence-completeness measurement; recording-extension as a fetched artifact | Per-vendor clip semantics, and ONVIF `Recording` search |
 | **Actions** | None. `Action` proto and `ActionStatus` exist; no dispatcher | None | First controlled set: bookmark, snapshot, recording extension, incident create/assign, notification. Idempotent, authorised, logged before and after, with a `kill -9` test at the action stage | PTZ presets, in the same shape. Every action idempotency key derived from `(incident, action_type, target, window)` |
-| **Streaming** | None. Poll only | None | None | Optional. `Query.Cursor` exists (`routes.go:156`) and nothing uses it; `Query.Limit` is hard-coded to 200 (`adapter.go:167`) |
-| **Clock** | `/api/v1/System/Time` declared, never called (§1.6a) | Clock sampling implemented; `device_clocks` populated from real sources; `DriftBand` becomes real | — | Per-vendor clock semantics are the hard part, not the protocol |
+| **Streaming** | None. Poll only | None | None | Optional. `Query.Cursor` is now the documented continuation: `_links.next` from the body, or a `Next-Cursor` header, followed until exhausted; `Query.Since` maps to the `time=gt:'…'` filter and `Query.Limit` to `size`. `Query.Limit` is still hard-coded to 200 per poll |
+| **Clock** | `/api/rest/v1/System/Time` declared, never called (§1.6a) | Clock sampling implemented; `device_clocks` populated from real sources; `DriftBand` becomes real | — | Per-vendor clock semantics are the hard part, not the protocol |
 | **Device/zone resolution** | `sourceDeviceRef` exists; the resolver does not | Resolver, so `zone.pathPrefix` rules work on a real site | — | Per-vendor topology mapping (`ResourceGroups`, ONVIF `tt:Network`/entity trees) |
 
 ### 4.3 The M2 evidence-retrieval blocker, stated as a dependency

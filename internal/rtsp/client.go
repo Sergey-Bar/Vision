@@ -34,9 +34,12 @@ type Options struct {
 	// forever, and a request with no deadline is exactly that.
 	Timeout time.Duration
 	// Transport names the transport to carry the session. Empty takes
-	// TransportTCPInterleaved, the only one this build carries.
+	// TransportTCPInterleaved, the only one this build carries. Anything else is
+	// refused by name.
 	Transport string
-	// Transport is refused by name for anything else.
+	// MaxNALBytes bounds one depacketised NAL unit and one interleaved frame
+	// (which is read at twice this bound, because a frame carries a partial unit
+	// plus its own header).
 	MaxNALBytes int
 }
 
@@ -70,7 +73,12 @@ type Client struct {
 	cseq  int
 	desc  *Description
 	dep   *Depacketizer
-	state string
+	state State
+	// rx is the buffer an interleaved frame is read into. It is reused for every
+	// packet: a 24/7 session at 25 fps and a few hundred packets a second is a
+	// few hundred allocations a second that buy nothing, and the depacketiser
+	// copies every byte it keeps.
+	rx []byte
 }
 
 // Dial connects and authenticates, but starts no media.
@@ -100,7 +108,7 @@ func Dial(ctx context.Context, rawURL string, opts Options) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("rtsp: dial %s: %w", u.Address(), err)
 	}
-	c := &Client{opts: o, url: u, conn: conn, br: bufio.NewReaderSize(conn, 64<<10), state: "connected"}
+	c := &Client{opts: o, url: u, conn: conn, br: bufio.NewReaderSize(conn, 64<<10), state: StateConnected}
 	return c, nil
 }
 
@@ -110,10 +118,24 @@ func (c *Client) URL() *URL { return c.url }
 // Description returns what the camera described, once Describe has run.
 func (c *Client) Description() *Description { return c.desc }
 
-// State names where the session is, for a status line. It is a closed
-// vocabulary because it is displayed, and a displayed string nobody can
-// enumerate is a string nobody can act on.
-func (c *Client) State() string { return c.state }
+// State is where a session is. It is a closed vocabulary because it is
+// displayed, and a displayed string nobody can enumerate is a string nobody can
+// act on.
+type State string
+
+const (
+	// StateConnected is a session that has dialled and authenticated but carries
+	// no media yet.
+	StateConnected State = "connected"
+	// StatePlaying is a session whose PLAY has been answered.
+	StatePlaying State = "playing"
+	// StateClosed is a session that has been torn down or whose connection is
+	// gone.
+	StateClosed State = "closed"
+)
+
+// State names where the session is, for a status line.
+func (c *Client) State() State { return c.state }
 
 func (c *Client) authHeaders() []string {
 	if c.opts.User == "" {
@@ -239,7 +261,7 @@ func (c *Client) Play(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
-	c.state = "playing"
+	c.state = StatePlaying
 	c.dep = NewDepacketizer(c.opts.MaxNALBytes)
 	return nil
 }
@@ -252,31 +274,30 @@ func joinControl(u *URL, control string) string {
 	base := strings.TrimSuffix(u.Path, "/")
 	switch {
 	case strings.HasPrefix(control, "/"):
-		return (&urlScheme{Host: u.Address(), Path: control}).String()
+		return (&controlURI{Host: u.Address(), Path: control}).String()
 	case strings.Contains(control, "=") || strings.HasPrefix(control, "trackID"):
 		// A trackID or a session-level control belongs to the base URL, and
 		// cameras reject a SETUP that appends it to the track path.
-		return (&urlScheme{Host: u.Address(), Path: base}).String()
+		return (&controlURI{Host: u.Address(), Path: base}).String()
 	default:
-		return (&urlScheme{Host: u.Address(), Path: base + "/" + control}).String()
+		return (&controlURI{Host: u.Address(), Path: base + "/" + control}).String()
 	}
 }
 
 // KeepAlive holds the session open. Cameras drop an RTSP session that has said
 // nothing for a timeout, and a 24/7 stream with a dropped session is a stream
 // that stops recording and says nothing about it.
+//
+// A refusal is deliberately not a session failure and deliberately not reported:
+// a camera that does not implement GET_PARAMETER is common enough that a 501
+// here says nothing about the media, and the next read finds out within a
+// timeout, which is the honest signal.
 func (c *Client) KeepAlive(ctx context.Context) error {
 	headers := []string{}
 	if c.desc != nil && c.desc.Session != "" {
 		headers = append(headers, "Session: "+c.desc.Session)
 	}
-	//nolint:nilerr // a refusal here is deliberately not a session failure; see below
-	if _, err := c.do(ctx, "GET_PARAMETER", "", headers); err != nil {
-		// A camera that does not implement GET_PARAMETER is common enough that
-		// a refusal here is not a session failure; the next read will find out
-		// within a timeout, which is the honest signal.
-		return nil
-	}
+	_, _ = c.do(ctx, "GET_PARAMETER", "", headers)
 	return nil
 }
 
@@ -284,8 +305,13 @@ func (c *Client) KeepAlive(ctx context.Context) error {
 //
 // RTCP is consumed and discarded: this client sends no receiver reports, and a
 // report it never sends is one it cannot be judged on.
+//
+// The returned packet's payload points into a buffer this client reuses, so it
+// is valid until the next call. Everything downstream of here copies what it
+// keeps - the depacketiser copies each single unit, each aggregated unit and
+// every fragment it reassembles - so nothing retains it.
 func (c *Client) ReadPacket() (*Packet, error) {
-	if c.state != "playing" {
+	if c.state != StatePlaying {
 		return nil, fmt.Errorf("%w: session is %q", ErrNotRTSP, c.state)
 	}
 	if err := c.conn.SetReadDeadline(time.Now().Add(c.opts.Timeout)); err != nil {
@@ -312,7 +338,10 @@ func (c *Client) ReadPacket() (*Packet, error) {
 		if length > c.opts.MaxNALBytes*2 {
 			return nil, fmt.Errorf("%w: interleaved frame of %d bytes", ErrNALTooLarge, length)
 		}
-		payload := make([]byte, length)
+		if cap(c.rx) < length {
+			c.rx = make([]byte, length)
+		}
+		payload := c.rx[:length]
 		if _, err := io.ReadFull(c.br, payload); err != nil {
 			return nil, err
 		}
@@ -362,7 +391,7 @@ func (c *Client) Close() error {
 		_, _ = c.do(ctx, "TEARDOWN", "", []string{"Session: " + c.desc.Session})
 		cancel()
 	}
-	c.state = "closed"
+	c.state = StateClosed
 	err := c.conn.Close()
 	c.conn = nil
 	if errors.Is(err, net.ErrClosed) {
@@ -371,14 +400,14 @@ func (c *Client) Close() error {
 	return err
 }
 
-// urlScheme is a tiny helper so control-URI joining does not drag net/url's
+// controlURI is a tiny helper so control-URI joining does not drag net/url's
 // escaping rules into a path a camera has to accept verbatim.
-type urlScheme struct {
+type controlURI struct {
 	Host string
 	Path string
 }
 
-func (u *urlScheme) String() string {
+func (u *controlURI) String() string {
 	p := u.Path
 	if p != "" && !strings.HasPrefix(p, "/") {
 		p = "/" + p

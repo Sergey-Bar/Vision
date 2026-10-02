@@ -6,7 +6,7 @@
     {
       "name": "motion-restricted-zone",
       "file": "motion-restricted-zone.json",
-      "hash": "edbf40cca9004fb5e9f52c4a4762d1f959e51afcc6744565f0612d25302c076b",
+      "hash": "4772ca8268283ccb2c60482be35e6b62f97908abf38aa5ffbaf88f9cf916e5f3",
       "events": 3,
       "covers": [
         "motion",
@@ -18,7 +18,7 @@
     {
       "name": "analytics-object-crossed",
       "file": "analytics-object-crossed.json",
-      "hash": "833e74c7bc8b47fc9a9e73dbd6503d35146a5e0280adda213f59e6121ec47966",
+      "hash": "ef559948d5ef73c1c0a1790f9395f2a37e132023ed4919c29d91a302686b10c1",
       "events": 2,
       "covers": [
         "analytics"
@@ -27,7 +27,7 @@
     {
       "name": "alarm-lifecycle",
       "file": "alarm-lifecycle.json",
-      "hash": "ce6beb8e9b9ec51d49cca826aac5277f1d26685bd3629625862218399b871872",
+      "hash": "86e9092b0ef36d2a4741a35c7695aafa27129a6c808762b1835ab71f4046c68e",
       "events": 3,
       "covers": [
         "alarm.created",
@@ -38,7 +38,7 @@
     {
       "name": "camera-offline-online",
       "file": "camera-offline-online.json",
-      "hash": "8c82b85c834f3fab97c4de034bf4d7c28ae58f228ac9d0672926573526ad87b9",
+      "hash": "a888a47acd4c9f15448546030605e85e4c5c641e4a4d360ad9a1a46be4ba3009",
       "events": 2,
       "covers": [
         "device.camera_offline",
@@ -48,7 +48,7 @@
     {
       "name": "bookmark-and-metadata",
       "file": "bookmark-and-metadata.json",
-      "hash": "c8835f585a1bbaf8495d4346f163cc2288a62a53ca19a0b1cbf20ddeae2dcc62",
+      "hash": "ee6c5be3151ef2bd6151a8cb12108086a9a81381715282e1cf9814f0941c4819",
       "events": 2,
       "covers": [
         "bookmark",
@@ -58,7 +58,7 @@
     {
       "name": "recording-state",
       "file": "recording-state.json",
-      "hash": "cae8429f487e19f001813415a20eb7a2f267c9f59e7678aac331f5148c6e2540",
+      "hash": "b1ff07d15f2ea8eab68adc97092c0731732a70398426141d87bbbb8f80b0cb7b",
       "events": 2,
       "covers": [
         "recording.started",
@@ -68,7 +68,7 @@
     {
       "name": "malformed-envelopes",
       "file": "malformed-envelopes.json",
-      "hash": "ebbe797f97c41c65b14ba3833a4dacc4841ebf6af70f95b85a20d8ec913da404",
+      "hash": "a00d5cf0b2868df7661502dfae5f216b3ed393911969fb43454280d2d8a84e33",
       "events": 4,
       "covers": [
         "malformed",
@@ -81,7 +81,7 @@
     {
       "name": "duplicate-delivery",
       "file": "duplicate-delivery.json",
-      "hash": "9fb2dea98b431f758b777110f7c3342f0c342dc76aa6df710e92d0d1e9653353",
+      "hash": "eb3e30d5c8dc9b307d46e14db6697a2b0ab2847249c78fe7df15c547742b864a",
       "events": 2,
       "covers": [
         "duplicate"
@@ -90,7 +90,7 @@
     {
       "name": "delayed-arrival",
       "file": "delayed-arrival.json",
-      "hash": "f6aecaf70c09e6f0b8b6cae5a79df1795c84bf2c3561ad8106cae01b554724fc",
+      "hash": "b45b3274d7ab79a848b1a263194e08b70bc6d6af205d809debd86a21249ce88b",
       "events": 1,
       "covers": [
         "delayed",
@@ -100,7 +100,7 @@
     {
       "name": "out-of-order-arrival",
       "file": "out-of-order-arrival.json",
-      "hash": "e2b22dc81be77ff23a30f4d83e5439190febca281c5a2a91d0be57d8c208f8f0",
+      "hash": "e3ef5596e318f87c0d207da7ee7afdd61e764ae5a0b53363c0b39d9eafd6e694",
       "events": 2,
       "covers": [
         "out-of-order"
@@ -109,7 +109,7 @@
     {
       "name": "missing-camera",
       "file": "missing-camera.json",
-      "hash": "c48a6c2bad53ecc944fe12d42669c0cd6733e27aca93d3c5f13c61fa4cf48825",
+      "hash": "d68955358445d088f1f59ea1ee182d18ffa38cd7d1c0642b2de23551be05672a",
       "events": 1,
       "covers": [
         "missing-camera",
@@ -119,7 +119,7 @@
     {
       "name": "reconnect-replay",
       "file": "reconnect-replay.json",
-      "hash": "d0552cd5814f4b1bd4adf2febe4062f353df3f5784025b085b1e758bdbc970bd",
+      "hash": "176bd3bae16f81c17c0e42f9e966d808104513bb35fcfe91bf00b06f645db55a",
       "events": 4,
       "covers": [
         "reconnect",

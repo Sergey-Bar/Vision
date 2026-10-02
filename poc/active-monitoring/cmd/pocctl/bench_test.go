@@ -27,6 +27,14 @@ import (
 // removing it left the suite GREEN. A control no test watches is a comment, and the
 // first thing this gate caught was its own table.
 func TestARunBenchmarkRefusesToOpenAModel(t *testing.T) {
+	// `refusesToOpenModel` reads SP_POC_ORT_LIB from the ENVIRONMENT on purpose —
+	// that is RC-17 — so this test has to pin that variable or it fails on every
+	// machine where the runtime is actually installed, which is every machine this
+	// gate is written for. A test that only passes on an unconfigured machine is a
+	// test that measures the machine rather than the code.
+	t.Setenv("SP_POC_ORT_LIB", "")
+	t.Setenv("SP_POC_DET_MODEL", "")
+
 	// Nothing named: nothing to refuse.
 	if refusesToOpenModel("", "") {
 		t.Error("a benchmark with no model and no library named thinks it was asked to open one")
@@ -56,6 +64,18 @@ func TestARunBenchmarkRefusesToOpenAModel(t *testing.T) {
 	// refusal for a configuration that has none — which is a gate that lies.
 	if refusesToOpenModel("   ", "") {
 		t.Error("a whitespace-only library path was treated as a named library")
+	}
+
+	// And the ambient case the comment above describes, asserted rather than assumed:
+	// a library in the shell is a library named, with no flag anywhere.
+	t.Setenv("SP_POC_ORT_LIB", `models\onnxruntime.dll`)
+	if !refusesToOpenModel("", "") {
+		t.Error("a library in the environment did not trigger the refusal, which is the whole reason the " +
+			"predicate reads the environment and not only the flags")
+	}
+	t.Setenv("SP_POC_ORT_LIB", "   ")
+	if refusesToOpenModel("", "") {
+		t.Error("a whitespace-only library in the environment was treated as a named library")
 	}
 }
 

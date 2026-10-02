@@ -58,7 +58,18 @@ __pycache__/
 # The agent's own workspace state. Not part of the product: it is machine-local,
 # it changes on every run, and committing it makes every diff noisy for whoever
 # reads the repository.
-.kilo/
+#
+# The exclusion is `.kilo/*` rather than `.kilo/` so that `.kilo/skills/` can be
+# un-ignored below. Git does not descend into an excluded directory, so a blanket
+# `.kilo/` makes the negation impossible and the repo-local skills would exist
+# only on this machine.
+#
+# `.kilo/skills/` is the exception because a skill in it is not workspace state.
+# It encodes an invariant from AGENTS.md as a procedure, and `AGENTS.md` reserves
+# changing an invariant to a human who reads the diff. A skill that is not
+# committed is a skill no human ever signs off on.
+.kilo/*
+!.kilo/skills/
 
 # Python bytecode from the AI runtime tests
 __pycache__/

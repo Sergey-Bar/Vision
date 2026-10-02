@@ -166,8 +166,10 @@ func runPoc(ctx context.Context, env *command.Env, args []string) error {
 		TenantID:      o.tenant,
 		SiteID:        o.site,
 		Source:        src.source(),
-		Detector:      src.detectorName(),
-		StartedAt:     time.Now().UTC(),
+		// Detector is left to runCapture, which names the detector it actually
+		// built. A name written here would be a claim about this file rather
+		// than about the run.
+		StartedAt: time.Now().UTC(),
 		Limitations: []string{
 			"no AI plane is configured in this build, so the observation is degraded and the incident is decided without one",
 			"the detector is the decoder-free coded-size reference: it measures change, not what changed",
@@ -187,7 +189,7 @@ func runPoc(ctx context.Context, env *command.Env, args []string) error {
 			printBanner(env, rep, o)
 		}
 	}
-	run, runErr := runCapture(ctx, o, recorder, src, store, rep, onReading, onReady)
+	runErr := runCapture(ctx, o, recorder, src, store, rep, onReading, onReady)
 	if recorder.stopped != "" {
 		rep.Degradations = append(rep.Degradations, "recording: "+recorder.stopped)
 	}
@@ -196,5 +198,5 @@ func runPoc(ctx context.Context, env *command.Env, args []string) error {
 	if !o.asJSON && rep.Pictures == 0 {
 		printBanner(env, rep, o)
 	}
-	return reportPoc(env, o, rep, run, runErr)
+	return reportPoc(env, o, rep, runErr)
 }

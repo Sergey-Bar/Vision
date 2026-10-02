@@ -112,6 +112,21 @@ func TestValidateRefRejectsEveryTraversalForm(t *testing.T) {
 		"..",
 		".",
 		"a/./b",
+		// A segment beginning with a colon.
+		//
+		// These two are here because nothing else in the file covers them, and
+		// without them the segment regex is untested: `unsafeSegment` is the only
+		// check that rejects them (no backslash, not absolute, no volume name, and
+		// `strings.Trim(segment, ".")` is not empty), so a mutation that neuters it
+		// leaves this whole test green. That was measured, not assumed - see the
+		// red-check table entry in scripts/verify.ps1.
+		//
+		// A colon mid-segment is deliberately NOT in this list: `a/b:stream` is
+		// accepted today, which on Windows is alternate-data-stream syntax. Whether
+		// that should be refused is a behaviour change and is recorded as an open
+		// question in docs/status.md rather than decided here.
+		":foo",
+		"a/:foo",
 		strings.Repeat("a", 600),
 	}
 	for _, ref := range bad {

@@ -327,6 +327,11 @@ func cmdRehearse(args []string) error {
 			Class: "bird", Value: "bird", Confidence: 0.9,
 			Box:      xprotect.Box{Top: 10, Left: 20, Bottom: 60, Right: 80},
 			RuleName: "rehearsal",
+			// R8: the rehearsal is about the transport and the read-back, so its
+			// fixture carries the attribution every pushed event now needs. Without
+			// it the rehearsal would fail on a refusal that has nothing to do with the
+			// fault being injected.
+			Provenance: xprotect.Provenance{AIState: ai.StateNotAsked},
 		})
 		observed := classify(err, out)
 		mark := "PASS"

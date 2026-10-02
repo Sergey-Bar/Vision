@@ -43,14 +43,14 @@ func aProbeServer(t *testing.T, answers map[string]string) milestone.Transport {
 
 func probeRoutes() []milestone.Route {
 	return []milestone.Route{
-		{Method: "GET", Path: "/api/v1/Events", Expect: "array", Unverified: true},
-		{Method: "GET", Path: "/api/v1/Bookmarks", Expect: "object", WriteBack: true, Unverified: true},
+		{Method: "GET", Path: "/api/rest/v1/events", Expect: "array", Unverified: true},
+		{Method: "GET", Path: "/api/rest/v1/bookmarks", Expect: "object", WriteBack: true, Unverified: true},
 	}
 }
 
 func TestTheProbeConfirmsWhatAnswersAndContradictsWhatDoesNot(t *testing.T) {
 	tr := aProbeServer(t, map[string]string{
-		"/api/v1/Events": `[{"Id":"1","Type":"Motion","Timestamp":"2026-07-01T12:00:00Z"}]`,
+		"/api/rest/v1/events": `[{"Id":"1","Type":"Motion","Timestamp":"2026-07-01T12:00:00Z"}]`,
 	})
 	report := milestone.Probe(context.Background(), tr, milestone.ProbeOptions{Routes: probeRoutes()})
 
@@ -62,7 +62,7 @@ func TestTheProbeConfirmsWhatAnswersAndContradictsWhatDoesNot(t *testing.T) {
 		byPath[r.Route.Path] = r
 	}
 
-	ev, ok := byPath["/api/v1/Events"]
+	ev, ok := byPath["/api/rest/v1/events"]
 	if !ok {
 		t.Fatal("the events route was not probed")
 	}
@@ -83,7 +83,7 @@ func TestTheProbeConfirmsWhatAnswersAndContradictsWhatDoesNot(t *testing.T) {
 
 	// A write-side route must be skipped, not attempted. A probe that placed a
 	// bookmark on every run would be an instrument nobody ran twice.
-	bm, ok := byPath["/api/v1/Bookmarks"]
+	bm, ok := byPath["/api/rest/v1/bookmarks"]
 	if !ok {
 		t.Fatal("the bookmark route was not reported at all")
 	}
@@ -94,7 +94,7 @@ func TestTheProbeConfirmsWhatAnswersAndContradictsWhatDoesNot(t *testing.T) {
 
 func TestTheProbeNamesAContradictionWithTheBody(t *testing.T) {
 	tr := aProbeServer(t, map[string]string{
-		"/api/v1/Events": "STATUS:500",
+		"/api/rest/v1/events": "STATUS:500",
 	})
 	report := milestone.Probe(context.Background(), tr, milestone.ProbeOptions{Routes: probeRoutes()})
 	if report.Summary.Contradicted != 1 {
@@ -104,7 +104,7 @@ func TestTheProbeNamesAContradictionWithTheBody(t *testing.T) {
 		t.Error("the report claims everything is confirmed while a route contradicted it")
 	}
 	for _, r := range report.Results {
-		if r.Route.Path == "/api/v1/Events" && r.Detail == "" {
+		if r.Route.Path == "/api/rest/v1/events" && r.Detail == "" {
 			t.Error("a contradiction with no detail; the operator needs the body to file a bug")
 		}
 	}
@@ -169,7 +169,7 @@ func TestAnUnreachableRouteIsNotTheSameAsAContradictedOne(t *testing.T) {
 // looks right.
 func TestTheProbeNeverPromotesARoute(t *testing.T) {
 	tr := aProbeServer(t, map[string]string{
-		"/api/v1/Events": `[{"Id":"1","Type":"Motion"}]`,
+		"/api/rest/v1/events": `[{"Id":"1","Type":"Motion"}]`,
 	})
 	before := unverifiedCount(t)
 	report := milestone.Probe(context.Background(), tr, milestone.ProbeOptions{Routes: milestone.Routes})
@@ -199,13 +199,13 @@ func unverifiedCount(t *testing.T) int {
 
 func TestTheProbeReachesTheClockRouteWhenAsked(t *testing.T) {
 	tr := aProbeServer(t, map[string]string{
-		"/api/v1/System/Time": `{"dateTime":"2026-07-01T12:00:00.000Z"}`,
+		"/api/rest/v1/System/Time": `{"dateTime":"2026-07-01T12:00:00.000Z"}`,
 	})
 	off := milestone.Probe(context.Background(), tr,
 		milestone.ProbeOptions{Routes: probeRoutes(), IncludeClock: true})
 	found := false
 	for _, r := range off.Results {
-		if r.Route.Path == "/api/v1/System/Time" {
+		if r.Route.Path == "/api/rest/v1/System/Time" {
 			found = true
 			if r.Verdict != milestone.VerdictConfirmed {
 				t.Errorf("the clock route came back %q: %s", r.Verdict, r.Detail)
@@ -220,7 +220,7 @@ func TestTheProbeReachesTheClockRouteWhenAsked(t *testing.T) {
 	// being asked is not something an instrument should do unprompted.
 	without := milestone.Probe(context.Background(), tr, milestone.ProbeOptions{Routes: probeRoutes()})
 	for _, r := range without.Results {
-		if r.Route.Path == "/api/v1/System/Time" {
+		if r.Route.Path == "/api/rest/v1/System/Time" {
 			t.Error("the clock route was probed without being asked for")
 		}
 	}
@@ -230,18 +230,18 @@ func TestAClockAnswerWithNoTimeIsContradictedNotZero(t *testing.T) {
 	// A zero clock is worse than no clock, because it looks like a measurement
 	// of 1970 and every window selected against it is a window with timestamps
 	// on it and no meaning.
-	tr := aProbeServer(t, map[string]string{"/api/v1/System/Time": `{}`})
+	tr := aProbeServer(t, map[string]string{"/api/rest/v1/System/Time": `{}`})
 	report := milestone.Probe(context.Background(), tr,
 		milestone.ProbeOptions{Routes: probeRoutes(), IncludeClock: true})
 	for _, r := range report.Results {
-		if r.Route.Path == "/api/v1/System/Time" && r.Verdict != milestone.VerdictContradicted {
+		if r.Route.Path == "/api/rest/v1/System/Time" && r.Verdict != milestone.VerdictContradicted {
 			t.Errorf("an empty clock answer was recorded as %q", r.Verdict)
 		}
 	}
 }
 
 func TestTheReportSerialisesForATicket(t *testing.T) {
-	tr := aProbeServer(t, map[string]string{"/api/v1/Events": `[{"Id":"1"}]`})
+	tr := aProbeServer(t, map[string]string{"/api/rest/v1/events": `[{"Id":"1"}]`})
 	report := milestone.Probe(context.Background(), tr, milestone.ProbeOptions{Routes: probeRoutes()})
 	raw, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
@@ -254,6 +254,52 @@ func TestTheReportSerialisesForATicket(t *testing.T) {
 		if r.String() == "" {
 			t.Error("a result renders as an empty line")
 		}
+	}
+}
+
+// The probe has to report the *body* for the routes whose purpose is to be
+// learned from a live site, and not only how many items arrived.
+//
+// `/eventTypes` is the one that needs it: a field *name* tells a human what to
+// call a column, and what the human needs is which GUIDs and names this
+// customer's installation actually uses. Neither published document shows a
+// response body, so the probe is the only evidence there will be until somebody
+// stands in front of a real server.
+func TestTheProbeReportsTheBodyAndNotOnlyAnItemCount(t *testing.T) {
+	tr := aProbeServer(t, map[string]string{
+		"/api/rest/v1/eventTypes": `[{"id":"481d4d6c-9156-4698-af7e-74b32f9e4359",
+			"name":"Motion Started","generatorType":"MIPDevice"}]`,
+	})
+	report := milestone.Probe(context.Background(), tr, milestone.ProbeOptions{
+		Routes: []milestone.Route{{Method: "GET", Path: "/api/rest/v1/eventTypes", Unverified: true}},
+	})
+	if len(report.Results) != 1 {
+		t.Fatalf("probed %d routes, want 1", len(report.Results))
+	}
+	got := report.Results[0]
+	if got.Verdict != milestone.VerdictConfirmed {
+		t.Fatalf("the vocabulary route came back %q: %s", got.Verdict, got.Detail)
+	}
+	if got.Sample == nil {
+		t.Fatal("the probe reported an item count and no body. The counts were never the " +
+			"question: the schema is documented nowhere, and the probe is the only evidence")
+	}
+	if got.Sample["name"] != "Motion Started" || got.Sample["id"] != "481d4d6c-9156-4698-af7e-74b32f9e4359" {
+		t.Errorf("the sample is %v; it has to be the vendor's own bytes for a human to read "+
+			"the identity and name fields off it", got.Sample)
+	}
+	// And it survives into the rendered line, because an operator running the
+	// probe in a terminal is the person who has to act on it.
+	if !strings.Contains(got.String(), "Motion Started") {
+		t.Errorf("the rendered result does not carry the body: %q", got.String())
+	}
+	// The serialised artifact is the thing pasted into a ticket.
+	raw, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(raw), `"sample"`) {
+		t.Errorf("the serialised result has no sample field: %s", raw)
 	}
 }
 

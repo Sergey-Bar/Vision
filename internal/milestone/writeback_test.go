@@ -50,15 +50,28 @@ func mustProbe(t *testing.T, tr milestone.Transport) milestone.ClockProbe {
 	return p
 }
 
+// A device reference in the vendor's own REST form.
+//
+// `bookmarks-rest-v1.openapi.yaml:224-235` requires `devicePath{type,id}` and
+// `events-rest-v1.reference.md:291` shows a source as `cameras/<uuid>`. The value
+// used to be the display string "Perimeter North [CAM-014]", which the documented
+// body has no field for.
+const testDeviceRef = "cameras/e028f597-c64b-4f27-bb8d-08f5cd768e1c"
+
 func validBookmark() milestone.Bookmark {
 	return milestone.Bookmark{
 		IdempotencyKey: "inc_abc123",
-		SiteRef:        "Perimeter North [CAM-014]",
+		SiteRef:        testDeviceRef,
 		Time:           time.Date(2026, 7, 1, 12, 0, 30, 0, time.UTC),
 		Label:          "Unverified change",
 		Description:    "The always-on detector reported a novelty score above the threshold.",
 	}
 }
+
+// placedBookmarkAnswer is the vendor's documented answer to a task-less bookmark
+// POST: a `bookmarkArrayBody` whose `reference` is the bookmark id
+// (`bookmarks-rest-v1.openapi.yaml:380-386`, `:408-410`).
+const placedBookmarkAnswer = `{"array":[{"header":"Unverified change","reference":"bm-1"}]}`
 
 // TestTheLiveTransportImplementsTheOptionalSurface is the assertion that the
 // seam is real: the three additions are discovered by type assertion, so a
@@ -107,7 +120,7 @@ func TestABookmarkIsAPointerNotACopyOfTheFootage(t *testing.T) {
 	var body map[string]any
 	tr := newLiveTransport(t, func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		_, _ = w.Write([]byte(`{"id":"bm-1"}`))
+		_, _ = w.Write([]byte(placedBookmarkAnswer))
 	})
 	ref, err := mustWriter(t, tr).WriteBookmark(context.Background(), validBookmark())
 	if err != nil {
@@ -123,6 +136,105 @@ func TestABookmarkIsAPointerNotACopyOfTheFootage(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), "2026-07-01T12:00:30Z") {
 		t.Errorf("the bookmark time is not the second the operator should open at: %s", raw)
+	}
+}
+
+// TestTheBookmarkBodyIsTheDocumentedOne. The body this adapter used to send
+// carried `bookmarks`, `idempotencyKey`, `deviceRef`, `time` and `label` — five
+// field names that appear nowhere in the published schema — and omitted `header`
+// and `devicePath`, which the vendor requires.
+//
+// It is worth a test that names every one of them, because "the request shape
+// looks about right" is not a thing anybody can check by eye, and because the
+// previous body's problem was invisible precisely: it was a struct with json
+// tags, and it compiled.
+func TestTheBookmarkBodyIsTheDocumentedOne(t *testing.T) {
+	var body map[string]any
+	tr := newLiveTransport(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		_, _ = w.Write([]byte(placedBookmarkAnswer))
+	})
+	if _, err := mustWriter(t, tr).WriteBookmark(context.Background(), validBookmark()); err != nil {
+		t.Fatalf("WriteBookmark: %v", err)
+	}
+
+	for _, required := range []string{"header", "devicePath", "timeTriggered"} {
+		if _, ok := body[required]; !ok {
+			t.Errorf("the bookmark body omits %q, which the vendor requires "+
+				"(bookmarks-rest-v1.openapi.yaml:424-457). Body: %v", required, body)
+		}
+	}
+	// Every field the documented schema declares, and nothing it does not.
+	declared := map[string]bool{"header": true, "description": true, "timeBegin": true,
+		"timeEnd": true, "timeTriggered": true, "reference": true, "devicePath": true}
+	for field := range body {
+		if !declared[field] {
+			t.Errorf("the bookmark body sends %q, which the published schema does not declare", field)
+		}
+	}
+	// The device is a {type,id} pair, not a string and not a display name.
+	device, ok := body["devicePath"].(map[string]any)
+	if !ok {
+		t.Fatalf("devicePath is %T, not an object: %v", body["devicePath"], body["devicePath"])
+	}
+	if device["type"] != "cameras" || device["id"] != "e028f597-c64b-4f27-bb8d-08f5cd768e1c" {
+		t.Errorf("devicePath is %v; this API names a device as {type,id}", device)
+	}
+	// And the wrapper array is gone: the documented body is one bookmark.
+	if _, present := body["bookmarks"]; present {
+		t.Error(`the body still wraps the bookmark in "bookmarks"; the documented body is a single bookmark`)
+	}
+}
+
+// TestTheWriteSendsNoTaskParameter is the decision, asserted.
+//
+// `bookmarks-rest-v1.openapi.yaml:142-161` gives `newReference` a meaning that
+// sounds like the product's ("create a new reference and trigger rules") and then
+// says the thing that decides it: "The newReference task does not create the
+// bookmark in the database." A task-less POST creates the bookmark and does not
+// trigger the vendor's rules, which is what "a pointer the operator can follow"
+// means — and triggering a customer's rules is a capability activation, which
+// AGENTS.md reserves to a human.
+func TestTheWriteSendsNoTaskParameter(t *testing.T) {
+	var got string
+	tr := newLiveTransport(t, func(w http.ResponseWriter, r *http.Request) {
+		got = r.URL.Query().Get("task")
+		_, _ = w.Write([]byte(placedBookmarkAnswer))
+	})
+	if _, err := mustWriter(t, tr).WriteBookmark(context.Background(), validBookmark()); err != nil {
+		t.Fatalf("WriteBookmark: %v", err)
+	}
+	if got != "" {
+		t.Errorf("the write sent task=%q. No task creates the bookmark without triggering the "+
+			"vendor's rules; `newReference` triggers rules and creates no bookmark", got)
+	}
+}
+
+// TestADisplayNameIsNotADeviceReference. `devicePath` is required, and a
+// required field carrying a value the vendor cannot interpret is a 400 the
+// caller has to reverse-engineer. Refusing here names the cause before any bytes
+// leave.
+func TestADisplayNameIsNotADeviceReference(t *testing.T) {
+	var reached atomic.Bool
+	tr := newLiveTransport(t, func(w http.ResponseWriter, r *http.Request) {
+		reached.Store(true)
+		_, _ = w.Write([]byte(placedBookmarkAnswer))
+	})
+	for _, ref := range []string{
+		"Perimeter North [CAM-014]",
+		"cameras/",
+		"microphones/014",
+		"cameras/not-a-uuid-but-a-path",
+		"detectors/cameras/e028f597-c64b-4f27-bb8d-08f5cd768e1c",
+	} {
+		b := validBookmark()
+		b.SiteRef = ref
+		if _, err := mustWriter(t, tr).WriteBookmark(context.Background(), b); err == nil {
+			t.Errorf("the device reference %q was accepted", ref)
+		}
+	}
+	if reached.Load() {
+		t.Error("an unresolvable device reference reached the vendor anyway")
 	}
 }
 
@@ -143,15 +255,20 @@ func TestA200WithNoIdIsNotASuccess(t *testing.T) {
 }
 
 // TestTheIdempotencyKeyTravelsInAHeaderAsWellAsTheBody: a vendor that honours
-// headers and ignores the body is exactly the case where a retry creates a
-// second bookmark, and a duplicate bookmark is an operator-visible defect.
-func TestTheIdempotencyKeyTravelsInAHeaderAsWellAsTheBody(t *testing.T) {
-	var gotKey string
-	var gotPath string
+// A vendor that honours an idempotency header and ignores everything else is
+// exactly the case where a retry creates a second bookmark, and a duplicate
+// bookmark is an operator-visible defect.
+//
+// It is now the ONLY place the key can travel: the documented body
+// (`bookmarks-rest-v1.openapi.yaml:424-457`) declares no idempotency field, so the
+// header is not "as well as" anything. See docs/vendor/milestone/route-audit.md
+// §2.5 for what that leaves unmitigated.
+func TestTheIdempotencyKeyTravelsInAHeader(t *testing.T) {
+	var gotKey, gotPath string
 	tr := newLiveTransport(t, func(w http.ResponseWriter, r *http.Request) {
 		gotKey = r.Header.Get("Idempotency-Key")
 		gotPath = r.URL.Path
-		_, _ = w.Write([]byte(`{"id":"bm-1"}`))
+		_, _ = w.Write([]byte(placedBookmarkAnswer))
 	})
 	if _, err := mustWriter(t, tr).WriteBookmark(context.Background(), validBookmark()); err != nil {
 		t.Fatalf("WriteBookmark: %v", err)
@@ -159,8 +276,8 @@ func TestTheIdempotencyKeyTravelsInAHeaderAsWellAsTheBody(t *testing.T) {
 	if gotKey != "inc_abc123" {
 		t.Errorf("the Idempotency-Key header was %q", gotKey)
 	}
-	if gotPath != "/api/v1/Bookmarks" {
-		t.Errorf("the write went to %q", gotPath)
+	if gotPath != "/api/rest/v1/bookmarks" {
+		t.Errorf("the write went to %q; the documented path is /api/rest/v1/bookmarks", gotPath)
 	}
 }
 
@@ -177,7 +294,7 @@ func TestTwoConcurrentWritesDoNotShareAKey(t *testing.T) {
 		case 2:
 			second.Store(r.Header.Get("Idempotency-Key"))
 		}
-		_, _ = w.Write([]byte(`{"id":"bm"}`))
+		_, _ = w.Write([]byte(`{"array":[{"reference":"bm"}]}`))
 	})
 	a := validBookmark()
 	b := validBookmark()
@@ -292,15 +409,19 @@ func TestAnUnreadableClockShapeIsNamedRatherThanZero(t *testing.T) {
 
 // TestTheClockRouteStaysUnverified: the plan's P0.5 is the probe that promotes
 // these routes, and until one runs against a live server they are a hypothesis.
-// A passing unit test is not the probe.
+// A passing unit test is not the probe — and neither is a published document,
+// which is what refuted these paths without being able to clear them.
 func TestTheClockRouteStaysUnverified(t *testing.T) {
 	for _, r := range milestone.Routes {
-		if r.Path == "/api/v1/System/Time" && !r.Unverified {
+		if r.Path == "/api/rest/v1/System/Time" && !r.Unverified {
 			t.Error("the clock route was promoted to verified by a unit test; only a live probe can do that")
 		}
-		if r.Path == "/api/v1/Bookmarks" && !r.Unverified {
+		if r.Path == "/api/rest/v1/bookmarks" && !r.Unverified {
 			t.Error("the bookmark route was promoted to verified by a unit test")
 		}
+	}
+	if !milestone.UnverifiedRoute(milestone.APIPrefix + "/System/Time") {
+		t.Error("the clock route is no longer in the unverified set, and no probe has run")
 	}
 }
 

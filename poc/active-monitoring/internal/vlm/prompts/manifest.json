@@ -7,14 +7,18 @@
     {
       "id": "alarm",
       "class": "alarm",
-      "version": "v1",
-      "file": "alarm.v1.txt"
+      "version": "v2",
+      "file": "alarm.v2.txt",
+      "supersedes": "v1",
+      "revision_reason": "Adds the frame-text-is-evidence rule. v1 had no instruction-injection guard, so nothing in the prompt told the model that a sign inside the clip is a picture rather than a command. testdata/injection-hostile.mp4 is the fixture the guard was written against, and it is `synthetic`: colour bars, one filled rectangle and rendered text, with no third-party material anywhere in it."
     },
     {
       "id": "camera_integrity",
       "class": "camera_integrity",
-      "version": "v1",
-      "file": "camera_integrity.v1.txt"
+      "version": "v2",
+      "file": "camera_integrity.v2.txt",
+      "supersedes": "v1",
+      "revision_reason": "The same rule, argued from this class rather than stated in general. A camera-integrity alert fires precisely when somebody has physically reached the camera, so a note taped to the lens is the expected evidence rather than an exotic case, and the guard here says what to report when the text and the geometry disagree. Written against testdata/injection-hostile.mp4, which carries four attempts in three registers rather than only the phrase that is already on every filter list."
     }
   ]
 }

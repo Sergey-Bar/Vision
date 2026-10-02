@@ -368,9 +368,15 @@ func run() error {
 		// with the material.
 		Clipper:       recorder.Clipper{FFmpeg: "ffmpeg", RollingDir: rolling, SegmentSeconds: cfg.SegmentSeconds, Index: rec.Index},
 		EventTypeGUID: cfg.EventTypeGUID,
-		CameraGUID:    cfg.CameraGUID,
-		Zone:          zone,
-		Provenance:    provenanceFor(cfg, spec), ClipBefore: cfg.ClipBefore, ClipAfter: cfg.ClipAfter,
+		// The blindness map and its resolver, together. `EventTypeGUIDs` is carried
+		// so `watch --config` can print what is configured, and the resolver is the
+		// only thing the runner calls: a caller that reached for the map directly
+		// would skip the refusal that keeps an absence from arriving as a crossing.
+		EventTypeGUIDs:   cfg.EventTypeGUIDs,
+		EventTypeGUIDFor: cfg.EventTypeGUIDFor,
+		CameraGUID:       cfg.CameraGUID,
+		Zone:             zone,
+		Provenance:       provenanceFor(cfg, spec), ClipBefore: cfg.ClipBefore, ClipAfter: cfg.ClipAfter,
 		Target: cfg.SoakTarget, Heartbeat: cfg.HeartbeatInterval, Gap: cfg.GapThreshold,
 		PushMax: cfg.PushMaxAttempts, MaxDisk: cfg.MaxDisk,
 		DeclaredRSS: cfg.RSSLimit, DeclaredDB: cfg.DBLimit, DeclaredCPU: cfg.CPULimit,
@@ -747,6 +753,12 @@ func buildDetector(cfg config.Config, logf func(string, ...any)) (*soak.ORTDetec
 		LibraryPath: cfg.ORTLib,
 		ModelPath:   cfg.DetModel,
 		Threads:     cfg.ORTThreads,
+		// The provider is declared, never discovered. ORT falls back to the CPU when
+		// the CUDA provider cannot be used and logs it rather than erroring, so a
+		// session opened without saying which device was wanted is a session whose
+		// numbers carry the wrong label.
+		ExecutionProvider: cfg.ORTEP,
+		CUDADeviceID:      cfg.ORTCUDADevice,
 	})
 	if err != nil {
 		// The no-cgo refusal arrives here, and it names the toolchain to install.

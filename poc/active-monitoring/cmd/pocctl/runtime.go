@@ -36,6 +36,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -78,6 +79,20 @@ type runtimeRecord struct {
 	// confirmed, and a report that cannot tell them apart is a report nobody can
 	// rely on.
 	Verified bool `json:"verified"`
+	// VerifiedBy says WHICH digest was confirmed, and it is a field of its own
+	// rather than a phrase folded into Verified for a specific reason: the two checks
+	// are not interchangeable, and a boolean cannot tell them apart.
+	//
+	// `library` means the caller supplied this file's own digest. `archive` means the
+	// whole release asset was confirmed against a digest a release page publishes and
+	// the file was extracted from it — which is the STRONGER claim, because a publisher
+	// prints the archive's digest and prints this file's nowhere, so pinning the member
+	// to a number this module computed and a person pasted back is a check against
+	// ourselves. Empty means nothing was confirmed.
+	//
+	// A record that says `verified: true` and cannot say which of the two it means is
+	// a record whose `true` has two very different values behind it.
+	VerifiedBy string `json:"verified_by,omitempty"`
 	// FetchedAt is when it was obtained. Not a claim about the library's build date,
 	// which is inside the artefact and not on its face.
 	FetchedAt string `json:"fetched_at"`
@@ -89,12 +104,14 @@ type runtimeRecord struct {
 
 func cmdFetchRuntime(args []string) error {
 	flags, err := flagSet("fetch-runtime", map[string]string{
-		"url":      "",
-		"out":      defaultRuntimePath(),
-		"sha256":   "",
-		"licence":  "MIT",
-		"manifest": runtimeManifest,
-		"verify":   "0",
+		"url":            "",
+		"out":            defaultRuntimePath(),
+		"sha256":         "",
+		"archive-sha256": "",
+		"licence":        "MIT",
+		"manifest":       runtimeManifest,
+		"verify":         "0",
+		"provider":       "keep",
 	}, args)
 	if err != nil {
 		return err
@@ -139,6 +156,43 @@ func cmdFetchRuntime(args []string) error {
 	if err := download(url, zipPath); err != nil {
 		return err
 	}
+
+	// The ARCHIVE's digest, checked against the one the publisher published, before a
+	// single byte is extracted.
+	//
+	// This is a different check from `--sha256` and it is not redundant with it. A
+	// release page publishes one digest, and it is the digest of the ASSET — the whole
+	// ZIP. `--sha256` compares the digest of the extracted LIBRARY, which the publisher
+	// prints nowhere, so a reader who pastes the published digest into `--sha256` gets a
+	// mismatch and has no way to tell whether the download is corrupt or they used the
+	// wrong flag. Asking this module to know its own library's digest is also asking it
+	// to trust a number that only exists because this module computed it, which is not
+	// a provenance check at all.
+	archiveSum, archiveSize, err := hashFile(zipPath)
+	if err != nil {
+		return err
+	}
+	wantArchive := strings.ToLower(strings.TrimSpace(firstNonEmpty(
+		flags["archive-sha256"], os.Getenv("SP_POC_ORT_ARCHIVE_SHA256"))))
+	if wantArchive == "" {
+		fmt.Printf("fetch-runtime: NO EXPECTED ARCHIVE DIGEST WAS SUPPLIED, so the download is NOT VERIFIED.\n"+
+			"  archive sha256 = %s (%s)\n"+
+			"  Release pages publish ONE digest and it is this one, the asset's. Read it against the release\n"+
+			"  page and re-run with --archive-sha256=%s.\n"+
+			"  (--sha256 is a different check: it pins the extracted library, which the publisher prints nowhere.)\n",
+			archiveSum, soak.Bytes(archiveSize), archiveSum)
+	} else if wantArchive != archiveSum {
+		return fmt.Errorf("fetch-runtime: the DOWNLOADED ARCHIVE does not match the digest you expected.\n"+
+			"  expected %s\n  actual   %s\n  size     %s\n  from     %s\n"+
+			"  Nothing was extracted and nothing was written. The archive digest is the one a release page "+
+			"publishes, so a mismatch here means the download is corrupt, the URL now points somewhere else, "+
+			"or the expected digest belongs to a different asset — and which of those it is decides whether you "+
+			"retry or stop.",
+			wantArchive, archiveSum, soak.Bytes(archiveSize), url)
+	} else {
+		fmt.Printf("fetch-runtime: archive digest MATCHES the expected %s (%s)\n", archiveSum[:16], soak.Bytes(archiveSize))
+	}
+
 	member, err := extractLibrary(zipPath, work)
 	if err != nil {
 		return err
@@ -155,6 +209,7 @@ func cmdFetchRuntime(args []string) error {
 	// the mismatch is "just" a different build.
 	expected := strings.ToLower(strings.TrimSpace(firstNonEmpty(flags["sha256"], os.Getenv("SP_POC_ORT_SHA256"))))
 	verified := false
+	verifiedBy := ""
 	if expected != "" {
 		if expected != sum {
 			return fmt.Errorf("fetch-runtime: the download does not match the digest you expected.\n"+
@@ -164,14 +219,21 @@ func cmdFetchRuntime(args []string) error {
 				"changes what you should do next, so this refuses rather than warning.",
 				expected, sum, url, out)
 		}
-		verified = true
+		verified, verifiedBy = true, "library"
 		fmt.Printf("fetch-runtime: digest MATCHES the expected %s\n", sum[:16])
+	} else if wantArchive != "" {
+		// The archive was confirmed above, so the file extracted from it is pinned to
+		// something a publisher published. Saying `false` here would understate what
+		// happened, and the field exists to say what actually did.
+		verified, verifiedBy = true, "archive"
+		fmt.Printf("fetch-runtime: library digest %s was not compared against anything of its own, but the\n"+
+			"  ARCHIVE it came out of was confirmed, so these bytes are pinned to a published digest.\n", sum[:16])
 	} else {
 		fmt.Printf("fetch-runtime: NO EXPECTED DIGEST WAS SUPPLIED, so this is RECORDED AND NOT VERIFIED.\n"+
 			"  sha256 = %s\n"+
-			"  Read that against the release page, then re-run with --sha256=%s to confirm it.\n"+
-			"  A digest nobody checked is not a provenance record; it is a number.\n",
-			sum, sum)
+			"  A release page publishes the ARCHIVE's digest, not this file's, so use --archive-sha256\n"+
+			"  with that value. --sha256 pins this file and needs a digest nobody publishes.\n",
+			sum)
 	}
 
 	if err := copyFile(member, out); err != nil {
@@ -180,7 +242,7 @@ func cmdFetchRuntime(args []string) error {
 
 	rec := runtimeRecord{
 		Kind: "onnxruntime", Path: filepath.ToSlash(out), SHA256: sum, Bytes: size,
-		Licence: flags["licence"], Source: url, Verified: verified,
+		Licence: flags["licence"], Source: url, Verified: verified, VerifiedBy: verifiedBy,
 		FetchedAt: time.Now().UTC().Format(time.RFC3339),
 		Platform:  runtime.GOOS + "/" + runtime.GOARCH,
 	}
@@ -198,10 +260,150 @@ func cmdFetchRuntime(args []string) error {
 	fmt.Printf("  sha256   %s (%s)\n", sum, verifiedWord(rec.Verified))
 	fmt.Printf("  licence  %s\n", licenceOrEmpty(rec.Licence))
 	fmt.Printf("  recorded %s\n\n", flags["manifest"])
-	fmt.Println("Set these to run the detector:")
+
+	// The companions. The provider DLLs are what make a GPU package a GPU package,
+	// and they have to sit BESIDE the library because that is where ONNX Runtime looks
+	// for them at session-creation time.
+	companions, cerr := fetchProviderDLLs(zipPath, filepath.Dir(out), flags, url, verified, verifiedBy)
+	if cerr != nil {
+		return cerr
+	}
+	for _, c := range companions {
+		fmt.Printf("  also wrote %s (%s) and recorded it\n", c.Path, soak.Bytes(c.Bytes))
+	}
+	if len(companions) == 0 {
+		fmt.Println("\n  No execution-provider DLL was found in this archive, so this is a CPU-only build.")
+		fmt.Println("  SP_POC_ORT_EP=cuda will be refused by name, before a session is opened, rather than")
+		fmt.Println("  falling back to the CPU and recording numbers from the wrong machine. To get a CUDA")
+		fmt.Println("  build, fetch the `-gpu` asset for this platform; the CPU one is named without it.")
+	}
+	fmt.Println("\nSet these to run the detector:")
 	fmt.Printf("  SP_POC_ORT_LIB=%s\n", out)
 	fmt.Printf("  SP_POC_ORT_SHA256=%s\n", sum)
 	return nil
+}
+
+// providerKind is the manifest Kind for a companion library, and it NAMES the
+// provider.
+//
+// The record's own doc comment said this field existed "so a manifest can also hold a
+// CUDA or DirectML provider later without a schema change", and this is that later. A
+// manifest with no schema change three weeks after the comment was written is worth
+// more than a manifest with a new field and a migration nobody had to think about.
+//
+// One kind PER PROVIDER rather than one kind for all of them, because the manifest's
+// replacement key is (kind, platform) and a GPU package ships more than one companion:
+// `onnxruntime_providers_cuda.dll` and `onnxruntime_providers_tensorrt.dll` under a
+// shared kind would overwrite each other and leave a manifest describing half of what
+// is on disk.
+func providerKind(base string) string { return "onnxruntime_provider_" + base }
+
+// fetchProviderDLLs extracts the provider libraries that sit beside the main library in
+// the archive, and records each one.
+//
+// It is a separate pass from extractLibrary rather than a mode of it, because
+// `libraryCandidates` deliberately EXCLUDES anything containing "provider" — that
+// exclusion is right for choosing which library to LOAD and would be wrong for choosing
+// which files to KEEP. Folding them together is how a GPU package ends up installed as
+// a CPU library that cannot find its own provider, and the symptom is a session that
+// opens and quietly runs on the CPU.
+//
+// The archive is consulted for members in the SAME DIRECTORY as the library and no
+// deeper: the provider lives beside the library, and a copy from a `training/` tree or
+// a nested example directory is a different build with the same file name.
+func fetchProviderDLLs(zipPath, destDir string, flags map[string]string, url string, verified bool, verifiedBy string) ([]runtimeRecord, error) {
+	if flags["provider"] == "drop" {
+		return nil, nil
+	}
+	zr, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return nil, fmt.Errorf("fetch-runtime: cannot reopen the archive to look for provider libraries: %w", err)
+	}
+	defer func() { _ = zr.Close() }()
+
+	suffix := sharedLibrarySuffix()
+	index := map[string]*zip.File{}
+	for _, f := range zr.File {
+		index[f.Name] = f
+	}
+	var out []runtimeRecord
+	for _, name := range providerCandidates(index, suffix) {
+		target, xerr := extractMember(index[name], destDir)
+		if xerr != nil {
+			return nil, fmt.Errorf("fetch-runtime: cannot extract the provider library %s: %w",
+				filepath.ToSlash(name), xerr)
+		}
+		sum, size, herr := hashFile(target)
+		if herr != nil {
+			return nil, herr
+		}
+		rec := runtimeRecord{
+			Kind: providerKind(providerName(filepath.Base(target))), Path: filepath.ToSlash(target), SHA256: sum, Bytes: size,
+			Licence: flags["licence"], Source: url,
+			// The COMPANION is verified exactly when the download was, and the reason is
+			// worth stating: a digest confirmed for onnxruntime.dll says nothing about a
+			// file that came from the same download. It is the same archive, so it is the
+			// same download, and it is recorded as such rather than as independently
+			// checked.
+			Verified:   verified,
+			VerifiedBy: verifiedBy,
+			FetchedAt:  time.Now().UTC().Format(time.RFC3339),
+			Platform:   runtime.GOOS + "/" + runtime.GOARCH,
+		}
+		if err := writeRuntimeRecord(flags["manifest"], rec); err != nil {
+			return nil, err
+		}
+		out = append(out, rec)
+	}
+	return out, nil
+}
+
+// providerName is the provider a companion DLL implements, derived from its file name.
+//
+// `onnxruntime_providers_cuda.dll` -> `cuda`, so the manifest's Kind reads
+// `onnxruntime_provider_cuda` and a reader can see which provider a row is for without
+// matching on a path. Anything it cannot name keeps the whole base name, because an
+// unrecognised companion is still a companion and dropping it silently is the failure
+// this extraction exists to avoid.
+func providerName(base string) string {
+	stem := strings.TrimSuffix(base, sharedLibrarySuffix())
+	stem = strings.TrimPrefix(stem, "onnxruntime_providers_")
+	if stem == "" || stem == base {
+		return strings.TrimSuffix(base, sharedLibrarySuffix())
+	}
+	return strings.ToLower(stem)
+}
+
+// providerCandidates names the provider libraries in the archive's library directory.
+//
+// It takes the archive index rather than a name slice so that it can be tested without
+// building a ZIP, and it matches on the directory DEPTH as well as the name, because a
+// `training/onnxruntime.dll` from a provider-shaped package is the wrong library and
+// there is no way to tell from the name.
+func providerCandidates(index map[string]*zip.File, suffix string) []string {
+	var out []string
+	for name := range index {
+		if info := index[name]; info != nil && info.FileInfo().IsDir() {
+			continue
+		}
+		slashed := filepath.ToSlash(name)
+		base := strings.ToLower(filepath.Base(slashed))
+		if !strings.HasSuffix(base, suffix) {
+			continue
+		}
+		if !strings.Contains(base, "provider") {
+			continue
+		}
+		// Beside the library, not deeper. The path in a Microsoft release is
+		// `onnxruntime/lib/onnxruntime_providers_cuda.dll`, which is depth 2; a
+		// training build or an example copy sits deeper still.
+		if strings.Count(slashed, "/") > 2 {
+			continue
+		}
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // verifyRuntime re-checks what the manifest already recorded, with no network.
@@ -266,6 +468,13 @@ func writeRuntimeRecord(manifest string, rec runtimeRecord) error {
 	// Replace an entry of the same kind and platform rather than appending: a
 	// manifest that accumulates one row per download is a manifest whose "what is
 	// installed" answer depends on how many times somebody re-fetched.
+	//
+	// The key is (kind, platform) and NOT (kind, platform, path). Adding the path
+	// looks like the fix for several providers sharing a kind — and it is, but it is
+	// the wrong fix, because it lets two fetch-runtime runs that installed DIFFERENT
+	// libraries at different paths both survive, and `runtime --verify` then reports
+	// two onnxruntime entries and no longer answers "what is installed". The providers
+	// get distinct KINDS instead, which is what a kind is for.
 	out := recs[:0:0]
 	for _, r := range recs {
 		if r.Kind == rec.Kind && r.Platform == rec.Platform {
@@ -382,22 +591,27 @@ func extractLibrary(zipPath, dest string) (string, error) {
 			"--url at an asset that holds exactly one", len(candidates), b.String())
 	}
 
-	name := candidates[0]
-	rc, err := index[name].Open()
+	return extractMember(index[candidates[0]], dest)
+}
+
+// extractMember writes one archive member into `dest` under its base name and returns
+// where it landed.
+func extractMember(f *zip.File, dest string) (string, error) {
+	rc, err := f.Open()
 	if err != nil {
-		return "", fmt.Errorf("cannot open %s in the archive: %w", filepath.ToSlash(name), err)
+		return "", fmt.Errorf("cannot open %s in the archive: %w", filepath.ToSlash(f.Name), err)
 	}
 	defer func() { _ = rc.Close() }()
-	target := filepath.Join(dest, filepath.Base(filepath.FromSlash(name)))
-	f, err := os.Create(target)
+	target := filepath.Join(dest, filepath.Base(filepath.FromSlash(f.Name)))
+	out, err := os.Create(target)
 	if err != nil {
 		return "", err
 	}
-	if _, err := io.Copy(f, rc); err != nil {
-		_ = f.Close()
+	if _, err := io.Copy(out, rc); err != nil {
+		_ = out.Close()
 		return "", err
 	}
-	if err := f.Close(); err != nil {
+	if err := out.Close(); err != nil {
 		return "", err
 	}
 	return target, nil

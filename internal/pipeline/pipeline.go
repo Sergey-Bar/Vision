@@ -34,6 +34,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -182,6 +183,13 @@ type Loops struct {
 	bundle   *activeBundle
 
 	hostname string
+
+	// sloMu guards loggedSLOs, which is the last set of breached objective names
+	// written to the log. Its own mutex rather than a shared one, because it is
+	// only ever touched by the gauge sampler and there is nothing to keep
+	// consistent with.
+	sloMu      sync.Mutex
+	loggedSLOs []string
 }
 
 // New builds the loops without starting them.
@@ -292,6 +300,100 @@ func (l *Loops) SampleGauges(ctx context.Context) {
 		available = 1
 	}
 	l.set(observability.GaugeAIUnavailable, 1-available)
+
+	// The two incident gauges, in one query because they are the same table and one
+	// failure is one log line.
+	//
+	// Both were declared and never written, which is worse for these two than for
+	// the rest: `ai_plane_availability` is an SLO that reads
+	// `GaugeIncidentDegraded`, so with no producer it reported "not measured" on
+	// every install and never once had an opinion. The objective was honest and
+	// permanently silent — a pilot could not measure how often the AI path was
+	// actually live, which is the one number the `degraded` column exists to give.
+	//
+	// "Open" counts an incident in review as well as one nobody has touched. Both
+	// are consuming operator attention, and a gauge that goes down when somebody
+	// picks a case up reads as the backlog shrinking when the work has only moved.
+	// If that is the wrong definition it is a one-word change here and nothing
+	// else — which is the reason it is written as a literal in one place.
+	var openIncidents, degradedIncidents int
+	if err := gaugeScope.QueryRow(ctx, `
+		SELECT
+			count(*) FILTER (WHERE state IN ('open', 'in_review')),
+			count(*) FILTER (WHERE degraded)
+		FROM incidents WHERE tenant_id = $1`,
+		l.Deps.Tenant).Scan(&openIncidents, &degradedIncidents); err != nil {
+		if ctx.Err() == nil {
+			l.log("the incident gauges could not be read; they keep their last value",
+				"error", err.Error())
+		}
+	} else {
+		l.set(observability.GaugeIncidentOpen, float64(openIncidents))
+		l.set(observability.GaugeIncidentDegraded, float64(degradedIncidents))
+	}
+
+	l.evaluateSLOs()
+}
+
+// evaluateSLOs records which objectives are not being met, and says so.
+//
+// `observability.Breaches` had no caller outside its own test for as long as it
+// existed. It is not a small gap: the eight objectives in slo.go are the plan's
+// M1 gate 3, and an objective that is only ever evaluated by a test is a
+// description of an intention rather than a thing the product checks.
+//
+// The log line is the surface, deliberately. `SLO` carries a `Remedy` on every
+// entry precisely so that an alert is actionable, and a remedy in a log line
+// attached to the reading that breached it is something an operator acts on
+// without a new endpoint to trust. The names are also surfaced on
+// `GET /v1/health`, which reports *which* objectives are breached and nothing
+// else, because that endpoint is unauthenticated and a measured disk percentage
+// or a dead-letter count is not something to hand to whoever asked.
+//
+// Every line is repeated only when the set changes, so a permanently breached
+// objective does not turn into a log line every poll for ever.
+func (l *Loops) evaluateSLOs() {
+	if l.Deps.Metrics == nil {
+		return
+	}
+	all := observability.Breaches(l.Deps.Metrics, observability.ReadingsFrom(l.Deps.Metrics))
+	breached := observability.Breached(all)
+
+	names := make([]string, 0, len(breached))
+	for _, s := range breached {
+		names = append(names, s.Name)
+	}
+	sort.Strings(names)
+
+	l.Deps.Metrics.RecordSLOs(observability.SLOState{Evaluated: len(all), Breached: names})
+	if !l.sloChanged(names) {
+		return
+	}
+	if len(breached) == 0 {
+		l.log("every SLO objective is being met", "objectives", len(all))
+		return
+	}
+	for _, s := range breached {
+		l.log("an SLO objective is not being met",
+			"objective", s.Name, "target", s.Target, "measured", s.Measured, "remedy", s.Remedy)
+	}
+}
+
+// sloChanged reports whether the breached set differs from the last one logged,
+// and remembers it when it does.
+//
+// SampleGauges runs on its own interval, and a site whose backlog sits above the
+// hard limit would otherwise emit the same alarm line every poll for ever. The set
+// is re-recorded to the registry on every evaluation regardless, so a reader sees
+// the current verdict even while the log stays quiet.
+func (l *Loops) sloChanged(names []string) bool {
+	l.sloMu.Lock()
+	defer l.sloMu.Unlock()
+	if strings.Join(l.loggedSLOs, ",") == strings.Join(names, ",") {
+		return false
+	}
+	l.loggedSLOs = names
+	return true
 }
 
 func (l *Loops) spawn(ctx context.Context, name string, run func(context.Context)) {

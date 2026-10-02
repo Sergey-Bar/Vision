@@ -19,12 +19,26 @@ type pagedTransport struct {
 	pages    []string // one JSON array per page
 	cursors  []string // the Next-Cursor each page hands out, "" for the last
 	askedFor []string
+	// cursorFor counts pages handed out per route.
+	//
+	// It was one counter for every route, which meant the order of the adapter's
+	// requests decided which page each collection got: adding one read ahead of
+	// the feeds shifted every feed onto page two, and a test asserting that three
+	// pages were followed failed for a reason that had nothing to do with
+	// pagination. A real server pages each collection independently, so this does
+	// too - and the assertion it protects gets stronger, because now every feed
+	// has to reach the third page, not whichever one happened to start at page 0.
+	cursorFor map[string]int
 }
 
-func (p *pagedTransport) Get(_ context.Context, _ milestone.Route, q milestone.Query) (*milestone.Response, error) {
+func (p *pagedTransport) Get(_ context.Context, route milestone.Route, q milestone.Query) (*milestone.Response, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	i := len(p.askedFor)
+	if p.cursorFor == nil {
+		p.cursorFor = map[string]int{}
+	}
+	i := p.cursorFor[route.Path]
+	p.cursorFor[route.Path] = i + 1
 	p.askedFor = append(p.askedFor, q.Cursor)
 	if i >= len(p.pages) {
 		i = len(p.pages) - 1

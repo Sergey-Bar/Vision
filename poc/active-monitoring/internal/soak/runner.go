@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Sergey-Bar/ai-captain-poc/internal/ai"
+	"github.com/Sergey-Bar/ai-captain-poc/internal/aistate"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/classify"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/config"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/detect"
@@ -82,11 +83,23 @@ type RunnerOptions struct {
 	// the run is told them. Without them the push is refused by name rather than
 	// sent with an empty source.
 	EventTypeGUID string
-	CameraGUID    string
-	PushName      string
-	PushIsVMS     bool
-	ClockSource   string
-	Logf          func(string, ...any)
+	// EventTypeGUIDs resolves a blindness window's Analytics Event Type. It is a
+	// VALUE and not a pointer to a Config so the runner can be built in a test
+	// without one; an empty map is the real world for an account without the rights
+	// to register the types, and every blindness is then refused by name rather than
+	// pushed as a crossing.
+	EventTypeGUIDs config.EventTypeMap
+	// EventTypeGUIDFor is the resolution. It is a FUNCTION and not a method on the
+	// map because the refusal has to be able to name the ordinary detection type as
+	// the alternative for an answered ask, and that value lives on the same Config.
+	// One resolver rather than two is what stops a caller reaching for the map
+	// directly and skipping the refusal.
+	EventTypeGUIDFor func(class, state string) (string, error)
+	CameraGUID       string
+	PushName         string
+	PushIsVMS        bool
+	ClockSource      string
+	Logf             func(string, ...any)
 	// OnFrame is called with each frame for the live screen's overlay. It runs
 	// on the pipeline goroutine and must not block.
 	OnFrame func(recorder.Frame, []ai.Box)
@@ -248,6 +261,8 @@ type Runner struct {
 	boxLog         *BoxLog
 	boxLogSampled  bool
 	boxLogReported bool
+	// absence is the open blindness windows, one per absence state. See absence.go.
+	absence *absenceLedger
 }
 
 // DetectorTally is the run's detector arithmetic, as the report needs it.
@@ -345,7 +360,7 @@ func NewRunner(opt RunnerOptions) (*Runner, error) {
 			"like a camera fault", TriggerSidecar)
 	}
 	return &Runner{opt: opt, log: opt.Logf, lat: ai.NewLatencies(200000), stopPush: make(chan struct{}),
-		boxLog: NewBoxLog(opt.BoxLogFrames), cpu: NewCPUSampler(func() []int {
+		boxLog: NewBoxLog(opt.BoxLogFrames), absence: newAbsenceLedger(), cpu: NewCPUSampler(func() []int {
 			if opt.ChildPIDs == nil {
 				return nil
 			}
@@ -1133,6 +1148,16 @@ func (r *Runner) handleIncident(ctx context.Context, ev TriggerEvent, aiState st
 			Detail: "the bookmark could not be queued, so the pushed event has no pointer to the recording: " + err.Error(),
 		})
 	}
+
+	// Step 8: the blindness, if there was one. It is a SEPARATE effect with its own
+	// Analytics Event Type, and it comes last because everything above is about this
+	// one detection while this is about the window.
+	//
+	// It runs after the detection's own event has been queued, deliberately. The
+	// detection happened — a car crossed the line — and the missing thing is the
+	// VERDICT. Enqueueing the blindness first would make an inability to type it look
+	// like a reason not to push the event the VMS can actually draw.
+	r.enqueueAbsence(ctx, ev, obs)
 }
 
 // askObserver asks the model once about the stored clip and records the answer.
@@ -1380,6 +1405,11 @@ func (r *Runner) enqueueEvent(ctx context.Context, ev TriggerEvent, evidence Evi
 		RuleName: ruleNameFor(ev, obs),
 		Evidence: xprotect.EvidenceRef{StorageRef: evidence.StorageRef, SHA256: evidence.SHA256, TimeBegin: evidence.TimeBegin.UTC().Format(time.RFC3339), TimeEnd: evidence.TimeEnd.UTC().Format(time.RFC3339),
 			Note: "POC evidence ref; the bookmark pushed alongside points at no VMS recording in this build"},
+		// R8. The observation IS the attribution: there is no other source in this
+		// run for who answered, under which contract, or with what output. A caller
+		// that forgot this line would push a sentence with nothing beside it, and
+		// BuildEvent now refuses rather than letting it through.
+		Provenance: provenanceOf(obs),
 	}
 	body, err := xprotect.BuildEvent(in)
 	if err != nil {
@@ -1387,20 +1417,58 @@ func (r *Runner) enqueueEvent(ctx context.Context, ev TriggerEvent, evidence Evi
 	}
 	payload, _ := json.Marshal(body)
 	id := ev.DetectionIDFor(r.opt.Provenance)
+	// The outbox's tag is the tag that was ACTUALLY pushed, which is `body.Tag`: it
+	// carries the provenance suffix that BuildEvent appends, and the push worker's
+	// read-back matches on this column. Enqueuing the pre-suffix tag would make every
+	// read-back search for an event that was never sent — a push that succeeds, an
+	// event that exists, and a caller that concludes it did not.
 	outboxID, err := r.opt.Store.Enqueue(ctx, store.OutboxEntry{
 		DetectionID: id, Kind: store.KindEvent,
-		Payload: string(payload), Tag: tag,
+		Payload: string(payload), Tag: body.Tag,
 	}, r.opt.PushMax)
 	if err != nil {
 		return err
 	}
 	r.appendLedger(ctx, store.LedgerPushEnqueued, id,
-		"kind="+store.KindEvent, "tag="+tag, "outbox="+itoa64(outboxID),
+		"kind="+store.KindEvent, "tag="+body.Tag, "outbox="+itoa64(outboxID),
 		"box="+boxString(measuredBox(ev)),
 		"confidence="+fmt.Sprintf("%.6f", in.Confidence),
+		"aistate="+obs.State,
 		"rule="+in.RuleName)
 	r.logf("queued %s push %d for detection %s", store.KindEvent, outboxID, id)
 	return nil
+}
+
+// provenanceOf is the one place a VLM answer becomes a wire attribution.
+//
+// It is a function and not an inline literal because there are now several callers —
+// the detection event and the aggregated absence event — and two constructions of
+// R8's bundle would drift. The drift would be invisible: both would still compile,
+// both would still pass a test that checked the fields, and one of them would stop
+// carrying the summary.
+func provenanceOf(obs vlm.Observation) xprotect.Provenance {
+	p := xprotect.Provenance{
+		AIState:         obs.State,
+		Verdict:         string(obs.Verdict),
+		Summary:         obs.Summary,
+		ModelIdentity:   obs.ModelIdentity,
+		ContractVersion: obs.ContractVersion,
+		Temperature:     obs.Temperature,
+		OutputHash:      obs.OutputHash,
+	}
+	// An unasked window has no verdict, and the observation sometimes carries a stale
+	// one from a reused struct. Stripping it here rather than trusting it is what
+	// keeps the fabricated negative off the wire: BuildEvent refuses a verdict on a
+	// blindness state, and this is where the refusal is made reachable-by-design
+	// rather than reachable-by-accident.
+	if aistate.IsBlindness(obs.State) {
+		p.Verdict = ""
+		p.Summary = ""
+		p.ModelIdentity = ""
+		p.ContractVersion = ""
+		p.OutputHash = ""
+	}
+	return p
 }
 
 // enqueueBookmark places the pointer that puts the operator on the recording.
@@ -1587,10 +1655,22 @@ func (r *Runner) attempt(ctx context.Context, e store.OutboxEntry) {
 	// pushed.
 	var out xprotect.Outcome
 	var err error
-	if e.Kind == store.KindBookmark {
+	// A SWITCH and not `if bookmark else event`. With an `else`, a kind added later
+	// is sent as an analytics event by default — so `absence_event` would have gone
+	// out correctly by luck rather than by decision, and the next kind added would
+	// go out as an analytics event by nobody's decision at all.
+	switch e.Kind {
+	case store.KindBookmark:
 		out, err = r.opt.XProtect.SendBookmarkPayload(ctx, xprotect.PushPayload{Body: []byte(e.Payload), Tag: e.Tag})
-	} else {
+	case store.KindEvent, store.KindAbsenceEvent:
 		out, err = r.opt.XProtect.SendPayload(ctx, xprotect.PushPayload{Body: []byte(e.Payload), Tag: e.Tag})
+	default:
+		// Unreachable through Enqueue, which refuses an undeclared kind. Refused rather
+		// than defaulted, because a row that reaches here with a payload nobody chose
+		// is exactly the kind of row AC4 would count as an attempt with no result.
+		_ = r.opt.Store.RecordResult(ctx, e.ID, "push_refused",
+			"outbox kind "+e.Kind+" is not one this build sends; the row is kept for a human", "")
+		return
 	}
 	switch {
 	case err == nil && out.State == "push_sent":

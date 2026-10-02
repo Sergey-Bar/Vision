@@ -27,6 +27,12 @@ type Adapter struct {
 	// transport-supplied tenant would be a tenant read from a file.
 	siteID        string
 	integrationID string
+	// eventTypes is this site's own GUID -> type-name map, read from
+	// `/eventTypes` once per poll. It is per-adapter and that is per-site by
+	// construction: the adapter is built once for one site in `security-core`,
+	// so this is the per-(tenant, site) cache the route needs, and no global
+	// map can leak one customer's vocabulary into another's.
+	eventTypes *siteEventTypes
 	// Logf receives feed-level faults. It never receives event bodies, credentials
 	// or anything the source sent beyond the route that failed.
 	//
@@ -43,6 +49,7 @@ func New(t Transport, siteID, integrationID string) *Adapter {
 		clock:         func() time.Time { return time.Now().UTC() },
 		siteID:        siteID,
 		integrationID: integrationID,
+		eventTypes:    &siteEventTypes{byGUID: map[string]string{}},
 	}
 }
 
@@ -89,18 +96,55 @@ type RawRecord struct {
 	// the envelope's Source field. Empty when the source named no device or
 	// named one this platform has not registered.
 	SourceDeviceRef string
+	// SourceTypeName is the name *this site* gives the event's type, read from
+	// that site's own `/eventTypes` when the `type` field is a GUID.
+	//
+	// Empty when it did not resolve, which is a state and not a default: a site
+	// that does not deploy the route, or a GUID the site did not answer for, both
+	// leave this empty and both leave the event flagged Malformed with the reason
+	// quoted. See eventtypes.go.
+	//
+	// It is carried rather than consumed here because mapping a name onto a
+	// canonical type is a human decision (`AGENTS.md`), and this is the input to
+	// it.
+	SourceTypeName string
 }
 
 // deviceRefPattern matches the bracketed identifier Milestone conventionally
 // appends to a source name, as in "Entrance Camera 01 [CAM-001]".
 var deviceRefPattern = regexp.MustCompile(`\[([A-Za-z0-9._:-]{1,64})\]`)
 
+// restResourcePattern matches the REST resource string this API uses to name a
+// device, as in `cameras/e028f597-c64b-4f27-bb8d-08f5cd768e1c`.
+//
+// This is the **documented** form. `events-rest-v1.reference.md:291` shows
+// `"source": "cameras/e028f597-…"` on a real event and :409 states that a camera's
+// may also be written as a bare `{id}`, so both occur and both have to parse.
+//
+// The bracketed convention above is not documented anywhere. It was assumed, and
+// because it was assumed and nothing tested it against a documented body, every
+// event from a real server arrived with no device attached — which reads as a
+// quiet site rather than as a parser that was wrong. See
+// docs/vendor/milestone/route-audit.md §3.
+var restResourcePattern = regexp.MustCompile(`^([a-z][a-z0-9]{0,31})/([A-Za-z0-9._:-]{1,128})$`)
+
 // sourceDeviceRef extracts the device identifier from an envelope.
 //
-// Three shapes are accepted, in the order they are tried: a bracketed id, a
-// dedicated device field, and finally the bare source name. The bracketed form
-// is a convention rather than a documented guarantee, which is why the dedicated
-// field is tried first where one exists.
+// Four shapes are accepted, in the order they are tried: a dedicated device field,
+// the documented REST resource string, a bracketed id, and — nothing else. A bare
+// human-readable label is refused, because treating a label as an id would create a
+// device row per camera label and attach events to the wrong thing the day someone
+// rewords it.
+//
+// For the REST form the **id alone** is returned, not the whole `cameras/<uuid>`.
+// The collection is the vendor's routing information, not an identifier: the
+// device row's `source_device_id` holds the uuid, and
+// `pipeline.Loops.resolveDevice` matches on exactly that. Keeping the prefix would
+// mean matching against a value the rest of the platform never stores.
+//
+// What the collection does carry — this is a camera and not a microphone — is left
+// to the device row's own `kind`. One place owns that mapping, and a second one
+// built from a string prefix would be a second place to be wrong.
 func sourceDeviceRef(item map[string]any) string {
 	if d := stringField(item, "DeviceId", "deviceId", "DeviceID", "CameraId", "cameraId"); d != "" {
 		return d
@@ -109,13 +153,45 @@ func sourceDeviceRef(item map[string]any) string {
 	if src == "" {
 		return ""
 	}
+	if m := restResourcePattern.FindStringSubmatch(src); len(m) == 3 {
+		return m[2]
+	}
 	if m := deviceRefPattern.FindStringSubmatch(src); len(m) == 2 {
 		return m[1]
 	}
 	// A bare source name with no bracketed id is not a device reference. Treating
 	// a human-readable label as an id would create a device row per camera
 	// label and attach events to the wrong thing when a label is reworded.
+	//
+	// A bare *uuid* is a device reference, and the documented event carries one
+	// whenever the collection prefix is omitted (:409). It is accepted on its
+	// shape, not on the assumption that a label would never look like a uuid.
+	if isDeviceUUID(src) {
+		return src
+	}
 	return ""
+}
+
+// isDeviceUUID is the 8-4-4-4-12 hex shape. It is a shape test and not a version
+// or variant test, because the only question being decided is whether this value
+// is an identifier rather than a name.
+func isDeviceUUID(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i, r := range s {
+		switch i {
+		case 8, 13, 18, 23:
+			if r != '-' {
+				return false
+			}
+		default:
+			if (r < '0' || r > '9') && (r < 'a' || r > 'f') && (r < 'A' || r > 'F') {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // KnownMilestoneEventTypes are the event types the adapter produces that the
@@ -145,7 +221,7 @@ func sourceDeviceRef(item map[string]any) string {
 var KnownMilestoneEventTypes = buildKnownEventTypes()
 
 // The two synthetic types the adapter itself produces. They are not vendor
-// vocabulary, and they are not malformed in the "unrecognised" sense � the
+// vocabulary, and they are not malformed in the "unrecognised" sense — the
 // Malformed flag on them describes the feed or the item, not the type.
 const (
 	adapterFeedErrorType    = "adapter_feed_error"
@@ -203,6 +279,15 @@ func NormalizedEventTypes() []string {
 // integration mode can disagree, and Definition of Done item 1 depends on them
 // not.
 func (a *Adapter) Poll(ctx context.Context, since *time.Time) ([]RawRecord, error) {
+	// The site's own event-type vocabulary, read before any feed so that every
+	// record this poll produces is typed against the same answer.
+	//
+	// It is first because the alternative is asking the site once per event, and
+	// it is unconditional because a site whose types do not resolve is exactly the
+	// site an operator most needs to be able to read the reason for. Nothing here
+	// can fail a poll: the refresh records why and moves on.
+	a.refreshEventTypes(ctx)
+
 	feeds := []Route{}
 	for _, r := range Routes {
 		if r.Paginated {
@@ -221,8 +306,8 @@ func (a *Adapter) Poll(ctx context.Context, since *time.Time) ([]RawRecord, erro
 			// loss counts accepted events, not whole feeds.
 			//
 			// The record carries a SourceEventID and a SiteID. It used to carry
-			// neither, and `pipeline.Poll` drops exactly those � "record with no
-			// source id was not written" � so a feed outage produced no inbox row,
+			// neither, and `pipeline.Poll` drops exactly those — "record with no
+			// source id was not written" — so a feed outage produced no inbox row,
 			// no dead letter and no counter, while the ingest-loss SLO saw a clean
 			// feed. An outage that is invisible to the thing that watches for
 			// outages is not an outage that gets noticed.
@@ -264,10 +349,22 @@ func (a *Adapter) Poll(ctx context.Context, since *time.Time) ([]RawRecord, erro
 const maxFeedPages = 200
 
 func (a *Adapter) readFeed(ctx context.Context, route Route, since *time.Time) ([]RawRecord, error) {
+	// A route the vendor selects with a `task` query parameter cannot be read with
+	// a GET, so it goes through the optional task surface.
+	//
+	// A transport without one is a replay, and a replay serves recorded bytes by
+	// path - which is what it has always done, and is the whole reason this surface
+	// is optional rather than a fourth method on Transport. The live transport
+	// implements it, so this fallback is only ever taken by a fixture.
+	if route.Task != "" {
+		if searcher, ok := a.transport.(BookmarkSearcher); ok {
+			return a.readTaskedFeed(ctx, searcher, route, since)
+		}
+	}
 	// Follow the cursor to the end of the feed.
 	//
 	// This read exactly one page and then stopped. `transport.Get` captures the
-	// `Next-Cursor` header into `Response.Headers` � deliberately, and with a
+	// `Next-Cursor` header into `Response.Headers` — deliberately, and with a
 	// comment saying so - and nothing ever followed it. The poll then advanced
 	// `integrations.last_success_at` to the newest received_at of the records it
 	// did read, so the next poll asked for `since = now` and items 201..N were
@@ -284,7 +381,9 @@ func (a *Adapter) readFeed(ctx context.Context, route Route, since *time.Time) (
 	)
 	for page := 0; page < maxFeedPages; page++ {
 		resp, err := a.transport.Get(ctx, route, Query{
-			Since: since, Limit: 200, Cursor: cursor,
+			// The documented page size, not a number typed here: the vendor's range
+			// is 1..2000 and a value outside it is a request it may refuse.
+			Since: since, Limit: DefaultPageSize, Cursor: cursor,
 		})
 		if err != nil {
 			return nil, err
@@ -303,10 +402,7 @@ func (a *Adapter) readFeed(ctx context.Context, route Route, since *time.Time) (
 		}
 		out = append(out, recs...)
 
-		next := ""
-		if resp != nil {
-			next = resp.Headers["Next-Cursor"]
-		}
+		next := nextLink(resp)
 		if next == "" {
 			return out, nil
 		}
@@ -323,9 +419,28 @@ func (a *Adapter) readFeed(ctx context.Context, route Route, since *time.Time) (
 		cursor = next
 	}
 	return out, fmt.Errorf("milestone: %s still had more pages after %d; the feed was truncated "+
-		"and the unread events are NOT lost from Milestone's side � they will be read on the "+
-		"next poll � but this poll's results are incomplete",
+		"and the unread events are NOT lost from Milestone's side — they will be read on the "+
+		"next poll — but this poll's results are incomplete",
 		describe(route), maxFeedPages)
+}
+
+// readTaskedFeed reads a feed the vendor selects with a `task` query parameter.
+//
+// One call, because the documented answer to a search carries no continuation: a
+// bookmark search returns `{"array":[…]}` with no `_links`
+// (`bookmarks-rest-v1.openapi.yaml:380-386`), bounded by the `countLimit` its
+// search body carries. There is no second page to be truncated by, which is worth
+// stating because the loop above exists precisely because a truncated feed is
+// otherwise invisible.
+func (a *Adapter) readTaskedFeed(ctx context.Context, s BookmarkSearcher, route Route, since *time.Time) ([]RawRecord, error) {
+	resp, err := s.SearchBookmarks(ctx, Query{Since: since, Limit: DefaultPageSize})
+	if err != nil {
+		return nil, err
+	}
+	if resp != nil && resp.Status == 404 {
+		return nil, nil
+	}
+	return a.Parse(route, resp)
 }
 
 // feedErrorID is the source event id for a feed that could not be read.
@@ -510,11 +625,34 @@ func (a *Adapter) toRecord(item map[string]any, index int, now time.Time) (RawRe
 	if rawType == "" {
 		return RawRecord{}, fmt.Errorf("item %s has no type field", id)
 	}
+
+	// The site's own name for this type, and the one fact that makes this parse
+	// re-derivable from the stored envelope alone.
+	//
+	// The stored annotation is read first and the site is asked second, which is
+	// the whole of the replay contract: `RecordFromPayload` re-derives from bytes
+	// weeks later, so it must find the name in them and must never make a call to
+	// find out. An envelope that already carries the name is answered from
+	// itself even after the site renames the type, because a decision replays
+	// from stored facts and not from what the vendor says today.
+	typeName := storedTypeName(item)
+	if typeName == "" {
+		if resolved, ok := a.siteEventTypeName(rawType); ok {
+			typeName = resolved
+			item[resolvedTypeNameKey] = typeName
+		}
+	}
+
 	// The type field alone is not always enough. An alarm arrives as "Alarm"
 	// with a changing AlarmState, and a device arrives as "Servlets.State"
 	// with a changing State; the transition is the event, so it is derived here
 	// rather than left for the normalizer to guess at from a payload.
-	eventType := deriveEventType(rawType, item)
+	//
+	// The name replaces the GUID here and nowhere else. `normalizeEventType` and
+	// its table are untouched — this is an input, not a new mapping — so a site
+	// whose names are spellings the normalizer already knows starts working on
+	// its own, and one whose are not behaves exactly as before.
+	eventType := deriveEventType(typeInput(rawType, typeName), item)
 
 	observed, tz := parseMilestoneTime(item)
 
@@ -549,15 +687,58 @@ func (a *Adapter) toRecord(item map[string]any, index int, now time.Time) (RawRe
 		// An unresolvable reference is left empty: the event still arrives, and
 		// is unattributable rather than attributed to something guessed.
 		SourceDeviceRef: sourceDeviceRef(item),
+		// Carried, not consumed. See the field's own comment, and eventtypes.go:
+		// which names a site uses is the human's mapping decision, and this is
+		// the input to it.
+		SourceTypeName: typeName,
 	}
 
 	if !KnownMilestoneEventTypes[eventType] {
 		// Carried, not dropped. An unknown type is a source change we want to
 		// see, and the backpressure metric will show it.
 		rec.Malformed = true
-		rec.MalformedReason = fmt.Sprintf("unrecognised source event type %q", rawType)
+		rec.MalformedReason = a.unrecognisedTypeReason(rawType, typeName)
 	}
 	return rec, nil
+}
+
+// typeInput is the string the type derivation reads: the site's own name when
+// there is one, and the raw `type` field otherwise.
+//
+// The raw field is kept in the fallback rather than discarded so that an
+// unresolved GUID still produces exactly the `unknown.<guid>` it always did, and
+// a site that deploys nothing new is byte-for-byte unaffected.
+func typeInput(rawType, typeName string) string {
+	if typeName != "" {
+		return typeName
+	}
+	return rawType
+}
+
+// storedTypeName is the site-resolved name carried in a stored envelope.
+func storedTypeName(item map[string]any) string {
+	return stringField(item, resolvedTypeNameKey)
+}
+
+// unrecognisedTypeReason says what the vendor called it, not only what we were
+// handed.
+//
+// An operator opening a dead letter cannot act on `unknown.481d4d6c-…`: they
+// have no way to look a GUID up, and the envelope is the only place the raw type
+// survives. A name is something they can search the customer's VMS for, and it
+// is what the alias table this work unblocks has to be written against.
+func (a *Adapter) unrecognisedTypeReason(rawType, typeName string) string {
+	if typeName != "" {
+		return fmt.Sprintf("this site calls event type %q a %q, and the platform's "+
+			"vocabulary does not yet name that; the type id the vendor sent is %q",
+			typeName, rawType, rawType)
+	}
+	why := a.unresolvedReason()
+	if why == "" {
+		return fmt.Sprintf("unrecognised source event type %q", rawType)
+	}
+	return fmt.Sprintf("unrecognised source event type %q, and no name for it could be "+
+		"resolved from the site: %s", rawType, why)
 }
 
 // deriveEventType refines the coarse source type using the state fields the
@@ -638,10 +819,20 @@ func decodeItems(route Route, body json.RawMessage) ([]map[string]any, error) {
 		return arr, nil
 	}
 
-	// A paged envelope is assumed to wrap the array. Both shapes are handled
-	// because which one Milestone actually uses is one of the unverified
-	// assumptions, and `securityctl adapter probe` exists to settle it.
+	// A paged envelope wraps the array under a name. Four names are read here
+	// because which one a given build uses is one of the unverified assumptions
+	// and `securityctl adapter probe` exists to settle it.
+	//
+	// `array` is not one of those guesses: it is the documented one. Both
+	// published answers put their entries there —
+	// `{"_links":{"prev","next"},"array":[…],"eventCount":N}` for events
+	// (`events-rest-v1.reference.md:377-391`) and `{"array":[…]}` for a bookmark
+	// search (`bookmarks-rest-v1.openapi.yaml:380-386`). Before it was read, a
+	// corrected path would have answered with a body this function could not parse
+	// at all, which is the failure `routes.go` warns about: an empty feed that
+	// looks like a quiet site.
 	var page struct {
+		Array  []map[string]any `json:"array"`
 		Items  []map[string]any `json:"Items"`
 		Data   []map[string]any `json:"Data"`
 		Values []map[string]any `json:"values"`
@@ -651,6 +842,8 @@ func decodeItems(route Route, body json.RawMessage) ([]map[string]any, error) {
 		return nil, &MalformedError{Route: route, Why: "body is neither an array nor a known page envelope"}
 	}
 	switch {
+	case page.Array != nil:
+		return page.Array, nil
 	case page.Items != nil:
 		return page.Items, nil
 	case page.Data != nil:
@@ -659,6 +852,32 @@ func decodeItems(route Route, body json.RawMessage) ([]map[string]any, error) {
 		return page.Values, nil
 	}
 	return nil, &MalformedError{Route: route, Why: "page envelope contained no recognisable item array"}
+}
+
+// nextLink is the next page, from the documented place or the header.
+//
+// Both are read, and neither replaces the other. The documented continuation is
+// `_links.next` in the body (`events-rest-v1.reference.md:377-379`); the
+// `Next-Cursor` **header** appears in neither document, and is what this adapter
+// used to follow and what a fixture transport still hands out. Which one a real
+// build sends is a probe question, so this reads whichever arrives and treats a
+// page with neither as the last page.
+func nextLink(resp *Response) string {
+	if resp == nil {
+		return ""
+	}
+	if cursor := resp.Headers["Next-Cursor"]; cursor != "" {
+		return cursor
+	}
+	var page struct {
+		Links struct {
+			Next string `json:"next"`
+		} `json:"_links"`
+	}
+	if len(resp.Body) == 0 || json.Unmarshal(resp.Body, &page) != nil {
+		return ""
+	}
+	return strings.TrimSpace(page.Links.Next)
 }
 
 func stringField(m map[string]any, names ...string) string {

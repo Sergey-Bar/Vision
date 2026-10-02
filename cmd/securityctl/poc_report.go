@@ -9,6 +9,11 @@ import (
 	"github.com/Sergey-Bar/Ai-Captain/internal/command"
 )
 
+// geometryFromSPS is the parenthetical on the banner's resolution line. The clip's
+// dimensions come out of the stream's own parameter set, and where the camera's
+// description disagrees the parameter set is right.
+const geometryFromSPS = "read from the stream's own parameter set, which outranks anything the camera declared"
+
 // printBanner names the camera, the geometry, the protocol and the limits.
 //
 // Every field is either a value or a labelled absence. A banner with a blank
@@ -27,7 +32,7 @@ func printBanner(env *command.Env, rep *pocReport, o pocOptions) {
 		fmt.Fprintf(w, "  resolution %s\n", absence("the stream delivered no parameter set, so its frame size is not knowable"))
 	} else {
 		fmt.Fprintf(w, "  resolution %s, profile %d level %d (%s)\n",
-			rep.Source.Resolution, rep.Source.Profile, rep.Source.Level, geometrySource(rep))
+			rep.Source.Resolution, rep.Source.Profile, rep.Source.Level, geometryFromSPS)
 	}
 	if rep.Source.FrameRate > 0 {
 		fmt.Fprintf(w, "  frame rate %d fps (%s)\n", rep.Source.FrameRate, frameRateSource(rep))
@@ -55,10 +60,6 @@ func printBanner(env *command.Env, rep *pocReport, o pocOptions) {
 // different fact from a field that was never populated.
 func absence(why string) string { return "ABSENT — " + why }
 
-func geometrySource(rep *pocReport) string {
-	return "read from the stream's own parameter set, which outranks anything the camera declared"
-}
-
 func frameRateSource(rep *pocReport) string {
 	if rep.Source.Kind == "file" {
 		// An elementary stream carries no timing. The rate is a value this run was
@@ -78,7 +79,7 @@ func clockSource(rep *pocReport) string {
 	return "the camera's RTP clock"
 }
 
-func reportPoc(env *command.Env, o pocOptions, rep *pocReport, run *pocRun, runErr error) error {
+func reportPoc(env *command.Env, o pocOptions, rep *pocReport, runErr error) error {
 	if o.asJSON {
 		enc := json.NewEncoder(env.Stdout)
 		enc.SetIndent("", "  ")
@@ -86,7 +87,7 @@ func reportPoc(env *command.Env, o pocOptions, rep *pocReport, run *pocRun, runE
 			return err
 		}
 	} else {
-		printSummary(env, o, rep, run)
+		printSummary(env, o, rep)
 	}
 	if runErr != nil {
 		return runErr
@@ -97,7 +98,7 @@ func reportPoc(env *command.Env, o pocOptions, rep *pocReport, run *pocRun, runE
 	return nil
 }
 
-func printSummary(env *command.Env, o pocOptions, rep *pocReport, run *pocRun) {
+func printSummary(env *command.Env, o pocOptions, rep *pocReport) {
 	w := env.Stdout
 	if o.quiet {
 		fmt.Fprintln(w)
@@ -167,7 +168,6 @@ func printSummary(env *command.Env, o pocOptions, rep *pocReport, run *pocRun) {
 	if len(rep.Degradations) == 0 {
 		fmt.Fprintf(w, "\nno degradations\n")
 	}
-	_ = run
 	fmt.Fprintln(w)
 	// The wording here is deliberate and the test above enforces it: the phrases
 	// a reader scans for - "nothing happened", "all clear" - are absent from

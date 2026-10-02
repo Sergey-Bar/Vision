@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Sergey-Bar/Ai-Captain/internal/command"
+	"github.com/Sergey-Bar/Ai-Captain/internal/mp4"
 )
 
 // pocFixture is the same synthetic stream the capture packages are tested
@@ -301,6 +302,62 @@ func TestPocRecordProducesAFixtureTheReplayPathAccepts(t *testing.T) {
 		"--pre-roll", "3s", "--post-roll", "2s", "--max-time", "20s")
 	if code != command.ExitOK {
 		t.Fatalf("replaying our own recording returned %d\n%s", code, text)
+	}
+}
+
+// TestPocReportsAStreamTheRecorderRefused is the red-check for a refusal that
+// used to be swallowed on its way out.
+//
+// The recorder refuses a stream whose parameter sets change mid-clip. The run
+// that hit it stored nothing, raised nothing, and returned no error, so the
+// command reported "the run produced no report" - which points an operator at
+// the reporting rather than at the one-bit SPS change that stopped the capture.
+// A capture path that fails quietly is worse than one that fails, because the
+// quiet one looks like a quiet scene.
+func TestPocReportsAStreamTheRecorderRefused(t *testing.T) {
+	raw, err := os.ReadFile(pocFixture)
+	if err != nil {
+		t.Fatalf("read the fixture: %v", err)
+	}
+	// One bit of the second SPS. A different decode configuration, not a
+	// re-send: the recorder's control is that the two are not equal.
+	var stream []byte
+	seenSPS := 0
+	for _, nal := range nalUnits(raw) {
+		unit := nal
+		if typ, ok := mp4.Parse(nal); ok && typ == mp4.NALPrefix {
+			seenSPS++
+			if seenSPS == 2 {
+				unit = append([]byte(nil), nal...)
+				unit[1] ^= 0x01
+			}
+		}
+		stream = append(stream, 0, 0, 0, 1)
+		stream = append(stream, unit...)
+	}
+	if seenSPS < 2 {
+		t.Fatalf("the fixture carries %d parameter sets, so a mid-stream change cannot be built from it", seenSPS)
+	}
+	dir := t.TempDir()
+	changed := filepath.Join(dir, "changed.h264")
+	if err := os.WriteFile(changed, stream, 0o600); err != nil {
+		t.Fatalf("write the changed stream: %v", err)
+	}
+
+	code, out := runPocCmd(t, "--stream", changed, "--out", filepath.Join(dir, "run"), "--quiet")
+	// ExitError, not ExitRefused: a stream the recorder will not accept is a
+	// command that broke, and a refusal here used to print "refused: the run
+	// produced no report" - a statement about the reporting, on a run whose
+	// capture had already stopped.
+	if code != command.ExitError {
+		t.Fatalf("exit %d, want %d: a stream the recorder refused is a broken capture\n%s",
+			code, command.ExitError, out)
+	}
+	if !strings.Contains(out, "parameter-set change") {
+		t.Errorf("the refusal does not name what stopped the capture:\n%s", out)
+	}
+	if strings.Contains(out, "produced no report") {
+		t.Errorf("the run blamed the reporting instead of the stream:\n%s", out)
 	}
 }
 

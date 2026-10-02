@@ -17,14 +17,24 @@
 ## Read these, in English, before anything else
 
 Four documents survive in this module. There were eleven; the rest are folded into
-these and the fold is recorded at the bottom of each.
+these and the fold is recorded at the bottom of each. Every link in this table
+resolves to a file in the tree — there used to be two here that did not, and a
+document that sends a reader to a file that was never written is a document whose
+other claims are not worth checking.
 
 | | |
 |---|---|
 | [`docs/JUDGE.md`](docs/JUDGE.md) | **the five minutes a judge watches**, and what each step does *not* prove |
-| [`docs/STATUS.md`](docs/STATUS.md) | what is built, what is not, and who each missing thing is waiting on |
+| [`docs/hackathon/demo-script.md`](docs/hackathon/demo-script.md) | the three-minute narration, with the questions it is expected to draw |
 | [`CONTRACT.md`](CONTRACT.md) | the law. Rules R1–R8, the acceptance arithmetic, the four absence words |
 | [`contracts/hafnia/README.md`](contracts/hafnia/README.md) | what the VLM client assumes, which assumption the provider's own documentation contests, and what settles it |
+
+**What is built, what is not, and who each missing thing is waiting on** is not a
+separate document here. It is `CONTRACT.md` for the rules, `README.md` for the
+real-run findings, and the SKIPPED block that `scripts/verify.ps1` prints for
+anything the gate could not measure on the machine it ran on. Those three are
+generated or measured; a hand-maintained status file goes stale on the day
+somebody forgets it, and a stale status file is worse than none.
 
 ### Three commands, on a clean checkout
 
@@ -36,7 +46,7 @@ go build -o bin\pocctl.exe ./cmd/pocctl
 go build -o bin\watch.exe   ./cmd/watch
 go build -o bin\fixtureprobe.exe ./cmd/fixtureprobe
 
-.\scripts\verify.ps1          # the gate: build, vet, boundary, tests, 20 red checks
+.\scripts\verify.ps1          # the gate: build, vet, boundary, tests, then every red check
 ```
 
 **Build comes first because the binaries are not in git.** `bin/` is gitignored,
@@ -61,6 +71,106 @@ not be the one being downloaded.
 raw candidate count, what each suppression pass removed, and the per-class
 histogram. **Those five facts are what make a zero diagnosable** rather than merely
 observable, and this repository shipped three silent zeros before this pass.
+
+### Three things that were added for the 2026 submission
+
+Everything below is a change of behaviour, not a change of wording, and each one
+carries its own red check in `scripts/verify.ps1`.
+
+**1. Every pushed event names the model that answered.** `xprotect.Provenance` is
+the R8 bundle — the ask's state, the model's own sentence verbatim, the model
+identity *as the provider stated it*, the contract version, and the hash of the
+validated output. It rides in two places on purpose: `data.evidence.note`, which is
+this repository's own extension and which Milestone's specification never
+enumerates, and the event's `tag`, which the specification documents as assignable
+"for filtering and sorting purposes". If a real VMS drops the evidence object, the
+tag survives and names the absence state and the output hash. `BuildEvent` **refuses**
+an event with no state, and refuses one that was answered but carries no attribution.
+
+**2. "Camera not assessed" is a filterable XProtect alarm, aggregated.** Three
+absence states — `not_asked`, `degraded`, `cannot_tell` — resolve through
+`SP_POC_EVENT_TYPE_GUIDS` to three Analytics Event Types; an unmapped pair is
+refused **by name**, because the alternative is an absence arriving wearing the
+detection's own event type, which fires a line-crossing Alarm Definition on a verdict
+that was never produced. `no_objects` is refused its own type by name too: it is a
+negative *answer*, it already drives the `false_positive` verdict, and an alarm that
+fires to say "nothing" is the fatigue this product exists to remove.
+
+A window of blindness produces **one** alarm carrying a count, not one per proposal:
+`TestFiveHundredUnaskedProposalsProduceOneEvent` states the arithmetic. Each crossing
+still gets its own XProtect event with its own measured box, because the crossing
+happened and only the *verdict* is missing.
+
+**3. The tamper proof is a command, not a claim.**
+
+```powershell
+pocctl audit ledger --tamper
+```
+
+It changes one byte of one row, watches verification fail and name the row, restores
+the byte **and the two append-only triggers**, and verifies a third time. It refuses
+to run against an already-broken chain, because breaking a second one hides the
+first.
+
+`SP_POC_ORT_EP=cuda` exists and **it is measured, on an RTX 4070**. It is refused
+before the session opens unless `nvidia-smi` reports the configured device — ONNX
+Runtime falls back to the CPU when the CUDA provider cannot be used and reports it as a
+log line rather than an error, so a run that asked for a GPU and got the CPU would
+produce real numbers under a label that says otherwise.
+
+### Measured, 02.10.2026, on this machine
+
+`pocctl detector --selftest --frames 30`, RTX 4070 (driver 610.88), ONNX Runtime
+1.29.0 `win-x64-gpu_cuda12`, cuDNN 9.27, `models/yolov8n.onnx` at 416x416 NHWC,
+4 CPU threads, the first frame excluded:
+
+| provider | median | p95 | max | sustains |
+|---|---|---|---|---|
+| `cpu` | 241 ms | 265 ms | 293 ms | ~3 / s |
+| `cuda`, device 0 | **17 ms** | **19 ms** | 19 ms | ~52 / s |
+
+The first frame is excluded and so is the mean, because the first pays for CUDA context
+and cuDNN kernel compilation — it was 7.9 s here, and including it would report this GPU
+as the slow one. The row prints the sustained rate rather than a conclusion written next
+to it, because a hard-coded sentence beside a measurement gets read as part of it.
+
+Reproduce it with:
+
+```powershell
+$env:SP_POC_ORT_LIB='models\onnxruntime.dll'; $env:SP_POC_DET_MODEL='models\yolov8n.onnx'
+$env:Path += ";$((Resolve-Path models).Path)"   # cuDNN is loaded by BARE NAME
+$env:SP_POC_ORT_EP='cuda'; pocctl detector --selftest --frames 30
+$env:SP_POC_ORT_EP='cpu';  pocctl detector --selftest --frames 30
+```
+
+**The CPU-only claim in this file's earlier revisions was wrong for this model.** The
+documented 0.9 s/frame bottleneck did not reproduce: on this machine the CPU detector
+runs the committed model in 241 ms, comfortably inside the 0.8 s frame interval. The
+0.9 s figure came from a `yolov4.onnx` that is **not in this repository**, so it cannot
+be re-measured here and is no longer claimed.
+
+### The two defects the GPU exposed
+
+Both were invisible until a session actually opened, and both are the same shape: a fact
+this module **records** in every artefact and does not **act on**.
+
+**RC-29 — a dynamic-axis export could not be run at all.** The committed detector
+declares its output dims as `-1`, because the anchor count depends on the input. The
+detector pre-allocated every declared output and *refused* the model when it could not,
+with a message phrased as protection. What it was actually doing was declining every
+modern YOLO export. It now hands the runtime a slice of nils and lets it allocate.
+
+**RC-30 — the input tensor was laid out the wrong way round.** The session worked the
+layout out from the model's own declared dims and recorded it — in `Input().Layout`, in
+the run report, in `fixtureprobe -detector` — and then built the tensor in a fixed order
+regardless. On this NHWC export that is a legible runtime error. The reason it is worth
+a test anyway is the quiet version: a tensor of exactly the right number of floats, fed
+in the wrong order, decodes to boxes that are **plausible and wrong**, nothing errors,
+and every artefact describing the model says the layout was honoured.
+
+The shapes the fix produces — `[1 52 52 3 85]`, `[1 26 26 3 85]`, `[1 13 13 3 85]` —
+are byte-for-byte what `pyworker/fixtures/yolov8n.contract.json` already recorded from
+a CPU run of this same model, which is an independent check that the layout is now right.
 
 ### The system, on one page
 
@@ -100,7 +210,8 @@ not the same claim.
 
 ### Module boundary
 
-`scripts/verify.ps1` holds ten import-graph rows. The load-bearing ones:
+`scripts/verify.ps1` holds one import-graph row per package below `internal/soak`.
+The load-bearing ones:
 
 - `internal/vlm` may not reach the store or the pipeline. RC-4's replay proof is
   structural **only** because of this: a verifier that can read what somebody said
@@ -148,10 +259,6 @@ pocctl mark <tag>             one human verdict on one pushed event; this is wha
 pocctl search <text>          what the model SAID, with its clip ref and its attribution
 pocctl brief                  one line per hour: frames read, proposals, and whether the model was asked at all
 ```
-
-| | |
-|---|---|
-| [`docs/vss-mapping.md`](docs/vss-mapping.md) | how the class and family columns relate to VSS 4.2, and the four places the mapping is **not** one |
 
 ---
 
@@ -318,7 +425,7 @@ set it with a path on a LOCAL disk
 | boundary | אין import של הפלטפורמה; השורש לא בונה את המודול; `internal/xprotect` לא מכיר את `xpsim`; `internal/detect` ו־`internal/ai` לא מכירים אחסון או את התול |
 | tests | `go test -race -p 1 -count=1 ./...` |
 | sidecar | `py -3 -m unittest` על `pyworker/` |
-| **red check** | **אחד עשרה בקרות מוסרות מהקוד**, וכל אחת חייבת להפוך את הסביבה ל־אדום |
+| **red check** | **כל בקרות ה־red check של הסקריפט מוסרות מהקוד**, וכל אחת חייבת להפוך את הסביבה ל־אדום. המספר מודפס ע"י השלב עצמו, לא כתוב כאן — מספר שנכתב במסמך הופך לשקר ביום שמוסיפים בקורה אחת־עשרה |
 
 ### ה־red check
 
@@ -326,9 +433,10 @@ set it with a path on a LOCAL disk
 טסט. מחיקת טסט לא מוכיחה דבר: סביבה עם טסט אחד פחות עדיין ירוקה, והדבר שהטסט
 שמר עליו עדיין לא מוגן. מחיקת הבדיקה עצמה מוכיחה שהטסט **שומר** עליה.
 
-שלוש הראשונות היו קיימות לפני עבודת ה־VLM, ושבע האחרונות הן `RC-1` עד `RC-7` —
-שבע הבדיקות שהתוכנית קוראת להן "ההבדל בין הדמו למערכת". כל אחת מסירה הכחשה
-אחת מסוימת:
+שלוש הראשונות היו קיימות לפני עבודת ה־VLM, ואחריהן `RC-1` ועד `RC-20` — כל אחת
+מסירה הכחשה אחת מסוימת. **הרשימה המלאה והעדכנית היא טבלת ה־`$controls` בתוך
+`scripts/verify.ps1`**, לא הטבלה שלהלן: רשימה שמתוחרת עם הקוד היא רשימה שתתיישן,
+והשלב עצמו מדפיס כמה בקרות הוא באמת הריץ.
 
 | נמחק | למה הסביבה חייבת להאדים |
 |---|---|
@@ -410,8 +518,8 @@ set it with a path on a LOCAL disk
 האירוע.
 
 **"הדטקטור היה ירוק?"**
-אם `verify.ps1` הדפיס GREEN, הוא הריץ גם את ה־red check — כלומר שלוש בקרות הוסרו
-מהקוד והסביבה הפכה לאדומה כל פעם. אם הוא הדפיס GREEN **עם SKIPS**, קרא את הדללת
+אם `verify.ps1` הדפיס GREEN, הוא הריץ גם את ה־red check — כלומר כל בקרה שהשלב
+הדפיס הוסרה מהקוד והסביבה הפכה לאדומה כל פעם. אם הוא הדפיס GREEN **עם SKIPS**, קרא את הדללת
 לפני שאתה מתייחס אליו כ־עבר.
 
 **"למה לא שתי הרצות במקביל?"**

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -389,6 +390,61 @@ func TestCaptureReproducesTheStreamByteForByte(t *testing.T) {
 	if !sawSetupOnTrack {
 		t.Errorf("SETUP did not address the media control URI; requests were %v", srv.seen())
 	}
+}
+
+// TestAPayloadTypeOfZeroIsNotMistakenForNoVideo pins a distinction the parser
+// used to collapse.
+//
+// Payload type 0 is a legal value in RTP. Carrying it as the "nothing was
+// declared" sentinel refused a working camera with "the session description has
+// no video media section" - a message about a missing section, on a description
+// whose video section is right there. The other half of the same control is that
+// a description with no video section is still refused, because accepting one
+// would hand the caller a stream that cannot exist.
+func TestAPayloadTypeOfZeroIsNotMistakenForNoVideo(t *testing.T) {
+	const head = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=Camera\r\nc=IN IP4 0.0.0.0\r\nt=0 0\r\na=control:*\r\n"
+
+	t.Run("payload type zero is accepted", func(t *testing.T) {
+		srv := newServer(t, nil)
+		srv.sdp = head +
+			"m=video 0 RTP/AVP 0\r\n" +
+			"a=rtpmap:0 H264/90000\r\n" +
+			"a=framerate:25\r\n" +
+			"a=control:trackID=1\r\n"
+		ctx := context.Background()
+		c, err := rtsp.Dial(ctx, srv.url(), rtsp.Options{Timeout: 3 * time.Second})
+		if err != nil {
+			t.Fatalf("dial: %v", err)
+		}
+		defer func() { _ = c.Close() }()
+		if _, err := c.Describe(ctx); err != nil {
+			t.Fatalf("a camera offering payload type 0 was refused: %v", err)
+		}
+		desc := c.Description()
+		if desc.PayloadType != 0 {
+			t.Errorf("payload type %d, want 0", desc.PayloadType)
+		}
+		if desc.ClockRate != 90000 {
+			t.Errorf("clock rate %d, want the 90000 the description declared", desc.ClockRate)
+		}
+	})
+
+	t.Run("a description with no video section is still refused", func(t *testing.T) {
+		srv := newServer(t, nil)
+		srv.sdp = head +
+			"m=audio 0 RTP/AVP 97\r\n" +
+			"a=rtpmap:97 mpeg4-generic/44100/2\r\n" +
+			"a=control:trackID=1\r\n"
+		ctx := context.Background()
+		c, err := rtsp.Dial(ctx, srv.url(), rtsp.Options{Timeout: 3 * time.Second})
+		if err != nil {
+			t.Fatalf("dial: %v", err)
+		}
+		defer func() { _ = c.Close() }()
+		if _, err := c.Describe(ctx); !errors.Is(err, rtsp.ErrNoMediaSection) {
+			t.Fatalf("got %v, want ErrNoMediaSection", err)
+		}
+	})
 }
 
 func TestRefusesWhatItCannotCarry(t *testing.T) {

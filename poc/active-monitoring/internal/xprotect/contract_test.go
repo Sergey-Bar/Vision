@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Sergey-Bar/ai-captain-poc/internal/aistate"
 )
 
 // specDir is the downloaded Milestone documentation, relative to this package.
@@ -164,6 +166,12 @@ func BuildEventOrDie(t *testing.T) EventRequest {
 		Box:      Box{Top: 194, Left: 286, Bottom: 429, Right: 408},
 		RuleName: "bird-line-cross",
 		Evidence: EvidenceRef{StorageRef: "ab/cd/abcd.mp4", SHA256: strings.Repeat("a", 64), TimeBegin: "2026-09-30T10:14:59Z", TimeEnd: "2026-09-30T10:15:09Z"},
+		Provenance: Provenance{
+			AIState: aistate.Asked, Verdict: "confirmed",
+			Summary:       "a bird crossed the line",
+			ModelIdentity: "nvidia/cosmos-3", ContractVersion: "contract-1",
+			OutputHash: strings.Repeat("b", 64),
+		},
 	})
 	if err != nil {
 		t.Fatal(err)

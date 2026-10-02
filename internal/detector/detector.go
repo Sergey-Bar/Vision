@@ -90,7 +90,14 @@ type Observed struct {
 	CodedBytes int
 	KeyFrame   bool
 	Time       time.Time
-	Luma       *Luma
+	// Luma is the decoded plane, or nil when the stream has not been decoded.
+	//
+	// A detector that compares planes keeps this one as its reference frame, so
+	// the bytes must not change before the next Observe. A decoder that writes
+	// every frame into one buffer therefore has to hand over a copy: the
+	// reference would otherwise be the current frame, every pixel would compare
+	// equal, and a detector that can never fire looks exactly like a quiet scene.
+	Luma *Luma
 }
 
 // Reading is one detector output: a score, the threshold it was compared
@@ -158,26 +165,30 @@ func Decimate(l Luma, factor int) (Luma, error) {
 		return Luma{}, fmt.Errorf("detector: %dx%d cannot be decimated by %d", l.Width, l.Height, factor)
 	}
 	out := make([]byte, w*h)
+	area := factor * factor
 	for y := 0; y < h; y++ {
+		top := y * factor * l.Stride
 		for x := 0; x < w; x++ {
+			left := top + x*factor
 			sum := 0
+			// Each block is read as a row of factor samples rather than as
+			// factor*factor indexed bytes: the bounds check is hoisted out of the
+			// inner loop, and the inner loop is the one that runs 8.3 million
+			// times a frame at 4K.
 			for dy := 0; dy < factor; dy++ {
-				for dx := 0; dx < factor; dx++ {
-					sum += int(l.Plane[(y*factor+dy)*l.Stride+x*factor+dx])
+				row := l.Plane[left+dy*l.Stride : left+dy*l.Stride+factor]
+				for _, v := range row {
+					sum += int(v)
 				}
 			}
-			// Saturate rather than truncate. A white block averaged into a
-			// black frame is 255, and the arithmetic mean of 16 white pixels is
-			// 255 — but a wider factor puts the numerator past 255 * factor^2
-			// for a mean that is still in range, and byte() would then wrap a
-			// bright average into a dark one. A dark frame that reads as light
-			// produces novelty every frame, which is the failure this detector
-			// exists to avoid.
-			mean := sum / (factor * factor)
-			if mean > 255 {
-				mean = 255
-			}
-			out[y*w+x] = byte(mean) //nolint:gosec // clamped to a byte above
+			// The numerator may be far past 255 - a wide factor over a white
+			// block is 255*factor*factor - which is why sum is an int, but the
+			// quotient is bounded by 255 because every term is. So the narrowing
+			// below cannot wrap, and a bright block averaged into a dark frame is
+			// 255 rather than a dark patch on a bright one: a dark frame that
+			// reads as light produces novelty every frame, which is the failure
+			// this detector exists to avoid.
+			out[y*w+x] = byte(sum / area) //nolint:gosec // bounded by 255 by the argument above
 		}
 	}
 	return Luma{Width: w, Height: h, Stride: w, Plane: out}, nil

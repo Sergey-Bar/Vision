@@ -666,6 +666,147 @@ file = 'internal\detect\engine.go'
       to   = 'measured := true // REDCHECK RC-20: every frame is recorded as measured'
       pkg  = './internal/soak'
       why  = '"the model saw nothing" and "the pipeline never asked" become the same row, and a reader counting rows computes a recall of zero out of a run that never ran. This repository has shipped that exact confusion three times.'
+    },
+    @{
+      # The two ledger readers have to agree about what (0, 0) means. VerifyLedger
+      # has always read it as "to the end"; Ledger compared `seq <= to` literally, so
+      # `pocctl audit ledger` printed "the ledger is empty. An empty chain is not an
+      # intact one" and then "PASS — 57 row(s) recomputed and chained" on the next
+      # line. Removing this line puts that contradiction back, and
+      # TestAnOpenEndedLedgerRangeMeansTheWholeChain fails on the row count.
+      name = 'RC-21 an open-ended ledger range means the whole chain'
+      file = 'internal\store\ledger.go'
+      from = 'to = s.lastSeq(ctx)'
+      to   = 'to = to // REDCHECK RC-21: the open-ended range was removed'
+      pkg  = './internal/store'
+      why  = 'the audit command reports an empty ledger beside a verified chain, so a reader who sees "PASS" beside "the ledger is empty" has been taught to read past the tool that is supposed to be checking it'
+    },
+    @{
+      # R8's first half: every pushed event names the state of its ask. Split from
+      # the attribution half on purpose — an event with no state never reaches the
+      # attribution checks, so folding them would make whichever came second
+      # unreachable and its red check would pass vacuously. Two defects, two controls.
+      name = 'RC-22 a pushed event names the state of its ask'
+      file = 'internal\xprotect\client.go'
+      from = '	if strings.TrimSpace(p.AIState) == "" {'
+      to   = '	if false && strings.TrimSpace(p.AIState) == "" { // REDCHECK RC-22: the missing-state refusal was removed'
+      pkg  = './internal/xprotect'
+      why  = 'an event reads the same whether the model was asked and answered or whether nobody could reach it, so a reader cannot tell a finding from a gap — which is the entire product'
+    },
+    @{
+      # R8's second half: an ANSWERED event carries the model, the contract version
+      # and the output hash. Not no_objects and not the three blindness states:
+      # nobody was asked, so there is nothing to attribute, and requiring it would
+      # force the writer to invent all.
+      name = 'RC-23 an answered event carries model, contract version and output hash'
+      file = 'internal\xprotect\client.go'
+      from = '	if strings.TrimSpace(p.ModelIdentity) == "" {'
+      to   = '	if false && strings.TrimSpace(p.ModelIdentity) == "" { // REDCHECK RC-23: the attribution refusal was removed'
+      pkg  = './internal/xprotect'
+      why  = 'a caption arrives in Smart Client with nobody named as its author, and the person reading it has no way of knowing that this repository cannot check what it says'
+    },
+    @{
+      # The aggregate's whole identity. Called once per WINDOW with the window's
+      # first proposal's instant, the key is stable and every later proposal refreshes
+      # the row under it. Recomputed per proposal it changes every time: the row still
+      # collapses, but the VMS ends up holding the LAST proposal's tag, a retry of
+      # the first proposal computes a key that matches nothing, and the retry becomes
+      # a second remote event. The window was re-keyed this way once and the test that
+      # caught it asserts both halves — the outbox row's tag column and the tag
+      # inside its payload.
+      name = 'RC-24 a blindness window is keyed once, by its first proposal'
+      file = 'internal\soak\absence.go'
+      from = '	w.tag = absenceWindowTag(r.opt.RunID, state, ev.At)'
+      to   = '	w.tag = absenceWindowTag(r.opt.RunID, state, ev.At.Add(time.Duration(w.count)*time.Second)) // REDCHECK RC-24: the window was re-keyed per proposal'
+      pkg  = './internal/soak'
+      why  = 'the aggregated alarm loses its idempotency, so a retry of the window first proposal becomes a second remote event and AC4 duplicate-id count goes above zero'
+    },
+    @{
+      # The outbox row and the payload must carry the SAME key. Rewriting only the
+      # payload moves the count into the tag the VMS will store while the column the
+      # push worker reads still holds the count-one key, so the read-back searches for
+      # something that was never sent and reports `unknown` — "the push returned 202
+      # but the event was not found" for an event that is sitting in the VMS.
+      name = 'RC-25 an aggregated alarm key is rewritten with its payload'
+      file = 'internal\store\outbox.go'
+      from = '		UPDATE outbox SET payload=?, tag=?, detail=?, updated_at=?'
+      to   = '		UPDATE outbox SET payload=?, detail=?, updated_at=? -- REDCHECK RC-25: the key was left behind'
+      pkg  = './internal/store'
+      why  = 'the module reports unknown for a push that succeeded, which AC2 reads as work still in flight and AC4 as an attempt with no result'
+    },
+    @{
+      # `no_objects` is a negative ANSWER, not a blindness. Accepted as a key, it
+      # becomes an Analytics Event Type that fires whenever a camera sees nothing —
+      # the alarm fatigue this product exists to remove, reintroduced through the
+      # blindness map. The refusal is in the PARSER and not at the push site on
+      # purpose: a run that starts and then pushes nothing reports zero alarms and no
+      # error, and "why did nothing arrive" is a much longer investigation than a
+      # startup refusal naming the offending entry.
+      name = 'RC-26 no_objects is refused its own Analytics Event Type'
+      file = 'internal\config\eventtypes.go'
+      from = '		if !IsBlindnessState(state) {'
+      to   = '		if false { // REDCHECK RC-26: no_objects was accepted as an event-type state'
+      pkg  = './internal/config'
+      why  = 'an alarm that fires to say "nothing" arrives hundreds of times an hour, which is the fatigue the absence feature was built to remove and the reason no_objects drives the verdict on the detection own event instead'
+    },
+    @{
+      # An unmapped (class, absence state) pair falls back to the DETECTION's event
+      # type rather than being refused. Every absence then arrives as a line-crossing
+      # alert, an Alarm Definition on "vehicle crossing the line" fires on it, and an
+      # operator is paged about a car that may not exist because the module could not
+      # reach its own model. The refusal names the pair and the remedy, which is the
+      # house style and the only reason an operator can act on it at two in the
+      # morning.
+      name = 'RC-27 an unmapped absence pair is refused, not pushed as a crossing'
+      file = 'internal\config\eventtypes.go'
+      from = '	return c.refuseUnmapped(class, state)'
+      to   = '	return c.EventTypeGUID, nil // REDCHECK RC-27: an unmapped pair was pushed as a crossing'
+      pkg  = './internal/config'
+      why  = 'the absence reaches the Smart Client wearing a crossing alarm type, and nothing in the output says the verdict was never produced'
+    },
+    @{
+      # ONNX Runtime falls back to the CPU when the CUDA provider cannot be used and
+      # reports it as a log line at session creation rather than an error. A CUDA
+      # spelling that silently meant `cpu` would produce a correct, slower run whose
+      # every recorded field says `cuda` — the exact shape of the defect this
+      # repository exists to end: real numbers with the wrong label. The device
+      # confirmation runs BEFORE the append, because the fallback happens after it,
+      # where nothing in this package can see it.
+      name = 'RC-28 a CUDA spelling is never silently the CPU'
+      file = 'internal\ortdetect\execution_provider.go'
+      from = 'func gpuMeansCUDA() string { return EPProviderCUDA }'
+      to   = 'func gpuMeansCUDA() string { return EPProviderCPU } // REDCHECK RC-28: `gpu` became the CPU'
+      pkg  = './internal/ortdetect'
+      why  = 'a latency measured on the CPU is recorded as one measured on a GPU, and the number is real and the label is not'
+    },
+    @{
+      # A model exported with dynamic axes publishes declared output dims of -1, and
+      # a -1 cannot be sized. This module used to refuse such a model outright with
+      # "an output tensor could not be allocated", which means the committed detector
+      # could not be run at all, on either provider. That is the NORMAL shape for a
+      # modern YOLO export, so the old behaviour was not a safety check — it was an
+      # inability wearing a refusal's clothes, and it failed while claiming to protect
+      # something. Removing this line makes the runtime allocate instead.
+      name = 'RC-29 a dynamic-axis export is run with runtime-allocated outputs'
+      file = 'internal\ortdetect\session_cgo.go'
+      from = '		return make([]ort.Value, len(outputs)), true'
+      to   = '		return preallocateConcrete(outputs), false // REDCHECK RC-29: the runtime never allocates'
+      pkg  = './internal/ortdetect'
+      why  = 'a detector exported with dynamic axes cannot be run at all, and the refusal says it is being protected from something'
+    },
+    @{
+      # The session worked out the layout from the model's own declared dims and
+      # recorded it — in Input().Layout, in the run report and in fixtureprobe's
+      # output — and then fed the tensor in a different order from the one declared.
+      # A recorded fact nobody acts on is the failure this module exists to end, and
+      # here it was hiding inside the module that exists to catch it. The symptom on
+      # an NHWC export is "index: 1 Got: 3 Expected: 416".
+      name = 'RC-30 the input tensor is laid out the way the model declares'
+      file = 'internal\ortdetect\session_cgo.go'
+      from = '		shape = ort.NewShape(1, h, w, c)'
+      to   = '		shape = ort.NewShape(1, c, h, w) // REDCHECK RC-30: NHWC is fed as NCHW'
+      pkg  = './internal/ortdetect'
+      why  = 'a tensor of exactly the right size fed in the wrong order decodes to boxes that are plausible and wrong, while every artefact describing the model says the layout was honoured'
     }
   )
   Push-Location $PWD

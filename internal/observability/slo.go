@@ -24,12 +24,78 @@ type SLO struct {
 	Remedy string
 }
 
-// Breaches evaluates the SLOs against the registry.
+// Readings are the numbers the objectives are evaluated against.
+//
+// It is a struct rather than a list of parameters because the list had nine of
+// them, three of which were accepted and then discarded — `driftExcluded`,
+// `correlations` and `contradictions` were named, documented by being in a
+// signature, and read by nothing. A caller that had to supply them was supplying
+// three zeros it did not have. They are gone rather than kept as fields nothing
+// reads, and if an objective that needs them is added to the plan it brings its
+// own reading.
+//
+// The two `Measured` flags exist because a gauge nobody has ever written reads as
+// zero, and for these two that zero is a claim. `evidence_disk` reads "the
+// evidence volume is 100% full" and `ai_plane_availability` reads "the AI plane
+// was never absent" — and at the time of writing, **no code in this repository
+// writes either gauge**, so both claims would be permanently false on every
+// install. An objective that reports an unmeasured input as a breach is an
+// objective that trains an operator to ignore it, which is the failure this whole
+// package exists to avoid.
+type Readings struct {
+	// LostEvents is accepted events the platform did not process. It is named for
+	// what it counts: the parameter it replaces was called `accepted`, and a
+	// reading of "5 accepted" on the objective named "zero accepted events lost"
+	// is a sentence that means two different things depending on which half you
+	// read.
+	LostEvents float64
+	// DeadLettered is how many of them are recorded as terminal dead letters.
+	DeadLettered float64
+	// IncidentVisibilities are the times from an event being accepted to its
+	// incident being visible to an operator.
+	IncidentVisibilities []time.Duration
+	// AIDegradedDecisions is how many decisions were made with the AI plane
+	// unavailable. Reported, never required.
+	AIDegradedDecisions float64
+	// AIDegradedMeasured says whether anything has written that gauge. Unmeasured
+	// is reported as unmeasured, not as zero degraded decisions.
+	AIDegradedMeasured bool
+	// DiskFreePercent is free space on the evidence volume.
+	DiskFreePercent float64
+	// DiskFreeMeasured says whether anything has written that gauge.
+	DiskFreeMeasured bool
+}
+
+// ReadingsFrom reads the current numbers out of a registry.
+//
+// It exists so the mapping from metric names to objective inputs is in one place
+// and testable, rather than in whichever caller happened to need the SLOs first.
+// A registry that has never been written reads as unmeasured rather than as
+// healthy, which is what an objective evaluating an unmeasured system should see.
+func ReadingsFrom(r *Registry) Readings {
+	if r == nil {
+		return Readings{}
+	}
+	return Readings{
+		LostEvents: float64(r.Counters.Get(CounterInboxAccepted)) -
+			float64(r.Counters.Get(CounterInboxDeadLettered)),
+		DeadLettered:        float64(r.Counters.Get(CounterInboxDeadLettered)),
+		AIDegradedDecisions: r.Gauges.Get(GaugeIncidentDegraded),
+		AIDegradedMeasured:  r.Gauges.Measured(GaugeIncidentDegraded),
+		DiskFreePercent:     r.Gauges.Get(GaugeEvidenceDiskFree),
+		DiskFreeMeasured:    r.Gauges.Measured(GaugeEvidenceDiskFree),
+	}
+}
+
+// Breaches evaluates the SLOs against the readings.
 //
 // It is a function and not a method on a struct because the SLO list is
 // configuration - a site may tighten the ingest target - and because the
 // evaluation must be testable without a running system.
-func Breaches(r *Registry, accepted, deadLettered, driftExcluded, correlations, contradictions, aiDegraded, diskFreePercent float64, incidentVisibilities []time.Duration) []SLO {
+func Breaches(r *Registry, in Readings) []SLO {
+	if r == nil {
+		r = NewRegistry()
+	}
 	byName := map[string]float64{
 		GaugeBacklogDepth:       r.Gauges.Get(GaugeBacklogDepth),
 		GaugeOutboxPending:      r.Gauges.Get(GaugeOutboxPending),
@@ -47,8 +113,8 @@ func Breaches(r *Registry, accepted, deadLettered, driftExcluded, correlations, 
 	out = append(out, SLO{
 		Name:     "ingest_availability",
 		Target:   "zero accepted events lost",
-		Breached: accepted > 0,
-		Measured: fmt.Sprintf("%.0f lost, %d dead-lettered", accepted, int(deadLettered)),
+		Breached: in.LostEvents > 0,
+		Measured: fmt.Sprintf("%.0f lost, %d dead-lettered", in.LostEvents, int(in.DeadLettered)),
 		Remedy: "check the dead-letter list before anything else. A dead letter is an accepted " +
 			"event the platform could not process, and the reason is recorded on it.",
 	})
@@ -70,8 +136,8 @@ func Breaches(r *Registry, accepted, deadLettered, driftExcluded, correlations, 
 
 	// SLO 3: incident visibility inside 15 seconds at p95, on the AI path.
 	var p95 time.Duration
-	if len(incidentVisibilities) > 0 {
-		sorted := append([]time.Duration(nil), incidentVisibilities...)
+	if len(in.IncidentVisibilities) > 0 {
+		sorted := append([]time.Duration(nil), in.IncidentVisibilities...)
 		sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
 		p95 = sorted[(int(0.95 * float64(len(sorted)-1)))]
 	}
@@ -87,11 +153,15 @@ func Breaches(r *Registry, accepted, deadLettered, driftExcluded, correlations, 
 	// SLO 4: the AI plane is never an SLO. This is recorded as a breach of a
 	// different kind: the product keeps working, but a pilot claiming an AI
 	// benefit has to be able to say how often it was there.
+	aiMeasured := fmt.Sprintf("%.0f degraded decision(s) recorded", in.AIDegradedDecisions)
+	if !in.AIDegradedMeasured {
+		aiMeasured = "not measured: nothing in this build reports degraded decisions"
+	}
 	out = append(out, SLO{
 		Name:     "ai_plane_availability",
 		Target:   "reported, never required",
-		Breached: aiDegraded > 0,
-		Measured: fmt.Sprintf("%.0f degraded decision(s) recorded", aiDegraded),
+		Breached: in.AIDegradedMeasured && in.AIDegradedDecisions > 0,
+		Measured: aiMeasured,
 		Remedy: "none, by design. The core keeps ingesting and verifying without it. " +
 			"This number is how a pilot measures what the AI plane actually contributed.",
 	})
@@ -136,18 +206,23 @@ func Breaches(r *Registry, accepted, deadLettered, driftExcluded, correlations, 
 	// SLO 8: evidence disk. This is the one that ends an incident badly: a full
 	// disk stops evidence fetches, and an incident without its evidence is not
 	// defensible.
+	//
+	// Unmeasured is not full. Nothing in this build samples the evidence volume
+	// yet, and an objective that reported "0.0% free, breached" on every install
+	// forever would be the one objective an operator learns to scroll past.
+	diskMeasured := fmt.Sprintf("%.1f%% free", in.DiskFreePercent)
+	if !in.DiskFreeMeasured {
+		diskMeasured = "not measured: no evidence-volume sampler in this build"
+	}
 	out = append(out, SLO{
 		Name:     "evidence_disk",
 		Target:   "10% free, warning at 25%",
-		Breached: diskFreePercent < 10,
-		Measured: fmt.Sprintf("%.1f%% free", diskFreePercent),
+		Breached: in.DiskFreeMeasured && in.DiskFreePercent < 10,
+		Measured: diskMeasured,
 		Remedy: "run a retention sweep before deleting anything by hand. A sweep that cannot " +
 			"check legal hold deletes nothing, so a dry run is safe.",
 	})
 
-	_ = driftExcluded
-	_ = correlations
-	_ = contradictions
 	return out
 }
 

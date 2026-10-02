@@ -44,6 +44,18 @@ type SessionConfig struct {
 	// count, so the same run on a 4-core laptop and a 16-core server has different
 	// latency and the recorded p99 describes neither.
 	Threads int
+	// ExecutionProvider is SP_POC_ORT_EP: "cpu" or "cuda". It is recorded on every
+	// measurement for the same reason the thread count is — a latency without an
+	// execution provider describes a device nobody can name.
+	//
+	// "cpu" is the default rather than a fallback. A run that silently fell back to
+	// the CPU because the GPU was unavailable would produce the same p99 numbers as a
+	// CPU run while the operator believed a GPU was in the loop, which is the exact
+	// shape of the defect this module exists to end.
+	ExecutionProvider string
+	// CUDADeviceID is SP_POC_ORT_CUDA_DEVICE: which GPU, zero-based, as CUDA numbers
+	// them. Only read when ExecutionProvider is "cuda".
+	CUDADeviceID int
 }
 
 // Session is an open ONNX Runtime session and the facts about the model it was
@@ -110,6 +122,18 @@ type Identity struct {
 	// RuntimeVersion is whatever the loaded ORT reports, so a measurement can name
 	// the runtime as well as the weights.
 	RuntimeVersion string
+	// ExecutionProvider is the device the session runs on, normalised from
+	// SP_POC_ORT_EP.
+	//
+	// It is the CONFIGURED provider, and it says so, because this binding exposes no
+	// read-back of a session's active providers. What stands behind it is not a hope:
+	// a CUDA run is refused before the session is opened unless `nvidia-smi` reports
+	// the configured device, and the append itself is refused on error. So the value
+	// is backed by a check that ran, not by a fallback that did not.
+	ExecutionProvider string
+	// CUDADeviceID is which GPU the run was confirmed against, zero-based. Zero on
+	// the CPU, and there it means nothing rather than "the first GPU".
+	CUDADeviceID int
 }
 
 // DetectLayout decides NCHW from NHWC by the position of the small axis. It is
@@ -177,6 +201,11 @@ func Open(cfg SessionConfig) (*Session, error) {
 			Detail: sprintf("SP_POC_ORT_THREADS=%d: %v", cfg.Threads, err),
 		}
 	}
+	if err := applyExecutionProvider(opts, cfg.ExecutionProvider, cfg.CUDADeviceID); err != nil {
+		_ = opts.Destroy()
+		_ = ort.DestroyEnvironment()
+		return nil, err
+	}
 
 	// Read the declarations from a temporary session BEFORE opening the real one, so
 	// a refusal costs nothing and names the model rather than the session.
@@ -227,7 +256,8 @@ func Open(cfg SessionConfig) (*Session, error) {
 		outputs = append(outputs, OutputSpec{Name: o.Name, Dims: o.Dimensions})
 	}
 
-	id := Identity{ModelPath: cfg.ModelPath}
+	id := Identity{ModelPath: cfg.ModelPath, ExecutionProvider: NormalizeEP(cfg.ExecutionProvider),
+		CUDADeviceID: cfg.CUDADeviceID}
 	sum, size, err := HashModel(cfg.ModelPath)
 	if err != nil {
 		_ = sess.Destroy()
@@ -319,8 +349,27 @@ func (s *Session) Infer(tensor []float32, layout string) ([]Tensor, error) {
 	if s.closed {
 		return nil, errors.New("ortdetect: the session is closed")
 	}
+	// The caller's layout is CROSS-CHECKED against the model's rather than used.
+	// Laying the tensor out in the caller's order when the model declares another is
+	// the quiet version of the bug RC-30 is about: a tensor of exactly the right size,
+	// fed in the wrong order, decoding to boxes that are plausible and wrong. Refusing
+	// is the only answer that does not involve this module guessing which of two
+	// confident statements is the true one.
+	if layout != "" && layout != s.input.Layout {
+		return nil, &Refusal{
+			What: "the caller's input layout disagrees with the model's",
+			Detail: sprintf("the caller says %s and %s declares %s. Laying the tensor out in the caller's "+
+				"order would feed the model a tensor of the right SIZE in the wrong order, which is a detector "+
+				"that decodes boxes that are plausible and wrong. Fix the caller or re-export the model",
+				layout, s.input.Name, s.input.Layout),
+		}
+	}
 
-	in, err := ort.NewTensor(ort.NewShape(1, int64(s.input.Channels()), int64(s.input.H), int64(s.input.W)), tensor)
+	shape, serr := s.inputShape(len(tensor))
+	if serr != nil {
+		return nil, serr
+	}
+	in, err := ort.NewTensor(shape, tensor)
 	if err != nil || in == nil {
 		return nil, &Refusal{
 			What: "the input tensor could not be created",
@@ -330,24 +379,20 @@ func (s *Session) Infer(tensor []float32, layout string) ([]Tensor, error) {
 	}
 	defer func() { _ = in.Destroy() }()
 
-	outSpecs := make([]ort.Value, 0, len(s.outputs))
-	for _, o := range s.outputs {
-		t, err := ort.NewTensor(ort.NewShape(o.Dims...), make([]float32, shapeSize(o.Dims)))
-		if err != nil || t == nil {
+	outSpecs, autoAllocate := preallocateOutputs(s.outputs)
+	if !autoAllocate {
+		defer func() {
 			for _, v := range outSpecs {
 				_ = v.Destroy()
 			}
-			return nil, &Refusal{
-				What:   "an output tensor could not be allocated",
-				Detail: sprintf("%s has declared shape %v: %v", o.Name, o.Dims, err),
-			}
-		}
-		outSpecs = append(outSpecs, t)
+		}()
 	}
 
 	if err := s.sess.Run([]ort.Value{in}, outSpecs); err != nil {
 		for _, v := range outSpecs {
-			_ = v.Destroy()
+			if v != nil {
+				_ = v.Destroy()
+			}
 		}
 		return nil, &Refusal{
 			What:   "the ONNX Runtime could not run the model",
@@ -356,7 +401,9 @@ func (s *Session) Infer(tensor []float32, layout string) ([]Tensor, error) {
 	}
 	defer func() {
 		for _, v := range outSpecs {
-			_ = v.Destroy()
+			if v != nil {
+				_ = v.Destroy()
+			}
 		}
 	}()
 
@@ -376,8 +423,50 @@ func (s *Session) Infer(tensor []float32, layout string) ([]Tensor, error) {
 		shape := t.GetShape()
 		out = append(out, Tensor{Name: s.outputs[i].Name, Dims: shape, Data: t.GetData()})
 	}
-	_ = layout
 	return out, nil
+}
+
+// inputShape is the tensor shape in the layout the MODEL declares.
+//
+// REDCHECK RC-30. It is not always (1, C, H, W), and the difference is not cosmetic.
+//
+// This function's caller used to build (1, C, H, W) unconditionally while accepting a
+// `layout` argument it immediately discarded with `_ = layout`. The session had already
+// worked out the layout from the model's own declared dims and recorded it — it was in
+// `Input().Layout`, in the run report and in `fixtureprobe -detector`'s output — and then
+// the tensor was laid out in a different order from the one the model declared.
+//
+// The symptom on an NHWC export is a runtime error reading `index: 1 Got: 3 Expected: 416`,
+// which is a real and legible failure. The reason it matters anyway is the class of bug
+// next door: the layout was RECORDED correctly and APPLIED wrongly, so every artefact
+// describing the model said `nhwc` while the bytes fed to it were NCHW. A recorded fact
+// nobody acts on is the failure this module exists to end, and here it was hiding inside
+// the module that exists to catch it.
+func (s *Session) inputShape(n int) (ort.Shape, error) {
+	c, h, w := int64(s.input.Channels()), int64(s.input.H), int64(s.input.W)
+	var shape ort.Shape
+	switch s.input.Layout {
+	case "nhwc":
+		shape = ort.NewShape(1, h, w, c)
+	case "nchw", "":
+		shape = ort.NewShape(1, c, h, w)
+	default:
+		return nil, &Refusal{
+			What: "the model's input layout is neither nchw nor nhwc",
+			Detail: sprintf("%q was detected for %s, so this module cannot lay the tensor out for it. "+
+				"Transpose the model at export time rather than guessing here: a wrong guess produces a "+
+				"tensor of the right SIZE that the model reads in the wrong order, which decodes to boxes "+
+				"that are plausible and wrong", s.input.Layout, s.input.Name),
+		}
+	}
+	if want := int(c * h * w); want != n {
+		return nil, &Refusal{
+			What: "the input tensor is the wrong size for this model",
+			Detail: sprintf("%s declares %d x %d in %s, which is %d floats, and %d were supplied. "+
+				"The caller's layout disagrees with the model's", s.input.Name, h, w, s.input.Layout, want, n),
+		}
+	}
+	return shape, nil
 }
 
 // Channels is the channel count implied by the model's own layout.
@@ -389,6 +478,71 @@ func (i InputSpec) Channels() int {
 		return 3
 	}
 	return 3
+}
+
+// preallocateOutputs allocates the output tensors, or declines to.
+//
+// REDCHECK RC-29. It DECLINES — handing the runtime a slice of nils so the RUNTIME
+// allocates — whenever any declared output dimension is not a positive number.
+//
+// Declining is not a fallback and it is not an optimisation. A model exported with
+// dynamic axes publishes declared output dims of -1, and a -1 cannot be sized: this
+// module used to refuse such a model outright with "an output tensor could not be
+// allocated", which means the committed detector could not be run at all, on either
+// provider. That is the common shape for a modern YOLO export, not an exotic one, so
+// the old behaviour was not a safety check — it was an inability wearing a refusal's
+// clothes, and it failed while claiming to be protecting something.
+//
+// The returned bool is TRUE when the runtime is allocating, and the caller must then
+// not pre-destroy: the binding writes the tensors it creates back into the slice it
+// was given, so the same slice holds the results.
+//
+// The two branches are kept as two functions rather than unified because there is no
+// way to unify them: a concrete shape is cheaper to pre-allocate and a symbolic one is
+// not allocatable at all.
+func preallocateOutputs(outputs []OutputSpec) ([]ort.Value, bool) {
+	if hasSymbolicDims(outputs) {
+		// REDCHECK RC-29: this branch IS the control. Removing it puts the refusal
+		// back and the committed detector cannot be run on either provider.
+		return make([]ort.Value, len(outputs)), true
+	}
+	return preallocateConcrete(outputs), false
+}
+
+// hasSymbolicDims reports whether any declared output dimension is not a positive
+// number.
+//
+// A dimension of -1 is what an export with dynamic axes publishes, and it carries no
+// size: the count of anchors depends on the input, and the export does not know the
+// input. There is no number to pre-allocate and no conservative guess, because a
+// conservative guess is a small buffer and a small buffer is a truncated frame.
+func hasSymbolicDims(outputs []OutputSpec) bool {
+	for _, o := range outputs {
+		for _, d := range o.Dims {
+			if d <= 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// preallocateConcrete allocates every declared output. A nil entry means the
+// allocation was refused, which [Session.Infer] reports by name rather than running
+// with a missing output.
+func preallocateConcrete(outputs []OutputSpec) []ort.Value {
+	specs := make([]ort.Value, 0, len(outputs))
+	for _, o := range outputs {
+		t, err := ort.NewTensor(ort.NewShape(o.Dims...), make([]float32, shapeSize(o.Dims)))
+		if err != nil || t == nil {
+			for _, v := range specs {
+				_ = v.Destroy()
+			}
+			return nil
+		}
+		specs = append(specs, t)
+	}
+	return specs
 }
 
 // Close releases the session, the options and the ORT environment.

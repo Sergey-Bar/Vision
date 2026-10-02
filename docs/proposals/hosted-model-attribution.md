@@ -55,10 +55,15 @@ the empty hash with a zero hash and it fails. Verified.
 
 ### What is needed
 
-**Migration** (expand only; no contract step bundled with it, per `AGENTS.md`):
+**Migration** (expand only; no contract step bundled with it, per `AGENTS.md`).
+The number is **0022**, not 0015: `0015_partitions_and_correlation_indexes.expand.sql`
+has shipped, and the latest is `0021_site_isolation_restrictive.expand.sql`
+(`migrations/compat.json` carries `maxSchemaVersion: 21`). A proposal that names an
+applied number is a proposal whose migration cannot land, and it is the kind of
+collision that is only visible to whoever reads the directory.
 
 ```sql
--- 0015_observation_hosted_attribution.expand.sql
+-- 0022_observation_hosted_attribution.expand.sql
 ALTER TABLE ai_observations
     ADD COLUMN model_identity        TEXT NOT NULL DEFAULT '',
     ADD COLUMN model_contract_version TEXT NOT NULL DEFAULT '',

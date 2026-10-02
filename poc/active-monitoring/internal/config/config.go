@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/Sergey-Bar/ai-captain-poc/internal/classify"
+	"github.com/Sergey-Bar/ai-captain-poc/internal/ortdetect"
 )
 
 // NoAnchorsSentinel is the value SP_POC_AI_ANCHORS takes when the model is a
@@ -382,6 +383,40 @@ var schema = []field{
 	{Name: "SP_POC_EVENT_TYPE_GUID", kind: kindString,
 		Consequence: "the event has no type, which the contract marks required, so every push is a 400",
 		Remedy:      "set SP_POC_EVENT_TYPE_GUID=<event type guid>"},
+	// The blindness map, and it is STRUCTURAL rather than required.
+	//
+	// Not required because its absence is a real, statable world: an account without
+	// the rights to register Analytics Event Types cannot create them, and the run
+	// still has to work — it pushes detection events, records every absence, and
+	// refuses to push an absence as if it were a crossing. Requiring the map would
+	// make that account unable to run at all, which is a worse answer than running
+	// with the limitation printed.
+	//
+	// Structural rather than a plain default because the empty string IS the
+	// meaningful value here: it says "no blindness types are registered", and that
+	// has to be something the operator typed rather than something they failed to.
+	{Name: "SP_POC_EVENT_TYPE_GUIDS", kind: kindString, structural: true, structuralVal: "",
+		Consequence: "there is no Analytics Event Type for \"this camera was not assessed\", so a blindness cannot become a filterable XProtect alarm. It stays in this module's store, `pocctl brief` reports the window as unsearchable, and nothing is pushed as if it were a crossing",
+		Remedy: "set SP_POC_EVENT_TYPE_GUIDS to 'class@absence_state=guid' entries separated by ';', e.g. " +
+			"SP_POC_EVENT_TYPE_GUIDS='*@not_asked=<guid1>;*@degraded=<guid2>;*@cannot_tell=<guid3>'. Only " +
+			"not_asked, degraded and cannot_tell are accepted; no_objects is a negative answer and does not get an alarm type"},
+	// The execution provider, and it is STRUCTURAL rather than required for the same
+	// reason SP_POC_EVENT_TYPE_GUIDS is: the CPU is a real, measured, honest
+	// configuration and refusing to run without a GPU stated would make the majority
+	// of machines unable to run at all.
+	//
+	// It is structural rather than defaulted because the WHOLE POINT of the variable
+	// is that the recorded device has to be one somebody chose. A defaulted value
+	// would be `cpu` and a run that silently fell back to the CPU while recording
+	// `cuda` is the failure this module exists to end.
+	{Name: "SP_POC_ORT_EP", kind: kindString, structural: true, structuralVal: "cpu",
+		Consequence: "every latency, detection rate and memory figure is measured on a device nobody named. The numbers would be real and the record would be incomplete, which is the shape of a claim nobody can reproduce",
+		Remedy: "set SP_POC_ORT_EP=cpu or SP_POC_ORT_EP=cuda. `cuda` is REFUSED before the session opens unless " +
+			"nvidia-smi reports the configured device, because ONNX Runtime falls back to the CPU and logs it " +
+			"rather than returning an error"},
+	{Name: "SP_POC_ORT_CUDA_DEVICE", kind: kindInt, structural: true, structuralVal: "0",
+		Consequence: "only read when SP_POC_ORT_EP=cuda, and it would silently name GPU 0 on a multi-GPU machine",
+		Remedy:      "set SP_POC_ORT_CUDA_DEVICE to one of the indices `nvidia-smi --query-gpu=index --format=csv` prints; CUDA numbers devices from zero"},
 	{Name: "SP_POC_PUSH_MAX_ATTEMPTS", kind: kindInt,
 		Consequence: "the outbox backoff budget has no bound, so a dead provider would be retried forever and AC4 could never conclude",
 		Remedy:      "set SP_POC_PUSH_MAX_ATTEMPTS=8"},
@@ -690,9 +725,20 @@ type Config struct {
 	CameraGUID           string
 	DevicePath           string
 	EventTypeGUID        string
-	PushMaxAttempts      int
-	PushTimeout          time.Duration
-	PushGrace            time.Duration
+	// EventTypeGUIDs is SP_POC_EVENT_TYPE_GUIDS, resolved. See eventtypes.go for
+	// why the map is the only source of truth for a blindness event's type.
+	EventTypeGUIDs EventTypeMap
+	// ORTEP is SP_POC_ORT_EP, already normalised to `cpu` or `cuda`. See
+	// ortdetect/execution_provider.go for why a default would be a defect.
+	ORTEP string
+	// ORTCUDADevice is SP_POC_ORT_CUDA_DEVICE, the zero-based CUDA device index. It
+	// means nothing when ORTEP is `cpu` and it is NOT defaulted to "the first GPU"
+	// there, because a number beside a field that does not apply is a number somebody
+	// will later trust.
+	ORTCUDADevice   int
+	PushMaxAttempts int
+	PushTimeout     time.Duration
+	PushGrace       time.Duration
 
 	UIAddr string
 	Label  string
@@ -922,6 +968,36 @@ func Load(lookup Lookup) (Config, error) {
 	str(&cfg.CameraGUID, "SP_POC_CAMERA_GUID")
 	str(&cfg.DevicePath, "SP_POC_DEVICE_PATH")
 	str(&cfg.EventTypeGUID, "SP_POC_EVENT_TYPE_GUID")
+	num(&cfg.ORTCUDADevice, "SP_POC_ORT_CUDA_DEVICE")
+	if raw, ok := get("SP_POC_ORT_EP"); ok {
+		// Normalised through ortdetect's own predicate so the vocabulary has one home,
+		// and the refusal the operator reads is the same sentence the session would
+		// give. Config does not re-implement it: two normalisers drift, and the drift
+		// is a provider string nobody can match against a machine.
+		ep, err := ortdetect.ValidateEP(raw)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("SP_POC_ORT_EP: %w", err))
+		} else {
+			cfg.ORTEP = ep
+		}
+	} else {
+		cfg.ORTEP = "cpu"
+	}
+	if raw, ok := get("SP_POC_EVENT_TYPE_GUIDS"); ok {
+		m, err := ParseEventTypeMap(raw)
+		if err != nil {
+			// Collected rather than returned, so an operator with three bad entries
+			// fixes them in one pass instead of re-running once per entry. `get` has
+			// already marked the variable seen, so the dead-variable check is not
+			// disturbed by the failure.
+			errs = append(errs, &MissingError{Var: "SP_POC_EVENT_TYPE_GUIDS", Raw: raw, ParseErr: err,
+				Consequence: "an Analytics Event Type map that cannot be read would resolve nothing, and every blindness " +
+					"state would be refused at the push site instead of at startup",
+				Remedy: "set SP_POC_EVENT_TYPE_GUIDS to 'class@absence_state=guid' entries separated by ';'"})
+		} else {
+			cfg.EventTypeGUIDs = m
+		}
+	}
 	num(&cfg.PushMaxAttempts, "SP_POC_PUSH_MAX_ATTEMPTS")
 	dur(&cfg.PushTimeout, "SP_POC_PUSH_TIMEOUT")
 	dur(&cfg.PushGrace, "SP_POC_PUSH_GRACE")
@@ -1200,6 +1276,23 @@ func (c Config) Validate() error {
 	}
 	if len(c.Classes) == 0 {
 		add("SP_POC_CLASSES", "an empty class list means no box is approved, and the run would be a measurement of nothing")
+	}
+	// The execution provider is re-checked here as well as in Load, because
+	// [Config.ORTEP] is a plain field and a Config assembled by a caller rather than
+	// by Load can carry anything in it. The session is the last line of defence, but a
+	// run that reaches the session with an unknown provider has already printed its
+	// header.
+	if ep := ortdetect.NormalizeEP(c.ORTEP); ep == "" {
+		add("SP_POC_ORT_EP", fmt.Sprintf("%q is not an execution provider this build performs; it is `cpu` or `cuda`, "+
+			"and an unknown value is refused rather than treated as the default because ONNX Runtime falls back to "+
+			"the CPU and says so in a log line rather than in an error", c.ORTEP))
+	}
+	// A negative device is refused rather than clamped. CUDA numbers devices from zero,
+	// so -1 names no device, and clamping it to 0 would quietly put the run on a GPU
+	// nobody asked for.
+	if c.ORTCUDADevice < 0 {
+		add("SP_POC_ORT_CUDA_DEVICE", fmt.Sprintf("%d is not a CUDA device id; CUDA numbers devices from zero, so this "+
+			"names no device and clamping it to 0 would put the run on a GPU nobody asked for", c.ORTCUDADevice))
 	}
 	// The class list is RESOLVED, not merely present. An entry that is neither a
 	// family nor a class is a refusal here rather than at the first frame,

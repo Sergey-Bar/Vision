@@ -166,11 +166,6 @@ type pocObservation struct {
 	ArtifactPath         string    `json:"artifactPath,omitempty"`
 }
 
-// pocRun is what the capture loop accumulated.
-type pocRun struct {
-	report *pocReport
-}
-
 // frameSource produces complete coded pictures.
 //
 // Both sources are pictures rather than NAL units because picture boundaries are
@@ -178,7 +173,6 @@ type pocRun struct {
 // computed per fragment, and a fragmented IDR is four or five of them.
 type frameSource interface {
 	source() pocSource
-	detectorName() string
 	// next returns the next complete picture, or an error at the end of the
 	// stream.
 	next() (*mp4.Picture, time.Time, error)
@@ -230,8 +224,7 @@ func openFileSource(o pocOptions) (*fileSource, error) {
 	return fs, nil
 }
 
-func (s *fileSource) source() pocSource    { return s.src }
-func (s *fileSource) detectorName() string { return "coded-size" }
+func (s *fileSource) source() pocSource { return s.src }
 func (s *fileSource) close() error {
 	return s.file.Close()
 }
@@ -289,8 +282,7 @@ func openRTSPSource(ctx context.Context, o pocOptions) (*rtspSource, error) {
 	return s, nil
 }
 
-func (s *rtspSource) source() pocSource    { return s.src }
-func (s *rtspSource) detectorName() string { return "coded-size" }
+func (s *rtspSource) source() pocSource { return s.src }
 
 func (s *rtspSource) close() error {
 	return s.client.Close()

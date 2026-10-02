@@ -21,9 +21,12 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Sergey-Bar/ai-captain-poc/internal/aistate"
 )
 
 // The documented paths. They are constants, not strings assembled at call sites,
@@ -359,6 +362,15 @@ type Vendor struct {
 // event is enough to investigate on its own. A bookmark points at a VMS
 // recording, and this build has no VMS recording, so without this the pushed
 // event would reference nothing.
+//
+// The inner fields of `data` are this repository's OWN extension. Milestone's
+// downloaded events specification declares `data` as "AnalyticsData (object or
+// null)" and the request sample is `"data": { }` — the inner fields are never
+// enumerated, so a real VMS may drop this object silently. That is why
+// [Provenance.TagSuffix] exists and why every rendered line names the carrier it
+// used: a demo that prints provenance the VMS discarded is exactly the failure
+// class this repository exists to prevent, and the only defence is to say which
+// field the reader is looking at.
 type EvidenceRef struct {
 	StorageRef string `json:"storageRef"`
 	SHA256     string `json:"sha256"`
@@ -366,6 +378,229 @@ type EvidenceRef struct {
 	TimeEnd    string `json:"timeEnd"`
 	Note       string `json:"note"`
 }
+
+// Provenance is CONTRACT.md R8's attribution bundle: everything a reader needs in
+// order to CHECK a sentence this module pushed, rather than take it on trust.
+//
+// Six fields and no more, and none of them is a weight hash. R8 forbids one: a
+// hosted model has no weights to hash, so inventing one would be the failure the
+// rule exists to prevent. `ModelIdentity` is what the API SAID it used and is
+// rendered with the word "provider claim" beside it every time, because a reader who
+// does not know that will read it as something this module established.
+type Provenance struct {
+	// AIState is the ask's state, from the aistate vocabulary. It is REQUIRED on
+	// every pushed event, because "the model was asked and said this" and "nobody
+	// could reach the model" are different facts about the same event and an event
+	// that does not say which one it is is unreadable.
+	AIState string
+	// Verdict is what the answer was, and is empty when there was no answer. It is
+	// never defaulted: a verdict on an unasked window is the fabricated negative.
+	Verdict         string
+	Summary         string
+	ModelIdentity   string
+	ContractVersion string
+	Temperature     float64
+	OutputHash      string
+	// AbsenceCount is how many proposals in the window share this event's
+	// blindness. Zero on an ordinary detection event.
+	//
+	// It lives here rather than on EventInput because it is part of what a reader
+	// has to be told about the sentence: "this camera was not assessed" and "this
+	// camera was not assessed 500 times in an hour" are different alarms, and the
+	// second is the one that tells an operator whether to look now or in the
+	// morning.
+	AbsenceCount int
+}
+
+// Absent reports whether the ask produced no answer.
+//
+// It is the branch that decides what an event must carry. A blindness event has no
+// model identity, no contract version and no output hash — and that absence is the
+// fact, so requiring them there would force the writer to invent all three.
+func (p Provenance) Absent() bool { return aistate.IsBlindness(p.AIState) }
+
+// Complete reports whether an ANSWERED ask carries the three things R8 requires.
+func (p Provenance) Complete() bool {
+	return p.ModelIdentity != "" && p.ContractVersion != "" && p.OutputHash != ""
+}
+
+// Validate is the refusal pair, kept together because they are the same sentence
+// with two different endings: an event must say what state its ask was in, and an
+// event that was answered must say who answered it.
+//
+// Two conditions and not one, because they are two defects and folding them makes
+// one unreachable: an event with no state at all never reaches the attribution
+// checks, and a single combined refusal cannot say which of the two things is
+// missing. Each has its own red check.
+func (p Provenance) Validate() error {
+	if strings.TrimSpace(p.AIState) == "" {
+		return errors.New("the event names no AI state, so a reader cannot tell whether the model was asked " +
+			"and answered or whether we could not reach it. The state is one of " +
+			strings.Join(aistate.All, ", ") + " and it is required on every pushed event")
+	}
+	if !aistate.Valid(p.AIState) {
+		return fmt.Errorf("the event names the AI state %q, which is not one of %s. An unknown state is a "+
+			"protocol error, not a new answer", p.AIState, strings.Join(aistate.All, ", "))
+	}
+	if p.Absent() {
+		// No model identity here is CORRECT: nobody was asked, so there is nothing to
+		// attribute. A verdict would not be: it is the fabricated negative.
+		if strings.TrimSpace(p.Verdict) != "" {
+			return fmt.Errorf("the event names the AI state %q and also carries the verdict %q, but an unasked "+
+				"or unanswered window has no verdict. A verdict here is a negative answer we did not receive", p.AIState, p.Verdict)
+		}
+		return nil
+	}
+	var missing []string
+	if strings.TrimSpace(p.ModelIdentity) == "" {
+		missing = append(missing, "model_identity")
+	}
+	if strings.TrimSpace(p.ContractVersion) == "" {
+		missing = append(missing, "contract_version")
+	}
+	if strings.TrimSpace(p.OutputHash) == "" {
+		missing = append(missing, "output_hash")
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("the event carries the AI state %q and an attributed sentence, but no %s. R8 requires "+
+			"every rendered claim to name the model that produced it, the contract version it was produced under and "+
+			"the hash of the validated output; an event with the sentence and none of those is a caption this "+
+			"repository cannot check", p.AIState, strings.Join(missing, ", "))
+	}
+	return nil
+}
+
+// Note renders the bundle as the one line that rides in
+// [EvidenceRef.Note], with the model's own sentence first and VERBATIM.
+//
+// Verbatim is the whole point: R8 forbids a paraphrase, because a paraphrase of a
+// model's sentence is a sentence this repository invented. It is first because the
+// reader in Smart Client reads the beginning of the field, and putting the metadata
+// ahead of the sentence would put our bookkeeping where the finding should be.
+//
+// There is no `model_hash` here and there must never be one. `model=` is labelled
+// `provider claim` on every render because that is what it is.
+func (p Provenance) Note() string {
+	head := strings.TrimSpace(p.Summary)
+	if head == "" {
+		head = "(no sentence was produced for this event)"
+	}
+	var b strings.Builder
+	b.WriteString(sanitizeNote(head))
+	b.WriteString(" | ai-captain: aistate=")
+	b.WriteString(p.AIState)
+	if p.Verdict != "" {
+		b.WriteString(" verdict=")
+		b.WriteString(p.Verdict)
+	}
+	if p.Absent() {
+		// Said as a positive fact rather than left as three blank fields: a reader
+		// who sees no model identity must be told WHY, and the why is the product.
+		b.WriteString(" model=NOT ASKED contract=n/a temperature=n/a output=n/a")
+	} else {
+		fmt.Fprintf(&b, " model=%s (provider claim) contract=%s temperature=%.4f output=%s",
+			p.ModelIdentity, p.ContractVersion, p.Temperature, p.OutputHash)
+	}
+	if n := p.AbsenceCount; n > 0 {
+		fmt.Fprintf(&b, " window_count=%d", n)
+	}
+	b.WriteString(" carrier=evidence.note+tag")
+	return b.String()
+}
+
+// sanitizeNote keeps the model's sentence on one line.
+//
+// A newline inside a note renders in Smart Client as a layout this module cannot
+// control, and the line after it looks like a separate field the VMS understood. It
+// replaces the control characters with spaces rather than refusing: the sentence is
+// the model's and refusing to push it because of a byte would turn a rendering
+// problem into a lost event, and a lost event is worse.
+func sanitizeNote(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\r' || r == '\t' {
+			return ' '
+		}
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+// TagSuffix is the machine-readable half of the provenance, for the one field
+// Milestone's specification actually documents as filterable: *"Custom tag
+// assignable to the event (for filtering and sorting purposes)."*
+//
+// It exists because `data.evidence` is an undeclared extension. If a real VMS drops
+// the evidence object — and the specification gives no reason to think it will not —
+// the tag is what survives, so the absence state and the output hash have to be in
+// it as well. Carrying the same two facts in both places is not duplication for its
+// own sake: it is the difference between a claim that degrades and a claim that
+// vanishes.
+//
+// It is appended to the caller's idempotency tag rather than replacing it, and that
+// keeps idempotency intact: the suffix is derived from the observation, and a
+// detection whose answer has not changed produces the same suffix and therefore the
+// same tag, so the read-back still collapses a retry onto the original event.
+func (p Provenance) TagSuffix() string {
+	var b strings.Builder
+	b.WriteString("|state=")
+	b.WriteString(tagToken(p.AIState))
+	if p.Verdict != "" {
+		b.WriteString("|v=")
+		b.WriteString(tagToken(p.Verdict))
+	}
+	if p.OutputHash != "" {
+		b.WriteString("|out=")
+		b.WriteString(shortHash(p.OutputHash))
+	}
+	if p.AbsenceCount > 0 {
+		b.WriteString("|n=")
+		b.WriteString(itoa(p.AbsenceCount))
+	}
+	return b.String()
+}
+
+// shortHash is the first 16 hex characters, which is what the tag can carry without
+// becoming a sentence. It is a PREFIX and the note carries the whole hash, so a
+// reader who needs the full value has it in the field that is meant to be read.
+func shortHash(h string) string {
+	h = strings.TrimSpace(h)
+	h = strings.TrimPrefix(h, "sha256:")
+	if len(h) <= 16 {
+		return tagToken(h)
+	}
+	return tagToken(h[:16])
+}
+
+// tagToken keeps a value usable inside a tag.
+//
+// It is deliberately NOT the same function as `soak.sanitizeTag`, which builds the
+// tag's PREFIX and has different requirements. This one has to survive being handed
+// a provider's model identity, which may contain spaces, dots, slashes and colons,
+// and the tag is also the query in `FindByTag`'s URL: an unescaped space would make
+// the read-back 400 and the push would look like it worked while nothing could find
+// it again. So anything outside [a-z0-9_-] becomes a dash and runs of dashes
+// collapse.
+func tagToken(s string) string {
+	var b strings.Builder
+	lastDash := true // leading dashes are dropped too
+	for _, r := range strings.ToLower(strings.TrimSpace(s)) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '_':
+			b.WriteRune(r)
+			lastDash = false
+		default:
+			if !lastDash {
+				b.WriteByte('-')
+				lastDash = true
+			}
+		}
+	}
+	return strings.TrimRight(b.String(), "-")
+}
+
+func itoa(n int) string { return strconv.Itoa(n) }
 
 // AnalyticsData is the payload of an analytics event.
 type AnalyticsData struct {
@@ -420,6 +655,13 @@ type EventInput struct {
 	Box           Box
 	RuleName      string
 	Evidence      EvidenceRef
+	// Provenance is R8's bundle and it is REQUIRED. An event with a sentence and no
+	// attribution is a caption nobody can check, and the Smart Client shows it to
+	// somebody who has no way of knowing that.
+	//
+	// `Evidence.Note` is NOT where it is carried: the note is built FROM the
+	// provenance, so a caller cannot fill in one and forget the other.
+	Provenance Provenance
 }
 
 // Empty reports whether the box names no region at all.
@@ -450,12 +692,15 @@ func BuildEvent(in EventInput) (EventRequest, error) {
 	if in.Tag == "" {
 		return EventRequest{}, errors.New("xprotect: the event has no tag; the tag is derived from the detection's content and is the only field the read-back can match on")
 	}
-	// REDCHECK RC-6: an event with an all-zero box is refused rather than sent.
+	// REDCHECK RC-22: every pushed event names the state of its ask.
 	//
-	// Every pushed event used to carry top/left/bottom/right all zero while the
-	// row in the database beside it held real numbers. That is the worst thing a
-	// demo can show, because the bounding box is what makes a VMS draw the object
-	// on the operator's timeline — and it fails while the database says otherwise.
+	// It is a separate refusal from the attribution half below, and it comes FIRST on
+	// purpose. An event with no state at all never reaches the attribution checks, so
+	// folding the two into one condition would make whichever half came second
+	// unreachable, and its red check would pass vacuously. Two defects, two controls.
+	if err := in.Provenance.Validate(); err != nil {
+		return EventRequest{}, fmt.Errorf("xprotect: refusing to push an event with no attribution: %w", err)
+	}
 	// REDCHECK RC-6: an event with an all-zero box is refused rather than sent.
 	//
 	// Every pushed event used to carry top/left/bottom/right all zero while the
@@ -476,17 +721,28 @@ func BuildEvent(in EventInput) (EventRequest, error) {
 		return EventRequest{}, fmt.Errorf("xprotect: refusing to push an event whose bounding box is inverted (%+v); "+
 			"bottom/right must be at or above top/left", in.Box)
 	}
+	// The note is BUILT here rather than accepted from the caller, so a caller cannot
+	// push a sentence with no provenance beside it by filling in one and leaving the
+	// other. The note the caller supplied, if any, is dropped — which is the point:
+	// there is exactly one function in this module that renders a model claim.
+	ref := in.Evidence
+	ref.Note = in.Provenance.Note()
+	// The tag carries the same two facts in machine form. Milestone's specification
+	// documents `tag` as assignable "for filtering and sorting purposes" and never
+	// enumerates the inner fields of `data`, so `data` is the carrier that may
+	// survive and `tag` is the one that certainly does. Both, deliberately.
+	tag := in.Tag + in.Provenance.TagSuffix()
 	return EventRequest{
 		Type:     in.EventTypeGUID,
 		Source:   "cameras/" + in.SourceGUID,
 		Time:     in.At.UTC().Format("2006-01-02T15:04:05.000Z"),
 		Datatype: "analytics",
-		Tag:      in.Tag,
+		Tag:      tag,
 		Data: AnalyticsData{
 			Object:   Object{Type: in.Class, Value: in.Value, Confidence: in.Confidence, BoundingBox: in.Box},
 			Rule:     Rule{Name: in.RuleName},
 			Vendor:   Vendor{Name: "aicaptain"},
-			Evidence: in.Evidence,
+			Evidence: ref,
 		},
 	}, nil
 }
@@ -500,9 +756,18 @@ func (c *Client) TriggerEvent(ctx context.Context, in EventInput) (Outcome, erro
 	if err != nil {
 		return Outcome{}, &RefusedError{Status: 0, Detail: err.Error()}
 	}
+	// The read-back matches on the tag that was ACTUALLY pushed, which is
+	// `body.Tag` and not `in.Tag`: [BuildEvent] appends the provenance suffix, and a
+	// read-back against the unsuffixed tag searches for an event that was never
+	// sent. That failure is silent in the worst way — the push is real, the event is
+	// in the VMS, and the caller concludes it was not.
+	//
+	// The two can only disagree because the tag is assembled in two places, which is
+	// why they are read off the SAME built body rather than recomputed.
+	tag := body.Tag
 	// Read back first. A duplicate from a previous attempt that returned 202 and
 	// then lost its response must not become a second event.
-	if id, err := c.FindByTag(ctx, in.Tag); err != nil {
+	if id, err := c.FindByTag(ctx, tag); err != nil {
 		return Outcome{}, err
 	} else if id != "" {
 		return Outcome{State: "push_sent", RemoteID: id, Status: StatusAccepted,
@@ -523,7 +788,7 @@ func (c *Client) TriggerEvent(ctx context.Context, in EventInput) (Outcome, erro
 		id, _ := idFromResponse(respBody)
 		// The read-back is what turns "the server said 202" into "the event is
 		// there". Without it, push_sent would be a claim about a status code.
-		found, rberr := c.FindByTag(ctx, in.Tag)
+		found, rberr := c.FindByTag(ctx, tag)
 		if rberr != nil {
 			return Outcome{State: "unknown", Status: status, Body: respBody, Detail: "the push returned 202 but the read-back failed, so the event's existence is not established"}, rberr
 		}

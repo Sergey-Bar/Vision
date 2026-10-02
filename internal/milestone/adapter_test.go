@@ -12,7 +12,13 @@ import (
 
 var testEpoch = time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC)
 
-const eventsRoute = "/api/v1/Events"
+// The documented path, so a test that feeds a body to a route is feeding it to
+// the route the adapter actually calls. It used to be "/api/v1/Events", which is
+// not a Milestone prefix — see docs/vendor/milestone/route-audit.md §2.1 — and
+// every test in this file passed against a path no server has ever answered.
+const eventsRoute = "/api/rest/v1/events"
+
+const bookmarksRoute = "/api/rest/v1/bookmarks"
 
 // stubTransport serves a fixed body per route, so the adapter's parsing is
 // testable without a server and without a fixture set.
@@ -37,6 +43,17 @@ func (s *stubTransport) Get(_ context.Context, route milestone.Route, _ mileston
 }
 
 func (s *stubTransport) Close() error { return nil }
+
+// SearchBookmarks makes the stub a faithful stand-in for the live transport,
+// which does implement the optional task surface.
+//
+// Without it, every poll test in this file would exercise the replay fallback —
+// `Transport.Get` on a route the vendor documents as POST-only — instead of the
+// bookmark read a live adapter actually performs. The stub answers from the same
+// two maps, so a test sets a body or a status once and both paths see it.
+func (s *stubTransport) SearchBookmarks(ctx context.Context, _ milestone.Query) (*milestone.Response, error) {
+	return s.Get(ctx, milestone.Route{Path: bookmarksRoute, Task: "searchTime"}, milestone.Query{})
+}
 
 // newAdapter builds an adapter over a stub transport, pinned to a fixed clock so
 // every timestamp in the tests is deterministic.
@@ -320,13 +337,168 @@ func TestUnknownEventTypeIsCarriedNotDropped(t *testing.T) {
 	}
 }
 
+// A documented event body, verbatim.
+//
+// From `events-rest-v1.reference.md:380-388`, the sample response of
+// `GET /api/rest/v1/events`. Every other test in this file feeds a body in the
+// shape the adapter *assumed* — `{"Id","Type":"Motion","Timestamp","Source":"Cam
+// [cam-1]"}` — and a test whose fixture agrees with the code under test about a
+// value the vendor contradicts is a test of nothing. This one is the vendor's own
+// sample, so it is the only test in the package that can fail if the parser is
+// wrong about the real thing.
+const documentedEvent = `{
+	"specversion": "1.0",
+	"type": "481d4d6c-9156-4698-af7e-74b32f9e4359",
+	"source": "cameras/e028f597-c64b-4f27-bb8d-08f5cd768e1c",
+	"time": "2023-02-28T18:10:12.4786334Z",
+	"id": "5e6a4c06-b290-473d-80b5-8e0dffa1d3a6",
+	"localId": 4,
+	"datatype": "none",
+	"tag": "My custom tag"
+}`
+
+// TestADocumentedEventIsAttributedToTheDeviceThatProducedIt.
+//
+// The device reference is the one field in this that needed no human decision, and
+// getting it wrong was the quietest defect in the package: `sourceDeviceRef` looked
+// for a bracketed id in `Source`, the documented value is `cameras/<uuid>`, so every
+// event from a real server arrived with no device attached. Nothing crashed. Zone
+// rules and device-filtered rules simply never matched, and that is indistinguishable
+// from a site where nothing is happening.
+func TestADocumentedEventIsAttributedToTheDeviceThatProducedIt(t *testing.T) {
+	a, stub := newAdapter()
+	stub.bodies[eventsRoute] = json.RawMessage(
+		`{"_links":{"next":""},"array":[` + documentedEvent + `],"eventCount":1}`)
+
+	byID := feedEvents(t, poll(t, a))
+	rec, ok := byID["5e6a4c06-b290-473d-80b5-8e0dffa1d3a6"]
+	if !ok {
+		t.Fatalf("a documented event was not ingested at all. The item id is read from the "+
+			"documented `id` field, so a miss here means the decoder does not read the vendor's "+
+			"own body. Records seen: %d", len(byID))
+	}
+
+	// The bare uuid, not `cameras/<uuid>`: `resolveDevice` matches against
+	// `devices.source_device_id`, which holds the identifier.
+	const wantDevice = "e028f597-c64b-4f27-bb8d-08f5cd768e1c"
+	if rec.SourceDeviceRef != wantDevice {
+		t.Errorf("the event's device is %q, want %q. An empty value here is not a failure "+
+			"anywhere: zone rules and device-filtered rules simply stop matching, and that "+
+			"looks exactly like a site where nothing is happening",
+			rec.SourceDeviceRef, wantDevice)
+	}
+}
+
+// TestADocumentedEventCarriesEveryFieldItHasToCarry is the same body read for the
+// rest of what it must preserve, so a parser regression names itself.
+func TestADocumentedEventCarriesEveryFieldItHasToCarry(t *testing.T) {
+	a, stub := newAdapter()
+	stub.bodies[eventsRoute] = json.RawMessage(`{"array":[` + documentedEvent + `],"eventCount":1}`)
+
+	recs := poll(t, a)
+	if len(recs) != 1 {
+		t.Fatalf("got %d records from a one-item page", len(recs))
+	}
+	rec := recs[0]
+
+	if rec.SourceEventID != "5e6a4c06-b290-473d-80b5-8e0dffa1d3a6" {
+		t.Errorf("SourceEventID is %q", rec.SourceEventID)
+	}
+	// Seven decimal places, UTC, as the reference documents (:294). RFC3339Nano is
+	// the only layout that keeps them; a second-resolution format would silently
+	// round an observation to the wrong second.
+	if got := rec.ObservedAt.UTC().Format("2006-01-02T15:04:05.9999999Z07:00"); got != "2023-02-28T18:10:12.4786334Z" {
+		t.Errorf("ObservedAt rendered as %q; the source declared 2023-02-28T18:10:12.4786334Z", got)
+	}
+	// The raw body is retained, so a field this build does not understand is still
+	// readable by whoever has to work out what it meant. That is what makes the
+	// remaining gap below a decision rather than a loss.
+	if len(rec.Envelope) == 0 {
+		t.Error("the raw body was not retained")
+	}
+	if !strings.Contains(string(rec.Envelope), `"tag"`) {
+		t.Error("the retained body is not the vendor's own; a field this build does not read " +
+			"has to survive for the next person to look at")
+	}
+}
+
+// TestTheOnlyThingADocumentedEventCannotDoIsNameItsType pins the blast radius.
+//
+// `type` on a documented event is a GUID, and mapping it to a normalized type is a
+// contract decision a human has to make — see
+// docs/vendor/milestone/route-audit.md §3 and §5. So a documented event is flagged
+// `Malformed` and dead-lettered, and that is correct behaviour: it is stored, the
+// reason is on it, and nothing is silently mapped to a guess.
+//
+// This test exists so the *only* thing standing between the adapter and a working
+// feed is named. When H1 is decided, this is the test that should be the one to
+// change, and it should fail loudly if a second gap appears beside it.
+func TestTheOnlyThingADocumentedEventCannotDoIsNameItsType(t *testing.T) {
+	a, stub := newAdapter()
+	stub.bodies[eventsRoute] = json.RawMessage(`{"array":[` + documentedEvent + `],"eventCount":1}`)
+
+	rec := poll(t, a)[0]
+
+	if !rec.Malformed {
+		t.Fatal("a GUID event type was accepted as a name. If H1 has been decided, this test " +
+			"is now wrong rather than the code — update it deliberately")
+	}
+	if !strings.Contains(rec.MalformedReason, "481d4d6c-9156-4698-af7e-74b32f9e4359") {
+		t.Errorf("MalformedReason is %q; it must quote the GUID the vendor sent, because "+
+			"\"unrecognised type\" with the value in the envelope is a thing somebody has to "+
+			"open the dead letter to act on", rec.MalformedReason)
+	}
+	// And the device still resolved, because a dead letter that names the device is
+	// triageable and one that does not is not.
+	if rec.SourceDeviceRef == "" {
+		t.Error("a dead-lettered event lost its device reference")
+	}
+}
+
+// A bare uuid with no collection prefix is a documented form of `source`
+// (:409), so it has to parse. It is distinguished from a human-readable label by
+// shape, which is the only thing available at this point in the pipeline.
+func TestABareDeviceUUIDIsADeviceReferenceButALabelIsNot(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want string
+	}{
+		{"cameras prefix", `{"id":"a1","type":"Motion","time":"2026-03-01T09:00:00Z",
+			"source":"cameras/e028f597-c64b-4f27-bb8d-08f5cd768e1c"}`,
+			"e028f597-c64b-4f27-bb8d-08f5cd768e1c"},
+		{"bare uuid", `{"id":"a2","type":"Motion","time":"2026-03-01T09:00:00Z",
+			"source":"e028f597-c64b-4f27-bb8d-08f5cd768e1c"}`,
+			"e028f597-c64b-4f27-bb8d-08f5cd768e1c"},
+		{"microphones prefix", `{"id":"a3","type":"Motion","time":"2026-03-01T09:00:00Z",
+			"source":"microphones/e028f597-c64b-4f27-bb8d-08f5cd768e1c"}`,
+			"e028f597-c64b-4f27-bb8d-08f5cd768e1c"},
+		{"bracketed convention", `{"Id":"a4","Type":"Motion","Timestamp":"2026-03-01T09:00:00Z",
+			"Source":"Entrance Camera 01 [CAM-001]"}`, "CAM-001"},
+		{"a label is not an id", `{"Id":"a5","Type":"Motion","Timestamp":"2026-03-01T09:00:00Z",
+			"Source":"Entrance Camera 01"}`, ""},
+		{"a rest path is not a device", `{"Id":"a6","Type":"Motion","Timestamp":"2026-03-01T09:00:00Z",
+			"Source":"site-hq/entrance/cameras/01"}`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, stub := newAdapter()
+			stub.bodies[eventsRoute] = json.RawMessage("[" + tc.body + "]")
+			rec := poll(t, a)[0]
+			if rec.SourceDeviceRef != tc.want {
+				t.Errorf("source %q resolved to %q, want %q",
+					tc.body, rec.SourceDeviceRef, tc.want)
+			}
+		})
+	}
+}
+
 // A feed that is not deployed on this site is not a fault, and a feed that is
 // deployed but failing must not take the whole poll down with it. Aborting on
 // the first bad endpoint would turn a partial outage into a total ingest outage.
 func TestFeedFailureIsIsolated(t *testing.T) {
 	a, stub := newAdapter()
 	stub.bodies[eventsRoute] = json.RawMessage(`[{"Id":"e1","Type":"Motion","Timestamp":"2026-03-01T09:00:00Z"}]`)
-	stub.status["/api/v1/Bookmarks"] = 500
+	stub.status[bookmarksRoute] = 500
 
 	var good, feedErr int
 	for _, r := range poll(t, a) {

@@ -164,6 +164,16 @@ const (
 	// FaultProviderGone is the push target being unreachable. The outbox keeps
 	// the rows and the backoff brings them back.
 	FaultProviderGone = "push_target_gone"
+	// FaultAbsenceNotTyped is a blindness window that could not become a filterable
+	// XProtect alarm because no Analytics Event Type is configured for
+	// (class, absence state).
+	//
+	// It is its own reason and not a `push_target_gone`, because the push target is
+	// fine and the retries would never succeed: the body has no type to send. Folding
+	// it into a provider fault would send an operator to look at the network while
+	// the thing to fix is a missing Analytics Event Type, and it would be averaged
+	// into the same rate as a genuinely unreachable VMS.
+	FaultAbsenceNotTyped = "absence_not_typed"
 )
 
 // RecordFault appends a fault row. Expected and Observed are for rehearsed

@@ -68,6 +68,15 @@ type ProbeResult struct {
 	// them is what lets a human compare the vendor's fields with the adapter's
 	// expectations in one glance, which is the whole job.
 	Keys []string `json:"keys,omitempty"`
+	// Sample is the first item as the server sent it.
+	//
+	// Keys alone are not enough for the route that exists to be learned from. A
+	// field *name* tells a human what to call a column; for `/eventTypes` the
+	// question is what the GUIDs and names on a real installation actually are,
+	// and a list of keys answers none of it. One item is bounded, and it is the
+	// same bytes the contradiction path already echoes in Detail, so it adds no
+	// new class of what lands in a local artifact.
+	Sample map[string]any `json:"sample,omitempty"`
 	// Duration is how long the call took, because a route that takes eleven
 	// seconds is a design problem even when it works.
 	DurationMS int64 `json:"durationMs"`
@@ -153,6 +162,14 @@ func (p ProbeResult) String() string {
 	case p.Items > 0:
 		s += fmt.Sprintf(" %d item(s), fields: %v", p.Items, p.Keys)
 	}
+	// The first item, verbatim and bounded. A field *name* is what to call a
+	// column; the value is what the vendor actually sent, and for the routes whose
+	// whole purpose is to be learned from a live site it is the answer.
+	if p.Sample != nil && p.Detail == "" {
+		if body, err := json.Marshal(p.Sample); err == nil {
+			s += " " + clip(string(body), 300)
+		}
+	}
 	if p.NeedsHuman != "" {
 		s += " [needs a human: " + p.NeedsHuman + "]"
 	}
@@ -181,21 +198,28 @@ func summarizeKeys(item map[string]any) []string {
 //
 // It is the same discipline the adapter has: parse the shape, report the field
 // names, and decide nothing about what they mean.
-func decodeEnvelope(body []byte) (items int, keys []string, err error) {
+func decodeEnvelope(body []byte) (items int, keys []string, sample map[string]any, err error) {
 	var asArray []map[string]any
 	if e := json.Unmarshal(body, &asArray); e == nil {
 		if len(asArray) == 0 {
-			return 0, nil, nil
+			return 0, nil, nil, nil
 		}
-		return len(asArray), summarizeKeys(asArray[0]), nil
+		return len(asArray), summarizeKeys(asArray[0]), asArray[0], nil
 	}
 	var asObject map[string]any
 	if e := json.Unmarshal(body, &asObject); e != nil {
-		return 0, nil, fmt.Errorf("the body is neither an object nor an array: %w", e)
+		return 0, nil, nil, fmt.Errorf("the body is neither an object nor an array: %w", e)
 	}
 	// A paged object carries its entries under a name; a single object is one
 	// entry. Both are reported as what they are rather than guessed between.
-	for _, name := range []string{"Items", "items", "Data", "data", "Results", "results", "Entries", "entries"} {
+	//
+	// `array` is listed first because it is the documented one, not because it is
+	// one more guess: both published answers put their entries there
+	// (`events-rest-v1.reference.md:377-391`,
+	// `bookmarks-rest-v1.openapi.yaml:380-386`). Without it the probe reported
+	// "1 item, fields: [_links, array, eventCount]" for a perfectly good feed,
+	// which is a report that reads like a shape mismatch and is not one.
+	for _, name := range []string{"array", "Items", "items", "Data", "data", "Results", "results", "Entries", "entries"} {
 		if nested, ok := asObject[name].([]any); ok {
 			entries := make([]map[string]any, 0, len(nested))
 			for _, e := range nested {
@@ -204,12 +228,12 @@ func decodeEnvelope(body []byte) (items int, keys []string, err error) {
 				}
 			}
 			if len(entries) == 0 {
-				return 0, nil, nil
+				return 0, nil, nil, nil
 			}
-			return len(entries), summarizeKeys(entries[0]), nil
+			return len(entries), summarizeKeys(entries[0]), entries[0], nil
 		}
 	}
-	return 1, summarizeKeys(asObject), nil
+	return 1, summarizeKeys(asObject), asObject, nil
 }
 
 // contextWithBudget bounds a probe call.
@@ -282,14 +306,43 @@ func probeRoute(ctx context.Context, t Transport, route Route, limit int) ProbeR
 		res.Detail = "a write-side route; run with the write flag to reach it deliberately"
 		return res
 	}
+	if route.Task != "" {
+		// A route the vendor selects with a `task` query parameter is a POST, and
+		// probing it with a GET would issue a call the vendor documents does not
+		// exist — so the probe reports what it cannot check rather than making
+		// the call and reporting the vendor's 405 as a contradiction.
+		if searcher, ok := t.(BookmarkSearcher); ok {
+			return probeWith(ctx, route, Query{Limit: limit}, func(_ context.Context, _ Route, q Query) (*Response, error) {
+				return searcher.SearchBookmarks(ctx, q)
+			})
+		}
+		res.Verdict = VerdictSkipped
+		res.Detail = "a POST selected by a `task` query parameter, and this transport has no way to " +
+			"reach it; a GET on this path is documented not to retrieve anything"
+		return res
+	}
+	return probeWith(ctx, route, Query{Limit: limit}, t.Get)
+}
+
+// probeWith reaches one route and judges the answer.
+//
+// One body, two ways in, so the read pass and the task pass cannot disagree about
+// what a shape mismatch means.
+func probeWith(ctx context.Context, route Route, query Query, get func(context.Context, Route, Query) (*Response, error)) ProbeResult {
+	res := ProbeResult{Route: route}
 	started := time.Now()
 	cctx, cancel := contextWithBudget(ctx, 20*time.Second)
 	defer cancel()
 
-	resp, err := t.Get(cctx, route, Query{Limit: limit})
+	resp, err := get(cctx, route, query)
 	res.DurationMS = time.Since(started).Milliseconds()
 	if err != nil {
 		res.Verdict, res.Detail, res.Status = classify(err)
+		return res
+	}
+	if resp == nil {
+		res.Verdict = VerdictContradicted
+		res.Detail = "the transport answered with no response at all"
 		return res
 	}
 	res.Status = resp.Status
@@ -298,7 +351,7 @@ func probeRoute(ctx context.Context, t Transport, route Route, limit int) ProbeR
 		res.Detail = summarizeBody(resp.Body)
 		return res
 	}
-	items, keys, derr := decodeEnvelope(resp.Body)
+	items, keys, sample, derr := decodeEnvelope(resp.Body)
 	if derr != nil {
 		res.Verdict = VerdictContradicted
 		res.Detail = derr.Error()
@@ -311,6 +364,7 @@ func probeRoute(ctx context.Context, t Transport, route Route, limit int) ProbeR
 	}
 	res.Items = items
 	res.Keys = keys
+	res.Sample = sample
 	res.Verdict = VerdictConfirmed
 	if route.Unverified {
 		// The probe confirmed the *shape*. It cannot know whether these are the

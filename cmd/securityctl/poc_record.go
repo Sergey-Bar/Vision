@@ -85,6 +85,3 @@ func (r *clipRecorder) Close() error {
 	}
 	return nil
 }
-
-// Bytes is how much was written, for the report.
-func (r *clipRecorder) Bytes() int64 { return r.written }

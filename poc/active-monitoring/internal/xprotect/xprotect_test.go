@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Sergey-Bar/ai-captain-poc/internal/aistate"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/xprotect"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/xpsim"
 )
@@ -74,6 +75,9 @@ func (s *statusRecorder) WriteHeader(code int) {
 
 func (s *statusRecorder) Hijack() (interface{ Close() error }, error) { return nil, nil }
 
+// input is the ordinary, fully attributed event: the model was asked and it
+// answered, so R8 requires all six of the attribution fields. Every fixture in this
+// package that wants a push to succeed has to say this much, which is the point.
 func input(tag string) xprotect.EventInput {
 	return xprotect.EventInput{
 		EventTypeGUID: "b4d1e1c2-0000-4000-8000-000000000001",
@@ -84,6 +88,12 @@ func input(tag string) xprotect.EventInput {
 		Box:      xprotect.Box{Top: 194, Left: 286, Bottom: 429, Right: 408},
 		RuleName: "bird-line-cross",
 		Evidence: xprotect.EvidenceRef{StorageRef: "ab/cd/x.mp4", SHA256: strings.Repeat("a", 64)},
+		Provenance: xprotect.Provenance{
+			AIState: aistate.Asked, Verdict: "confirmed",
+			Summary:       "a bird crossed the line",
+			ModelIdentity: "nvidia/cosmos-3", ContractVersion: "contract-1",
+			Temperature: 0.0, OutputHash: strings.Repeat("b", 64),
+		},
 	}
 }
 

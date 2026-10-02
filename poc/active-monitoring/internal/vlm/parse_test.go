@@ -267,7 +267,11 @@ func TestTheContractVersionCoversThePromptAndChangesWithIt(t *testing.T) {
 	if ContractVersionFor(a, 1, "model-x", RegionUS) == va {
 		t.Fatal("a region change did not move the contract version")
 	}
-	b.Version = "v2"
+	// The revision to compare against is derived, not written down: the shipped
+	// prompt is at v2 and the shipped revision moved from v1 to v2, so hard-coding
+	// either side would have broken this test at the very moment the guard was added
+	// — which is exactly when a test about prompt revisions is worth having.
+	b.Version = b.Version + "-moved"
 	if ContractVersionFor(b, 1, "model-x", RegionEU) == vb {
 		t.Fatal("a prompt revision did not move the contract version")
 	}

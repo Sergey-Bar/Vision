@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Sergey-Bar/ai-captain-poc/internal/aistate"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/recorder"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/xprotect"
@@ -315,6 +316,9 @@ func TestAPushThatCameBackIsNotSentTwice(t *testing.T) {
 		Class: "motion", Value: "motion", Confidence: 0.5,
 		Box:      xprotect.Box{Top: 400, Left: 120, Bottom: 560, Right: 340},
 		RuleName: "alarm-reference-pinned",
+		// R8 requires the attribution on every pushed event, and this fixture has to
+		// carry it for the rehearsal to be about the pump rather than about a refusal.
+		Provenance: xprotect.Provenance{AIState: aistate.NotAsked},
 	})
 	if err != nil {
 		t.Fatal(err)

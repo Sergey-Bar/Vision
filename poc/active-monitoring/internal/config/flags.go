@@ -57,6 +57,7 @@ var FlagSet = map[string]string{
 	"camera-integrity":  "SP_POC_CAMERA_INTEGRITY",
 	"device-path":       "SP_POC_DEVICE_PATH",
 	"event-type-guid":   "SP_POC_EVENT_TYPE_GUID",
+	"event-type-guids":  "SP_POC_EVENT_TYPE_GUIDS",
 	"push-max-attempts": "SP_POC_PUSH_MAX_ATTEMPTS",
 	"push-timeout":      "SP_POC_PUSH_TIMEOUT",
 	"ui-addr":           "SP_POC_UI_ADDR",

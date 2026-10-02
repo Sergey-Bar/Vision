@@ -31,6 +31,7 @@ import (
 	"github.com/Sergey-Bar/Ai-Captain/internal/audit"
 	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
 	"github.com/Sergey-Bar/Ai-Captain/internal/identity"
+	"github.com/Sergey-Bar/Ai-Captain/internal/observability"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -69,6 +70,12 @@ type Server struct {
 	// HealthCheck is the readiness set. A check named "aiRuntime" is informational
 	// and never makes the core unready.
 	HealthCheck map[string]func(context.Context) error
+	// Metrics is the observability registry, read for the SLO verdicts.
+	//
+	// Nil means this install has not wired one and the endpoint says so rather
+	// than reporting every objective as met — "zero breached" from a process that
+	// never evaluated anything is the one answer here that would be a lie.
+	Metrics *observability.Registry
 
 	mu sync.Mutex
 	// httpServer is the running listener, retained so Shutdown can reach it.
@@ -585,14 +592,51 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	// Health deliberately excludes the AI plane. Core liveness must not depend
 	// on something that is explicitly not an SLO, or a model outage would page
 	// somebody about a security system that is working.
-	WriteJSON(w, http.StatusOK, map[string]any{
+	//
+	// The same reasoning keeps a breached objective from changing the status. A
+	// backlog above the hard limit is a real problem and the process is still
+	// running; a readiness probe that turns the platform unready because it is
+	// behind moves the failure to every replica at once and removes the capacity
+	// that would have drained the backlog. So the objectives are reported, not
+	// enforced, and what is reported is the *names* only.
+	body := map[string]any{
 		"status":        "ok",
 		"uptimeSeconds": s.clock().Sub(s.startedAt()).Seconds(),
 		"aiPlane": map[string]any{
 			"note": "AI availability is not an SLO and never affects this status.",
 		},
-	})
+	}
+
+	slo := map[string]any{
+		"note": "which SLO objectives are not being met. Names only: this endpoint is " +
+			"unauthenticated, and the reading and the remedy are in the log.",
+	}
+	if s.Metrics == nil {
+		slo["evaluated"] = 0
+		slo["status"] = sloNotEvaluated
+	} else {
+		state := s.Metrics.SLOs()
+		slo["evaluated"] = state.Evaluated
+		switch {
+		case state.Evaluated == 0:
+			slo["status"] = sloNotEvaluated
+		case len(state.Breached) == 0:
+			slo["status"] = "met"
+		default:
+			slo["status"] = "breached"
+		}
+		slo["breached"] = state.Breached
+	}
+	body["slo"] = slo
+
+	WriteJSON(w, http.StatusOK, body)
 }
+
+// sloNotEvaluated is the one status this endpoint must not get wrong. "met" from
+// a process that has measured nothing is the only response here that would be a
+// lie, and it is the one an operator reads most often — on a site that has just
+// been installed, and every few seconds after that.
+const sloNotEvaluated = "not evaluated"
 
 func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
 	checks := map[string]any{}

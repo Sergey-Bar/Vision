@@ -150,13 +150,11 @@ func (r *PreRoll) Len() int {
 
 // Groups is the number of complete-or-in-progress groups retained, which is the
 // number that says whether a clip can start on a keyframe at all.
-func (r *PreRoll) Groups() int { return len(r.gops) + b2i(r.cur != nil) }
-
-func b2i(b bool) int {
-	if b {
-		return 1
+func (r *PreRoll) Groups() int {
+	if r.cur != nil {
+		return len(r.gops) + 1
 	}
-	return 0
+	return len(r.gops)
 }
 
 // Deepest is the wall span currently retained: the lead-in a trigger fired now
@@ -280,7 +278,15 @@ type Recorder struct {
 	closed bool
 
 	params ParameterSets
-	frag   *fragmenter
+	// sp is what params.SPS says, parsed once when the SPS was stored. The
+	// banner polls Geometry on a status line and the clip reports the same four
+	// numbers at Finish, so parsing the parameter set on each of those calls is
+	// work whose answer cannot change: an SPS is replaced or refused, never
+	// edited. spOK is false when the bytes did not parse, and the refusal then
+	// happens where it always did - when a clip is begun.
+	sp   SequenceParameters
+	spOK bool
+	frag *fragmenter
 
 	triggerDecode uint64
 	triggerReason string
@@ -357,15 +363,31 @@ func (r *Recorder) PushNAL(nal []byte, decodeTime uint64, wall time.Time) error 
 	if typ, ok := Parse(nal); ok {
 		switch typ {
 		case NALPrefix:
-			if len(r.params.SPS) > 0 && !bytes.Equal(r.params.SPS, nal) {
+			// Three cases, and the first is the common one: a camera re-sends the
+			// same parameter set before many keyframes, and a re-send that is
+			// copied again is an allocation per keyframe for no new information.
+			switch {
+			case bytes.Equal(r.params.SPS, nal):
+				// The same parameter set again, which is what a camera sends
+				// before every keyframe. Nothing to store, and the geometry
+				// already parsed from it still stands.
+			case len(r.params.SPS) > 0:
 				return fmt.Errorf("%w: SPS changed at media time %d", ErrProfileChange, decodeTime)
+			default:
+				r.params.SPS = append([]byte(nil), nal...)
+				if sp, err := parseSPS(nal); err == nil {
+					r.sp, r.spOK = sp, true
+				}
 			}
-			r.params.SPS = append([]byte(nil), nal...)
 		case NALSuffix:
-			if len(r.params.PPS) > 0 && !bytes.Equal(r.params.PPS, nal) {
+			switch {
+			case bytes.Equal(r.params.PPS, nal):
+				// A re-send, as above.
+			case len(r.params.PPS) > 0:
 				return fmt.Errorf("%w: PPS changed at media time %d", ErrProfileChange, decodeTime)
+			default:
+				r.params.PPS = append([]byte(nil), nal...)
 			}
-			r.params.PPS = append([]byte(nil), nal...)
 		}
 	}
 	if r.state == stateExhausted || r.closed {
@@ -408,14 +430,10 @@ func (r *Recorder) Closed() bool { return r.closed }
 // picture of a live stream, so a status line can name a real resolution instead
 // of leaving a blank for the first few seconds of a run.
 func (r *Recorder) Geometry() (width, height, profile, level int, ok bool) {
-	if len(r.params.SPS) == 0 {
+	if !r.spOK {
 		return 0, 0, 0, 0, false
 	}
-	sp, err := parseSPS(r.params.SPS)
-	if err != nil {
-		return 0, 0, 0, 0, false
-	}
-	return sp.Width, sp.Height, sp.Profile, sp.Level, true
+	return r.sp.Width, r.sp.Height, int(r.sp.Profile), int(r.sp.Level), true
 }
 
 func (r *Recorder) pushPicture(p *Picture) error {
@@ -512,7 +530,7 @@ func (r *Recorder) write(p *Picture, duration uint32) bool {
 			return false
 		}
 	}
-	est := int64(len(AVCC(p.NALs))) + 256
+	est := int64(AVCCLen(p.NALs)) + 256
 	if int64(len(r.frag.w.b))+est > r.opts.MaxBytes {
 		r.cappedBytes = true
 		r.noteCap("the clip reached its byte cap")
@@ -611,19 +629,22 @@ func (r *Recorder) Finish() (*Clip, error) {
 		r.write(r.held, d)
 		r.held = nil
 	}
-	sp, err := parseSPS(r.params.SPS)
-	if err != nil {
-		return nil, err
+	// Recording is only reachable through begin, which parsed these bytes to
+	// build the avcC, so the cached parse is the answer parseSPS would give here.
+	// The guard is not a fallback: a clip that reported a geometry nobody parsed
+	// would report zeroes, and zeroes in a report read as a stream of no size.
+	if !r.spOK {
+		return nil, errors.New("mp4: the recorder is recording but its parameter sets were never parsed")
 	}
 	c := &Clip{
 		Data:          r.frag.w.b,
 		MediaType:     "video/mp4",
 		Timescale:     r.opts.Timescale,
 		Duration:      r.pre.scaled(uint64(r.frag.duration())),
-		Width:         sp.Width,
-		Height:        sp.Height,
-		Profile:       sp.Profile,
-		Level:         sp.Level,
+		Width:         r.sp.Width,
+		Height:        r.sp.Height,
+		Profile:       int(r.sp.Profile),
+		Level:         int(r.sp.Level),
 		Pictures:      r.pictures,
 		KeyFrames:     r.keyframes,
 		PreRollPics:   r.preRollPics,

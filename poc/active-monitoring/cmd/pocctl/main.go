@@ -63,6 +63,8 @@ func main() {
 		err = cmdFetchModel(os.Args[2:])
 	case "fetch-runtime":
 		err = cmdFetchRuntime(os.Args[2:])
+	case "detector":
+		err = cmdDetector(os.Args[2:])
 	case "fetch-groundtruth":
 		err = cmdFetchGroundtruth(os.Args[2:])
 	case "bench":
@@ -104,6 +106,7 @@ func usage() {
   demo --live             the same, against the LIVE XProtect instance and the live source
   prove <detection>        recompute this decision from stored facts, with zero provider calls
   audit ledger             recompute the hash-chained decision ledger
+  audit ledger --tamper    change one byte of one row, watch the chain fail, restore it
   audit seal               sign the chain head, or verify a seal
   audit seals              verify every seal against a trusted public key
   audit decisions          the stored decision inputs: score, threshold, measured region
@@ -117,6 +120,8 @@ func usage() {
                            is already on disk against models/runtime.json, offline.
   fetch-groundtruth        download the Open Images annotations a benchmark needs and record
                            the licence of the images and of the annotations SEPARATELY
+  detector --selftest      PASS / FAIL / NOT RUN per row: could this machine honour what
+                           SP_POC_ORT_EP asked for, and if not, which of the causes it is
   bench                    measure the detector. --images <dir> drives it over a labelled
                            still set and holds a session; --run <id> measures a finished run
                            from its store and opens no model

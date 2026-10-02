@@ -39,9 +39,9 @@ func scenarioWithOffsets() []fixture.Scenario {
 		Epoch:      time.Date(2019, 1, 1, 0, 0, 0, 0, time.UTC),
 		CapturedAt: time.Date(2019, 1, 1, 0, 0, 0, 0, time.UTC),
 		Events: []fixture.Event{
-			{OffsetMS: 0, Kind: "/api/v1/Events", Method: "GET",
+			{OffsetMS: 0, Kind: "/api/rest/v1/events", Method: "GET",
 				Envelope: env("evt-1", "Motion", "2019-01-01T00:00:00Z")},
-			{OffsetMS: 120_000, Kind: "/api/v1/Events", Method: "GET",
+			{OffsetMS: 120_000, Kind: "/api/rest/v1/events", Method: "GET",
 				Envelope: env("evt-2", "Motion", "2019-01-01T00:02:00Z")},
 		},
 	}}
@@ -133,7 +133,7 @@ func TestReplayIsDeterministicAcrossEpochs(t *testing.T) {
 // get wrong in the other direction, and that a host-locale bug made wrong here.
 //
 // A timestamp saying "+02:00" must still say "+02:00" after a rebase. The
-// obvious implementation - t.In(parsed.Location()) - does not do that: Go's
+// obvious implementation - time.Time.In(parsed.Location()) - does not do that: Go's
 // parser resolves a recognised abbreviation against the *host's* zone database,
 // and In then re-resolves it for the new instant, so on a host at UTC+3 in
 // July a source that declared +02:00 came out declaring +03:00. The same build on
@@ -149,7 +149,7 @@ func TestReplayPreservesTheOffsetTheSourceDeclared(t *testing.T) {
 		Epoch:      time.Date(2019, 1, 1, 0, 0, 0, 0, time.UTC),
 		CapturedAt: time.Date(2019, 1, 1, 0, 0, 0, 0, time.UTC),
 		Events: []fixture.Event{
-			{OffsetMS: 60_000, Kind: "/api/v1/Events", Method: "GET", Envelope: env},
+			{OffsetMS: 60_000, Kind: "/api/rest/v1/events", Method: "GET", Envelope: env},
 		},
 	}}
 	epoch := time.Date(2026, 7, 1, 15, 0, 0, 0, time.UTC)

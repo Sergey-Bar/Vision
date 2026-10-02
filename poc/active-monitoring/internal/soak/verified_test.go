@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Sergey-Bar/ai-captain-poc/internal/aistate"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/evidence"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/novelty"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
@@ -107,10 +108,16 @@ func TestASnapshotIsRefusedWhenTheFrameIsNoLongerHeld(t *testing.T) {
 // draw the object on the operator's timeline, so that is the demo's worst failure
 // and it happened while the database disagreed with the wire.
 func TestAPushedEventWithAnAllZeroBoxIsRefused(t *testing.T) {
+	// Attributed, so the BOX refusal is the one that fires. Without the provenance
+	// the event would be refused earlier for carrying no AI state, the assertion on
+	// "all zero" would fail, and the test would be measuring the wrong refusal — the
+	// vacuous green RC-6's own red check exists to prevent.
+	prov := xprotect.Provenance{AIState: aistate.NotAsked}
 	_, err := xprotect.BuildEvent(xprotect.EventInput{
 		EventTypeGUID: "t", SourceGUID: "g", At: time.Now(), Tag: "tag-1",
 		Class: "motion", Value: "motion", Confidence: 0.5, RuleName: "alarm-l",
-		Box: xprotect.Box{}, // the measured region went missing
+		Box:        xprotect.Box{}, // the measured region went missing
+		Provenance: prov,
 	})
 	if err == nil {
 		t.Fatal("an event with an all-zero box was accepted")
@@ -125,7 +132,8 @@ func TestAPushedEventWithAnAllZeroBoxIsRefused(t *testing.T) {
 	if _, err := xprotect.BuildEvent(xprotect.EventInput{
 		EventTypeGUID: "t", SourceGUID: "g", At: time.Now(), Tag: "tag-1",
 		Class: "motion", Value: "motion", Confidence: 0.5, RuleName: "alarm-l",
-		Box: xprotect.Box{Top: 200, Left: 100, Bottom: 600, Right: 500},
+		Box:        xprotect.Box{Top: 200, Left: 100, Bottom: 600, Right: 500},
+		Provenance: prov,
 	}); err != nil {
 		t.Fatalf("a real box was refused: %v", err)
 	}
@@ -134,7 +142,8 @@ func TestAPushedEventWithAnAllZeroBoxIsRefused(t *testing.T) {
 	if _, err := xprotect.BuildEvent(xprotect.EventInput{
 		EventTypeGUID: "t", SourceGUID: "g", At: time.Now(), Tag: "tag-1",
 		Class: "camera_integrity", Value: "motion", Confidence: 0.5, RuleName: "camera_integrity-r",
-		Box: xprotect.Box{Top: 0, Left: 0, Bottom: 1000, Right: 1000},
+		Box:        xprotect.Box{Top: 0, Left: 0, Bottom: 1000, Right: 1000},
+		Provenance: prov,
 	}); err != nil {
 		t.Fatalf("a full-frame box was refused: %v", err)
 	}

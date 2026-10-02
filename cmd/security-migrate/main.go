@@ -110,23 +110,19 @@ func run() error {
 	}
 }
 
+// connectConfig resolves the database to migrate.
+//
+// It refuses rather than falling back to the compiled-in localhost default. The
+// fallback was two lines and it was invisible: `security-migrate up` in a shell
+// without SP_DATABASE_URL connected to 127.0.0.1:5432/security as security_core
+// and, if that database existed, began changing its schema. The refusal names
+// both ways to name a database, and `dbx.ErrNoTarget` is what a caller tests for.
+//
+// The second return value was the password flag and it was never used here; the
+// password is resolved separately and passed to dbx.Open, because a flag argument
+// is visible in the process list.
 func connectConfig(dsnFlag, _ string) (dbx.Config, error) {
-	cfg := dbx.DefaultConfig()
-
-	dsn := dsnFlag
-	if dsn == "" {
-		dsn = os.Getenv("SP_DATABASE_URL")
-	}
-	if dsn == "" {
-		return cfg, nil
-	}
-	// A DSN may carry a user. It must not carry a password in the environment:
-	// an environment variable survives into child processes and diagnostic
-	// dumps, a flag does not. The password has its own dedicated variable.
-	if err := cfg.ApplyDSN(dsn); err != nil {
-		return cfg, err
-	}
-	return cfg, nil
+	return dbx.ConfigForTarget(dsnFlag, "SP_DATABASE_URL")
 }
 
 // resolvePassword prefers the dedicated environment variable over the flag. A
@@ -219,8 +215,10 @@ Commands:
 
 Flags:
   -dsn string        Postgres DSN without a password. Falls back to SP_DATABASE_URL.
+                      Required: with neither named, this tool refuses rather than
+                      guessing a database from the values compiled into it.
   -password string   Database password. SP_DATABASE_PASSWORD is preferred; a flag
-                     argument is visible to anything that can list processes.
+                      argument is visible to anything that can list processes.
   -json              Emit machine-readable output.
   -dry-run           Print the plan and change nothing.
   -timeout duration  Overall timeout (default 10m).

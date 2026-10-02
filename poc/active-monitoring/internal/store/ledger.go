@@ -96,6 +96,30 @@ BEGIN SELECT RAISE(ABORT, 'the ledger is append-only: a recorded decision row ca
 // measurement rather than a diff.
 var ledgerGuards = []string{ledgerGuardUpdate, ledgerGuardDelete}
 
+// LedgerGuardNames are the two trigger names `ledgerGuards` installs.
+//
+// It exists for exactly one caller — the tamper demonstration in `pocctl audit
+// ledger --tamper`, which has to drop them to prove that verification catches an
+// edited row, and then put them back. Spelling the names in that command instead
+// would be a second copy of the guard's identity: rename a trigger in this file
+// and the demonstration would silently drop nothing, report an intact chain after
+// "tampering" with it, and print a PASS that means nothing.
+//
+// The names are returned and the DDL below is kept unexported on purpose. A tool
+// that can remove the guard can always remove a trigger by name from SQL, so
+// hiding the string would be security theatre; what the guard is FOR is to stop
+// somebody editing a row by accident, in the middle of an incident review, while
+// they still believe it is being recorded.
+func LedgerGuardNames() []string {
+	return []string{"ledger_no_update", "ledger_no_delete"}
+}
+
+// LedgerGuards returns the CREATE TRIGGER statements, for re-installation after a
+// demonstration has taken them out.
+func LedgerGuards() []string {
+	return append([]string(nil), ledgerGuards...)
+}
+
 // Append adds one row to the chain.
 //
 // The read of the tail and the insert are in ONE transaction. Two appends racing
@@ -292,6 +316,19 @@ func (s *Store) VerifyLedger(ctx context.Context, from, to int64) (ChainReport, 
 	return rep, nil
 }
 
+// lastSeq is the highest recorded sequence, or 0 for an empty ledger.
+//
+// 0 rather than an error for the empty case, because `pocctl audit ledger` on a
+// fresh data root has to be able to say "nothing has been recorded" and a reader
+// needs that to be a sentence and not a stack trace.
+func (s *Store) lastSeq(ctx context.Context) int64 {
+	var maxSeq sql.NullInt64
+	if err := s.db.QueryRowContext(ctx, `SELECT MAX(seq) FROM ledger`).Scan(&maxSeq); err != nil {
+		return 0
+	}
+	return maxSeq.Int64
+}
+
 // LedgerRange returns the recorded sequence bounds.
 func (s *Store) LedgerRange(ctx context.Context) (from, to int64, err error) {
 	var lo, hi sql.NullInt64
@@ -305,7 +342,26 @@ func (s *Store) LedgerRange(ctx context.Context) (from, to int64, err error) {
 }
 
 // Ledger returns the rows in a range, for the seal and the report.
+//
+// `to <= 0` means "to the end of the chain", which is what [Store.VerifyLedger]
+// does and what every caller passing (0, 0) meant. It did NOT used to, because this
+// function compared `seq <= to` literally: `pocctl audit ledger` — the command whose
+// entire job is to show a person the rows and whether they chain — asked for
+// `Ledger(0, 0)`, got an empty slice, printed "the ledger is empty. An empty chain
+// is not an intact one", and printed "PASS — 57 row(s) recomputed and chained" on
+// the line below it. A tool that says a ledger is empty and intact in consecutive
+// sentences teaches its reader to read past it.
+//
+// The two functions now agree on what a range means. A caller that genuinely wants
+// the empty range — nothing, for a check of "is there anything here" — should ask
+// for (1, 0) or use [Store.LedgerRange], and there is no such caller today.
 func (s *Store) Ledger(ctx context.Context, from, to int64) ([]LedgerRow, error) {
+	if to <= 0 {
+		// REDCHECK RC-21: this is the whole open-ended range. Removing it puts
+		// `pocctl audit ledger`'s self-contradiction back — "the ledger is empty"
+		// printed above a PASS that says how many rows chained.
+		to = s.lastSeq(ctx)
+	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT seq,at,kind,subject,payload,prev_hash,hash FROM ledger
 		WHERE seq >= ? AND seq <= ? ORDER BY seq`, from, to)

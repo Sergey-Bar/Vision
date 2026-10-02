@@ -776,6 +776,24 @@ func redactSource(raw string) string {
 	return rest
 }
 
+// demoAbsenceGUIDs are the three blindness Analytics Event Types the demo run
+// configures, against the LOCAL simulator.
+//
+// They are invented here and mean nothing outside it. The demo proves that a window
+// of `not_asked` produces ONE aggregated event carrying a count, that the count is
+// right, and that the read-back finds it — a claim about the mechanism. It is not a
+// claim that any Milestone account has these types registered, and the demo says so
+// on screen: the truth line names xpsim, and nothing in this repository may say
+// otherwise.
+//
+// Three and not four: `no_objects` is a negative ANSWER, it already drives the
+// `false_positive` verdict on the detection's own event, and an alarm that fires to
+// say "nothing" is the fatigue this product exists to remove. `config` refuses that
+// fourth entry by name.
+const demoAbsenceGUIDs = "*@not_asked=b4d1e1c2-0000-4000-8000-000000000002;" +
+	"*@degraded=b4d1e1c2-0000-4000-8000-000000000003;" +
+	"*@cannot_tell=b4d1e1c2-0000-4000-8000-000000000004"
+
 func demoEnv(root, dataRoot, clip, zones, model, anchors, simAddr, uiAddr string, seconds int, r *relay) []string {
 	env := []string{
 		"SP_POC_DATA_ROOT=" + dataRoot,
@@ -947,6 +965,13 @@ func demoEnv(root, dataRoot, clip, zones, model, anchors, simAddr, uiAddr string
 		"SP_POC_CAMERA_GUID=0d9a1b2c-1111-2222-3333-444455556666",
 		"SP_POC_DEVICE_PATH=/Local/00000000-0000-0000-0000-000000000000",
 		"SP_POC_EVENT_TYPE_GUID=b4d1e1c2-0000-4000-8000-000000000001",
+		// The blindness map, set so the demo can show the absence path without a
+		// real VMS. These GUIDs are the simulator's, not a real instance's: the
+		// events go to xpsim and the read-back finds them there, which proves the
+		// mechanism and not that any Milestone account has these types registered.
+		// The three states are the only ones accepted — `no_objects` is a negative
+		// answer and gets no alarm of its own.
+		"SP_POC_EVENT_TYPE_GUIDS=" + demoAbsenceGUIDs,
 		"SP_POC_PUSH_MAX_ATTEMPTS=6",
 		"SP_POC_PUSH_TIMEOUT=10s",
 		"SP_POC_UI_ADDR=" + uiAddr,

@@ -103,6 +103,12 @@ func benchImages(flags map[string]string) error {
 		LibraryPath: envOr("SP_POC_ORT_LIB", flags["ort"]),
 		ModelPath:   envOr("SP_POC_DET_MODEL", flags["model"]),
 		Threads:     envInt("SP_POC_ORT_THREADS", flags["threads"], 4),
+		// A benchmark that ran on a different device than it printed is worse than no
+		// benchmark, so the bench takes the provider from the same variables the run
+		// does rather than defaulting. A typo is refused by name rather than treated
+		// as the CPU.
+		ExecutionProvider: envOr("SP_POC_ORT_EP", "cpu"),
+		CUDADeviceID:      envInt("SP_POC_ORT_CUDA_DEVICE", "", 0),
 	})
 	if err != nil {
 		return fmt.Errorf("bench: %w", err)

@@ -23,8 +23,13 @@ import (
 
 func aRequest() milestone.BookmarkRequest {
 	return milestone.BookmarkRequest{
-		IncidentID:  "inc_abc123",
-		SiteRef:     "Perimeter North [CAM-014]",
+		IncidentID: "inc_abc123",
+		// A device reference in the vendor's own REST form, which is what this API
+		// requires: `bookmarks-rest-v1.openapi.yaml:224-235` wants
+		// `devicePath{type,id}`, and `events-rest-v1.reference.md:291` shows the id
+		// in a source as `cameras/<uuid>`. It used to be the display string
+		// "Perimeter North [CAM-014]", which the documented body has no place for.
+		SiteRef:     "cameras/e028f597-c64b-4f27-bb8d-08f5cd768e1c",
 		SiteID:      "site-hq",
 		WindowStart: time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC),
 		WindowEnd:   time.Date(2026, 7, 1, 12, 0, 8, 0, time.UTC),
@@ -171,7 +176,7 @@ func TestPlacingABookmarkReachesTheVendorAndReportsAFailureHonestly(t *testing.T
 		switch r.Method {
 		case http.MethodPost:
 			sent = readBookmark(t, r)
-			_, _ = w.Write([]byte(`{"id":"bm-99"}`))
+			_, _ = w.Write([]byte(`{"array":[{"reference":"bm-99"}]}`))
 		default:
 			w.WriteHeader(http.StatusInternalServerError)
 		}
@@ -192,7 +197,12 @@ func TestPlacingABookmarkReachesTheVendorAndReportsAFailureHonestly(t *testing.T
 		t.Fatalf("the bookmark was not placed: %+v", decision)
 	}
 	if sent.IdempotencyKey == "" {
-		t.Error("the placed bookmark carried no idempotency key")
+		t.Error("the placed bookmark carried no idempotency key. The documented body has no field " +
+			"for one, so the header is the only place it can travel")
+	}
+	if sent.SiteRef != aRequest().SiteRef {
+		t.Errorf("the device reached the vendor as %q, want the request's own %q",
+			sent.SiteRef, aRequest().SiteRef)
 	}
 	if sent.Time.IsZero() {
 		t.Error("the placed bookmark carried no time")
@@ -216,32 +226,35 @@ func TestPlacingABookmarkReachesTheVendorAndReportsAFailureHonestly(t *testing.T
 // readBookmark pulls the interesting parts out of the body the test server
 // received, so the test asserts on what crossed the wire rather than on what the
 // client believed it sent.
+//
+// It decodes the documented `newBookmarkBody`, which has no idempotency field, so
+// the key is read from the header and that is reported as the header value. The
+// previous version asserted the header and the body carried the same key, which
+// was a coherent check against a body shape that does not exist.
 func readBookmark(t *testing.T, r *http.Request) milestone.Bookmark {
 	t.Helper()
 	var body struct {
-		Bookmarks []struct {
-			IdempotencyKey string `json:"idempotencyKey"`
-			DeviceRef      string `json:"deviceRef"`
-			Time           string `json:"time"`
-			Label          string `json:"label"`
-		} `json:"bookmarks"`
+		Header     string `json:"header"`
+		DevicePath struct {
+			Type string `json:"type"`
+			ID   string `json:"id"`
+		} `json:"devicePath"`
+		TimeTriggered string `json:"timeTriggered"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		t.Fatalf("the write-back was not the expected JSON: %v", err)
 	}
-	if len(body.Bookmarks) != 1 {
-		t.Fatalf("the write-back carried %d bookmarks, want exactly 1", len(body.Bookmarks))
-	}
-	b := body.Bookmarks[0]
-	if got := r.Header.Get("Idempotency-Key"); got == "" || got != b.IdempotencyKey {
-		t.Errorf("the Idempotency-Key header is %q and the body says %q; a vendor that reads only "+
-			"one of them makes a retry unsafe", got, b.IdempotencyKey)
+	if body.Header == "" || body.DevicePath.ID == "" || body.TimeTriggered == "" {
+		t.Errorf("the write-back omitted a required field: %+v", body)
 	}
 	return milestone.Bookmark{
-		IdempotencyKey: b.IdempotencyKey,
-		SiteRef:        b.DeviceRef,
-		Label:          b.Label,
-		Time:           mustParseRFC3339(t, b.Time),
+		// The header is the only place this key can travel: neither published
+		// document declares it, so there is nowhere in the body to put it. See
+		// docs/vendor/milestone/route-audit.md §2.5.
+		IdempotencyKey: r.Header.Get("Idempotency-Key"),
+		SiteRef:        body.DevicePath.Type + "/" + body.DevicePath.ID,
+		Label:          body.Header,
+		Time:           mustParseRFC3339(t, body.TimeTriggered),
 	}
 }
 

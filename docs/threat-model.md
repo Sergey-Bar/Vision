@@ -291,6 +291,93 @@ is deterministic; it does not prove the Milestone endpoint mapping is correct,
 because that mapping is `Unverified` in `internal/milestone/routes.go` until a
 real server confirms it. DoD item 1 stays open until it is.
 
+**R5 — agent skills are untrusted input, and the corpus is prose.** Sixty-seven
+skills from outside this repository were installed on the machine this product is
+developed on, and a skill is read as instructions by the thing making the
+decisions. That is the same category as a rule bundle, with a wider blast radius:
+a rule bundle is data this product validates, and a skill is text an agent may act
+on. The published research on skill supply chains puts vulnerability rates at
+26.1% and likely-malicious at 5.2%, with executable scripts 2.12x more likely to
+be affected, so "they are just markdown" is not a defence.
+
+The scan was run and the adjudication is recorded in §6b. What survives it as an
+accepted risk: the corpus is overwhelmingly documentation, the findings are
+overwhelmingly false positives, and a false-positive-heavy scanner is a scanner
+whose *next* report gets skimmed. The control that matters is that the gate runs
+on every verification and writes its findings to disk, not that any one run came
+back clean.
+
+## 6b. The skill supply chain, and the adjudication of its scan
+
+**The boundary.** Agent skills installed on the development machine are untrusted
+third-party input. They are not part of this product, they are not version-
+controlled here, and nothing in this repository can revoke one — only the person
+who installed it can.
+
+**The control, and the test that proves it.**
+
+| | |
+|---|---|
+| `skills-audit` in `scripts/verify.ps1` asserts that a scan record exists for each skill directory **and that it postdates the newest skill in that directory** | the gate runs every verification; add a skill and it fails until `scripts\scan-skills.ps1` is re-run |
+| The scan itself is `scripts\scan-skills.ps1` (or `.\scripts\verify.ps1 -ScanSkills`), not every run | measured: 6.3 min cold and 10.3 min warm for 25 skills, because the scanner caches nothing. A gate that added forty minutes per run is a gate that gets stopped being run — the same defect that made `lint` and `-race` decorative |
+| `--no-llm` keeps file contents local | SC4 still queries `api.osv.dev` with dependency coordinates, which is the only egress and is documented in the script comment |
+| The verdict is **advisory** and never sets the gate's exit code | a legitimate skill scoring 100 CRITICAL on a filtered `os.environ` passthrough would otherwise block the build, which trains its readers to pass `--fail-on-findings` nothing and then stop reading the scanner |
+| Where the tool is absent, the gate prints `SKIPPED` and sets `verified: false` in the record | the same rule as every other gate: a check that turns itself off is not a check |
+
+**Why freshness rather than a scan on every run.** A scan-on-every-run gate was
+built first and measured, and it was wrong: 42 skills in one directory did not
+finish inside ten minutes. Replacing it with a freshness check keeps the property
+that actually matters — the record cannot go stale while reading as current — and
+keeps the gate's cost at milliseconds. The failure mode this trades away is a
+change *inside* an already-scanned skill, which the mtime comparison does catch,
+against the failure mode it buys back: a gate nobody runs.
+
+**The scan, 2026-10-02.** 67 skills, 375 findings, 17.9 minutes for both
+directories.
+
+| Directory | Skills | Max risk | Findings |
+|---|---|---|---|
+| `~/.agents/skills` | 42 | 100 CRITICAL | 57 |
+| `~/.config/kilo/skills` | 25 | 100 CRITICAL | 317 |
+
+**Every serious category is a false positive on a documentation corpus**, and the
+reason is the same in every case: the finding is a pattern match on the *shape* of
+text whose subject is that pattern.
+
+| Rule | Count | Where | Adjudication |
+|---|---|---|---|
+| `RP1` artifact not fully inspected | 142 | `sentry-*` SDK reference docs | **Coverage limit, not a vulnerability.** These skills ship 40+ SDK documentation files that exceed the per-file analysis cap. The scanner is saying it read less than it wanted, which is worth knowing and is not an attack. |
+| `E1`, `AE1`, `PE3` data-exfiltration shapes | 110 | `sentry-*`, `graphify`, `archify` | Documentation about shipping telemetry, plus a code-graph tool that necessarily reads the repository. No destination, no encoding, no beacon. |
+| `P2` hidden instructions | 30 | `sentry-*/references/sdks/**`, `archify/assets/template.html` | Comments and `<script>` blocks inside documentation *about* instrumentation and session replay. |
+| `YR2` webshell match | 3 | `security-review/references/{language-patterns,vuln-categories}.md` | **Exactly right, and exactly backwards.** That file is a catalogue of malicious-code patterns, supplied to teach an agent to recognise them. A webshell signature firing on a webshell example is a true negative. |
+| `SSRF1` | 1 | same file | Same reasoning. |
+| `YR4` hack tool | 6 | `archify/examples/*.html` | Inline JavaScript in HTML diagrams, matched by hack-tool heuristics. |
+| `SC2` remote script fetch | 6 | `sentry-create-alert`, `sentry-snapshots-cocoa` | Install snippets in prose, not lines this repository runs. |
+| `TM1` shell invocation, `AST4` subprocess | 9 | `graphify`, `security-review`, `acquire-codebase-knowledge`, `test-gap-audit` | Shell and subprocess calls are what a code-navigation tool *is*. |
+| `E2` env harvesting | 5 | `skill-creator/scripts/{run_eval,improve_description}.py` | `{k: v for k, v in os.environ.items() if k != "CLAUDECODE"}` — a filter that *removes* one variable and passes the child environment through. It does not read the values. |
+
+**Two mitigations that are checkable rather than a judgement call.** The one
+finding that needed more than reading was `skill-creator`'s, and it is closed by
+absence rather than by argument: every script in that skill shells out to
+`claude -p`, and `claude` is not on this machine, so the code cannot run here at
+all. `Get-Command claude` returning nothing is the proof. The same applies to
+`webapp-testing`, whose one genuine capability is `subprocess.Popen(...,
+shell=True)` on a `--server` string — real, and constrained by the same rule that
+bounds every other untrusted-input path in this repository: the threat model owns
+the answer, not the convenience of the call site. Never interpolate repository or
+web content into that flag.
+
+**What is not modelled.** SkillSpector is defense-in-depth, not a sandbox: it
+never executes the skill, does not isolate the host, reports that it may miss
+non-English content and image-borne payloads, and its `--no-llm` mode is static
+plus regex plus YARA with no semantic analysis. A skill that achieves its effect by
+being *persuasive prose* — the one category this corpus is made of — is the worst
+case for it and the best case for it at the same time, because the prose is right
+there in `SKILL.md` for a human to read. **The control that actually holds is that
+a human reads `AGENTS.md` before the agent acts, and `AGENTS.md` reserves changing
+an invariant, a published contract, a capability or a date to that human.** No
+scanner substitutes for it.
+
 ## 6a. Video frames are untrusted input
 
 Added when the capture path went from "no video" to "video from a camera", which

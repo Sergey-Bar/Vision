@@ -233,8 +233,12 @@ func TestReservoirQuantiles(t *testing.T) {
 func TestEverySLOBriefCarriesARemedy(t *testing.T) {
 	r := observability.NewRegistry()
 	// A deliberately bad state: everything breached.
-	all := observability.Breaches(r, 3, 2, 1, 10, 5, 7, 3.2,
-		[]time.Duration{30 * time.Second, 40 * time.Second})
+	all := observability.Breaches(r, observability.Readings{
+		LostEvents:           3,
+		DeadLettered:         2,
+		DiskFreePercent:      3.2,
+		IncidentVisibilities: []time.Duration{30 * time.Second, 40 * time.Second},
+	})
 	if len(all) < 8 {
 		t.Fatalf("%d SLOs evaluated, want at least 8", len(all))
 	}
@@ -256,8 +260,17 @@ func TestEverySLOBriefCarriesARemedy(t *testing.T) {
 func TestAIPlaneIsReportedButNotRequired(t *testing.T) {
 	r := observability.NewRegistry()
 	// Everything else healthy, the AI plane fully down.
-	all := observability.Breaches(r, 0, 0, 0, 100, 0, 250, 90,
-		[]time.Duration{time.Second, 2 * time.Second})
+	all := observability.Breaches(r, observability.Readings{
+		AIDegradedDecisions: 250,
+		// Measured, because otherwise the objective correctly declines to answer.
+		// Nothing in this build writes the degraded-incident gauge yet — see
+		// TestAnEmptyRegistryIsNotAHealthyRegistryAndNotAFailedOne — so a test that
+		// wants the objective to speak has to say it was measured.
+		AIDegradedMeasured:   true,
+		DiskFreePercent:      90,
+		DiskFreeMeasured:     true,
+		IncidentVisibilities: []time.Duration{time.Second, 2 * time.Second},
+	})
 
 	breached := observability.Breached(all)
 	for _, s := range breached {
@@ -278,8 +291,10 @@ func TestHealthyStateBreachesNothing(t *testing.T) {
 	r.IngestLag.Observe(0.8)
 	r.IngestLag.Observe(1.1)
 
-	all := observability.Breaches(r, 0, 0, 0, 100, 1, 0, 55,
-		[]time.Duration{2 * time.Second, 3 * time.Second})
+	all := observability.Breaches(r, observability.Readings{
+		DiskFreePercent:      55,
+		IncidentVisibilities: []time.Duration{2 * time.Second, 3 * time.Second},
+	})
 	breached := observability.Breached(all)
 	if len(breached) != 0 {
 		for _, s := range breached {
@@ -291,7 +306,7 @@ func TestHealthyStateBreachesNothing(t *testing.T) {
 // Any accepted event lost is a breach, at any percentage.
 func TestAnyLossIsABreach(t *testing.T) {
 	r := observability.NewRegistry()
-	all := observability.Breaches(r, 1, 0, 0, 0, 0, 0, 50, nil)
+	all := observability.Breaches(r, observability.Readings{LostEvents: 1, DiskFreePercent: 50})
 	breached := observability.Breached(all)
 	for _, s := range breached {
 		if s.Name == "ingest_availability" {
@@ -299,6 +314,120 @@ func TestAnyLossIsABreach(t *testing.T) {
 		}
 	}
 	t.Error("one lost event is not a breach; the SLO is zero, not a percentage")
+}
+
+// TestReadingsFromCountsWhatWasAcceptedButNotTerminal, not what was lost in the
+// abstract.
+//
+// `pipeline.Loops` increments `inbox_accepted_total` for every event the inbox
+// accepts and `inbox_dead_lettered_total` for the ones it terminates as dead
+// letters. A dead letter is an accepted event the platform could not process —
+// invariant 1's requirement is that it reaches *a* terminal state, and this is
+// that state. So the loss is the difference between the two, not either counter
+// alone, and getting that arithmetic wrong in either direction is either a
+// permanently breached objective or a permanently silent one.
+func TestReadingsFromCountsWhatWasAcceptedButNotTerminal(t *testing.T) {
+	r := observability.NewRegistry()
+	r.Counters.Inc(observability.CounterInboxAccepted)
+	r.Counters.Inc(observability.CounterInboxAccepted)
+	r.Counters.Inc(observability.CounterInboxAccepted)
+	r.Counters.Inc(observability.CounterInboxDeadLettered)
+	r.Gauges.Set(observability.GaugeIncidentDegraded, 4)
+	r.Gauges.Set(observability.GaugeEvidenceDiskFree, 61)
+
+	got := observability.ReadingsFrom(r)
+	if got.LostEvents != 2 {
+		t.Errorf("LostEvents is %.0f; 3 accepted with 1 dead-lettered is 2 that reached no "+
+			"terminal state", got.LostEvents)
+	}
+	if got.DeadLettered != 1 {
+		t.Errorf("DeadLettered is %.0f, want 1", got.DeadLettered)
+	}
+	if got.AIDegradedDecisions != 4 {
+		t.Errorf("AIDegradedDecisions is %.0f, want the degraded-incident gauge", got.AIDegradedDecisions)
+	}
+	if !got.AIDegradedMeasured || !got.DiskFreeMeasured {
+		t.Errorf("both gauges were written and ReadingsFrom says they were not measured: %+v", got)
+	}
+	if got.DiskFreePercent != 61 {
+		t.Errorf("DiskFreePercent is %.0f, want the evidence-disk gauge", got.DiskFreePercent)
+	}
+
+	// A healthy site: everything accepted reached a terminal state.
+	healthy := observability.NewRegistry()
+	healthy.Counters.Inc(observability.CounterInboxAccepted)
+	healthy.Counters.Inc(observability.CounterInboxDeadLettered)
+	if lost := observability.ReadingsFrom(healthy).LostEvents; lost != 0 {
+		t.Errorf("a site whose only accepted events are dead letters reports %.0f lost", lost)
+	}
+}
+
+// A registry nobody has written must read as unmeasured rather than as healthy,
+// and neither must it read as breached.
+//
+// Both directions have been real. `evidence_disk` breaches below 10% free, and no
+// code in this build samples the evidence volume, so an unwritten gauge reads as
+// zero — a permanently, universally full disk. `ai_plane_availability` reports
+// how often the AI plane was absent, and its gauge is equally unwritten, so zero
+// reads as "never degraded". An objective that asserts either of those about a
+// system that has reported nothing is not an SLO, it is a story.
+func TestAnEmptyRegistryIsNotAHealthyRegistryAndNotAFailedOne(t *testing.T) {
+	r := observability.NewRegistry()
+	if state := r.SLOs(); state.Evaluated != 0 || len(state.Breached) != 0 {
+		t.Errorf("a registry nobody evaluated reports %+v", state)
+	}
+	if got := observability.ReadingsFrom(nil); got.LostEvents != 0 {
+		t.Errorf("ReadingsFrom(nil) is %+v; a nil registry has no readings", got)
+	}
+
+	readings := observability.ReadingsFrom(r)
+	if readings.DiskFreeMeasured || readings.AIDegradedMeasured {
+		t.Errorf("an unwritten registry reports a measurement: %+v", readings)
+	}
+	for _, slo := range observability.Breaches(r, readings) {
+		switch slo.Name {
+		case "evidence_disk":
+			if slo.Breached {
+				t.Errorf("evidence_disk is breached on an unwritten gauge: %q", slo.Measured)
+			}
+			if !strings.Contains(slo.Measured, "not measured") {
+				t.Errorf("evidence_disk reports %q; a gauge nobody wrote has no reading to report",
+					slo.Measured)
+			}
+		case "ai_plane_availability":
+			if slo.Breached {
+				t.Errorf("ai_plane_availability is breached on an unwritten gauge: %q", slo.Measured)
+			}
+		}
+	}
+
+	// And once something *is* measured, the objective judges it. Otherwise the
+	// guard above would pass for an objective that can never breach at all.
+	r.Gauges.Set(observability.GaugeEvidenceDiskFree, 3.5)
+	measured := observability.ReadingsFrom(r)
+	for _, slo := range observability.Breaches(r, measured) {
+		if slo.Name == "evidence_disk" && !slo.Breached {
+			t.Errorf("a volume with 3.5 percent free is not a breach: %q", slo.Measured)
+		}
+	}
+}
+
+// The recorded verdict is the contract between the loop that evaluates the
+// objectives and the endpoint an operator reads them on, so it is copied out
+// rather than shared by reference: a caller that sorted the slice in place would
+// otherwise be editing the record.
+func TestTheRecordedVerdictIsACopy(t *testing.T) {
+	r := observability.NewRegistry()
+	r.RecordSLOs(observability.SLOState{Evaluated: 8, Breached: []string{"ingest_backlog"}})
+
+	read := r.SLOs()
+	if read.Evaluated != 8 || len(read.Breached) != 1 {
+		t.Fatalf("recorded %+v", read)
+	}
+	read.Breached[0] = "evidence_disk"
+	if again := r.SLOs(); again.Breached[0] != "ingest_backlog" {
+		t.Error("mutating what a reader was handed changed the recorded verdict")
+	}
 }
 
 func itoa(n int) string {

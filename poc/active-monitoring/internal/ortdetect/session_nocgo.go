@@ -24,9 +24,11 @@ import "errors"
 // SessionConfig is the same shape as the cgo build's, so every caller compiles
 // either way. See session_cgo.go for what each field means.
 type SessionConfig struct {
-	LibraryPath string
-	ModelPath   string
-	Threads     int
+	LibraryPath       string
+	ModelPath         string
+	Threads           int
+	ExecutionProvider string
+	CUDADeviceID      int
 }
 
 // InputSpec mirrors the cgo build's. It is a struct rather than a set of
@@ -47,11 +49,13 @@ type OutputSpec struct {
 // Identity mirrors the cgo build's. Every field is empty, and that is reported
 // rather than defaulted: there is no model, so there is no hash.
 type Identity struct {
-	ModelPath      string
-	SHA256         string
-	Bytes          int64
-	Licence        string
-	RuntimeVersion string
+	ModelPath         string
+	SHA256            string
+	Bytes             int64
+	Licence           string
+	RuntimeVersion    string
+	ExecutionProvider string
+	CUDADeviceID      int
 }
 
 // Session is the no-cgo placeholder. It has no fields because it cannot exist: the

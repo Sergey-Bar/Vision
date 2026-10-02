@@ -188,11 +188,10 @@ func (d *Depacketizer) Push(p Packet) ([][]byte, error) {
 }
 
 func parseSTAPA(payload []byte) ([][]byte, error) {
-	if len(payload) < 1 {
-		return nil, fmt.Errorf("%w: empty aggregation packet", ErrShortPacket)
-	}
+	// The caller has already refused an empty payload, so the first byte - the
+	// STAP-A header - is known to be there.
 	var out [][]byte
-	off := 1 // the STAP-A header byte
+	off := 1
 	for off < len(payload) {
 		if off+2 > len(payload) {
 			return nil, fmt.Errorf("%w: STAP-A size field runs past the end", ErrShortPacket)

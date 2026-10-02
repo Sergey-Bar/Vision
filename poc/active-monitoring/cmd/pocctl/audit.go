@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -145,6 +146,7 @@ func auditUsage() {
 	fmt.Print(`pocctl audit — check this run's own claims
 
   audit ledger [--run <id>]       recompute the hash chain and name the first broken row
+  audit ledger --tamper [--seq N] change ONE byte of one row, watch the chain fail, put it back
   audit seal [--run <id>]         sign the chain head with a key, or verify the existing seal
   audit seals --trusted-key <f>   verify every seal file against a named public key
   audit decisions [--run <id>]    the stored decision inputs: score, threshold, measured region
@@ -152,6 +154,10 @@ func auditUsage() {
 
 A chain that verifies is not the same claim as a chain somebody attested to, and
 this prints which of the two you are looking at.
+
+--tamper edits a row, so it refuses a chain that is already broken and restores
+what it changed, including the append-only guards. It prints FAIL for the broken
+state and never anything softer.
 `)
 }
 
@@ -185,7 +191,10 @@ func resolveRun(st *store.Store, named string) (string, error) {
 
 // auditLedger recomputes the chain. W3-1's observable half.
 func auditLedger(args []string) error {
-	flags, err := flagSet("audit ledger", map[string]string{"data-root": os.Getenv("SP_POC_DATA_ROOT"), "run": "", "detection": ""}, args)
+	flags, err := flagSet("audit ledger", map[string]string{
+		"data-root": os.Getenv("SP_POC_DATA_ROOT"), "run": "", "detection": "", "seq": "",
+		"tamper": boolSpec,
+	}, args)
 	if err != nil {
 		return err
 	}
@@ -194,6 +203,14 @@ func auditLedger(args []string) error {
 		return err
 	}
 	defer func() { _ = st.Close() }()
+
+	if flags["tamper"] == "true" {
+		// A flag on this subcommand and not a `verify` subcommand of its own: it
+		// recomputes the SAME chain, on the SAME rows, with the same code — and a
+		// separate subcommand would be a separate implementation of the check, which
+		// is the one thing that would make the demonstration worthless.
+		return tamperLedger(st, tamperSeq(flags))
+	}
 
 	if flags["detection"] != "" {
 		rows, err := st.LedgerFor(ctx(), flags["detection"])
@@ -227,6 +244,28 @@ func auditLedger(args []string) error {
 		return fmt.Errorf("audit ledger: the chain does not verify")
 	}
 	return nil
+}
+
+// tamperSeq reads the optional `--seq` the demonstration takes.
+//
+// It is parsed here rather than by `flagSet`, which is `--name value` and therefore
+// would accept `--seq` with no value and hand the demonstration the next flag as a
+// sequence number. A flag that consumes the wrong token on a command that writes to
+// a database is not a papercut.
+func tamperSeq(flags map[string]string) int64 {
+	raw := strings.TrimSpace(flags["seq"])
+	if raw == "" {
+		return 0
+	}
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || n <= 0 {
+		// Refused rather than silently defaulting to the last row: an operator who
+		// named a row and got a different one would be watching a demonstration of
+		// something they did not ask for.
+		fmt.Fprintf(os.Stderr, "pocctl: audit ledger --tamper: --seq %q is not a ledger sequence number; "+
+			"naming the newest row instead\n", raw)
+	}
+	return n
 }
 
 func printLedgerRows(rows []store.LedgerRow) {

@@ -31,10 +31,42 @@ type OutboxEntry struct {
 }
 
 // Outbox kinds. These are the only external effects this module performs.
+//
+// KindAbsenceEvent is the THIRD, and it is new. It is not a new column and not a
+// migration: `kind` is unconstrained TEXT, so this is one more value in a column
+// that already held two.
+//
+// It has to be its own kind because of what the unique index is. `(detection_id,
+// kind)` gives every detection its own row — which is what makes AC4's "every
+// detection has an outbox row" hold — and that is incompatible with collapsing a
+// window's 500 blindness proposals onto one remote event, because 500 rows under one
+// detection id would be one row and 499 detections would have none.
+//
+// The alternative was to drop the ordinary detection event for every blindness
+// proposal and let the aggregated row stand in for it. That satisfies AC4 (one row
+// each) and produces exactly one remote event, and it is worse: the detection DID
+// happen — a car crossed the line — and withholding the event with its measured
+// bounding box loses the thing the VMS can actually draw. What is missing is the
+// VERDICT, not the crossing. So both go out, and only the verdict's absence is
+// aggregated.
 const (
-	KindEvent    = "event"
-	KindBookmark = "bookmark"
+	KindEvent        = "event"
+	KindBookmark     = "bookmark"
+	KindAbsenceEvent = "absence_event"
 )
+
+// ValidOutboxKind reports whether a kind is one of the three.
+//
+// It exists so a typo in a kind cannot become a row nothing ever drains: `Due` lists
+// by kind through the push worker, and a row whose kind nobody recognises would sit
+// at `attempts=0` forever, which AC4 counts as an attempt with no result.
+func ValidOutboxKind(k string) bool {
+	switch k {
+	case KindEvent, KindBookmark, KindAbsenceEvent:
+		return true
+	}
+	return false
+}
 
 // Enqueue records the intent to push, in the same transaction the caller is
 // already in. The row is created BEFORE the attempt, so a crash between the
@@ -44,6 +76,11 @@ const (
 func (s *Store) Enqueue(ctx context.Context, e OutboxEntry, maxAttempts int) (int64, error) {
 	if e.DetectionID == "" || e.Kind == "" {
 		return 0, errors.New("store: an outbox entry needs a detection and a kind; an unattributable push cannot be audited")
+	}
+	if !ValidOutboxKind(e.Kind) {
+		return 0, fmt.Errorf("store: %q is not an outbox kind this build performs (%s, %s, %s); a row nothing drains "+
+			"would sit at attempts=0 forever and AC4 would count it as an attempt with no result",
+			e.Kind, KindEvent, KindBookmark, KindAbsenceEvent)
 	}
 	if e.Tag == "" {
 		return 0, errors.New("store: an outbox entry needs a tag; the tag is the idempotency key the read-back uses, and a counter would collide across a restart")
@@ -74,6 +111,67 @@ func (s *Store) Enqueue(ctx context.Context, e OutboxEntry, maxAttempts int) (in
 		return id, nil
 	}
 	return id, nil
+}
+
+// PendingAbsence returns the un-sent absence row for one blindness state, or nil.
+//
+// It is the aggregate's whole bookkeeping, and it asks for a row that has NOT been
+// attempted yet: a row with a result is spent, and the next proposal in the same
+// state must start a new window rather than join one whose count has already been
+// published to the VMS. Two absences merged across a push would produce one remote
+// event whose count understates how long the model was unreachable, and the count is
+// the number an operator reads to decide how urgently to look.
+//
+// It matches on the tag prefix rather than on a column, because adding a column for
+// this would be a migration to hold a string the tag already holds. `substr` and not
+// `LIKE`: the tag is operator-derived text and a `%` or `_` in it would turn a
+// prefix match into a pattern.
+func (s *Store) PendingAbsence(ctx context.Context, tagPrefix string) (*OutboxEntry, error) {
+	var id int64
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id FROM outbox
+		WHERE kind=? AND dead_letter=0 AND (result IS NULL OR result='')
+		  AND substr(tag,1,?)=?
+		ORDER BY id DESC LIMIT 1`, KindAbsenceEvent, len(tagPrefix), tagPrefix).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("store: cannot find the pending absence row for %q: %w", tagPrefix, err)
+	}
+	return s.Entry(ctx, id)
+}
+
+// RefreshAbsence rewrites a pending absence row's payload, its tag and its count.
+//
+// The TAG moves with the payload, and that is not an optimisation. The push worker
+// reads `tag` from this column and passes it to the read-back call, while the tag
+// INSIDE the payload is what the VMS stored: if only the payload were rewritten, the
+// row would carry one key and the push would send another, the read-back would search
+// for the first, find nothing, and report `unknown` — "the push returned 202 but the
+// event was not found". The event would exist and the module would say it did not,
+// and the count would be republished on the next tick.
+//
+// It is a CONDITIONAL update — `AND result IS NULL OR result=”` — and that condition
+// is the concurrency control rather than a nicety. The push worker runs on its own
+// goroutine: if it sends the row between the caller's read and this write, a blind
+// UPDATE would overwrite a payload that has already been published, and the count in
+// the VMS would then disagree with the count in the row with nothing to say which is
+// right.
+//
+// A false return means the row was spent in between, and the caller starts a new
+// window. That is the correct outcome, not an error.
+func (s *Store) RefreshAbsence(ctx context.Context, id int64, payload, tag string, count int) (bool, error) {
+	res, err := s.exec(ctx, `
+		UPDATE outbox SET payload=?, tag=?, detail=?, updated_at=?
+		WHERE id=? AND kind=? AND (result IS NULL OR result='')`,
+		payload, tag, fmt.Sprintf("aggregated absence event, %d proposal(s) in this window", count),
+		nowUTC(time.Now()), id, KindAbsenceEvent)
+	if err != nil {
+		return false, fmt.Errorf("store: cannot refresh outbox row %d: %w", id, err)
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
 }
 
 // DefaultPushAttempts is the budget a push gets when the caller says nothing.

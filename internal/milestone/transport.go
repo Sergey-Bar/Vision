@@ -22,7 +22,15 @@ import (
 const MaxBodyBytes = 32 << 20
 
 // DefaultPageSize is the adapter's page size.
+//
+// Inside the documented 1..2000 range
+// (events-rest-v1.reference.md:262). A page size outside the range the vendor
+// declares is a request it is entitled to refuse, so it is clamped rather than
+// sent.
 const DefaultPageSize = 200
+
+// MaxPageSize is the largest page the documented API accepts.
+const MaxPageSize = 2000
 
 // httpTransport is the production Transport.
 //
@@ -93,7 +101,10 @@ func (t *httpTransport) Get(ctx context.Context, route Route, query Query) (*Res
 		return nil, &UnauthenticatedError{Route: route, Status: 0}
 	}
 
-	target := t.urlFor(route, query)
+	target, err := t.urlFor(route, http.MethodGet, query)
+	if err != nil {
+		return nil, err
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
 	if err != nil {
@@ -161,36 +172,109 @@ func (t *httpTransport) Get(ctx context.Context, route Route, query Query) (*Res
 	return out, nil
 }
 
-// urlFor builds the request URL.
+// urlFor builds the request URL for any route, read or write.
 //
-// The path is joined onto the base with a single separator, and every query
-// parameter is set explicitly rather than appended by concatenation, so a cursor
-// containing a reserved character is encoded rather than becoming a second
-// parameter.
+// One builder, not two. `post` and `get` share it on purpose: a write-back surface
+// with its own URL construction is how the base-URL trailing-slash bug gets a
+// second, differently broken copy.
 //
-// It cannot fail, so it does not return an error. It was shaped as
-// (*url.URL, error) back when it composed the query by string concatenation,
-// where an unencoded ampersand in a cursor was a real failure; the values are
-// built through url.Values and Encode now, and a nil error on that path is a
-// result every caller would have had to check to learn nothing.
-func (t *httpTransport) urlFor(route Route, query Query) *url.URL {
+// # The query parameters are the documented ones
+//
+// `events-rest-v1.reference.md:219-263` is explicit about how this API takes a
+// cursor, and it is not how this file used to ask:
+//
+//   - time: `?time=gt:'<ISO8601>'` — the filter syntax is `property=operator:value`,
+//     string and DateTime values in single quotes, and for `time` only `gt` and
+//     `lt` are allowed (:221-222, :311-313). There is no `since`.
+//   - size: `?size=<n>`, between 1 and 2000 (:262). There is no `limit`.
+//   - continuation: `?page=<n>` plus a `_links.next` value in the body
+//     (:261, :377-379). There is no `cursor` parameter, and the `Next-Cursor`
+//     *header* this adapter used to follow appears nowhere in either document.
+//
+// The old names were not merely different, they were inert: every poll asked the
+// same unfiltered question and EVENTS:300 answers that by returning the oldest
+// stored events first, from the start of the retention window, every time.
+//
+// The `Next-Cursor` header is still honoured, because a header the documents do
+// not mention may still be what a given build sends, and honouring both costs one
+// branch. Which one a real server uses is a probe question; see
+// docs/vendor/milestone/route-audit.md §2.2.
+func (t *httpTransport) urlFor(route Route, method string, query Query) (*url.URL, error) {
 	target := *t.base
 	target.Path = strings.TrimRight(t.base.Path, "/") + "/" + strings.TrimLeft(route.Path, "/")
+	target.RawQuery = ""
 
 	q := url.Values{}
-	if query.Since != nil {
-		q.Set("since", query.Since.UTC().Format(time.RFC3339))
+	// The vendor selects a POST's operation with a query parameter
+	// (bookmarks-rest-v1.openapi.yaml:167-171), so the task is part of the route
+	// rather than something a call site supplies.
+	if route.Task != "" {
+		q.Set("task", route.Task)
 	}
-	limit := query.Limit
-	if limit <= 0 {
-		limit = DefaultPageSize
+
+	if next, isLink := nextPageLink(query.Cursor); isLink {
+		page, err := url.Parse(next)
+		if err != nil {
+			return nil, fmt.Errorf("milestone: %s handed back a next page this adapter cannot read: %w",
+				describe(route), err)
+		}
+		// A next link is a URL the vendor chose. If it names another host, the
+		// site's bearer credential would go there, which is the same reason
+		// redirects are not followed: a 3xx is a fact about the endpoint and this
+		// adapter reports facts.
+		if page.Host != "" && !strings.EqualFold(page.Host, t.base.Host) {
+			return nil, fmt.Errorf("milestone: %s handed back a next page on %s, which is not the "+
+				"server this adapter is configured for (%s). Refusing to send the site's "+
+				"credentials to a host nobody configured", describe(route), page.Host, t.base.Host)
+		}
+		target.Path = page.Path
+		if extra, err := url.ParseQuery(page.RawQuery); err == nil {
+			for name, values := range extra {
+				for _, v := range values {
+					q.Add(name, v)
+				}
+			}
+		}
+		target.RawQuery = q.Encode()
+		return &target, nil
 	}
-	q.Set("limit", strconv.Itoa(limit))
+
 	if query.Cursor != "" {
 		q.Set("cursor", query.Cursor)
 	}
+	// The read parameters go on a read. A bookmark POST carries none of them, and
+	// sending `size=200` to a documented body-and-task endpoint is asking the
+	// vendor a question about an endpoint that has no paging.
+	if method == http.MethodGet {
+		if query.Since != nil {
+			q.Set("time", "gt:'"+query.Since.UTC().Format(time.RFC3339Nano)+"'")
+		}
+		limit := query.Limit
+		if limit <= 0 {
+			limit = DefaultPageSize
+		}
+		if limit > MaxPageSize {
+			limit = MaxPageSize
+		}
+		q.Set("size", strconv.Itoa(limit))
+	}
 	target.RawQuery = q.Encode()
-	return &target
+	return &target, nil
+}
+
+// nextPageLink reports whether a cursor is a URL rather than an opaque token.
+//
+// The documented continuation is `_links.next`, which is a URI
+// (events-rest-v1.reference.md:377-379), so a cursor that starts like one is
+// followed as one. Anything else — including the synthetic cursors in the tests —
+// stays an opaque parameter, which is what a server that answers with a
+// `Next-Cursor` header expects.
+func nextPageLink(cursor string) (string, bool) {
+	if strings.HasPrefix(cursor, "/") || strings.HasPrefix(cursor, "http://") ||
+		strings.HasPrefix(cursor, "https://") {
+		return cursor, true
+	}
+	return "", false
 }
 
 // Close releases the connection pool.

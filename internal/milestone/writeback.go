@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -74,7 +73,116 @@ type BookmarkRef struct {
 	// It is reported rather than inferred, because "I created one" and "one
 	// already existed" are the same answer to "does the operator see a bookmark"
 	// and different answers to "did we just double-write".
+	//
+	// It is **false against every documented build of this API**, and that is a
+	// fact rather than a default. Neither published document declares an
+	// idempotency mechanism — no `Idempotency-Key` header, and no statement that a
+	// client-supplied `reference` is honoured as a caller-chosen key — so a vendor
+	// has no documented reason to echo one back. The field exists because a caller
+	// has to be able to ask the question, and the answer it will get is "we do not
+	// know". See docs/vendor/milestone/route-audit.md §2.5.
 	Replayed bool
+}
+
+// BookmarkSearcher is the optional bookmark-read surface.
+//
+// It is optional, and separate, for the same reason BookmarkWriter is: this
+// adapter reads bookmarks with a `POST`, because the vendor says a GET cannot
+// retrieve them
+// (`bookmarks-rest-v1.openapi.yaml:45-46`: *"Bookmarks cannot be retrieved by use
+// a GET .../bookmarks request. Please use one of the search tasks under the POST
+// requests."*), and `Transport.Get` is a GET. Widening `Transport` to take a
+// method and a body would make its own name false and would give every fixture
+// transport a fake implementation of a search task it does not have.
+//
+// It returns the vendor's own bytes rather than records, for the same reason
+// `Get` does: the adapter is the single parsing path, and a search that parsed
+// here would be a second parser.
+type BookmarkSearcher interface {
+	SearchBookmarks(ctx context.Context, query Query) (*Response, error)
+}
+
+// searchTimeBody is the documented body of `task=searchTime`
+// (`bookmarks-rest-v1.openapi.yaml:305-374`).
+type searchTimeBody struct {
+	// Time is the start of the window and is required (:373).
+	Time string `json:"time"`
+	// CountLimit is required (:374) and is the vendor's name for a page size.
+	CountLimit int `json:"countLimit"`
+	// ResourceTypes or DevicePaths must be specified (:257-258). There is no "all"
+	// value, so the documented collections are named explicitly rather than
+	// guessed at: a bookmark on a microphone or a speaker would otherwise be
+	// invisible to a poll that asked for cameras only.
+	ResourceTypes []string `json:"resourceTypes"`
+}
+
+// bookmarkResourceTypes is every device collection the documented search accepts.
+var bookmarkResourceTypes = []string{"cameras", "microphones", "speakers"}
+
+// SearchBookmarks reads the bookmark feed over a time window.
+//
+// One call, one page. The documented search answer carries no continuation link —
+// it is a `bookmarkArrayBody`, `{"array":[…]}` (`:380-386`) — so `countLimit` is
+// the whole extent of the read and there is nothing to follow.
+func (t *httpTransport) SearchBookmarks(ctx context.Context, query Query) (*Response, error) {
+	route := mustFindTask(APIPrefix+"/bookmarks", "searchTime")
+	if t.token == "" {
+		return nil, &UnauthenticatedError{Route: route, Status: 0}
+	}
+	limit := query.Limit
+	if limit <= 0 {
+		limit = DefaultPageSize
+	}
+	if limit > MaxPageSize {
+		limit = MaxPageSize
+	}
+	// The window's start. The vendor's documented default span is 60 minutes
+	// (:342) when neither endTime nor timeLimit is given, so a poll that wants a
+	// different span has to say so, and a poll that wants the default says nothing.
+	body, err := json.Marshal(searchTimeBody{
+		Time:          searchStart(query.Since),
+		CountLimit:    limit,
+		ResourceTypes: bookmarkResourceTypes,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("milestone: encode the bookmark search: %w", err)
+	}
+	resp, err := t.do(ctx, http.MethodPost, route, body, "")
+	if err != nil {
+		return nil, err
+	}
+	return &Response{
+		Status:  resp.Status,
+		Body:    resp.Body,
+		Route:   route,
+		Headers: map[string]string{"Content-Type": "application/json"},
+	}, nil
+}
+
+// searchStart is the window start for a search, and the reason a poll with no
+// cursor still asks a bounded question.
+//
+// `time` is required by the vendor, so "no cursor" cannot be expressed as its
+// absence. It is expressed as the epoch instead: with the documented 60-minute
+// default span, a cursorless poll reads the first hour of recorded history rather
+// than everything, which is bounded and honest. A poll that has a cursor uses it.
+func searchStart(since *time.Time) string {
+	if since == nil {
+		return time.Unix(0, 0).UTC().Format(time.RFC3339)
+	}
+	return since.UTC().Format(time.RFC3339)
+}
+
+// mustFindTask resolves a path-and-task pair declared in Routes, so a task the
+// code sends but the table does not declare is a startup panic rather than a call
+// the audit cannot account for.
+func mustFindTask(path, task string) Route {
+	for _, r := range Routes {
+		if r.Path == path && r.Task == task {
+			return r
+		}
+	}
+	panic("milestone: no route is declared at " + path + " with task " + task)
 }
 
 // ClockProbe is the optional clock surface.
@@ -220,38 +328,181 @@ func (d Drift) Band() string {
 	}
 }
 
-// bookmarkRoute is the write-back route. It is Unverified until a live probe
-// confirms it, and the plan's P0.5 is exactly that probe - so this stays marked
-// rather than being quietly promoted to verified by a passing test.
+// bookmarkRoute is the write-back route.
+//
+// The path is documented (`bookmarks-rest-v1.openapi.yaml:140`) and the method is
+// documented. The interesting part is the absent `task`.
+//
+// # Why no task, deliberately
+//
+// `task` is a query parameter that selects one of four operations on this one path
+// (`:142-161`, `:167-171`), and the two that matter here are opposites:
+//
+//   - **no task** — "a new bookmark is created from the body" … "the bookmark is
+//     created, but the rule system is not triggered" (`:145`, `:160-161`).
+//   - **`newReference`** — "create a new reference and trigger rules", "will be
+//     used to execute configured rules, to ensure actions like Start-Recording is
+//     performed in real time", and then: "**The newReference task does not create
+//     the bookmark in the database**" (`:147`, `:156-158`).
+//
+// This seam exists to place a pointer the operator can follow: the vendor's
+// player, at the right second, on the vendor's own archive. `newReference` does
+// not create that pointer. It fires the customer's own configured rules, which
+// can start recordings on their archive — an operational side effect on a
+// customer's system, and therefore a capability activation, which AGENTS.md
+// reserves to a human.
+//
+// So Task is empty, and the reason is written here rather than left to be
+// re-derived by the next reader. The read side of the same path takes
+// `task=searchTime` and that is a different route entry, not a variation of this
+// one.
 var bookmarkRoute = Route{
-	Method: "POST", Path: "/api/v1/Bookmarks",
+	Method: "POST", Path: APIPrefix + "/bookmarks",
 	Expect: "object", WriteBack: true, Unverified: true,
+	Notes: "Documented, including the decision to send no `task`: a task-less POST creates " +
+		"the bookmark and does not trigger the vendor's rules, while `newReference` triggers " +
+		"rules and creates no bookmark. Body is newBookmarkBody — header and devicePath are " +
+		"required, timeTriggered is the instant the operator should open at, and the vendor " +
+		"derives timeBegin/timeEnd from it when they are absent. The answer is " +
+		"{\"array\":[{...,\"reference\":<bookmark id>}]}.",
 }
 
-// systemTimeRoute is the clock route, for the same reason.
-var systemTimeRoute = Route{
-	Method: "GET", Path: "/api/v1/System/Time",
-	Expect: "object", ClockProbe: true, Unverified: true,
+// systemTimeRoute is the clock route.
+//
+// It used to be a second, independent declaration of the same path that the Routes
+// table also declares, and nothing tied the two together: they could disagree and
+// every test would still pass, because each only ever compared itself with its own
+// copy. Two copies of one fact is the same defect class as a route with no verdict
+// in the audit — a thing the code states that nothing checks — so it is one
+// declaration now, looked up by path, and route_audit_test.go says so.
+//
+// It is Unverified for the same reason every other route is, and it has one more:
+// neither published document declares a clock endpoint at all. See
+// docs/vendor/milestone/route-audit.md §2.7.
+var systemTimeRoute = mustFindRoute(APIPrefix + "/System/Time")
+
+// mustFindRoute resolves a path that is declared in Routes, so a typo is a
+// startup panic rather than a route that silently addresses nothing.
+func mustFindRoute(path string) Route {
+	for _, r := range Routes {
+		if r.Path == path {
+			return r
+		}
+	}
+	panic("milestone: no route is declared at " + path)
 }
 
-// bookmarkPayload is the exact request body for a bookmark.
+// newBookmarkBody is the documented request body for a bookmark
+// (`bookmarks-rest-v1.openapi.yaml:424-457`).
 //
 // A struct rather than a map, for the reason the hafnia client has the same
 // rule: a request that quietly grows a field is a request whose wire shape
 // nobody has reviewed, and the reviewer is a customer with a security review.
-type bookmarkPayload struct {
-	Bookmarks []bookmarkItem `json:"bookmarks"`
+//
+// The shape it replaces sent `bookmarks`, `idempotencyKey`, `deviceRef`, `time`
+// and `label`. **None of those five field names exists in the published body**,
+// and the vendor requires `header` and `devicePath`, so the request would have
+// been refused before a bookmark could have failed to land. The field names below
+// are the documented ones, in the documented spelling.
+type newBookmarkBody struct {
+	// Header is the bookmark's title in the operator's list. Required by the
+	// vendor (:456).
+	Header string `json:"header"`
+	// Description is the longer text. Optional, and prose.
+	Description string `json:"description,omitempty"`
+	// TimeTriggered is the instant the operator should open at.
+	//
+	// It is the only time this body carries. The vendor documents that when
+	// `timeBegin` or `timeEnd` is absent the `timeTriggered` is used for them
+	// (:428-430), so sending one timestamp gets a well-formed bookmark without
+	// this code inventing a clip duration it has no basis for.
+	TimeTriggered string `json:"timeTriggered,omitempty"`
+	// DevicePath names the camera. Required by the vendor (:457).
+	DevicePath devicePathRef `json:"devicePath"`
 }
 
-type bookmarkItem struct {
-	// IdempotencyKey goes in a header rather than the body where the vendor
-	// accepts it, and is repeated here because the body shape is what a live
-	// probe has to confirm.
-	IdempotencyKey string `json:"idempotencyKey"`
-	DeviceRef      string `json:"deviceRef"`
-	Time           string `json:"time"`
-	Label          string `json:"label"`
-	Description    string `json:"description,omitempty"`
+// devicePathRef is the documented `{type, id}` device reference
+// (`bookmarks-rest-v1.openapi.yaml:224-235`): `type` is the resource collection,
+// `cameras` for a camera, and `id` is a uuid.
+type devicePathRef struct {
+	Type string `json:"type"`
+	ID   string `json:"id"`
+}
+
+// defaultDeviceType is assumed when the reference is a bare uuid.
+//
+// The events reference says a camera source "can be cameras/{id} or simply {id}"
+// (`events-rest-v1.reference.md:409`), so a bare id is a documented form and the
+// only question is which collection it names. A camera is the only device type
+// this adapter reads, so that is the assumption, and it is an assumption rather
+// than a fact — a bare microphone uuid would be sent as a camera.
+const defaultDeviceType = "cameras"
+
+// parseDevicePath reads a Milestone device reference into the documented pair.
+//
+// It refuses a reference that is not one rather than passing it through. The
+// adapter's own SiteRef used to be a display string such as
+// "Perimeter North [CAM-014]", and a required field carrying a value the vendor
+// does not recognise is a 400 the caller would have to reverse-engineer from an
+// error body — while a refusal here names the cause before any bytes leave, which
+// is what requireToken does for credentials and for the same reason.
+//
+// Accepted: `cameras/<uuid>`, `microphones/<uuid>`, `speakers/<uuid>`, and a bare
+// uuid.
+//
+// The uuid check is an **assumption**, not a certainty: the documented schema
+// says `id` is `format: uuid` (`:233-235`) and this build enforces that, so a site
+// whose device ids are not uuids has bookmarks refused rather than sent and
+// refused. The refusal names the cause, which is the point — a 400 with no
+// explanation is the outcome being avoided — and the probe is where the assumption
+// is settled.
+func parseDevicePath(ref string) (devicePathRef, error) {
+	trimmed := strings.TrimSpace(ref)
+	if trimmed == "" {
+		return devicePathRef{}, fmt.Errorf("%w: no device reference", ErrWriteBack)
+	}
+	kind, id := "", trimmed
+	if slash := strings.LastIndex(trimmed, "/"); slash >= 0 {
+		kind, id = trimmed[:slash], trimmed[slash+1:]
+	}
+	if !isUUID(id) {
+		return devicePathRef{}, fmt.Errorf("%w: %q is not a device reference. This API names a "+
+			"device as \"cameras/<uuid>\"; a camera's display name is not one, and sending it "+
+			"would be a refusal from the vendor with no explanation",
+			ErrWriteBack, clip(ref, 80))
+	}
+	if kind == "" {
+		return devicePathRef{Type: defaultDeviceType, ID: id}, nil
+	}
+	switch kind {
+	case "cameras", "microphones", "speakers":
+		return devicePathRef{Type: kind, ID: id}, nil
+	default:
+		return devicePathRef{}, fmt.Errorf("%w: %q names the device collection %q, and the "+
+			"documented collections are cameras, microphones and speakers", ErrWriteBack, clip(ref, 80), kind)
+	}
+}
+
+// isUUID is the shape check on a bare device id: 32 hex digits in the 8-4-4-4-12
+// arrangement. It is a shape test and not a version or variant test, because the
+// only thing being decided is whether this value is a uuid at all.
+func isUUID(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i, r := range s {
+		switch i {
+		case 8, 13, 18, 23:
+			if r != '-' {
+				return false
+			}
+		default:
+			if (r < '0' || r > '9') && (r < 'a' || r > 'f') && (r < 'A' || r > 'F') {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func (t *httpTransport) WriteBookmark(ctx context.Context, b Bookmark) (BookmarkRef, error) {
@@ -261,13 +512,16 @@ func (t *httpTransport) WriteBookmark(ctx context.Context, b Bookmark) (Bookmark
 	if err := t.requireToken(); err != nil {
 		return BookmarkRef{}, err
 	}
-	body, err := json.Marshal(bookmarkPayload{Bookmarks: []bookmarkItem{{
-		IdempotencyKey: b.IdempotencyKey,
-		DeviceRef:      b.SiteRef,
-		Time:           b.Time.UTC().Format(time.RFC3339),
-		Label:          b.Label,
-		Description:    b.Description,
-	}}})
+	device, err := parseDevicePath(b.SiteRef)
+	if err != nil {
+		return BookmarkRef{}, err
+	}
+	body, err := json.Marshal(newBookmarkBody{
+		Header:        b.Label,
+		Description:   b.Description,
+		TimeTriggered: b.Time.UTC().Format(time.RFC3339),
+		DevicePath:    device,
+	})
 	if err != nil {
 		return BookmarkRef{}, fmt.Errorf("milestone: encode the bookmark: %w", err)
 	}
@@ -292,19 +546,31 @@ func (t *httpTransport) WriteBookmark(ctx context.Context, b Bookmark) (Bookmark
 // A 200 that carries no bookmark id is not a success. "The call returned 200" and
 // "a bookmark exists" are different claims, and a bookmark that silently did not
 // land is an operator who finds nothing when they follow the incident.
+//
+// The identity field is `reference`, described in the vendor's own schema as
+// "Bookmark ID" (`:408-410`), reachable two documented ways: `array[0].reference`
+// for a task-less POST, whose answer is a `bookmarkArrayBody` (`:380-386`), and
+// `result.reference` for `task=newReference` (`:211-223`). It used to read `id`
+// and `bookmark.id`, neither of which the published answer contains, so a
+// successful write was parsed as a failure.
 func parseBookmarkRef(resp wireResponse) (BookmarkRef, error) {
 	var wire struct {
-		ID       string `json:"id"`
-		Bookmark struct {
-			ID string `json:"id"`
-		} `json:"bookmark"`
+		Array []struct {
+			Reference string `json:"reference"`
+		} `json:"array"`
+		Result struct {
+			Reference string `json:"reference"`
+		} `json:"result"`
 	}
 	if err := json.Unmarshal(resp.Body, &wire); err != nil {
 		return BookmarkRef{}, fmt.Errorf("milestone: the bookmark answer is not readable: %w", err)
 	}
-	id := wire.ID
-	if id == "" {
-		id = wire.Bookmark.ID
+	id := wire.Result.Reference
+	for _, item := range wire.Array {
+		if strings.TrimSpace(item.Reference) != "" {
+			id = item.Reference
+			break
+		}
 	}
 	if id == "" {
 		return BookmarkRef{}, fmt.Errorf("%w: the vendor answered %d with no bookmark id, so the operator "+
@@ -481,11 +747,11 @@ func (t *httpTransport) do(ctx context.Context, method string, route Route, body
 	if body != nil {
 		reader = bytes.NewReader(body)
 	}
-	endpoint, err := t.urlForWrite(route, method)
+	endpoint, err := t.urlFor(route, method, Query{})
 	if err != nil {
 		return wireResponse{}, err
 	}
-	req, err := http.NewRequestWithContext(ctx, method, endpoint, reader)
+	req, err := http.NewRequestWithContext(ctx, method, endpoint.String(), reader)
 	if err != nil {
 		return wireResponse{}, fmt.Errorf("milestone: build the %s: %w", method, err)
 	}
@@ -522,21 +788,12 @@ func (t *httpTransport) do(ctx context.Context, method string, route Route, body
 	return wireResponse{Status: resp.StatusCode, Header: resp.Header, Body: raw}, nil
 }
 
-// urlForWrite builds a write-side URL, keeping the base-URL trailing-slash
-// handling in one place.
-func (t *httpTransport) urlForWrite(route Route, method string) (string, error) {
-	u := *t.base
-	u.Path = strings.TrimRight(t.base.Path, "/") + route.Path
-	if method == http.MethodGet {
-		q := url.Values{}
-		q.Set("pageSize", "1")
-		u.RawQuery = q.Encode()
-	}
-	if u.Host == "" {
-		return "", errors.New("milestone: the base URL has no host")
-	}
-	return u.String(), nil
-}
+// urlForWrite no longer exists: URL construction is one function, in
+// transport.go, so the write surface cannot develop its own. It used to live here
+// and it is recorded here because of what it got wrong — it appended `pageSize=1`
+// to every GET, which is not a parameter either published document declares, and
+// it knew nothing about the vendor's `task` query parameter, which is how a POST
+// selects its operation.
 
 func describeStatus(route Route, resp *http.Response) error {
 	switch resp.StatusCode {

@@ -9,7 +9,7 @@
   "events": [
     {
       "offsetMs": 0,
-      "kind": "/api/v1/Servlets",
+      "kind": "/api/rest/v1/Servlets",
       "method": "GET",
       "envelope": {
         "Id": "sv-0001",
@@ -24,7 +24,7 @@
     },
     {
       "offsetMs": 90000,
-      "kind": "/api/v1/Servlets",
+      "kind": "/api/rest/v1/Servlets",
       "method": "GET",
       "envelope": {
         "Id": "sv-0002",

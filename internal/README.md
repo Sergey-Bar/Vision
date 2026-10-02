@@ -13,6 +13,16 @@ It is a map, not an architecture document. It does not restate build state —
 `docs/status.md` is the only source of truth for that — and it does not restate
 the plan, which lives in `docs/roadmap/`.
 
+**Everything below is the root module.** `poc/active-monitoring/` is a second Go
+module in the same repository, with its own `go.mod` and its own
+`scripts/verify.ps1`. It is not reachable from here: `go build ./...`,
+`go vet ./...`, `golangci-lint` and `sonar-project.properties` cannot cross a
+module boundary, so not one package in this file is covered by the POC's gate and
+not one line of the POC is covered by `scripts/verify.ps1`. If a package you need
+is under `poc/`, it is not part of this product and nothing above will notice it
+disappearing. The reasoning is in [`../README.md`](../README.md) and in
+`sonar-project.properties`.
+
 ---
 
 ## Read this first
@@ -84,7 +94,8 @@ Only five do. Everything else reaches the ledger through its caller.
 elease | Builds and verifies signed offline release archives. Verification is deliberately stricter than construction | support | no | `release.Build`, `release.Verify`, `release.Manifest`, `ScanForSecrets` |
 | `rules` | The rule DSL: bundle, JSON Schema, semantic validation, compiled AST, deterministic engine. Imports nothing internal | evaluate | no | `rules.Compiler`, `Compile`, `CompiledBundle`, `Engine`, `Decision`, `Tier`, `DegradeTo` |
 | `schemalaws` | The schema-level invariant suite: RLS isolation, append-only, provenance, `storage_ref` CHECKs, no person model | support | test only | `schemalaws` (threat-model controls C1–C6, C11–C12, C18–C19, C32–C33, C35) |
-| `simulate` | Runs a bundle over the fixture set and diffs the outcome; the diff *digest* is the activation gate | evaluate | no | `simulate.Runner.Run`, `simulate.Diff`, `simulate.DigestFor` |
+| `simulate` | Runs a bundle over the fixture set and diffs the outcome; the diff *digest* is the activation gate | evaluate | no | `simulate.Runner.Run`, `simulate.DigestFor` |
+| `statuscheck` | Derives every countable claim in `docs/status.md` from the file that defines it and fails when the document disagrees | support | test only | `statuscheck.Check`, `statuscheck.Derive` |
 | `testutil` | The shared database-backed test harness. Skips rather than fails when no database is configured | support | no | `testutil.Pool`, `testutil.Reset`, `testutil.NewTenant` |
 
 ### Binaries and tools
@@ -226,7 +237,7 @@ The one thing to internalise: **every route in this package is an assumption.**
 printed.
 
 1. `internal/milestone/routes.go` — the complete assumed Milestone API surface:
-   eight routes, every one `Unverified`, with a `Notes` field saying what is
+   nine routes, every one `Unverified`, with a `Notes` field saying what is
    being assumed. Also `Transport`, `Query`, `Response` and the three typed
    errors.
 2. `internal/milestone/adapter.go` — `Poll` (deterministic order by source event
@@ -235,13 +246,20 @@ printed.
    a state machine, not a type), `normalizeEventType` (the vendor-to-canonical
    map), `parseMilestoneTime` (a naive timestamp gets an *empty* source timezone,
    not an assumed UTC).
-3. `internal/fixture/fixture.go` and `internal/fixture/sanitize.go` — what a
+3. `internal/milestone/eventtypes.go` — the event `type` GUID, resolved against
+   *this site's* own `/eventTypes` answer. The GUIDs are per-site configuration,
+   so the mapping is name-based and per `(tenant, site)`; a GUID the site did not
+   answer for is **unresolved, never defaulted**, and the resolved name is written
+   into the stored envelope so a replay derives the same type (invariant 2). No
+   alias table — that is a human's decision, and it is not writable until a probe
+   has shown a real site's real names.
+4. `internal/fixture/fixture.go` and `internal/fixture/sanitize.go` — what a
    capture stores, and the allow-list choke point between the network and the
    repository.
-4. `internal/milestone/replay.go` — the same `Transport` interface with bytes
+5. `internal/milestone/replay.go` — the same `Transport` interface with bytes
    from a directory. Not a stub; a second byte source for the same code.
-5. `internal/milestone/adapter_test.go` — twelve tests that pin the assumptions.
-6. `tools/fixturegen/main.go` — the synthetic scenarios, and why they are
+6. `internal/milestone/adapter_test.go` — twelve tests that pin the assumptions.
+7. `tools/fixturegen/main.go` — the synthetic scenarios, and why they are
    authored rather than captured.
 
 ### (b) The durability seam — `inbox`, `outbox`, `jobs`, `migrate`, `dbx`
@@ -374,17 +392,18 @@ out of order.
 | 2 | `docs/status.md` | The only source of truth for what is built and what is not |
 | 3 | `internal/README.md` | This file: the map you are now using |
 | 4 | `docs/threat-model.md` | Every control names the test that proves it. Read the control table, not the prose |
-| 5 | `internal/milestone/routes.go` | The vendor seam and the eight `Unverified` assumptions. Start here, because everything downstream is downstream of a hypothesis |
+| 5 | `internal/milestone/routes.go` | The vendor seam and the nine `Unverified` assumptions. Start here, because everything downstream is downstream of a hypothesis |
 | 6 | `internal/milestone/adapter.go` | How a vendor envelope becomes a `RawRecord`, and where the vocabulary mapping lives |
-| 7 | `internal/dbx/dbx.go` | The tenant-context discipline. Everything tenant-scoped depends on reading this first |
-| 8 | `internal/inbox/inbox.go` | Invariant 1: dedupe key before row, lease with expiry, terminal states |
-| 9 | `internal/normalize/normalize.go` | The one-transaction step, drift correction, and a derived event id |
-| 10 | `internal/clock/clock.go` | Why `observed_at` / `received_at` / `normalized_at` are three columns and not one |
-| 11 | `internal/graph/graph.go` | Topology and provenance, and the deliberate absence of a person model |
-| 12 | `internal/rules/bundle.go` | The rule DSL, evidence tiers, and `IfAIAvailable` having no default |
-| 13 | `internal/rules/engine.go` | Deterministic evaluation, `Decision`, and degradation checked before corroboration |
-| 14 | `internal/observations/observations.go` | The AI record and the three absences. The AI plane's whole contract in one file |
-| 15 | `internal/incidents/replay.go` | Invariant 2, expressed as a struct that cannot be given a model |
+| 7 | `internal/milestone/eventtypes.go` | Why the event-type GUID is resolved per site and never defaulted |
+| 8 | `internal/dbx/dbx.go` | The tenant-context discipline. Everything tenant-scoped depends on reading this first |
+| 9 | `internal/inbox/inbox.go` | Invariant 1: dedupe key before row, lease with expiry, terminal states |
+| 10 | `internal/normalize/normalize.go` | The one-transaction step, drift correction, and a derived event id |
+| 11 | `internal/clock/clock.go` | Why `observed_at` / `received_at` / `normalized_at` are three columns and not one |
+| 12 | `internal/graph/graph.go` | Topology and provenance, and the deliberate absence of a person model |
+| 13 | `internal/rules/bundle.go` | The rule DSL, evidence tiers, and `IfAIAvailable` having no default |
+| 14 | `internal/rules/engine.go` | Deterministic evaluation, `Decision`, and degradation checked before corroboration |
+| 15 | `internal/observations/observations.go` | The AI record and the three absences. The AI plane's whole contract in one file |
+| 16 | `internal/incidents/replay.go` | Invariant 2, expressed as a struct that cannot be given a model |
 
 Then run the four verification commands from `AGENTS.md`:
 `make contract-check`, `make build`, `make test-race`, `make lint`.
@@ -486,8 +505,12 @@ way when it is resolved rather than removing it.
 12. **`.gitignore` covers `/coverage` and `__pycache__/`.** `go test
     -coverprofile=coverage` writes a plain file at the repo root that is easy to
     stage by accident, and `deploy/ai-runtime/__pycache__/*.pyc` is present on
-    disk right now. Both are build output. Note also that `.gitignore`
-    references `docs/fixtures.md`, which does not exist.
+    disk right now. Both are build output. This item used to end "Note also that
+    `.gitignore` references `docs/fixtures.md`, which does not exist" — it does not
+    reference it. The dangling reference was in two README tables that had copied
+    the claim from each other, and both have been corrected
+    (`docs/README.md:153`, and the CI row beside it, which described a
+    `.github/workflows/ci.yml` that was deleted).
 
 13. **`internal/graph`'s package doc points at a test that lives elsewhere.** The
     doc says a test asserts the absence of `entity_aliases`; that test is
@@ -496,14 +519,27 @@ way when it is resolved rather than removing it.
     `graph_test.go`. The M1 no-person-model decision is enforced. Do not add
     identity resolution without reading that test.
 
-14. **`docs/status.md` is the source of truth and it is stale in two places.**
-    It says the suite is green "across 24 packages" (the tree has 30 leaf
-    packages under `internal/` plus `internal/contracts/securityv1`) and that the
-    toolchain is "Go 1.27" (`go.mod` says `1.26.0`; `.github/workflows/ci.yml`
-    pins `GO_VERSION: "1.26"`). Everything else in it — the 20 contract
-    messages and 22 enums, which I counted in `contracts/compat/baseline.json` —
-    matches the tree. Two stale numbers in an authoritative document is a defect
-    worth reporting, not a reason to stop trusting the document.
+14. **[RESOLVED 2026-10-02 — do not read this as a current defect.] `docs/status.md`
+     is checked against the tree.** It said the suite was green "across 24
+     packages" when the tree had thirty leaf packages, and the toolchain was "Go
+     1.27" when `go.mod` said `1.26.0`. `internal/statuscheck` now derives every
+     countable claim from the file that defines it — the contract counts from
+     `contracts/compat/baseline.json`, the gate count from the distinct gate names
+     in `scripts/verify.ps1`, the Go minor from `go.mod` — and fails when the
+     document prints a different number. Two further numbers were stale and were
+     found by that test on its first run: the published JSON Schemas and their
+     property count, both undercounted because a fourth profile had been added.
+     The gate count is checked in the `**Verification:**` paragraph only, not in the
+     whole document. The rest of `docs/status.md` records what was true on a given
+     day — a table of what a round fixed, a dated run record — and a checker that
+     reported those as defects would punish an author for writing down why
+     something changed. Two tests hold that scope with a synthetic document rather
+     than by asserting on today's prose.
+
+     Note that this trap list was itself stale while it described the staleness:
+     it said the tree had thirty leaf packages, and there are forty-two. A trap
+     list that is corrected once and left alone documents a tree that no longer
+     exists, which is why the numbers now derive.
 
 15. **`AGENTS.md` and `docs/status.md` disagree about `sites.default_locale`.**
     `AGENTS.md` says it "stays in the schema … a site that later needs another

@@ -440,6 +440,98 @@ func TestShutdownWithoutAListenerIsANoOp(t *testing.T) {
 	}
 }
 
+// The SLO verdicts are on the health surface, by name.
+//
+// Two properties are load-bearing and opposite. The breach has to be visible
+// without anyone opening a log, because nobody is going to grep a log at 02:00 for
+// an objective name. And the status must stay 200: a readiness probe that turns
+// the platform unready because it is behind moves the failure to every replica at
+// once and removes the capacity that would have drained the backlog.
+func TestHealthReportsWhichSLOsAreBreachedAndStaysUp(t *testing.T) {
+	s := &api.Server{Metrics: observability.NewRegistry()}
+	s.Metrics.RecordSLOs(observability.SLOState{
+		Evaluated: 8, Breached: []string{"ingest_backlog", "ingest_availability"},
+	})
+
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/health", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("a breached objective answered %d. Liveness must not depend on an SLO: the "+
+			"process is running and removing it from the pool removes the drain", rec.Code)
+	}
+	var body struct {
+		SLO struct {
+			Status    string   `json:"status"`
+			Evaluated int      `json:"evaluated"`
+			Breached  []string `json:"breached"`
+		} `json:"slo"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode health: %v", err)
+	}
+	if body.SLO.Status != "breached" || len(body.SLO.Breached) != 2 {
+		t.Errorf("the endpoint reports %q for %v", body.SLO.Status, body.SLO.Breached)
+	}
+	// Names only. This endpoint is unauthenticated, and a measured disk percentage
+	// or a dead-letter count is not something to hand to whoever asked.
+	raw := rec.Body.String()
+	for _, leak := range []string{
+		"%",                          // a measured percentage
+		"measured",                   // an SLO's reading
+		"check the dead-letter list", // a remedy
+		"run a retention sweep",      // a remedy
+		"a source is falling behind", // a remedy
+	} {
+		if strings.Contains(raw, leak) {
+			t.Errorf("an unauthenticated health response contains %q:\n%s", leak, raw)
+		}
+	}
+}
+
+// An install whose pipeline has not run reports that it has not evaluated. The
+// alternative answer is "met", from a process that has measured nothing, and that
+// is the only response here that would be a lie.
+func TestHealthSaysNotEvaluatedRatherThanMet(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		set  func(*api.Server)
+	}{
+		{"no registry", func(*api.Server) {}},
+		{"a registry nobody wrote to", func(s *api.Server) {
+			s.Metrics = observability.NewRegistry()
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &api.Server{}
+			tc.set(s)
+			rec := httptest.NewRecorder()
+			s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/health", nil))
+
+			var body struct {
+				SLO struct {
+					Status string `json:"status"`
+				} `json:"slo"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode health: %v", err)
+			}
+			if body.SLO.Status != "not evaluated" {
+				t.Errorf("the endpoint says %q", body.SLO.Status)
+			}
+		})
+	}
+
+	// And the evaluated-and-clean case says met, so the word means something.
+	s := &api.Server{Metrics: observability.NewRegistry()}
+	s.Metrics.RecordSLOs(observability.SLOState{Evaluated: 8})
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/health", nil))
+	if !strings.Contains(rec.Body.String(), `"status":"met"`) {
+		t.Errorf("eight evaluated objectives with no breach do not read as met:\n%s", rec.Body.String())
+	}
+}
+
 func healthUptime(t *testing.T, s *api.Server) float64 {
 	t.Helper()
 	rec := httptest.NewRecorder()

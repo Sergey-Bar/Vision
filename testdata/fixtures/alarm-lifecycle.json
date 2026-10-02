@@ -9,7 +9,7 @@
   "events": [
     {
       "offsetMs": 0,
-      "kind": "/api/v1/Alarms",
+      "kind": "/api/rest/v1/Alarms",
       "method": "GET",
       "envelope": {
         "Acknowledged": false,
@@ -27,7 +27,7 @@
     },
     {
       "offsetMs": 30000,
-      "kind": "/api/v1/Alarms",
+      "kind": "/api/rest/v1/Alarms",
       "method": "GET",
       "envelope": {
         "Acknowledged": true,
@@ -46,7 +46,7 @@
     },
     {
       "offsetMs": 120000,
-      "kind": "/api/v1/Alarms",
+      "kind": "/api/rest/v1/Alarms",
       "method": "GET",
       "envelope": {
         "Acknowledged": true,

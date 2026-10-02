@@ -9,7 +9,7 @@
   "events": [
     {
       "offsetMs": 0,
-      "kind": "/api/v1/Events",
+      "kind": "/api/rest/v1/events",
       "method": "GET",
       "envelope": {
         "Source": "No Id Camera",
@@ -22,7 +22,7 @@
     },
     {
       "offsetMs": 100,
-      "kind": "/api/v1/Events",
+      "kind": "/api/rest/v1/events",
       "method": "GET",
       "envelope": {
         "Id": "ml-0002",
@@ -35,7 +35,7 @@
     },
     {
       "offsetMs": 200,
-      "kind": "/api/v1/Events",
+      "kind": "/api/rest/v1/events",
       "method": "GET",
       "envelope": {
         "Id": "ml-0003",
@@ -49,7 +49,7 @@
     },
     {
       "offsetMs": 300,
-      "kind": "/api/v1/Events",
+      "kind": "/api/rest/v1/events",
       "method": "GET",
       "envelope": {
         "Id": "ml-0004",

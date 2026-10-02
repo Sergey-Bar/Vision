@@ -9,8 +9,20 @@ Documentation=file:///usr/share/doc/security-platform/README.md
 After=network.target
 
 [Service]
-Type=notify
-NotifyAccess=main
+# Type=simple, not Type=notify.
+#
+# `Type=notify` makes systemd wait for READY=1 on NOTIFY_SOCKET before considering
+# the service started. Nothing in this tree sends it: there is no sd_notify call
+# and no NOTIFY_SOCKET handling in `security-core`. A unit that declares notify and
+# whose process never notifies waits out systemd's start timeout, is killed, and
+# burns one of StartLimitBurst's five attempts — a service that never starts, for a
+# reason that is invisible in the unit file itself.
+#
+# Type=simple means systemd considers the process started once it is forked. The
+# console's readiness is then what `/v1/health/ready` is for, and a probe reads that
+# rather than the unit's state. If sd_notify is ever added, the correct change is
+# the notifier plus `Type=notify`, not `Type=notify` alone.
+Type=simple
 User=security
 Group=security
 

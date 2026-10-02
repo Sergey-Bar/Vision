@@ -241,10 +241,32 @@ func (g *Gauges) Set(name string, value float64) {
 }
 
 // Get reads a gauge.
+//
+// A gauge nobody has ever set reads as zero, and for a threshold that is often
+// the safe direction — a backlog of zero is a healthy backlog. For an objective
+// whose threshold is *below* zero's side, it is not: a free-disk gauge nobody
+// writes reads as a full disk. `Measured` is the way to tell those apart, and any
+// objective that breaches on a low reading has to ask it.
 func (g *Gauges) Get(name string) float64 {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 	return g.values[name]
+}
+
+// Measured reports whether a gauge has ever been written.
+//
+// It is a question the zero value cannot answer on its own, and the pipeline
+// already states the rule it exists for: "a gauge set to zero because its query
+// failed is worse than a stale one — it reads as 'the backlog is clear', which is
+// the one thing an operator must never be told by a broken query." That rule was
+// applied to keeping a stale value; this is the same rule applied to *whether a
+// value exists*, and it is the difference between an objective that reports a
+// breach and one that reports the truth.
+func (g *Gauges) Measured(name string) bool {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	_, ok := g.measuredAt[name]
+	return ok
 }
 
 // Stale reports a gauge not refreshed within maxAge, which is how a collector
@@ -286,6 +308,46 @@ type Registry struct {
 	// IngestLag keeps a reservoir of recent lag samples so the SLO's p95 can be
 	// evaluated without keeping every observation for ever.
 	IngestLag *Reservoir
+
+	// slo is the last evaluation's verdict, so the process that runs the
+	// objectives and the surface an operator reads them on share one record
+	// without either knowing about the other.
+	//
+	// It is not a gauge. An objective's name is not a number, and adding eight
+	// 0/1 gauge names to the exposition would publish eight series that say
+	// nothing a single list does not, on a surface a metrics client scrapes.
+	sloMu sync.Mutex
+	slo   SLOState
+}
+
+// SLOState is which objectives were last evaluated as not being met.
+//
+// Names only. The reading that breached, and the remedy, are in the log line the
+// evaluator writes — an operator acts on those, and the endpoint that also reports
+// this is unauthenticated, so a disk percentage or a dead-letter count does not
+// belong in it.
+type SLOState struct {
+	Evaluated int
+	Breached  []string
+}
+
+// RecordSLOs stores the verdict of one evaluation.
+func (r *Registry) RecordSLOs(state SLOState) {
+	r.sloMu.Lock()
+	defer r.sloMu.Unlock()
+	r.slo.Evaluated = state.Evaluated
+	r.slo.Breached = append([]string(nil), state.Breached...)
+}
+
+// SLOs reports the last evaluation's verdict, as a copy so a caller cannot mutate
+// what the next reader sees.
+func (r *Registry) SLOs() SLOState {
+	r.sloMu.Lock()
+	defer r.sloMu.Unlock()
+	return SLOState{
+		Evaluated: r.slo.Evaluated,
+		Breached:  append([]string(nil), r.slo.Breached...),
+	}
 }
 
 // NewRegistry builds a registry.
