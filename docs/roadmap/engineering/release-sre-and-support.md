@@ -1061,10 +1061,13 @@ closed list of commands and asserts the recovery runbook's steps are all in it,
 with the comment: "a runbook step naming a command that does not exist is a wasted
 minute at the worst possible moment." **Every runbook step in §8 is subject to the
 same rule, and the list grows as `deploy/`, the installer and `securityctl model-bundle`
-arrive.** Note the inverse finding: `internal/milestone/routes.go` references
-`securityctl adapter probe` in five places and the command does not exist
-(Q-4). That test's list should be generated from the command tree, not
-hand-maintained, or it cannot catch exactly this.
+arrive.** Note the inverse finding, now closed on the first half: `internal/milestone/routes.go`
+references `securityctl adapter-probe` in five places and the command did not exist
+until 2026-10-02 (Q-4). The second half is still open and is the more interesting
+one: that test's list should be generated from the command tree, not hand-maintained,
+or it cannot catch exactly this. The five references were all wrong in a second way
+besides the command's absence — the real name is `adapter-probe`, not `adapter probe`
+— and nothing noticed, because nothing checked.
 
 **What the site owner is given, shipped in the release archive:**
 
@@ -2136,7 +2139,7 @@ useless to somebody who is not running a vulnerability scanner.
 | `install` / `upgrade` / `rollback` / `backup` / `restore` | ❌ skeletons that refuse with a named reason | `docs/status.md`; specified in §2.3 |
 | OCI profile | ❌ not started, and §4.1 explains why | `README.md` mentions it in the `deploy/` row |
 | Load generator | ❌ not started | needed for gate 3 |
-| `securityctl adapter probe` | ❌ referenced in 5 places, does not exist | `internal/milestone/routes.go`; Q-4 |
+| `securityctl adapter-probe` | ✅ built 2026-10-02; was referenced in 5 places and did not exist, under a name (`adapter probe`) that was also wrong | `cmd/securityctl/adapter_probe.go`; Q-4 |
 | **CI can build the module as pinned** | ❌ Q-7 | `go.mod` says 1.26.0, CI pins 1.24 with `GOTOOLCHAIN: local` |
 | Licence activation design | ❌ **not decided** | §3.3; ADR required before M3 GA |
 | `security.txt`, PGP key, disclosure policy | ❌ not started | §10.4 |

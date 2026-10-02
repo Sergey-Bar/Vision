@@ -15,7 +15,7 @@
 // one lives. Reading a document fixed five of nine routes and left four needing a
 // probe. It cleared none of them, and it cannot: a published document is not a
 // running server, so `Unverified` stays true on every route until
-// `securityctl adapter probe` has run against a real installation and a human
+// `securityctl adapter-probe` has run against a real installation and a human
 // has read the artifact it produced. The plan names this as the top project risk
 // and it is still the top project risk; what changed is that the hypothesis is
 // now written down and cited rather than remembered.
@@ -71,7 +71,7 @@ type Route struct {
 	Paginated bool
 	// Unverified marks a route whose real behaviour has not been confirmed
 	// against a live server. It is a field rather than a comment so that
-	// `securityctl adapter probe` can print exactly which parts of the adapter
+	// `securityctl adapter-probe` can print exactly which parts of the adapter
 	// are still a hypothesis, and so a test can assert the list shrinks over
 	// time rather than rotting silently.
 	Unverified bool
@@ -105,7 +105,7 @@ type Route struct {
 // published document can refute an assumption and it did — five of these nine
 // routes were declared wrong and are corrected here — but refuting is all it can
 // do. No Milestone server has ever been reachable from this codebase, so when
-// `securityctl adapter probe` runs against a real installation, the entries it
+// `securityctl adapter-probe` runs against a real installation, the entries it
 // confirms lose the flag, and the ones it contradicts get fixed here and there -
 // which is the whole point of keeping them in one file.
 //
@@ -230,7 +230,7 @@ func RouteByKind(kind string) (Route, bool) {
 }
 
 // UnverifiedRoutes lists the routes still awaiting confirmation against a live
-// server. Exposed so `securityctl adapter probe` can report it and a test can
+// server. Exposed so `securityctl adapter-probe` can report it and a test can
 // assert the list is non-empty rather than quietly emptying out.
 func UnverifiedRoutes() []Route {
 	var out []Route
@@ -284,6 +284,21 @@ type Query struct {
 	Limit int
 	// Cursor continues a paged read.
 	Cursor string
+	// Params are extra query parameters, passed through as given and spelled the
+	// vendor's way: `property=operator:value`, with string values in single
+	// quotes (`events-rest-v1.reference.md:219-263`).
+	//
+	// They exist for questions the adapter has no route for. A probe asking whether
+	// a site's analytics are populated asks
+	// `analyticData.object.value=contains:'ABC123'`, and there is no reason to
+	// learn a new Go type to do it.
+	//
+	// A name here wins over the same name derived below, because the caller is
+	// answering a question the adapter's own paging did not intend to ask. Writes
+	// carry none of them, for the same reason `size` is read-only: sending a read
+	// filter to a documented body-and-task endpoint asks the vendor about an
+	// endpoint that has no filters.
+	Params map[string]string
 }
 
 // Response is what a transport returns: the status, the allow-listed headers,

@@ -821,7 +821,7 @@ func decodeItems(route Route, body json.RawMessage) ([]map[string]any, error) {
 
 	// A paged envelope wraps the array under a name. Four names are read here
 	// because which one a given build uses is one of the unverified assumptions
-	// and `securityctl adapter probe` exists to settle it.
+	// and `securityctl adapter-probe` exists to settle it.
 	//
 	// `array` is not one of those guesses: it is the documented one. Both
 	// published answers put their entries there —

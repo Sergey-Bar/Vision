@@ -498,10 +498,12 @@ declared, the site's own name for a GUID is resolved per site and carried on the
 record, the envelope and the dead-letter reason. **Phase B is still yours**, and it
 is the part that cannot be written without a live site:
 
-1. Run `securityctl adapter probe` against a real installation and read
+1. Run `securityctl adapter-probe` against a real installation and read
    `sample` on the `/eventTypes` row. That is the response schema, which neither
    document shows, and the identity/name field names this adapter guesses at
-   (`eventtypes.go`) either match it or do not.
+   (`eventtypes.go`) either match it or do not. The exact command, and what each
+   possible answer means, is in
+   [`design-partner-runbook.md`](design-partner-runbook.md).
 2. Read the GUID→name pairs off that row. **They are per-site**, so the decision
    is about how to map *names*, not GUIDs — a compiled-in GUID table would break
    at customer two, which is why none was written.
@@ -560,6 +562,16 @@ marked that way and would store an event-type list as though a camera had produc
 it; and `TestTheResolvedNameIsStoredSoTheTypeReplays` fails if the site-resolved
 name is not written into the stored envelope, because the derive-from-stored-bytes
 property (invariant 2) is what stops one event having two types.
+
+One more seam, because §2.8's last question is not answerable from a document. This
+API has no machine-readable specification, so "is the documented filter honoured" is
+a fact about a build of Milestone. `Query.Params` and `adapter-probe --param` exist
+so that question can be asked of a server and recorded in the same artifact as the
+schema, rather than by hand-typing a curl at a customer's box — which is the thing
+`adapter-probe` exists to replace. A named parameter wins over the same name this
+adapter derived, because a caller that says `size=1` is asking a question the
+derived paging did not intend to ask
+(`TestANamedQueryParameterReachesTheWireAndWinsOverADerivedOne`).
 
 This is the third class-level gate after `sqlguard` and `rlsrole`, and it exists
 because the class has already recurred — a documented field nothing reads, in

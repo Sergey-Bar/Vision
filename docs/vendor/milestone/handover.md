@@ -7,7 +7,9 @@ do, and what a human has to decide. It is not a backlog of nice-to-haves. Each i
 is something the repository's own rules put out of an agent's reach, and each is
 written so that the decision can be made without re-reading the code.
 
-The evidence behind all three is in [`route-audit.md`](route-audit.md).
+The evidence behind all three is in [`route-audit.md`](route-audit.md), and the
+three questions H1 needs answered on a real installation are written out as three
+commands in [`design-partner-runbook.md`](design-partner-runbook.md).
 
 ---
 
@@ -29,7 +31,7 @@ original list is done, and the finding above is now smaller than it was:
 
 | | Was | Is |
 |---|---|---|
-| The event-types route | "Adding that route is easy" — not added | **Declared**, `Unverified`, probed by `securityctl adapter probe` with the response body in the report (`route-audit.md` §2.8, §1 row 10) |
+| The event-types route | "Adding that route is easy" — not added | **Declared**, `Unverified`, probed by `securityctl adapter-probe` with the response body in the report (`route-audit.md` §2.8, §1 row 10) |
 | The GUID | An opaque string in a dead letter | **Resolved per site.** `RawRecord.SourceTypeName` carries the name *this site* uses, and the dead-letter reason quotes it: *"this site calls event type \"Motion Started\" a \"481d4d6c-…\""* |
 | The mapping | none | Still none. `normalizeEventType` and `rules.KnownMilestoneEventTypes` are untouched. |
 
@@ -61,7 +63,7 @@ Two things that are worth knowing before you read the code:
 3. **Answer the bookmark question in the same review** (consequence 1 below).
 
 **What a human can do cheaply instead of deciding anything:** run
-`securityctl adapter probe` against a real installation and read the artifact. It
+`securityctl adapter-probe` against a real installation and read the artifact. It
 reports, per route, the fields the server actually returned next to the fields this
 adapter expects, and now the first item's body. That turns "the documents say GUID"
 into "this build returned `481d4d6c-…` for an event it calls Motion Started", which
@@ -83,7 +85,7 @@ ones:
 | 3 | `SourceDeviceRef` was empty for every documented event. The parser read the device out of `Source` and expected a bracketed id; `source` is `cameras/<guid>`. So events were unattributable and **every device-filtered rule matched nothing**. | **Closed, 2026-10-02.** The documented REST resource string and the documented bare-uuid form both parse, returning the identifier without the collection prefix — which is what `devices.source_device_id` holds. Red-checked. It needed no decision: the value is documented and unambiguous, and it was the one defect in this table that failed *silently*, which is the worst way to fail. |
 
 **What a human can do cheaply instead of deciding anything:** run
-`securityctl adapter probe` against a real installation and read the artifact. It
+`securityctl adapter-probe` against a real installation and read the artifact. It
 reports, per route, the fields the server actually returned next to the fields this
 adapter expects. That turns "the documents say GUID" into "this build returned
 `481d4d6c-…` for a motion event", which is the input H1 actually needs.

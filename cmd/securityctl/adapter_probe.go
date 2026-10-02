@@ -41,13 +41,20 @@ findings would make the flag a statement the tool makes about itself.
 
   --base-url    the vendor's API root
   --token       bearer credential, from the secret store
+  --param       extra query parameter, name=value, repeatable. Use it to ask a
+                question the documents state in prose and this build cannot check:
+                  --param "analyticData.object.value=contains:'ABC123'"
+                A filter that is documented but not honoured is a finding, and
+                this is the only way to turn that sentence into evidence.
   --clock       also sample the vendor's clock and report the drift
   --timeout     per-route budget
   --json        machine-readable only
 
 Examples:
   securityctl adapter-probe --base-url https://milestone.example:8080 --token "$SP_MILESTONE_TOKEN"
-  securityctl adapter-probe --base-url "$MS" --token "$T" --clock --json`,
+  securityctl adapter-probe --base-url "$MS" --token "$T" --clock --json
+  securityctl adapter-probe --base-url "$MS" --token "$T" \
+    --param "analyticData.object.value=contains:'ABC123'" --json`,
 		Run: runAdapterProbe,
 	}
 }
@@ -61,7 +68,17 @@ func runAdapterProbe(ctx context.Context, env *command.Env, args []string) error
 		withClock = fs.Bool("clock", false, "Also sample the vendor's clock and report the drift.")
 		timeout   = fs.Duration("timeout", 20*time.Second, "Per-route budget.")
 		asJSON    = fs.Bool("json", false, "Machine-readable only.")
+		params    = map[string]string{}
 	)
+	fs.Func("param", "Extra query parameter, name=value. Repeatable.", func(v string) error {
+		name, value, split := strings.Cut(v, "=")
+		name = strings.TrimSpace(name)
+		if !split || name == "" {
+			return fmt.Errorf("--param wants name=value; got %q", v)
+		}
+		params[name] = value
+		return nil
+	})
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -82,6 +99,7 @@ func runAdapterProbe(ctx context.Context, env *command.Env, args []string) error
 		Endpoint:     *baseURL,
 		ItemLimit:    1,
 		IncludeClock: *withClock,
+		Params:       params,
 	})
 
 	if *withClock {

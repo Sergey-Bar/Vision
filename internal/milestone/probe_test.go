@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -300,6 +302,53 @@ func TestTheProbeReportsTheBodyAndNotOnlyAnItemCount(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), `"sample"`) {
 		t.Errorf("the serialised result has no sample field: %s", raw)
+	}
+}
+
+// A documented filter that this build cannot otherwise ask about is asked through
+// the probe, and the answer lands in the same artifact as the schema.
+//
+// This API has no machine-readable specification (route-audit.md §4), so whether
+// `analyticData.object.value=contains:'ABC123'` is honoured is a fact about a
+// server and not about a document. The alternative — hand-typing a curl at a
+// customer's box — is the thing `adapter-probe` exists to replace: a person
+// clicking through endpoints is a person who reaches some of them and stops, and
+// what they skipped would not be written down.
+func TestTheProbeSendsNamedParametersOnEveryRead(t *testing.T) {
+	var mu sync.Mutex
+	asked := map[string][]url.Values{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		asked[r.URL.Path] = append(asked[r.URL.Path], r.URL.Query())
+		mu.Unlock()
+		_, _ = w.Write([]byte(`{"array":[{"id":"e1","type":"Analytics"}],"eventCount":1}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	tr, err := milestone.NewHTTPTransport(srv.URL, "probe-token", 5*time.Second)
+	if err != nil {
+		t.Fatalf("NewHTTPTransport: %v", err)
+	}
+	report := milestone.Probe(context.Background(), tr, milestone.ProbeOptions{
+		Routes:    []milestone.Route{{Method: "GET", Path: "/api/rest/v1/events", Expect: "array", Unverified: true}},
+		ItemLimit: 1,
+		Params:    map[string]string{"analyticData.object.value": "contains:'ABC123'"},
+	})
+	if len(report.Results) != 1 {
+		t.Fatalf("probed %d routes, want 1", len(report.Results))
+	}
+	if report.Results[0].Verdict != milestone.VerdictConfirmed {
+		t.Fatalf("verdict %q: %s", report.Results[0].Verdict, report.Results[0].Detail)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	got := asked["/api/rest/v1/events"]
+	if len(got) != 1 {
+		t.Fatalf("the events route was probed %d times", len(got))
+	}
+	if !strings.Contains(got[0].Get("analyticData.object.value"), "ABC123") {
+		t.Errorf("the named parameter did not reach the query: %v", got[0])
 	}
 }
 

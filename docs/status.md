@@ -26,10 +26,13 @@ a real Postgres 16, with `SP_TEST_DATABASE_URL` set so the database-backed suite
 ran rather than skipped. `contractcheck` reports 20 messages and 22 enums
 compatible with the baseline, plus 7 JSON Schemas (248 properties) and the
 OpenAPI document's 20 paths. No data races. The run is
-`dist/verification/verify-20261002-140812.json`, `verified: true`, zero gates
-failed, zero skipped - including `recovery-drill`, which is the gate that skips
-whenever the database variable is absent, and which was the reason the previous
-run of this paragraph was not evidence even though it was green.
+`dist/verification/verify-20261002-144151.json`, `verified: true`, seventeen
+gates, zero failed, zero skipped, against a real database — including
+`recovery-drill`, which is the gate that skips whenever the database variable is
+absent, and which was the reason the previous run of this paragraph was not
+evidence even though it was green. `red-check` is 7 of 7 controls proved in 12
+seconds; `skills-audit` is 1 second, because it checks freshness rather than
+rescanning 67 skills.
 
 **What this round added, and what it cost.** Three things, all of them about this
 gate rather than the product:
@@ -501,6 +504,38 @@ compliance track. `scripts/verify.ps1` was re-run afterwards: exit 0, fifteen ga
 no gate skipped, `verified: true`,
 `dist/verification/verify-20261002-120501.json`.
 
+A fifth pass made the site trip executable.
+[`docs/vendor/milestone/design-partner-runbook.md`](../vendor/milestone/design-partner-runbook.md)
+is the whole of H1's remaining evidence as three commands, and `Query.Params` plus
+`securityctl adapter-probe --param` exist so the questions it asks can be asked
+*of a server*. This API has no machine-readable specification — EVENTS' OpenAPI and
+JSON downloads both 404 — so "the documented filter is honoured" is a fact about a
+build of Milestone and not about a page. Hand-typing a curl at a customer's box is
+what `adapter-probe` exists to replace.
+
+That pass also found and corrected a false claim that had been sitting in nine
+documents: the command is `securityctl adapter-probe`, and every one of those
+references said `adapter probe` — including four that asserted the command **does
+not exist**. It has existed since it was written. Q-4 and F-2 in the roadmap's risk
+registers are marked resolved rather than deleted, with the finding they missed
+written down: the references were wrong in two ways at once and nothing noticed,
+because nothing checked. That is the defect `release-sre-and-support.md` §8 already
+predicted — a hand-maintained list of commands cannot catch a wrong command name.
+
+`scripts/verify.ps1`: exit 0, **seventeen gates**, nothing skipped, `verified: true`,
+`dist/verification/verify-20261002-152932.json`, `database.urlSet: true`.
+
+**And one thing about that count that belongs here rather than in a commit message.**
+The gate list was fifteen when this work started and is seventeen now. The two that
+appeared in between — `red-check` and `skills-audit` — were added to
+`scripts/verify.ps1` by another session working in this same directory between
+12:05 and 13:57 UTC, and were swept into the previous commit by a single
+`git add -A` that was told to commit the whole tree. They are good gates and both
+pass, and the commit says nothing about them. The risk was named before that commit
+was made and it happened anyway: **a whole-tree commit cannot tell whose work it
+carries**, and a commit message that describes only the author's own changes is
+then incomplete in a way no reviewer can see.
+
 ### The core service
 
 `cmd/security-core` exists and runs the pipeline. It is the first binary here
@@ -786,7 +821,7 @@ five of them.
 
 **What this did not do, deliberately.** A published document can refute an
 assumption; it cannot confirm one. **No `Unverified` flag was cleared.** Nothing
-here is a probe, and `securityctl adapter probe` against a real installation plus
+here is a probe, and `securityctl adapter-probe` against a real installation plus
 a human reading the artifact is still the only thing that can promote a route.
 
 ### The event-type GUID now has a name attached, resolved from the site itself

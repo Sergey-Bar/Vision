@@ -52,7 +52,7 @@ Checking a path or a field against a published document proves the request is
 contract-shaped. It does not prove anything reached an operator's client, because
 **no Milestone server has ever been reachable from this repository**
 (`docs/status.md` says so, and `internal/milestone/routes.go` marks every route
-`Unverified` for the same reason). `securityctl adapter probe` against a real
+`Unverified` for the same reason). `securityctl adapter-probe` against a real
 installation is what changes that, and a human edits `routes.go` afterwards.
 
 The three defects these documents exposed in the platform's own adapter are

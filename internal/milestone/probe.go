@@ -12,7 +12,7 @@ import (
 
 // The adapter probe.
 //
-// The plan's P0.5: "one `securityctl adapter probe` that reaches every route
+// The plan's P0.5: "one `securityctl adapter-probe` that reaches every route
 // and reports exactly which assumptions hold, so the neutral claim is testable."
 //
 // # Why this is worth building at all
@@ -140,6 +140,17 @@ type ProbeOptions struct {
 	// placed by a probe is a bookmark an operator has to delete.
 	IncludeBookmarks bool
 	IncludeClock     bool
+	// Params are query parameters added to every read, spelled the vendor's way:
+	// `name=value`, with the filter syntax left exactly as the documents write it
+	// (`analyticData.object.value=contains:'ABC123'`,
+	// `events-rest-v1.reference.md:219-263`).
+	//
+	// They are here because the documents are prose and there is no machine-readable
+	// spec for this API to check a filter against (route-audit.md §4). Whether a
+	// documented filter is actually honoured is a question about a server, so it is
+	// asked of a server and recorded like any other probe result rather than
+	// believed from a page.
+	Params map[string]string
 }
 
 func (o ProbeOptions) withDefaults() ProbeOptions {
@@ -268,7 +279,7 @@ func Probe(ctx context.Context, t Transport, opts ProbeOptions) ProbeReport {
 	}
 
 	for _, route := range o.Routes {
-		report.Results = append(report.Results, probeRoute(ctx, t, route, o.ItemLimit))
+		report.Results = append(report.Results, probeRoute(ctx, t, route, o.ItemLimit, o.Params))
 	}
 
 	// The write-side routes are separate because reaching them means writing to
@@ -296,7 +307,7 @@ func Probe(ctx context.Context, t Transport, opts ProbeOptions) ProbeReport {
 	return report
 }
 
-func probeRoute(ctx context.Context, t Transport, route Route, limit int) ProbeResult {
+func probeRoute(ctx context.Context, t Transport, route Route, limit int, params map[string]string) ProbeResult {
 	res := ProbeResult{Route: route}
 	if route.WriteBack {
 		// Writing is not probing. A write-side route reached by a read probe
@@ -312,7 +323,7 @@ func probeRoute(ctx context.Context, t Transport, route Route, limit int) ProbeR
 		// exist — so the probe reports what it cannot check rather than making
 		// the call and reporting the vendor's 405 as a contradiction.
 		if searcher, ok := t.(BookmarkSearcher); ok {
-			return probeWith(ctx, route, Query{Limit: limit}, func(_ context.Context, _ Route, q Query) (*Response, error) {
+			return probeWith(ctx, route, Query{Limit: limit, Params: params}, func(_ context.Context, _ Route, q Query) (*Response, error) {
 				return searcher.SearchBookmarks(ctx, q)
 			})
 		}
@@ -321,7 +332,7 @@ func probeRoute(ctx context.Context, t Transport, route Route, limit int) ProbeR
 			"reach it; a GET on this path is documented not to retrieve anything"
 		return res
 	}
-	return probeWith(ctx, route, Query{Limit: limit}, t.Get)
+	return probeWith(ctx, route, Query{Limit: limit, Params: params}, t.Get)
 }
 
 // probeWith reaches one route and judges the answer.

@@ -257,6 +257,17 @@ func (t *httpTransport) urlFor(route Route, method string, query Query) (*url.UR
 			limit = MaxPageSize
 		}
 		q.Set("size", strconv.Itoa(limit))
+		// Last, so a named parameter overrides one this file derived. A caller that
+		// says `size=1` or `time=...` is answering a specific question, and a
+		// derived value that silently won would make the request something other
+		// than what was asked for.
+		//
+		// Inside the GET guard, not after it, so that "a write carries no read
+		// parameters" is structural rather than a consequence of no caller
+		// currently being able to supply one.
+		for name, value := range query.Params {
+			q.Set(name, value)
+		}
 	}
 	target.RawQuery = q.Encode()
 	return &target, nil
