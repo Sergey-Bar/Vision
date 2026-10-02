@@ -62,11 +62,20 @@ milestone whose purpose is proof rather than surface area:
 
 1. **The Milestone endpoint surface has never touched a real server.** Every
    route is still `Unverified` and the fixtures are synthetic.
-2. **There is no model, no GPU, no signed model bundle, and no Go client for
-   the runtime.** Nothing in the Go tree calls the inference endpoint, so gate 4
-   is blocked by a missing *connection* as much as by a missing model.
-3. **No SLO has been demonstrated under load**, because the observability
-   package has no production caller yet.
+2. **There is no model, no GPU and no signed model bundle.** The *connection* to
+   the runtime is built and wired — `internal/airuntime` is the Go client for
+   `runtime.py`, `cmd/security-core` constructs it and hands it to the VLM worker,
+   and `QueueVLM` has a producer (the consume loop, after the incident) and a
+   consumer — so gate 4 is blocked by hardware and by a signed bundle, and by
+   nothing in the Go tree. *(Corrected 2026-10-02. This item previously also read
+   "no Go client", which stopped being true during the build-out and was not
+   updated. See C1 below.)*
+3. **No SLO has been demonstrated under load.** The metrics are emitted and wired:
+   the pipeline samples backlog depth, dead letters, job-queue depth, ingest lag,
+   clock drift, AI availability and open incidents into the registry the SLO
+   definitions read. What is missing is a **recorded load run**, which is a room
+   and a stopwatch, not a package. *(Corrected 2026-10-02; this item previously
+   said the observability package had no production caller. See C6.)*
 4. **No design partner has run this for 14 consecutive days.**
 
 Note for a future reader: M1's first cut assumed the installer, the service
@@ -609,22 +618,34 @@ document a reader is most likely to trust:
 
 | # | Finding | Consequence |
 |---|---|---|
-| C1 | **The Go core has no client for the AI runtime.** Nothing in any `.go` file calls the inference endpoint; `jobs.QueueVLM` is a queue name with no producer or consumer. | M1 gate 4 is blocked by a missing *connection*, not only a missing model. `docs/status.md` names three unsigned DoD items and this is a fourth. |
-| C2 | **The runtime's bundle check verifies a digest, not a signature.** `ModelBundle.verify()` compares `sha256(manifest)` against the *contents* of `manifest.sig` and never uses `public_key`, while the docstring and error message both say "signature". | A bundle whose `.sig` file contains a hash is accepted as if it were signed. This is the one finding that undermines a supply-chain claim in a document that is otherwise careful about them. |
+| C1 | **CLOSED 2026-10-02.** *Was:* the Go core had no client for the AI runtime — nothing in any `.go` file called the inference endpoint and `jobs.QueueVLM` had no producer or consumer. *Is:* `internal/airuntime` is the client for `runtime.py`, `pipeline.enqueueVLM` produces, `airuntime.VLMWorker` consumes and calls it, and `cmd/security-core` constructs the client and hands it over. | M1 gate 4 is blocked by **hardware and a signed bundle only**. The finding was correct when written and was not revisited after the build-out; the drift was found by reading the code, not by a gate, because `internal/statuscheck` watches numbers and not claims. |
+| C2 | **CLOSED.** The runtime's bundle check verified a digest, not a signature: `ModelBundle.verify()` compared `sha256(manifest)` against the *contents* of `manifest.sig` and never used `public_key`, while the docstring and error message both said "signature". It now performs Ed25519 verification against a configured public key, refuses an unsigned bundle, refuses a missing key, and refuses a key it can tell is not well-formed. | A bundle whose `.sig` file contains a hash is no longer accepted as if it were signed. This was the one finding that undermined a supply-chain claim in a document that is otherwise careful about them. |
 | C3 | **The adapter's known-event-type table is keyed on spellings normalisation never produces.** 12 of 18 keys are unreachable and 9 types that are produced are missing. | Real motion, analytics and access events are marked malformed. Bounded today only because `RawRecord.Malformed` has no consumer outside the adapter. |
-| C4 | **`evaluation.Evaluate` hard-codes the `restricted-person` field**, so every other profile scores recall 0 and can never pass a gate. | Blocks M2's "the M1 incident class plus two more". |
-| C5 | **The labelled-case minimum is statistically insufficient.** At n=30 an observed 0.20 false-positive rate has a Wilson upper bound of 0.373, and a 0.70 recall has a lower bound of 0.521. ~200 cases are needed for the stated gates. | A profile could pass its gates on evidence that cannot support them. Full working in [the AI track](engineering/ai-and-data.md) §3. |
-| C6 | **`internal/observability` has no production caller**, so no metric is emitted. | M1 gate 3 is unreachable, not merely unmet. |
+| C3 | **CLOSED, structurally.** `KnownMilestoneEventTypes` was keyed on spellings normalisation never produces: 12 of its 18 keys were unreachable and 9 produced types were missing, so real motion, analytics and access events were flagged malformed. It is now **derived** from `normalizedEventTypes` — one list, next to the switches that produce it, with a consistency test that fails when an arm is missing from it. | The two tables can no longer disagree, which is the finding's real content; a keying mistake is now impossible rather than merely absent. |
+| C4 | **CLOSED.** `evaluation.Evaluate` hard-coded the `restricted-person` field, so every other profile scored recall 0 and could never pass a gate. The field now comes from the profile being scored. | M2's "the M1 incident class plus two more" is unblocked on this axis. |
+| C5 | **The labelled-case minimum is statistically insufficient.** At n=30 an observed 0.20 false-positive rate has a Wilson upper bound of 0.373, and a 0.70 recall has a lower bound of 0.521. ~200 cases are needed for the stated gates. | A profile could pass its gates on evidence that cannot support them. Full working in [the AI track](engineering/ai-and-data.md) §3. This one is open and it is **not** a coding task — it is the cost of collecting ~200 labelled cases per profile, and it is the single largest non-build item in M2. |
+| C6 | **CLOSED 2026-10-02.** *Was:* `internal/observability` had no production caller, so no metric was emitted. *Is:* the pipeline samples backlog depth, dead letters, job-queue depth, ingest lag p95, clock-drift severity, AI availability and open incidents into the registry the SLO definitions read, and a ledger-gated test asserts the two incident gauges are written. | M1 gate 3 is **unmet rather than unreachable**. What remains is a recorded load run, which is a room and a stopwatch. |
 | C7 | **A rule can legally name `aiObservation.field: summary`** although the schema says it is never evaluated by a rule, and nothing enforces either. | A weak, invariable constraint on the AI trust boundary. |
-| C8 | **`internal/graph`'s package doc claims a test asserts the absence of `entity_aliases`; no such test exists.** | M1's no-person-model decision is protected by a comment. |
-| C9 | **`fixture.Event.ObservedAt` is never called and `ReplayTransport.Get` discards the epoch it computes.** | Replay parity today is byte-parity, not timing-parity, which changes what M1 gate 1 means. Needs an E1 decision before the gate is attempted. |
-| C10 | **CI pinned Go 1.24 with `GOTOOLCHAIN: local` against a `go 1.26.0` module.** | CI could not build the project at all. Fixed to `1.26`; `docs/status.md`'s "Go 1.27" was the remaining stale claim, now corrected. |
-| C11 | **There is no `cmd/security-core`, but both service units invoke one.** `make build` produces only `securityctl` and `security-migrate`; `internal/api.Server.ListenAndServe` has no `main` caller. | The service units cannot start as written, so the lifecycle has been exercised against a manually run process rather than a supervised service. The unit also declares `Type=notify` with no `sd_notify` handshake, and its `MemoryDenyWriteExecute`, `SystemCallFilter=@system-service` and `PrivateDevices` hardening each preclude a GPU runtime. |
-| C12 | **`contractcheck` silently ignores `map<...>` fields and never diffs OpenAPI or the JSON Schemas.** `Device.attributes` is absent from the baseline. | The compatibility gate is narrower than "the contracts are the source of truth" implies. A breaking change to a map field, or to any HTTP or JSON-Schema surface, passes silently. |
-| C13 | **`VerifyChecksums` hashes the migration file body, not its name.** | Renaming an applied migration passes verification while the ledger's `name` column silently diverges from the file. |
-| C14 | **The API access log carries no `tenant_id`, `site_id` or `request_id`**, which the conventions require on every line. | An operator cannot correlate an HTTP request to a ledger row or a log line. |
+| C8 | **CLOSED.** `internal/graph`'s package doc claimed a test asserting the absence of `entity_aliases`; no such test existed, so M1's no-person-model decision was protected by a comment. | The claim is now a test. |
+| C9 | **`fixture.Event.ObservedAt` is never called and `ReplayTransport.Get` discards the epoch it computes.** Still open as of 2026-10-02. | Replay parity today is byte-parity, not timing-parity, which changes what M1 gate 1 means. Needs an E1 decision before the gate is attempted. |
+| C10 | **CI pinned Go 1.24 with `GOTOOLCHAIN: local` against a `go 1.26.0` module.** CI could not build the project at all. Moot now — the pipeline was removed outright and GitHub Actions cannot start a job on this account. The lesson survives it: **a pin below the `go` directive is a hard build failure, so a change to one requires a change to the other in the same commit**, and `GOTOOLCHAIN: local` is what makes it a failure rather than a silent toolchain download. |
+| C11 | **CLOSED.** There was no `cmd/security-core` while both service units invoked one, and `ListenAndServe` had no `main` caller. The core exists and both units invoke it. | The units start as written. The `Type=notify` handshake and the hardening flags that would preclude a GPU runtime are the live residue, and both are M1 site work rather than code. |
+| C12 | **Partly closed, not verified in full.** `contractcheck` ignored `map<...>` fields and never diffed OpenAPI or the JSON Schemas. It now runs as **three separate gates** (`contract-check-protobuf`, `-schema`, `-openapi`), so a change to an HTTP or JSON-Schema surface cannot pass silently. Whether `map<...>` protobuf fields are diffed was not confirmed on 2026-10-02 and is worth a read before the next contract change. | The compatibility gate is still narrower than "the contracts are the source of truth" implies, by an amount nobody has measured recently. |
+| C13 | **CLOSED.** `VerifyChecksums` hashed the migration file body, not its name, so renaming an applied migration passed verification while the ledger's `name` column silently diverged from the file. It now detects the rename and refuses `up`, not just the status command. |
+| C14 | **CLOSED.** The API access log carried no `tenant_id`, `site_id` or `request_id`, which `AGENTS.md` requires on every line. It now does, and a test asserts all three appear — including the id being generated when the proxy did not supply one. |
 
-C2 and C3 are the two I would fix this week. Both are small, both are
-contained, and both are the kind of defect that a security buyer's engineer
-finds in an afternoon. C11 is close behind, because a customer whose service
-will not start is a customer we cannot pilot with.
+**Re-tally, 2026-10-02.** Nine of these are closed (C1, C2, C3, C4, C6, C8, C11,
+C13, C14), one is partly closed and unverified (C12), and four are genuinely open:
+**C5** (the labelled-case minimum — a collection cost, not a coding task, and the
+largest non-build item in M2), **C7** (a rule can legally name
+`aiObservation.field: summary`), **C9** (replay is byte-parity, not timing-parity,
+and needs an E1 decision before M1 gate 1 is attempted), and **C10**, which is moot
+because the pipeline no longer exists.
+
+The drift itself was the finding worth recording. Every one of the nine was true
+when written, and none was revisited after the build-out that closed it —
+`internal/statuscheck` watches *numbers* moving away from their files and does not
+watch *claims* going stale. Nine false claims in the document a reader is most
+likely to trust is not a typo; it is the predictable result of a review that is
+written once and not maintained, and the fix that would catch the class is a gate,
+not another review.
