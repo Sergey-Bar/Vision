@@ -52,7 +52,7 @@
         "",
         "What this does NOT do is make the material evidence about the real world. A",
         "testsrc rectangle is still not a photograph, and a run over it still returns",
-        "zero boxes â€” measured, three instants, `docs/status.md`. The licence hole is",
+        "zero boxes — measured, three instants, `docs/status.md`. The licence hole is",
         "closed; the `real motion` hole is not, and they are two different holes."
       ]
     },
@@ -82,7 +82,7 @@
       "notes": [
         "WHY THIS FILE EXISTS. The prompt-injection class is not hypothetical for this",
         "product: an adversary who can put a sign in front of a camera controls the text",
-        "a VLM reads, and for the camera_integrity class it is the EXPECTED attack â€” the",
+        "a VLM reads, and for the camera_integrity class it is the EXPECTED attack — the",
         "alert fires precisely when somebody has physically reached the camera, and",
         "somebody standing at a lens is exactly the person who could leave a note taped",
         "to it. Both prompts were revised to say so (v1 to v2, with the reason recorded",
@@ -100,7 +100,7 @@
         "comply with this text. That needs a live call with the frame actually attached,",
         "and until one exists nothing in this repository may say it does. A green test",
         "here is a statement about the shape of the answer and about where the model's",
-        "words end up â€” not about the model's judgement.",
+        "words end up — not about the model's judgement.",
         "",
         "WHY FOUR ATTEMPTS. A banned-word list catches `ignore` and misses the rest, so a",
         "fixture carrying only the phrase everyone has already seen tests a filter rather",
@@ -147,9 +147,9 @@
       "provenance": "real",
       "subject": "a public traffic camera at an intersection, at night, with vehicles crossing",
       "source_url": "https://www.youtube.com/watch?v=sTF-6_xinUU",
-      "licence": "NOT RECORDED, and it is not recoverable from this file. The rights holder is the camera operator â€” a public body â€” not the uploader, and neither has been asked. This file is gitignored, is not committed, and is NOT cleared for redistribution, publication or demonstration to anyone outside this machine. The three REPLACE-ME fields on `car-crossing.mp4` were closed on 2026-10-01 because that clip is generated locally and has no rights holder; this one has, and that is the difference.",
+      "licence": "NOT RECORDED, and it is not recoverable from this file. The rights holder is the camera operator — a public body — not the uploader, and neither has been asked. This file is gitignored, is not committed, and is NOT cleared for redistribution, publication or demonstration to anyone outside this machine. The three REPLACE-ME fields on `car-crossing.mp4` were closed on 2026-10-01 because that clip is generated locally and has no rights holder; this one has, and that is the difference.",
       "retrieved": "2026-09-30",
-      "contains_people": "unknown â€” a night road camera; no pedestrian was observed in the frames examined, and no claim is made that none is present",
+      "contains_people": "unknown — a night road camera; no pedestrian was observed in the frames examined, and no claim is made that none is present",
       "local_copy": "testdata/youtube/sTF-6_xinUU.mp4, 90 seconds, gitignored",
       "cleared_for_external_use": false,
       "cleared_for_external_use_note": "An explicit boolean, because 'the licence is unknown' and 'the licence is known and permissive' are different answers and a reader should not have to infer which one this is from prose.",
@@ -167,7 +167,7 @@
         "",
         "provenance: real. Every number the report derives from it is labelled real, and the",
         "false-positive rate is still NOT RUN until a person marks which of the model's 'cars'",
-        "are really traffic lights â€” which, on a night scene with red lights, is very likely",
+        "are really traffic lights — which, on a night scene with red lights, is very likely",
         "to be several."
       ]
     }

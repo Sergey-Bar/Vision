@@ -1,5 +1,5 @@
 {
-  "anchors": "models\\yolov8n.anchors.txt",
+  "anchors": "models\\yolov4n.anchors.txt",
   "classes": 0,
   "decoded_boxes": [
     {
@@ -132,7 +132,7 @@
     }
   ],
   "decoder_family": "anchored",
-  "decoder_family_note": "ANCHORED: this export publishes one output per stride and its box coordinates are offsets from per-cell anchor boxes. The anchors are in the model's .cfg and are NOT in the ONNX file, so this export cannot be decoded without them. See models/yolov8n.anchors.txt and the --anchors flag.",
+  "decoder_family_note": "ANCHORED: this export publishes one output per stride and its box coordinates are offsets from per-cell anchor boxes. The anchors are in the model's .cfg and are NOT in the ONNX file, so this export cannot be decoded without them. See models/yolov4n.anchors.txt and the --anchors flag.",
   "frame_source": "one real frame from testdata\\youtube\\sTF-6_xinUU.mp4",
   "has_objectness": true,
   "has_objectness_decided_by": "85 fields against the COCO-80 vocabulary (the model carries no names)",
@@ -157,7 +157,7 @@
     "pad_y": 83
   },
   "measured_by": "pyworker/probe_model.py, through server.Engine's own load path",
-  "model": "yolov8n.onnx",
+  "model": "yolov4n.onnx",
   "names_verbatim": "",
   "observed": {
     "box_fields": {

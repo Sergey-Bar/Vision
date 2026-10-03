@@ -14,35 +14,45 @@ import (
 //
 // This is the whole of the call path, in this order, and the order is the point:
 //
-//  1. the prompt is resolved by CLASS, so the class is a file and never a field
+//  1. the prompt is resolved by INCIDENT CLASS, so the class is a file and never a
+//     field, and the DETECTED class is substituted into it
 //  2. the budget is reserved BEFORE anything leaves the site
 //  3. the clip is uploaded
-//  4. the asset is scheduled for deletion on a context that survives the caller
-//     going away, so a clip is deleted on every path after the upload
+//  4. the asset is scheduled for deletion on a context that survives the caller going
+//     away, so a clip is deleted on every path after the upload
 //  5. the completion is asked for
 //
-// Every failure produces an observation with a non-answered state and
-// [VerdictNone]. There is no path through this function that returns a verdict
-// without an answered ask, and there is no path that returns no observation at
-// all, because a caller that gets nothing cannot record that it got nothing.
-func (c *Client) Observe(ctx context.Context, detectionID, class string, clip []byte, mediaType string) Observation {
-	prompt, err := c.Prompts().Get(class)
+// `promptID` is the incident class, which question is being asked, and
+// `detectedClass` is what the local pipeline measured the object to be. They are
+// SEPARATE arguments because they are separate facts and conflating them is the bug
+// this signature exists to prevent: a detector that confidently said `bird` and a
+// novelty run that measured a change and named nothing ask the same question about
+// different evidence, and the prompt has to say which of the two produced the clip. A
+// single argument carrying either would send the model a false statement about its own
+// evidence.
+//
+// Every failure produces an observation with a non-answered state and [VerdictNone].
+// There is no path through this function that returns a verdict without an answered ask,
+// and there is no path that returns no observation at all, because a caller that gets
+// nothing cannot record that it got nothing.
+func (c *Client) Observe(ctx context.Context, detectionID, promptID, detectedClass string, clip []byte, mediaType string) Observation {
+	prompt, err := c.Prompts().GetFor(promptID, detectedClass)
 	if err != nil {
-		return refused(detectionID, aistate.NotAsked, class, string(ReasonNoPrompt), oneLine(err))
+		return refused(detectionID, aistate.NotAsked, detectedClass, string(ReasonNoPrompt), oneLine(err))
 	}
 	if len(clip) == 0 {
-		return refused(detectionID, aistate.NotAsked, class, string(ReasonNoClip),
+		return refused(detectionID, aistate.NotAsked, detectedClass, string(ReasonNoClip),
 			"there is no clip to send, so the model was not asked")
 	}
 	// The budget is consulted BEFORE the upload. A site that has reached its cap
 	// must not ship footage to a third party for a call that will be refused.
 	if err := c.quota.take(); err != nil {
-		return refused(detectionID, aistate.NotAsked, class, string(ReasonFor(err)), oneLine(err))
+		return refused(detectionID, aistate.NotAsked, detectedClass, string(ReasonFor(err)), oneLine(err))
 	}
 
 	asset, err := c.UploadAsset(ctx, mediaType, clip)
 	if err != nil {
-		return c.failed(detectionID, class, prompt, asset, err)
+		return c.failed(detectionID, detectedClass, prompt, asset, err)
 	}
 	// The delete runs on a context detached from the caller's, with a deadline
 	// of its own. A deferred delete on the caller's context does not run if the
@@ -52,7 +62,7 @@ func (c *Client) Observe(ctx context.Context, detectionID, class string, clip []
 	obs, err := c.ask(ctx, asset.ID, prompt)
 	defer c.deleteDetached(asset.ID)
 	if err != nil {
-		return c.failed(detectionID, class, prompt, asset, err)
+		return c.failed(detectionID, detectedClass, prompt, asset, err)
 	}
 	obs.DetectionID = detectionID
 	obs.Finalise()
@@ -87,8 +97,8 @@ func (c *Client) logf(format string, args ...any) {
 // DISTINCT state, and none of them fabricates an answer. A test asserts the
 // states differ — which is the assertion that will go red the day somebody
 // collapses two of them into one.
-func (c *Client) failed(detectionID, class string, prompt Prompt, asset Asset, err error) Observation {
-	obs := refused(detectionID, stateForError(err), class, string(ReasonFor(err)), oneLine(err))
+func (c *Client) failed(detectionID, detectedClass string, prompt Prompt, asset Asset, err error) Observation {
+	obs := refused(detectionID, stateForError(err), detectedClass, string(ReasonFor(err)), oneLine(err))
 	obs.PromptID = prompt.ID
 	obs.PromptVersion = prompt.Version
 	obs.ContractVersion = ContractVersionFor(prompt, c.cfg.OutputSchemaVersion, c.cfg.APIModelName, c.cfg.Region)

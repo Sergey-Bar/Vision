@@ -158,7 +158,7 @@ func TestAWrongSizedTensorIsRefusedByName(t *testing.T) {
 // did — it is cheap, it needs no model, and it pins the two together.
 func TestTheDeclaredLayoutIsTheOneTheModelSays(t *testing.T) {
 	// The committed export's declared input, verbatim from
-	// pyworker/fixtures/yolov8n.contract.json. If someone re-exports the model in NCHW
+	// pyworker/fixtures/yolov4n.contract.json. If someone re-exports the model in NCHW
 	// this test is the thing that must be updated, and it fails loudly rather than the
 	// decoder quietly producing wrong boxes.
 	_, err := DetectLayout([]int64{-1, 416, 416, 3})

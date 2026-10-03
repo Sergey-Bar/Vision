@@ -38,7 +38,7 @@ import numpy as np  # noqa: E402
 import server  # noqa: E402
 
 FIXTURE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
-CONTRACT_PATH = os.path.join(FIXTURE_DIR, "yolov8n.contract.json")
+CONTRACT_PATH = os.path.join(FIXTURE_DIR, "yolov4n.contract.json")
 
 
 def contract() -> dict:
@@ -157,9 +157,9 @@ def put_anchored(t: np.ndarray, row: int, tx, ty, tw, th, obj: float, class_inde
 class ContractTests(unittest.TestCase):
     def test_the_fixture_records_a_real_measurement(self):
         c = contract()
-        self.assertEqual(c["model"], "yolov8n.onnx")
+        self.assertEqual(c["model"], "yolov4n.onnx")
         self.assertIn("probe_model.py", c["measured_by"])
-        # The file is NAMED yolov8n and is not one. The contract says so, and a
+        # The file is NAMED yolov4n and is not one. The contract says so, and a
         # test that hid that would leave the next reader believing the name.
         self.assertEqual(c["decoder_family"], "anchored")
         self.assertEqual(c["output"]["count"], 3, "the measured export publishes one output per stride")

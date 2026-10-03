@@ -167,7 +167,7 @@ func TestTheAssetIsDeletedOnEveryPathAfterTheUpload(t *testing.T) {
 			defer s.Close()
 
 			c := clientFor(t, s, 0)
-			_ = c.Observe(context.Background(), "det-1", "alarm", []byte("mp4-bytes"), "video/mp4")
+			_ = c.Observe(context.Background(), "det-1", "alarm", "car", []byte("mp4-bytes"), "video/mp4")
 			if !deleted.Load() {
 				t.Fatal("the uploaded clip was not deleted")
 			}
@@ -192,11 +192,11 @@ func TestTheBudgetIsReservedBeforeAnythingLeavesTheSite(t *testing.T) {
 	defer s.Close()
 
 	c := clientFor(t, s, 1)
-	first := c.Observe(context.Background(), "det-1", "alarm", []byte("clip-one"), "video/mp4")
+	first := c.Observe(context.Background(), "det-1", "alarm", "car", []byte("clip-one"), "video/mp4")
 	if first.State != aistate.CannotTell && first.State != aistate.Degraded {
 		t.Fatalf("the first call against a stub server produced %+v; the test server answers the completion with no asset", first)
 	}
-	obs := c.Observe(context.Background(), "det-2", "alarm", []byte("clip-two"), "video/mp4")
+	obs := c.Observe(context.Background(), "det-2", "alarm", "car", []byte("clip-two"), "video/mp4")
 	if uploads.Load() != 1 {
 		t.Fatalf("the client uploaded %d clips against a cap of one call; a capped site must not ship footage for a refused call", uploads.Load())
 	}
@@ -261,7 +261,7 @@ func TestTheFaultMatrixProducesDistinctStatesAndNoFabricatedAnswer(t *testing.T)
 			defer s.Close()
 
 			c := clientFor(t, s, 0)
-			obs := c.Observe(context.Background(), "det-1", "alarm", []byte("mp4-bytes"), "video/mp4")
+			obs := c.Observe(context.Background(), "det-1", "alarm", "car", []byte("mp4-bytes"), "video/mp4")
 			if obs.State != tc.want {
 				t.Fatalf("%s produced the state %q rather than %q (reason: %s)", tc.name, obs.State, tc.want, obs.Reason)
 			}
@@ -295,7 +295,7 @@ func TestTheAssetMissingOnCompletionIsNotTheSameAsAMissingAnswer(t *testing.T) {
 	}))
 	defer s.Close()
 	c := clientFor(t, s, 0)
-	obs := c.Observe(context.Background(), "det-1", "alarm", []byte("mp4"), "video/mp4")
+	obs := c.Observe(context.Background(), "det-1", "alarm", "car", []byte("mp4"), "video/mp4")
 	if obs.State != aistate.CannotTell {
 		t.Fatalf("an expired asset produced %q rather than cannot_tell", obs.State)
 	}
@@ -313,7 +313,7 @@ func TestACancelledContextIsADegradationAndNotAnAnswer(t *testing.T) {
 	c := clientFor(t, s, 0)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	obs := c.Observe(ctx, "det-1", "alarm", []byte("mp4"), "video/mp4")
+	obs := c.Observe(ctx, "det-1", "alarm", "car", []byte("mp4"), "video/mp4")
 	if obs.State == aistate.Asked {
 		t.Fatal("a cancelled context produced an answered observation")
 	}
@@ -333,7 +333,7 @@ func TestATimeoutIsADegradationNamedAsOne(t *testing.T) {
 	c := clientFor(t, s, 0)
 	c.cfg.Timeout = 40 * time.Millisecond
 	c.http = &http.Client{Timeout: 40 * time.Millisecond, Transport: s.Client().Transport}
-	obs := c.Observe(context.Background(), "det-1", "alarm", []byte("mp4"), "video/mp4")
+	obs := c.Observe(context.Background(), "det-1", "alarm", "car", []byte("mp4"), "video/mp4")
 	if obs.State != aistate.Degraded {
 		t.Fatalf("a timeout produced %q rather than degraded (reason: %s)", obs.State, obs.Reason)
 	}

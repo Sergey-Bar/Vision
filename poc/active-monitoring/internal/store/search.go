@@ -44,6 +44,49 @@ type SearchHit struct {
 	SHA256     string
 	TimeBegin  time.Time
 	TimeEnd    time.Time
+
+	// Confidence is the model's OWN confidence in the verdict it gave about this
+	// clip, and it is a STORED COLUMN: `vlm_observations.confidence`, beside the
+	// model identity, the contract version and the output hash. It recomputes from
+	// stored facts because it IS a stored fact.
+	//
+	// It is not a similarity and must never render as one. There are no embeddings
+	// here and that is a decision rather than an omission; what this number is is the
+	// model's confidence in its own answer, which is a different claim with a different
+	// failure mode.
+	//
+	// HasConfidence is separate because `confidence` is `NOT NULL DEFAULT 0` and a
+	// model may legitimately answer 0. Treating 0 as "no number" would print a
+	// fabricated measurement for a model that said zero, and treating a missing answer
+	// as 0 would print a percentage for a row nobody asked. So the two are different
+	// facts and one flag carries the difference.
+	Confidence    float64
+	HasConfidence bool
+
+	// RunID, RunLabel and SourceArg name WHICH RUN answered. They are carried on
+	// every card because a cross-run search is legitimate and an answer from two runs
+	// is not comparable unless both are visible: a run has its own model identity, its
+	// own contract version and its own source, and the same reasoning that refuses to
+	// compare a v1 answer with a v2 answer refuses to compare two runs without their
+	// labels.
+	RunID     string
+	RunLabel  string
+	SourceArg string
+
+	// GroundTruth is what a human concluded about this tag, once one has reviewed it.
+	//
+	// It is carried on the card rather than in a separate screen because the search
+	// result is where a reviewer looks, and a verdict the reviewer already overturned
+	// that the card does not show is a verdict the next reader will re-litigate. `By`
+	// carries who concluded it, because "this is wrong" from a named person is evidence
+	// and the same sentence from nobody is an opinion.
+	GroundTruth         string
+	GroundTruthTag      string
+	GroundTruthBy       string
+	GroundTruthNote     string
+	GroundTruthAt       time.Time
+	HasGroundTruth      bool
+	MarkedFalsePositive bool
 }
 
 // SearchQuery is what a person asked for. Every field is optional except Text and
@@ -55,14 +98,93 @@ type SearchHit struct {
 // filter for a camera would be a flag that silently matches everything, which is
 // worse than no flag.
 type SearchQuery struct {
+	// RunID is the one run, which is the common case and what every existing caller
+	// uses.
 	RunID string
-	// Text is matched against the model's summary, case-insensitively.
+	// RunIDs is a SET of runs, and a search across runs is legitimate because every
+	// card names its run. It used to be refused outright, with the reasoning that
+	// "searching across runs would answer a question about no particular run" — which
+	// was true and stopped being true the moment every card carried its run's label,
+	// model identity and contract version. The refusal was protecting a gap that has
+	// been closed, and leaving it in place would have been a guard outliving its
+	// reason.
+	//
+	// `RunIDs` wins when it is non-empty, so a caller that sets both gets the set and
+	// not the union, and a union of two overlapping sets is not a set anybody meant.
+	RunIDs []string
+	// Source filters on the camera, which is `runs.source_arg` one level up. There is
+	// no camera column on `detections` and none is added: the JOIN finds it, so this is
+	// a filter and not a migration.
+	//
+	// A source with no run in scope matches NOTHING. That is the whole reason the
+	// original run-scope refusal existed, restated as a behaviour rather than an error:
+	// a camera filter that silently matched everything is worse than no filter at all,
+	// and a filter that returns an empty result says "nothing from this camera in this
+	// window" while one that returns everything says nothing at all.
+	Source string
+	// Text is matched against the model's summary AND the reviewer's ground-truth note,
+	// case-insensitively. Both, because an operator searching "the person who looked at
+	// this said it was a shadow" is looking for the reviewer's words and not the
+	// model's, and that is the query with the highest value per line in this whole
+	// surface.
 	Text    string
 	Class   string
 	Verdict string
 	From    time.Time
 	To      time.Time
 	Limit   int
+	// OrderBy is "at" for chronological, which is the DEFAULT, or "confidence" for
+	// verdict confidence, highest first.
+	//
+	// There is no relevance ordering and there never will be. With no similarity there
+	// is nothing to rank by meaning, and a "relevance" column computed from the text
+	// match would be a number this module cannot account for, which is the one thing a
+	// search surface must not invent.
+	OrderBy string
+}
+
+// Search orders.
+const (
+	// OrderAt is chronological, the default.
+	OrderAt = "at"
+	// OrderConfidence is verdict confidence, highest first.
+	OrderConfidence = "confidence"
+)
+
+// scope is the resolved set of runs a query is over.
+//
+// An explicit `RunID` WINS over `RunIDs` rather than being unioned in. A caller who
+// named one run and then a list did one of the two on purpose, and a union of two
+// overlapping sets is not a set anybody meant.
+func (q SearchQuery) scope() []string {
+	if r := strings.TrimSpace(q.RunID); r != "" {
+		return []string{r}
+	}
+	if len(q.RunIDs) == 0 {
+		return nil
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, r := range q.RunIDs {
+		r = strings.TrimSpace(r)
+		if r == "" || seen[r] {
+			continue
+		}
+		seen[r] = true
+		out = append(out, r)
+	}
+	return out
+}
+
+// placeholders is `?,?,?` for an IN list of n runs.
+//
+// It is built rather than written out because the argument count and the placeholder
+// count have to agree and a hand-written pair is where they stop agreeing.
+func placeholders(n int) string {
+	if n <= 0 {
+		return "NULL"
+	}
+	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
 }
 
 // SearchSummary is what the window looked like, INCLUDING everything the search did
@@ -181,8 +303,14 @@ func (s *Store) SearchObservations(ctx context.Context, q SearchQuery) ([]Search
 	var out []SearchHit
 	for rows.Next() {
 		var h SearchHit
-		var at, tb, te string
+		var at string
 		var ref, sha sql.NullString
+		// The time bounds are NULLABLE, because `evidence` is a LEFT JOIN and a
+		// decision can be stored without its clip. Scanning them into plain strings
+		// aborts the entire search with "converting NULL to string is unsupported",
+		// which loses every card in the window because ONE of them had no evidence --
+		// the opposite of what a search surface should do about a missing clip.
+		var tb, te sql.NullString
 		if err := rows.Scan(&h.DetectionID, &at, &h.Class, &h.Summary, &h.Verdict, &h.AIState,
 			&h.ReasonCode, &h.PromptID, &h.ModelIdentity, &h.ContractVersion, &h.Temperature,
 			&h.OutputHash, &ref, &sha, &tb, &te); err != nil {
@@ -190,8 +318,12 @@ func (s *Store) SearchObservations(ctx context.Context, q SearchQuery) ([]Search
 		}
 		h.At, _ = time.Parse(time.RFC3339Nano, at)
 		h.StorageRef, h.SHA256 = ref.String, sha.String
-		h.TimeBegin, _ = time.Parse(time.RFC3339Nano, tb)
-		h.TimeEnd, _ = time.Parse(time.RFC3339Nano, te)
+		h.TimeBegin, _ = time.Parse(time.RFC3339Nano, tb.String)
+		h.TimeEnd, _ = time.Parse(time.RFC3339Nano, te.String)
+		// The confidence flag is the same derivation as the cards query's: derived
+		// from the ANSWER, never from the number, because the column is NOT NULL
+		// DEFAULT 0 and a row nobody asked about carries 0.
+		h.HasConfidence = h.AIState == aistate.Asked
 		out = append(out, h)
 	}
 	return out, sum, rows.Err()

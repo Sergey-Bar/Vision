@@ -186,6 +186,12 @@ type Report struct {
 	// without saying the match was at IoU 0.25 is asking the reader to trust a
 	// threshold they cannot see.
 	Matched []Match
+	// ClassCounts is the run's per-class partition, folded from the frames' own.
+	//
+	// It is beside the totals and not inside them because a total cannot be split: the
+	// counts say how many were missed and say nothing about WHAT was missed, which is
+	// the entire content of a per-class row.
+	ClassCounts []ClassCounts
 	// MatchThreshold is the IoU a pair had to reach, printed on every report.
 	MatchThreshold float64
 	// DroppedBoxes and DroppedFrames name WHAT was set aside. Both are counted and
@@ -225,6 +231,18 @@ type FrameCount struct {
 	Dropped        int
 	GroundTruth    int
 	Detected       int
+	// ByClass is this frame's own per-class partition.
+	//
+	// It is computed HERE and not from the counts above, because a per-class table
+	// cannot be reconstructed from a total. The counts say how many were missed; they
+	// say nothing about WHAT was missed, and the class of a missed box is the entire
+	// content of a per-class row.
+	//
+	// It is carried on the FRAME rather than accumulated into the report directly
+	// because the match indices are frame-local. Summing indices across frames would
+	// pair a detection from one frame with a ground-truth box from another, which is a
+	// silent wrong answer rather than a compile error.
+	ByClass []ClassCounts
 }
 
 // Options are the settings a measurement is taken under, and every one of them
@@ -271,6 +289,10 @@ func (o Options) withDefaults() Options {
 func Measure(frame string, dets []Detection, truth []GT, opts Options) FrameCount {
 	o := opts.withDefaults()
 	fc := FrameCount{Frame: frame}
+	// The per-class partition is computed from the SAME pairing this function makes,
+	// here, while both sides' indices mean something. It is not derived from the totals
+	// afterwards because the totals carry no classes.
+	var pairs []Match
 	for _, d := range dets {
 		if d.Score < o.ClassThreshold {
 			continue
@@ -306,6 +328,9 @@ func Measure(frame string, dets []Detection, truth []GT, opts Options) FrameCoun
 		}
 		usedDet[c.di], usedGT[c.gi] = true, true
 		fc.TruePositives++
+		pairs = append(pairs, Match{
+			Detection: dets[c.di], GT: truth[c.gi], IoU: c.iou, DetIdx: c.di, GTIdx: c.gi,
+		})
 	}
 	for di := range dets {
 		if dets[di].Score < o.ClassThreshold {
@@ -332,6 +357,9 @@ func Measure(frame string, dets []Detection, truth []GT, opts Options) FrameCoun
 		}
 		fc.GroundTruth++
 	}
+	// The per-class partition, from the pairing and the same slices, so its indices
+	// mean what they say.
+	fc.ByClass = classCounts(dets, truth, pairs, usedDet, usedGT, o)
 	return fc
 }
 
@@ -343,6 +371,10 @@ func Measure(frame string, dets []Detection, truth []GT, opts Options) FrameCoun
 func Accumulate(frames []FrameCount, seconds float64, droppedByClass map[string]int, droppedFrames int) Report {
 	rep := Report{MatchThreshold: 0.5, DroppedByClass: droppedByClass, DroppedFrames: droppedFrames}
 	rep.PerFrame = frames
+	// The run's per-class table is the FOLD of its frames' tables, computed here where
+	// the frames are in hand. It is not derived from the run's totals afterwards: the
+	// totals carry no classes, so there is nothing to derive it from.
+	rep.ClassCounts = FoldClassCounts(frames)
 	for _, f := range frames {
 		rep.TruePositives += f.TruePositives
 		rep.FalsePositives += f.FalsePositives

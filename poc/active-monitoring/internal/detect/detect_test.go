@@ -333,14 +333,31 @@ func writeZone(t *testing.T, body string) string {
 	return path
 }
 
-func TestZoneWithNoLinesIsRefused(t *testing.T) {
-	// A zone with no line can only ever produce zero events, and a run that
-	// reports zero events as if the model had found nothing is the most
-	// expensive silence there is.
+// TestALineLessZoneIsLoadedAndCarriesNoDrawing: the primary configuration.
+//
+// This test USED to assert the opposite, that a zone with no lines is refused, and it
+// was right while crossing was the only mode. It became wrong the moment the engine
+// grew a presence path, and it is rewritten rather than deleted because the refusal it
+// checked was a real piece of reasoning and the next reader needs to know what changed:
+// a guard written against an earlier engine outliving the engine is how a primary
+// configuration becomes a refusal.
+//
+// The load succeeds, and `Validate` still refuses every real geometry error, which the
+// three tests below this one continue to check.
+func TestALineLessZoneIsLoadedAndCarriesNoDrawing(t *testing.T) {
 	path := writeZone(t, `{"source":"x","lines":[]}`)
-	_, err := LoadZone(path)
-	if err == nil || !strings.Contains(err.Error(), "no lines") {
-		t.Fatalf("a zone with no lines was accepted: %v", err)
+	z, err := LoadZone(path)
+	if err != nil {
+		t.Fatalf("a line-less zone was refused: %v", err)
+	}
+	if len(z.Lines) != 0 {
+		t.Fatalf("a line-less zone loaded %d line(s)", len(z.Lines))
+	}
+	// And the engine builds on it. `Zone{}` is what `watch` passes when SP_POC_ZONES is
+	// unset, so a Config that works here is a Config the shipped presence path can
+	// build.
+	if _, err := New(Zone{}, testConfig()); err != nil {
+		t.Fatalf("the engine refused the zero Zone that presence mode hands it: %v", err)
 	}
 }
 

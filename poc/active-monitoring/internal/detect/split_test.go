@@ -345,8 +345,9 @@ func TestAnEmptyHealthyFrameIsNotAnAbsence(t *testing.T) {
 // artefact all look like an object for exactly one frame.
 func TestMarkTooNewDemotesAOneFrameTrack(t *testing.T) {
 	seen := map[string]int{"fresh": 1, "old": 9}
+	constMin := func(Box) int { return 3 }
 	boxesIn := []Box{box("fresh", 0.9, 0.1, 0.1, 0.3, 0.4), box("old", 0.9, 0.5, 0.1, 0.7, 0.4)}
-	kept, ghosts := MarkTooNew(boxesIn, func(b Box) int { return seen[b.Class] }, 3)
+	kept, ghosts := MarkTooNew(boxesIn, func(b Box) int { return seen[b.Class] }, constMin)
 	if len(kept) != 1 || kept[0].Class != "old" {
 		t.Fatalf("kept = %v, want only the track seen nine times", classesOf(kept))
 	}
@@ -355,15 +356,49 @@ func TestMarkTooNewDemotesAOneFrameTrack(t *testing.T) {
 	}
 	// A minimum of one is a no-op, and it is spelled out rather than falling out
 	// of a comparison.
-	all, none := MarkTooNew(boxesIn, func(b Box) int { return seen[b.Class] }, 1)
+	all, none := MarkTooNew(boxesIn, func(b Box) int { return seen[b.Class] }, func(Box) int { return 1 })
 	if len(all) != 2 || len(none) != 0 {
 		t.Errorf("a minimum of one demoted something: %v", classesOf(all))
 	}
 	// A nil predicate is a no-op too: a caller with no tracker has not said the
 	// boxes are young, it has said it does not know.
-	all, none = MarkTooNew(boxesIn, nil, 3)
+	all, none = MarkTooNew(boxesIn, nil, constMin)
 	if len(all) != 2 || len(none) != 0 {
 		t.Errorf("a nil predicate demoted something: %v", classesOf(all))
+	}
+	// A nil MINIMUM is a no-op for the same reason, and it is checked separately
+	// because the two are different mistakes: a missing tracker and a missing bar are
+	// not the same absence.
+	all, none = MarkTooNew(boxesIn, func(b Box) int { return seen[b.Class] }, nil)
+	if len(all) != 2 || len(none) != 0 {
+		t.Errorf("a nil minimum demoted something: %v", classesOf(all))
+	}
+}
+
+// TestTheMinimumIsPerBoxAndNotOneNumberForTheFrame: the source-aware minimum. On one
+// frame a car is found by the whole-frame pass and a bird is found in a crop, and they
+// are held to different bars in the same call.
+//
+// This is the test that protects the crop pass's headline case. A bird 40 px across at
+// 30 m arrives as eight pixels after a whole-frame downscale and is below the detection
+// floor, so the crop pass is the only thing that will ever see it, and the crop pass
+// produces it on exactly two samples. A single global minimum either erases the bird or
+// re-admits the shadow the rule exists to stop.
+func TestTheMinimumIsPerBoxAndNotOneNumberForTheFrame(t *testing.T) {
+	seen := map[string]int{"car": 2, "bird": 2}
+	// Two sightings for each. The car's bar is 3 and the bird's is 2.
+	bars := map[string]int{"car": 3, "bird": 2}
+	in := []Box{box("car", 0.9, 0.1, 0.1, 0.3, 0.4), box("bird", 0.8, 0.6, 0.6, 0.65, 0.65)}
+	kept, ghosts := MarkTooNew(in,
+		func(b Box) int { return seen[b.Class] },
+		func(b Box) int { return bars[b.Class] })
+	if len(kept) != 1 || kept[0].Class != "bird" {
+		t.Fatalf("kept = %v, want only the crop-sourced bird at two samples. The two-sample whole-frame "+
+			"car was demoted and the two-sample magnified bird was not, or the other way round, and both "+
+			"are the same defect", classesOf(kept))
+	}
+	if len(ghosts) != 1 || ghosts[0].Class != "car" {
+		t.Fatalf("ghosts = %+v, want the two-sample whole-frame car demoted as too new", ghosts)
 	}
 }
 

@@ -235,7 +235,7 @@ func TestTheStateOfAnEmptyFrameIsNotAskedAndNotNoObjects(t *testing.T) {
 	// must not depend on having a model — a frame with no pixels is not worth
 	// loading a model for.
 	d := &Detector{}
-	ans := d.Detect(7, nil, 0, 0)
+	ans := d.Detect(7, nil, 0, 0, Rect{})
 	if ans.State != StateNotAsked {
 		t.Fatalf("state = %q for a frame with no pixels, want %q", ans.State, StateNotAsked)
 	}

@@ -3,12 +3,12 @@
 Last revised 2026-10-02 (a capture-path pass over `internal/rtsp`,
 `internal/mp4`, `internal/detector` and `securityctl poc`: two defects with
 red-checked tests, the per-frame copies on the hot path removed, and the dead
-code in the poc command taken out â€” see "The 2026-10-02 capture-path pass"
-below. The hackathon Phases 1, 3, 4 and 5 of 2026-09-29 â€” the second AI
+code in the poc command taken out — see "The 2026-10-02 capture-path pass"
+below. The hackathon Phases 1, 3, 4 and 5 of 2026-09-29 — the second AI
 provider behind a shared interface, the vendor write-back and clock seam, the
 vendor-neutrality invariant, the general profile, the fail-closed rule for a
 degradation with no reason, the soak and chaos harness, the adapter probe, the
-acceptance report, and a repo-wide encoding repair â€” are described below where
+acceptance report, and a repo-wide encoding repair — are described below where
 they happened.)
 
 Milestone 1. This document is the source of truth for what is built. The README
@@ -409,10 +409,10 @@ rediscovered as a mystery.
 
 | Found | Cost had it shipped |
 |---|---|
-| `rules simulate` declared its flags twice â€” the tree parsed them and the Run got an empty list | `--bundle` was silently ignored, so the **activation digest was computed for the default bundle** while the operator reviewed a candidate. The gate agreed, because the report was internally consistent about the wrong file. |
+| `rules simulate` declared its flags twice — the tree parsed them and the Run got an empty list | `--bundle` was silently ignored, so the **activation digest was computed for the default bundle** while the operator reviewed a candidate. The gate agreed, because the report was internally consistent about the wrong file. |
 | The evidence store's containment check read `ModeSymlink`, which Windows does not set for a directory junction | `Open` **read files outside the evidence root** on Windows. The one test that would have caught it skipped on Windows. |
 | `ReplayTransport` computed the scenario epoch and discarded it on `_ = epoch` | `observed_at` stayed at the capture instant, so **every fixture test of a time window was measuring the capture date** and passing for the wrong reason. |
-| The rebase's `at.In(parsed.Location())` resolved through the host's zone database | A vendor clock declaring `+02:00` was recorded as `+03:00` â€” a fact about the capture that depended on the machine doing the replay. |
+| The rebase's `at.In(parsed.Location())` resolved through the host's zone database | A vendor clock declaring `+02:00` was recorded as `+03:00` — a fact about the capture that depended on the machine doing the replay. |
 | FU-A reassembly read the indicator's *type* instead of `nal_ref_idc` | Every keyframe stopped being a keyframe. Nothing failed; the muxer wrote the file, ffprobe read it, and it was a clip that could not be seeked or pre-rolled. |
 | `AlreadyQueried` compared an empty `Degraded` against `"none"` | Every observation looked like a failure, so nothing ever counted as asked and the product **paid for every window on every event**, silently. |
 | The detector's baseline absorbed keyframes | The change that started a motion sequence was normalised away and the trigger stayed quiet through the event it exists to catch. |
@@ -431,18 +431,18 @@ symptom was hidden.
 
 One subsystem was taken through hygiene, typing and hot-path work: `internal/rtsp`,
 `internal/mp4`, `internal/detector` and `securityctl poc`. Every existing test in
-those four trees passes **unchanged** â€” the refactor criterion the plan sets for
-this kind of work â€” and two behaviour changes came with a new test each, both run
+those four trees passes **unchanged** — the refactor criterion the plan sets for
+this kind of work — and two behaviour changes came with a new test each, both run
 once with the control removed and watched go red.
 
 | Found | Cost had it shipped |
 |---|---|
-| A recorder refusal ended `poc` with `nil`, and the `strings.HasPrefix(stopReason, "the recorder")` branch meant to catch it was unreachable behind an early `return` | A mid-stream parameter-set change exited **"refused: the run produced no report"** â€” a statement about the reporting, on a capture that had already stopped. `TestPocReportsAStreamTheRecorderRefused` asserts `ExitError` and the absence of that sentence. |
-| `parseSDP` used `PayloadType == 0` as the "no video media section" sentinel | A camera offering payload type 0 â€” a legal RTP value â€” was refused for a media section that was present. `TestAPayloadTypeOfZeroIsNotMistakenForNoVideo` covers both halves: type 0 is accepted, and a description with no video section is still refused. |
+| A recorder refusal ended `poc` with `nil`, and the `strings.HasPrefix(stopReason, "the recorder")` branch meant to catch it was unreachable behind an early `return` | A mid-stream parameter-set change exited **"refused: the run produced no report"** — a statement about the reporting, on a capture that had already stopped. `TestPocReportsAStreamTheRecorderRefused` asserts `ExitError` and the absence of that sentence. |
+| `parseSDP` used `PayloadType == 0` as the "no video media section" sentinel | A camera offering payload type 0 — a legal RTP value — was refused for a media section that was present. `TestAPayloadTypeOfZeroIsNotMistakenForNoVideo` covers both halves: type 0 is accepted, and a description with no video section is still refused. |
 | `Recorder.write` measured a sample with `len(AVCC(p.NALs))`, then `appendSample` built it again | Every frame in every clip was assembled and discarded once before being assembled for real. `AVCCLen` is the measurement; `AVCC` is the construction. |
 | `firstMBInSlice` called `rbsp`, which copies the whole NAL unit to read one Exp-Golomb value | An allocation per slice, on a path that runs for the life of the process. The builder now hands the same scratch buffer back. |
 | `fragmenter.appendSample` routed the sample through `boxWriter.box`, which takes an already-built payload | Each frame was copied into a scratch buffer and then copied again into the file. The `mdat` header is now written in place. |
-| `parseSPS` ran four times per clip â€” on every `Geometry()` call, in `newFragmenter`, and in `Finish` | The banner's `Geometry` re-parsed the parameter set on every poll, and a clip's own width and height came from a parse separate from the one that built the avcC. It is parsed once when the SPS is stored; `Finish` refuses loudly rather than reporting zeroes. |
+| `parseSPS` ran four times per clip — on every `Geometry()` call, in `newFragmenter`, and in `Finish` | The banner's `Geometry` re-parsed the parameter set on every poll, and a clip's own width and height came from a parse separate from the one that built the avcC. It is parsed once when the SPS is stored; `Finish` refuses loudly rather than reporting zeroes. |
 
 Measured over the committed fixture, 20 iterations, before and after on the same
 machine: the read-and-group path went from 248,320 B and 981 allocations per pass
@@ -460,7 +460,7 @@ reuses one, with the aliasing contract written down; the session `state` is a
 carried a `pocRun` type, a `finish` receiver and a `rec` parameter that were all
 read by nobody, and the report's detector name now comes from the detector that
 ran rather than from the frame source. `detector.Decimate`'s saturation clamp was
-provably unreachable â€” every term is at most 255, so the quotient is â€” and is
+provably unreachable — every term is at most 255, so the quotient is — and is
 replaced by the argument that makes the narrowing safe.
 
 `Observed.Luma` now documents that a decoder reusing one output buffer must hand
@@ -470,8 +470,8 @@ scene. Nothing decodes yet, so it is a contract written down rather than a bug
 fixed.
 
 **The two control characters named below are fixed, and the class is now gated.**
-`internal/inbox/inbox.go:160` read `pp.site_ids` where it means `app.site_ids` â€”
-a `0x07` byte where the `a` of `app` belonged â€” and `internal/milestone/epoch_test.go:136`
+`internal/inbox/inbox.go:160` read `pp.site_ids` where it means `app.site_ids` —
+a `0x07` byte where the `a` of `app` belonged — and `internal/milestone/epoch_test.go:136`
 had the same byte before `t.In(`, so the sentence read `t.In(parsed.Location())`
 rather than `time.Time.In(...)`. Both were comments; neither was a functional bug,
 and both are invisible in a diff because the byte is not printable.
@@ -479,7 +479,7 @@ and both are invisible in a diff because the byte is not printable.
 character in a `.go`, `.md` or `.sql` file outside a declared allowlist, so the next
 one is a test failure rather than a line somebody notices while grepping.
 
-**Evidence for this round:** `scripts/verify.ps1` exit 0 on this machine â€”
+**Evidence for this round:** `scripts/verify.ps1` exit 0 on this machine —
 contract-check on all three surfaces, contract-sync, vet, gofmt, `golangci-lint`
 at 0 issues, the generated-code check, `go test -race -p 1 -count=1 ./...`,
 migration-phases, sql-guard, rules-lint and the 61-test Python runtime. It
@@ -498,7 +498,7 @@ suites executed rather than skipped: the recovery drill, the RLS canary, and the
 pipeline's poll / consume / dead-letter suites all ran.
 
 The script also wrote itself a record this time, to
-`dist/verification/verify-<timestamp>.json` â€” the gate list with a per-gate outcome
+`dist/verification/verify-<timestamp>.json` — the gate list with a per-gate outcome
 and duration, tool versions, the commit, whether the database variables were set, and
 a `verified` boolean that is false whenever anything was skipped or failed. Two
 things it says out loud rather than leaving to be inferred:
@@ -512,8 +512,8 @@ things it says out loud rather than leaving to be inferred:
 
 The record also preserved what the console scrolled past: the local toolchain is
 **go1.27.0** while `go.mod` declares `go 1.26.0` and the removed CI pinned
-`GO_VERSION: "1.26"`. The build passes â€” a newer toolchain than the directive is not
-the same thing as a pin below it â€” but the drift is recorded rather than noticed.
+`GO_VERSION: "1.26"`. The build passes — a newer toolchain than the directive is not
+the same thing as a pin below it — but the drift is recorded rather than noticed.
 
 The POC's own gate was run separately and is green
 (`poc/active-monitoring`, every package, no database needed).
@@ -532,7 +532,7 @@ gates**, race detector on, database present, record at
 recorded where they happened rather than only here: `pagination_test.go`'s stub now
 pages **per route** instead of on one process-wide counter, because the adapter now
 makes one read ahead of the feeds and a shared counter meant the order of requests
-decided which page each collection got â€” the test was asserting pagination through
+decided which page each collection got — the test was asserting pagination through
 a fixture that had accidentally coupled it to request ordering. And `ProbeResult`
 gained a `sample` field, so a probe of `/eventTypes` reports the vendor's actual
 response body instead of an item count; without it the one route whose purpose is
@@ -540,12 +540,12 @@ to be learned from a live site reported the only thing the documents already say
 
 A fourth pass recorded the two E1 signatures in
 [`docs/roadmap/master-roadmap.md`](../roadmap/master-roadmap.md): M1's exit gate
-gains **gate 5**, the eventâ†’incident funnel per camera with the ratio published in
+gains **gate 5**, the event→incident funnel per camera with the ratio published in
 the release notes, and **M2 is re-baselined from ~46 to 12 engineer-weeks** with a
 named 19 ew float and four named cuts. Gate 5's arithmetic is the reason it exists:
 the designed load is 1.73M events a day, the North Star is Human Attention Minutes
 per 1,000 security events, and no document stated what fraction of events becomes an
-incident â€” a number that is load-bearing for pricing, packaging and fit. Gate 4
+incident — a number that is load-bearing for pricing, packaging and fit. Gate 4
 already produced it as a byproduct nobody had to write down.
 
 The same pass moved four other things the roadmap had wrong: ONVIF Profile M back
@@ -779,12 +779,12 @@ SQL. The Go layer is written and tested against the shape they propose; only the
 storage cannot yet hold it.
 
 **The rest of the list is ordinary work that has not been done yet**, and nothing
-on it is blocked by a decision: P0.8 (the clock *caller* â€” the probe samples the
+on it is blocked by a decision: P0.8 (the clock *caller* — the probe samples the
 clock, but nothing invokes it from a running service), P0.10 (labelled footage),
 P2.1's UDP half, P4.4's dispatch from a live incident, P4.5's shadow run, P4.6's
-console, and the 7-day and 24-hour runs â€” which are time, not engineering.
+console, and the 7-day and 24-hour runs — which are time, not engineering.
 
-### `securityctl acceptance` â€” the criteria, runnable
+### `securityctl acceptance` — the criteria, runnable
 
 The thirteen criteria are in the plan as a list, and a list is checked by hand or
 not at all. `securityctl acceptance` checks what this build can check and reports
@@ -807,7 +807,7 @@ would be needed and what *is* built.
 reports them in order, failures first. The harness **records** and `Criteria`
 **reads**: nothing in it decides whether it passed, and every criterion is proven
 capable of failing by a test that constructs a run violating it. The cost
-criterion is the one that matters most, and it is exact â€” 200 events at three
+criterion is the one that matters most, and it is exact — 200 events at three
 attempts each make 200 provider calls, because a retry must not pay.
 
 `securityctl soak --chaos` runs four fault-injection cases plus a fifth for the
@@ -816,9 +816,9 @@ thirteen are visibly pending, and none of them is claimed handled.
 
 `securityctl adapter-probe` reaches every route and reports
 confirmed / contradicted / unreachable / skipped, with the field names the vendor
-actually returned. It **never** promotes a route's `Unverified` flag â€” a probe
+actually returned. It **never** promotes a route's `Unverified` flag — a probe
 that marked its own homework would make the flag a claim the tool makes about
-itself â€” and it prints how many routes a human could promote and why that is
+itself — and it prints how many routes a human could promote and why that is
 their decision.
 
 **The systemd unit still says `Type=notify`.** Nothing in the tree implements an
@@ -856,15 +856,15 @@ gives every route a verdict with a line citation. The result:
 |---|---|
 | The path prefix was `/api/v1`. The documented root is `/api/rest/v1`. **Every call would have 404'd**, and a feed that 404s is a site that looks quiet | Corrected, in one constant (`milestone.APIPrefix`) |
 | Bookmarks were read with `GET /Bookmarks`. The vendor says in its own words that bookmarks *"cannot be retrieved by use a GET"*, and the documented read is `POST /bookmarks?task=searchTime` with a search body | Corrected, over a new optional `BookmarkSearcher` |
-| The bookmark write-back sent `bookmarks`/`idempotencyKey`/`deviceRef`/`time`/`label`. **None of those five field names is in the published schema**, and the two the vendor requires â€” `header`, `devicePath` â€” were missing | Corrected, and the required field set is asserted by a test |
-| A successful bookmark write was parsed for an `id` the published answer does not contain; it answers `{"array":[{â€¦,"reference":â€¦}]}` | Corrected |
-| The feed cursor was `?since=`/`?limit=`/`?cursor=` and a `Next-Cursor` header. **None of the four is a parameter this API has**; the documented spellings are `time=gt:'â€¦'`, `size` and `_links.next`. Every poll asked the same unfiltered question and got the oldest stored events first, from the start of the retention window | Corrected. `Next-Cursor` is still honoured, and both mechanisms are recorded rather than one chosen silently |
+| The bookmark write-back sent `bookmarks`/`idempotencyKey`/`deviceRef`/`time`/`label`. **None of those five field names is in the published schema**, and the two the vendor requires — `header`, `devicePath` — were missing | Corrected, and the required field set is asserted by a test |
+| A successful bookmark write was parsed for an `id` the published answer does not contain; it answers `{"array":[{…,"reference":…}]}` | Corrected |
+| The feed cursor was `?since=`/`?limit=`/`?cursor=` and a `Next-Cursor` header. **None of the four is a parameter this API has**; the documented spellings are `time=gt:'…'`, `size` and `_links.next`. Every poll asked the same unfiltered question and got the oldest stored events first, from the start of the retention window | Corrected. `Next-Cursor` is still honoured, and both mechanisms are recorded rather than one chosen silently |
 | Both documented answers wrap their entries in `array`, which the item decoder did not know. A corrected path would have answered with a body the adapter refused to read | Corrected |
-| `Priority`, `TimeSpan`, `ImagePath` and `VideoRecordingStartTime` were assumed event fields. **They do not exist in this API** â€” they are the older XProtect Event Manager shape | Removed from the assumption; recorded in audit Â§3 |
-| `type` on an event is a **GUID**, not a name, so no event type normalises yet | **Half open.** The Configuration API route (`GET /eventTypes`) is declared and the site's own name for a GUID is resolved per site and carried on the record, the envelope and the dead-letter reason. The alias table from a vendor name to a canonical type is **still reserved to a human** â€” see below |
+| `Priority`, `TimeSpan`, `ImagePath` and `VideoRecordingStartTime` were assumed event fields. **They do not exist in this API** — they are the older XProtect Event Manager shape | Removed from the assumption; recorded in audit §3 |
+| `type` on an event is a **GUID**, not a name, so no event type normalises yet | **Half open.** The Configuration API route (`GET /eventTypes`) is declared and the site's own name for a GUID is resolved per site and carried on the record, the envelope and the dead-letter reason. The alias table from a vendor name to a canonical type is **still reserved to a human** — see below |
 | Four routes (`System/UserGroups`, `Alarms`, `ResourceGroups`, `System/Time`) and one name (`Servlets`) appear in **neither** document | **Open.** `NOT-ANSWERABLE-FROM-DOCS`: absence from a document is not evidence of absence from the product |
-| A live clock endpoint does not exist in either document, so the clock-drift gate has no working input | **Open.** Recorded in audit Â§2.7 with a candidate (the HTTP `Date` header) |
-| A tenth route, `GET /eventTypes`, was added. The documents name the resource twice (`events-rest-v1.reference.md:40`, `:42`) and **never show a body**, so the route declares no response `Expect` at all | **Declared, `Unverified`.** Audit Â§2.8. The route-audit gate caught it the moment it was declared â€” that is the gate working, not a gap in it |
+| A live clock endpoint does not exist in either document, so the clock-drift gate has no working input | **Open.** Recorded in audit §2.7 with a candidate (the HTTP `Date` header) |
+| A tenth route, `GET /eventTypes`, was added. The documents name the resource twice (`events-rest-v1.reference.md:40`, `:42`) and **never show a body**, so the route declares no response `Expect` at all | **Declared, `Unverified`.** Audit §2.8. The route-audit gate caught it the moment it was declared — that is the gate working, not a gap in it |
 
 `internal/milestone/route_audit_test.go` is the gate. It fails if a route has no
 verdict in the audit, if a verdict names a route the code no longer calls, if the
@@ -884,11 +884,11 @@ The half of H1 that did not need a decision has landed.
 **What was wrong.** `type` on a documented event is a GUID
 (`events-rest-v1.reference.md:289-297`, `:380-388`), so every event from a real
 server normalised to `unknown.<guid>`, was flagged `Malformed`, and was
-dead-lettered with a string no operator can look up. Nothing was lost â€” the event
-is stored and the reason is visible â€” but the feed could not work.
+dead-lettered with a string no operator can look up. Nothing was lost — the event
+is stored and the reason is visible — but the feed could not work.
 
 **What landed.** `GET /api/rest/v1/eventTypes` is declared
-(`routes.go`, audit Â§1 row 10, `Unverified` like everything else) and read once per
+(`routes.go`, audit §1 row 10, `Unverified` like everything else) and read once per
 poll. The site's **own** name for each GUID is resolved per `(tenant, site)`,
 carried on `RawRecord.SourceTypeName`, quoted in the dead-letter reason, and
 written into the stored envelope as `_resolvedEventTypeName` so the consume loop
@@ -896,7 +896,7 @@ re-derives the same type weeks later (invariant 2). A GUID the site did not answ
 for is **unresolved, never defaulted**.
 
 **The trap this had to avoid.** The GUIDs are **per-site configuration**, not
-global constants â€” `481d4d6c-â€¦` is an instance in one customer's XProtect and the
+global constants — `481d4d6c-…` is an instance in one customer's XProtect and the
 same concept carries a different GUID at the next site. A compiled-in `guid ->
 motion` table would work perfectly at the design partner and silently dead-letter
 every event at customer two, invisible until there was a customer two, and
@@ -910,15 +910,15 @@ is what a compiled-in table degenerates into, fails it and four other tests.
 a canonical type changes `rules.KnownEventTypes` and the published rule-bundle
 vocabulary, which `AGENTS.md` reserves. It is also **blocked on evidence the code
 cannot produce**: the names have to be a real site's, and no Milestone server has
-ever answered a request from this codebase. The sequence is in audit Â§5 and
-[`handover.md`](vendor/milestone/handover.md) â€” probe the site, read the
+ever answered a request from this codebase. The sequence is in audit §5 and
+[`handover.md`](vendor/milestone/handover.md) — probe the site, read the
 `/eventTypes` row's `sample` (the probe now reports the first item's body, not
 only an item count), then decide on **names** rather than GUIDs.
 
 `normalizeEventType` and `rules.KnownMilestoneEventTypes` are **unchanged**. The
 resolved name is an input to the existing normalizer, so a site whose names happen
 to be spellings the platform already knows starts working with no table at all, and
-one whose are not dead-letters exactly as before â€” with the vendor's own string in
+one whose are not dead-letters exactly as before — with the vendor's own string in
 the reason instead of an opaque GUID.
 
 ### A documented event is now attributable, and the one that failed silently is the one that mattered
@@ -928,8 +928,8 @@ decision. **The third did not, and it was the worst of the three**, so it is now
 closed:
 
 `SourceDeviceRef` was empty for every documented event. `sourceDeviceRef` looked for
-a bracketed id in `Source` â€” the shape `"Entrance Camera 01 [CAM-001]"`, which
-appears in no Milestone document â€” while the documented value is
+a bracketed id in `Source` — the shape `"Entrance Camera 01 [CAM-001]"`, which
+appears in no Milestone document — while the documented value is
 `cameras/e028f597-c64b-4f27-bb8d-08f5cd768e1c` (EVENTS:291, bare `{id}` also
 allowed at :409). So every event from a real server arrived with **no device
 attached**. Nothing crashed, nothing was flagged, nothing was logged: zone rules and
@@ -937,7 +937,7 @@ device-filtered rules simply stopped matching. That is indistinguishable from a 
 where nothing is happening, which is the worst way for a defect to present.
 
 It is now parsed in both documented forms, returning the identifier without the
-collection prefix â€” the thing `devices.source_device_id` holds and
+collection prefix — the thing `devices.source_device_id` holds and
 `resolveDevice` matches on. Red-checked: disabling the parse fails three tests.
 `adapter_test.go` now feeds the vendor's own sample body
 (`events-rest-v1.reference.md:380-388`) through the parser, which is the only test
@@ -963,7 +963,7 @@ measured" on every install and never once had an opinion. A pilot could not meas
 how often the AI path was actually live, which is the single number the
 `incidents.degraded` column exists to provide.
 
-Two were free and are now written â€” `SampleGauges` reads both in one query,
+Two were free and are now written — `SampleGauges` reads both in one query,
 `count(*) FILTER (WHERE state IN ('open','in_review'))` and
 `count(*) FILTER (WHERE degraded)`. "Open" counts an incident in review as well as
 one nobody has touched, because both consume operator attention and a gauge that
@@ -974,7 +974,7 @@ of the eight are one line away: `CounterAuditAppends` (the writer counts none of
 the rows it appends), `CounterOutboxDelivered` (`DrainOnce` already returns that
 count) and `CounterRuleBundleActivated`.
 
-That test found two I had missed by hand â€” which is the argument for it, and it is
+That test found two I had missed by hand — which is the argument for it, and it is
 the same argument as `sqlguard` and `rlsrole`: a class of defect that is invisible
 in a diff needs a gate, and a list is better than nothing but a list that is checked
 is better than a list.
@@ -1459,7 +1459,7 @@ recreates every `site_isolation` policy as RESTRICTIVE, so the effective
 predicate is tenant AND site. `ALTER POLICY` only supports `RENAME TO`, so each
 is dropped and recreated carrying its original USING expression and role list
 over verbatim, and a policy whose role list is anything but PUBLIC is refused
-rather than guessed â€” recreating it with different roles would be a privilege
+rather than guessed — recreating it with different roles would be a privilege
 change disguised as a scope change.
 
 The change is fail-closed, and that shaped how it landed. A statement that
@@ -1500,7 +1500,7 @@ so a path added tomorrow is covered by construction.
 
 `runtime.py` verified `a` using the un-cofactored equation `[S]B == R + [k]A`,
 justified by a comment that misattributed the choice to the RFC's reference
-implementation. It is now cofactored, and it requires BOTH equations â€” which is
+implementation. It is now cofactored, and it requires BOTH equations — which is
 strictly smaller than either, because multiplication by the cofactor is a group
 homomorphism, so the plain equation implies the cofactored one and never the
 reverse, and checking only the cofactored form accepts a superset of what it
@@ -1513,8 +1513,8 @@ proved the direction rather than asserting it.
 
 The hole was a small-order public key. For an order-8 key, `[k]A` is the
 identity for every `k`, so both equations are satisfied and any signature
-verifies. Two cases are now refused outright â€” the identity element as a public
-key, and an order-8 key with a zero signature â€” and both were confirmed to
+verifies. Two cases are now refused outright — the identity element as a public
+key, and an order-8 key with a zero signature — and both were confirmed to
 return `True` against the pre-change code. The suite is 61 tests, from 49.
 ### Still open
 
@@ -1538,9 +1538,9 @@ return `True` against the pre-change code. The suite is 61 tests, from 49.
   outage and a read that cannot is a blank console.
 
 - **The verifier search is not finished.** Three adversarial reviews in one day
-  found ninety defects between them. The two gates added afterwards â€”
+  found ninety defects between them. The two gates added afterwards —
   `internal/sqlguard` for the mutation class, `internal/rlsrole` for the scope
-  class â€” exist because the classes recurred rather than because the instances
+  class — exist because the classes recurred rather than because the instances
   did. The classes they do not cover (a counter computed in Go from a stale
   read, a test that accepts the failure it should exclude, an exported symbol
   with no reader) are still found by reading. A fourth review is not a plan; it

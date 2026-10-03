@@ -175,6 +175,17 @@ type RunnerOptions struct {
 	// carries no class per box, and routing real detections through it would
 	// discard the one thing that makes a detection measurable.
 	Detector Detector
+	// Crop is the crop pass: novelty proposes a region, the detector is run on that
+	// region alone at full resolution, and the result is unioned with the whole-frame
+	// boxes.
+	//
+	// It is additive by construction and the whole-frame pass is untouched by it, which
+	// is what makes it safe to ship as the default: setting SP_POC_CROP_PASS=false
+	// restores the previous behaviour exactly, with no state to unwind.
+	//
+	// `Proposer` is nil unless the crop pass is enabled, and an enabled pass with no
+	// proposer is refused at startup rather than running and finding nothing.
+	Crop CropPass
 	// DetIdentity is what every decision made from a detected box must name: the
 	// model path, its SHA-256, its recorded licence and the input size it ran at.
 	// RC-18 is this bundle reaching the database.
@@ -236,6 +247,27 @@ type Runner struct {
 	// the only thing in this run that can answer "why zero detections".
 	detectorsMu sync.Mutex
 	detectors   detect.Counters
+	// crops is the crop pass's own arithmetic, and it is the only thing in this run that
+	// can answer "why did the crop pass find nothing".
+	//
+	// It exists because a crop pass that stops working does NOT look broken: the
+	// whole-frame pass is still finding cars, the run is still clean, and the only
+	// symptom is that the smallest objects have gone missing, which is exactly the
+	// symptom the whole project was built to fix and exactly the one nobody would
+	// notice. Every counter here is a count of something that did NOT happen, and those
+	// are the ones that would otherwise be invisible.
+	cropsMu sync.Mutex
+	crops   CropCounters
+	// viewChanges and viewTracksDropped are the view-change arbitration's own totals.
+	//
+	// They are counted HERE and not read from the detector because the number a report
+	// needs is not "how many times the camera moved" but "how many things the pipeline
+	// threw away because it moved". A camera moved once and 14 tracks were dropped is a
+	// different run from a camera moved once and nothing was dropped, and only the second
+	// figure tells an operator what their event stream just did.
+	viewMu            sync.Mutex
+	viewChanges       int
+	viewTracksDropped int
 	// attribution is the RC-18 bundle for the decision currently being recorded.
 	//
 	// It is a field rather than a parameter because `handleIncident` reaches
@@ -624,6 +656,11 @@ func (r *Runner) process(ctx context.Context, f recorder.Frame) {
 	r.mu.Unlock()
 
 	var boxes []ai.Box
+	// cutBoxes is the crop pass's own contribution to this frame. It travels beside the
+	// union rather than inside it because three consumers need to know which box came
+	// from where: the source-aware track minimum, the stored `region_source`, and the
+	// report's crop-pass block.
+	var cutBoxes []ai.Box
 	telemetry := ai.Telemetry{}
 	// aiState is the four-word vocabulary state, and it defaults to `not_asked`
 	// — the honest reading when no model is configured at all, rather than an
@@ -641,7 +678,7 @@ func (r *Runner) process(ctx context.Context, f recorder.Frame) {
 
 	switch {
 	case r.opt.Detector != nil:
-		boxes, aiState, telemetry, detRefusal, detLatency, detP50, detP95, detP99 = r.runDetector(f)
+		boxes, cutBoxes, aiState, telemetry, detRefusal, detLatency, detP50, detP95, detP99 = r.runDetector(f)
 	case r.opt.Trigger != nil:
 		boxes, aiState = r.measureTrigger(f)
 	default:
@@ -659,6 +696,11 @@ func (r *Runner) process(ctx context.Context, f recorder.Frame) {
 		Boxes:      toDetect(boxes),
 		AIState:    aiState,
 		Candidates: telemetry.Candidates,
+		// The crop pass's boxes are handed over BY VALUE and not re-derived from a
+		// rounded region. Answer.Cut is a membership set over the same boxes the engine
+		// is about to be given, and anything derived here would be a second answer to
+		// "which box was magnified" that could disagree with the first.
+		Cut: toDetect(cutBoxes),
 	})
 	// The split's own arithmetic is observed here and nowhere else, because this
 	// is the only place that has both the split and the frame it came from.
@@ -740,33 +782,32 @@ func (r *Runner) process(ctx context.Context, f recorder.Frame) {
 // `measureTrigger` assigns one configured class per frame, which is right for a
 // change-fraction and would discard every class a model finds.
 //
-// It also returns seven values, which is ugly and is stated rather than hidden: a
-// detector's answer is genuinely seven facts, and bundling them into a struct that
-// the frame loop immediately unpacks would be the same information with a second
-// type to keep in sync.
-func (r *Runner) runDetector(f recorder.Frame) (boxes []ai.Box, state string, tel ai.Telemetry,
+// The EIGHTH thing it returns is the set of boxes the crop pass produced, kept SEPARATE
+// from the union rather than merged into it. Two reasons, both about the truth of the
+// record: the engine holds a source-aware track minimum that applies a lower bar to a
+// magnified sighting, so it has to know which boxes were magnified; and `region_source`
+// is a stored column, so a later reader has to be able to ask "was this found in a crop"
+// without re-deriving it from a rounded rectangle.
+//
+// The whole-frame pass runs FIRST and is not conditional on anything. It finds cars and
+// people, it costs one inference, and nothing about the crop pass changes it, which is
+// what makes the crop pass additive and the rollback one environment variable rather
+// than a code change.
+func (r *Runner) runDetector(f recorder.Frame) (boxes []ai.Box, cuts []ai.Box, state string, tel ai.Telemetry,
 	refusal *ortdetect.Refusal, latencyMS float64, p50, p95, p99 *float64) {
 
-	ans := r.opt.Detector.Detect(f.Seq, f.RGB, f.Width, f.Height)
+	ans := r.opt.Detector.Detect(f.Seq, f.RGB, f.Width, f.Height, ortdetect.Rect{})
 	state = ans.State
 	latencyMS = ans.LatencyMS
 	refusal = ans.Refusal
 	tel = ans.Telemetry.ToAITelemetry()
 	r.lat.Add(time.Duration(ans.LatencyMS * float64(time.Millisecond)))
 
-	// The percentiles come from the DETECTOR, not from here. The runner's own `lat`
-	// is a running figure over every measured frame; the throughput gate needs the
-	// detector's own p99 over its own bounded window, and a p99 cannot be computed
-	// from a mean at all.
+	// The percentiles come from the DETECTOR, not from here. The runner's own `lat` is a
+	// running figure over every measured frame; the throughput gate needs the detector's
+	// own p99 over its own bounded window, and a p99 cannot be computed from a mean at
+	// all.
 	p50, p95, p99 = percentilesFor(r.opt.Detector)
-
-	if len(ans.Boxes) == 0 {
-		// `no_objects` and `degraded` both land here and both are correct: the
-		// STATE carries the difference and the boxes are empty either way. What must
-		// not happen is the boxes being empty for a third reason and the state
-		// saying `asked_answered`.
-		return nil, state, tel, refusal, latencyMS, p50, p95, p99
-	}
 
 	out := make([]ai.Box, 0, len(ans.Boxes))
 	for _, b := range ans.Boxes {
@@ -778,14 +819,114 @@ func (r *Runner) runDetector(f recorder.Frame) (boxes []ai.Box, state string, te
 			r.logf("frame %d: the detector produced a box this build refuses to pass on: %+v", f.Seq, b)
 			continue
 		}
-		// The class goes through UNCHANGED. Every field of the box is the model's
-		// own, in the model's own coordinates, and the tracker reads them without
-		// rescaling — which is why this is a copy of the struct rather than a
-		// reconstruction field by field. A reconstruction is a second place for a
-		// coordinate to be rescaled.
+		// The class goes through UNCHANGED. Every field of the box is the model's own,
+		// in the model's own coordinates, and the tracker reads them without rescaling,
+		// which is why this is a copy of the struct rather than a reconstruction field
+		// by field. A reconstruction is a second place for a coordinate to be rescaled.
 		out = append(out, ai.Box(b))
 	}
-	return out, state, tel, refusal, latencyMS, p50, p95, p99
+
+	// The crop pass. By construction the union is a SUPERSET of the whole-frame boxes:
+	// rule 1 in crop.go skips any region a whole-frame box already covers, so the two
+	// passes cannot both report the same object unless their boxes differ by more than
+	// an IoU of 0.5.
+	cuts, ct := r.cropPass(f, out)
+	boxes, kept, deduped := unionBoxes(out, cuts)
+	ct.BoxesKept = kept
+	ct.DedupedAway = deduped
+	r.cropsMu.Lock()
+	r.crops = r.crops.Add(ct)
+	r.cropsMu.Unlock()
+
+	if len(boxes) == 0 {
+		// `no_objects` and `degraded` both land here and both are correct: the STATE
+		// carries the difference and the boxes are empty either way. What must not
+		// happen is the boxes being empty for a third reason and the state saying
+		// `asked_answered`.
+		return nil, cuts, state, tel, refusal, latencyMS, p50, p95, p99
+	}
+	return boxes, cuts, state, tel, refusal, latencyMS, p50, p95, p99
+}
+
+// cropPass runs the crop proposals and the inferences they justify.
+//
+// It is a method rather than a free function so the counters land on the runner and the
+// refusals go through the same rate-limited logger the whole-frame pass uses: a
+// misconfigured crop is the same kind of fault as a misconfigured detector, and logging
+// it by a second path would produce 9,000 lines a second at 25 fps.
+func (r *Runner) cropPass(f recorder.Frame, whole []ai.Box) ([]ai.Box, CropCounters) {
+	cp := r.opt.Crop
+	if !cp.Enabled || cp.Proposer == nil {
+		return nil, CropCounters{}
+	}
+	regions, ct := proposeCrops(frameSource{
+		Seq: f.Seq, RGB: f.RGB, Width: f.Width, Height: f.Height, AtNS: f.At.UnixNano(),
+	}, whole, cp)
+	// The view-change arbitration, applied to the TRACKER.
+	//
+	// The crop gate already dropped its regions for a moved frame. The tracker did not,
+	// and that is where the flood would come from: every box in the panned view falls
+	// inside some old track's neighbourhood and the association threshold would match
+	// them, so one camera move becomes fifty tracks and fifty presence events.
+	//
+	// So the tracks go, the count comes back, and presence is gated until the view
+	// settles. It does not duplicate the camera-integrity event: the rule is that ONE
+	// thing is said about the camera and nothing else is said about the scene.
+	//
+	// `Engine` is nil in a trigger-mode run that declared no engine, and a nil check
+	// here rather than an assumption, because the arbitration is about the TRACKER and
+	// there is no tracker to arbitrate.
+	switch ct.ViewVerdict {
+	case novelty.ViewChanged:
+		dropped := 0
+		if r.opt.Engine != nil {
+			dropped = r.opt.Engine.InvalidateAll()
+			r.opt.Engine.SetSuppressed(true)
+		}
+		r.viewMu.Lock()
+		r.viewChanges++
+		r.viewTracksDropped += dropped
+		r.viewMu.Unlock()
+		r.logf("frame %d: the view CHANGED. %d live track(s) invalidated, and presence events are "+
+			"suppressed until the view settles. One thing is said about the camera; the silence "+
+			"about the scene is an absence of findings and not a claim that nothing happened",
+			f.Seq, dropped)
+	case novelty.ViewSettling:
+		if r.opt.Engine != nil {
+			r.opt.Engine.SetSuppressed(true)
+		}
+	default:
+		if r.opt.Engine != nil {
+			r.opt.Engine.SetSuppressed(false)
+		}
+	}
+	if len(regions) == 0 {
+		return nil, ct
+	}
+	out := make([]ai.Box, 0, len(regions))
+	for _, reg := range regions {
+		ans := r.opt.Detector.Detect(f.Seq, f.RGB, f.Width, f.Height, reg.rect)
+		r.lat.Add(time.Duration(ans.LatencyMS * float64(time.Millisecond)))
+		// A refusal on ONE crop is not a refusal of the frame. The whole-frame boxes are
+		// already measured and already committed to this frame's answer, and discarding
+		// them because a crop failed would turn a partial success into a total one. So it
+		// is counted and named, and the boxes kept.
+		if ans.Refusal != nil {
+			ct.Refusals++
+			r.noteRefusal(f.Seq, ans.Refusal)
+			continue
+		}
+		for _, b := range ans.Boxes {
+			if !b.Valid() {
+				r.logf("frame %d: the crop pass at %d,%d %dx%d produced a box this build refuses to pass on: %+v",
+					f.Seq, reg.rect.X, reg.rect.Y, reg.rect.W, reg.rect.H, b)
+				continue
+			}
+			out = append(out, ai.Box(b))
+		}
+	}
+	ct.BoxesFound = len(out)
+	return out, ct
 }
 
 // noteRefusal logs a detector refusal by name, no more than a few times a second.
@@ -1197,7 +1338,7 @@ func (r *Runner) askObserver(ctx context.Context, id string, ev TriggerEvent, re
 		r.recordObservation(ctx, id, ev, obs, "")
 		return obs
 	}
-	obs := r.opt.Observer.Observe(ctx, id, ev.PromptID, clip, "video/mp4")
+	obs := r.opt.Observer.Observe(ctx, id, ev.PromptID, ev.DetectionClass, clip, "video/mp4")
 	if obs.DetectionID == "" {
 		obs.DetectionID = id
 	}

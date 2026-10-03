@@ -162,9 +162,30 @@ func run() error {
 		// here. It was, and the log read `source: source: live rtsp camera`.
 		logf("%s", spec.LabelRedacted())
 	}
-	zone, err := detect.LoadZone(cfg.ZonesPath)
-	if err != nil {
-		return err
+	// The zone is loaded ONLY when one is named, and the mode is logged either way.
+	//
+	// This used to be an unconditional `detect.LoadZone(cfg.ZonesPath)`, which was correct
+	// when crossing was the only mode and became a refusal the moment presence arrived: an
+	// empty path is not a missing file, it is the primary configuration.
+	//
+	// The log line is not decoration. "No silent default" is the rule this whole
+	// configuration package exists to enforce, and a mode change that is only visible in the
+	// run's behaviour is exactly the silent default the rule is about: an operator who
+	// upgrades and gets a different detector with no line drawn must be able to find out from
+	// the log, not from the absence of events.
+	var zone detect.Zone
+	if cfg.ZonesPath == "" {
+		logf("zone: none - PRESENCE MODE. Every tracked object seen often enough is reported once, with " +
+			"its class and its measured box. Set SP_POC_ZONES to a zone file for line-crossing mode; " +
+			"that one variable is the whole of the rollback.")
+	} else {
+		var zerr error
+		zone, zerr = detect.LoadZone(cfg.ZonesPath)
+		if zerr != nil {
+			return zerr
+		}
+		logf("zone: %s - LINE-CROSSING MODE. Only objects that cross one of %d named line(s) are reported",
+			cfg.ZonesPath, len(zone.Lines))
 	}
 	engine, err := detect.New(zone, detect.Config{
 		ScoreThreshold: cfg.ScoreThreshold, Classes: cfg.Classes, IoU: cfg.TrackIoU,
@@ -187,6 +208,11 @@ func run() error {
 		// the report says the operator set it and the run did not obey it.
 		GhostScore: cfg.GhostMinScore, MinArea: cfg.MinBoxArea,
 		TrackMinFrames: cfg.TrackMinFrames, MaxBoxesDrawn: cfg.MaxBoxesDrawn,
+		// The source-aware half of the minimum. It is handed over unconditionally rather
+		// than only when the crop pass is enabled, because the engine refuses a crop
+		// minimum above the global one and that refusal has to be reachable from a
+		// configuration that will not run.
+		CutMinFrames: cfg.CropMinFrames,
 	})
 	if err != nil {
 		return err
@@ -314,6 +340,10 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	crop, err := buildCrop(cfg, logf)
+	if err != nil {
+		return err
+	}
 
 	if err := rec.Start(context.Background()); err != nil {
 		return err
@@ -350,6 +380,7 @@ func run() error {
 		Client: aic, XProtect: push, Engine: engine, Recorder: rec,
 		TriggerMode: cfg.TriggerMode, Trigger: trigger, Observer: observer,
 		Detector: detector, DetIdentity: detIdentity, BoxLogFrames: cfg.BoxLogFrames,
+		Crop:  crop,
 		AIFPS: cfg.AIFPS,
 		DetDecode: soak.DetDecode{
 			NMSClass: cfg.DetNMSClass, NMSGlobal: cfg.DetNMSGlobal,
@@ -660,8 +691,8 @@ func buildObserver(cfg config.Config, logf func(string, ...any)) (soak.Observer,
 // one way: the pipeline may use a client, and a client does not use a pipeline.
 type vlmObserver struct{ c *vlm.Client }
 
-func (o vlmObserver) Observe(ctx context.Context, detectionID, class string, clip []byte, mediaType string) vlm.Observation {
-	return o.c.Observe(ctx, detectionID, class, clip, mediaType)
+func (o vlmObserver) Observe(ctx context.Context, detectionID, promptID, detectedClass string, clip []byte, mediaType string) vlm.Observation {
+	return o.c.Observe(ctx, detectionID, promptID, detectedClass, clip, mediaType)
 }
 
 func (o vlmObserver) PromptIDFor(class string) (string, string, error) {
@@ -670,6 +701,69 @@ func (o vlmObserver) PromptIDFor(class string) (string, string, error) {
 		return "", "", err
 	}
 	return p.ID, p.Version, nil
+}
+
+// buildCrop assembles the crop pass for this run, or refuses.
+//
+// It exists as its own function because the crop pass needs a SECOND novelty engine and
+// that fact has to be visible in one place. In `detector` mode there is no `Trigger` at
+// all, the detector answers directly, so there is nothing for the trigger to do, which
+// means the engine that proposes crop regions has to be built here rather than by
+// `buildTrigger`. A reader looking at `buildTrigger` alone would conclude this run has
+// no way to know where to look.
+//
+// It is a second engine and not a shared one on purpose. The trigger engine advances its
+// previous-frame state on every call, and two consumers sharing one engine would halve
+// the effective novelty rate and interleave the two engines' frames, so a per-frame
+// state machine driven twice as fast would see every other frame. They also measure
+// different things: the trigger proposes whole-frame change-fraction regions against its
+// own threshold, and the crop gate proposes candidate regions against MinArea, which is
+// a different bar for a different purpose.
+//
+// An enabled pass with no proposer is REFUSED rather than running and finding nothing. A
+// crop pass that silently finds nothing is indistinguishable, in every output the run
+// produces, from a detector that cannot see small objects, which is the failure the crop
+// pass was built to remove.
+func buildCrop(cfg config.Config, logf func(string, ...any)) (soak.CropPass, error) {
+	cp := soak.CropPass{
+		Enabled:       cfg.CropPass,
+		MinArea:       cfg.CropMinArea,
+		Pad:           cfg.CropPad,
+		MaxRegions:    cfg.CropMaxRegions,
+		CropMinFrames: cfg.CropMinFrames,
+	}
+	if !cp.Enabled {
+		logf("crop pass: OFF. One downscaled pass over the whole frame; vehicles and people at range, " +
+			"and nothing smaller. Set SP_POC_CROP_PASS=true to propose regions with the novelty engine " +
+			"and re-measure each one at full resolution.")
+		return cp, nil
+	}
+	// The gate's own settings come from the novelty configuration rather than from
+	// `novelty.Defaults()`, so the numbers the report prints and the numbers the gate used
+	// are the same ones. `MinCells` is the floor that makes a component an object at all,
+	// and `MaxCandidates` bounds the gate's work before the configuration's own region cap
+	// does.
+	nc := novelty.Config{
+		Mode: novelty.ModeTemporal, Threshold: cfg.NoveltyThreshold, Release: cfg.NoveltyRelease,
+		NoiseK: 6, FloorLuma: 10.0, GridWidth: cfg.NoveltyGrid,
+		MinCells: 4, Sustain: cfg.NoveltySustain, Cooldown: cfg.Cooldown,
+		MaxCandidates: cfg.CropMaxRegions * 4,
+	}
+	if err := nc.Validate(); err != nil {
+		return soak.CropPass{}, fmt.Errorf("SP_POC_CROP_PASS=true: the crop pass's novelty engine is not usable: %w", err)
+	}
+	eng, nerr := novelty.New(nc)
+	if nerr != nil {
+		return soak.CropPass{}, fmt.Errorf("SP_POC_CROP_PASS=true: the crop pass's novelty engine could not be built: %w", nerr)
+	}
+	cp.Proposer = eng
+	cp.Gate = novelty.NewGate(cfg.NoveltyFPS, cfg.AIFPS)
+	logf("crop pass: ON. The novelty engine proposes regions of at least %.5f of the frame; each is "+
+		"padded by %.2f of its own size and measured at full resolution. At most %d crop(s) per frame, "+
+		"and a crop-sourced track needs %d sightings against %d for a whole-frame one. %s",
+		cp.MinArea, cp.Pad, cp.MaxRegions, cp.CropMinFrames, cfg.TrackMinFrames,
+		cp.RateSummary(cfg.AIFPS))
+	return cp, nil
 }
 
 // buildTrigger builds the local novelty engine for this run's trigger mode.

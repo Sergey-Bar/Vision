@@ -410,7 +410,7 @@ func cmdSim(args []string) error {
 }
 
 func cmdFetchModel(args []string) error {
-	flags, err := flagSet("fetch-model", map[string]string{"url": "", "out": "models/yolov8n.onnx"}, args)
+	flags, err := flagSet("fetch-model", map[string]string{"url": "", "out": "models/yolov4n.onnx"}, args)
 	if err != nil {
 		return err
 	}
