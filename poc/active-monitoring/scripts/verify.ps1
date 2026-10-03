@@ -807,6 +807,53 @@ file = 'internal\detect\engine.go'
       to   = '		shape = ort.NewShape(1, c, h, w) // REDCHECK RC-30: NHWC is fed as NCHW'
       pkg  = './internal/ortdetect'
       why  = 'a tensor of exactly the right size fed in the wrong order decodes to boxes that are plausible and wrong, while every artefact describing the model says the layout was honoured'
+    },
+    # --- the caller side: a hand-built environment that fell behind the schema.
+    #
+    # Every control above removes a guard from inside the pipeline. These three
+    # remove a NAME or a VALUE from `demoEnv`, which is a slice of `NAME=value`
+    # strings in `cmd/pocctl` that `pocctl demo` hands to a child process. They are
+    # here because the defect they guard is the one this table could not see at
+    # all: a required variable added to `internal/config` does not reach a
+    # hand-built slice, every test in `internal/config` stays green, and the demo
+    # refuses to start at step 6 of 7 — after two builds, after the fault
+    # rehearsal, and after the push target is listening. The schema does not know
+    # the slice exists, so nothing in the schema could catch it. Only running the
+    # command did.
+    @{
+      # The first entry of the eight `when: SP_POC_TRIGGER_MODE=detector`
+      # variables. One name stands for all eight: they were added to the schema on
+      # one commit and the demo's slice was not updated, and the mutation renames
+      # rather than deletes so the slice still parses — a deleted line is a
+      # compile error, which this gate reads as a red for the wrong reason.
+      name = 'the demo environment names every variable the schema requires'
+      file = 'cmd\pocctl\demo.go'
+      from = '"SP_POC_DET_MODEL=" + model,'
+      to   = '"SP_POC_DET_MODEL_RENAMED_BY_REDCHECK=" + model,'
+      pkg  = './cmd/pocctl'
+      why  = 'the detector opens no file, draws nothing, and reports a zero detection rate at full health with no error anywhere. Every number in the report is true and describes a run that never looked at a frame'
+    },
+    @{
+      # The half of the score chain that is checked ONLY in detector mode, and the
+      # one relation of the three that no downstream arithmetic can detect.
+      name = 'the score chain in the demo environment ascends'
+      file = 'cmd\pocctl\demo.go'
+      from = '"SP_POC_DET_SCORE=0.005",'
+      to   = '"SP_POC_DET_SCORE=0.5",'
+      pkg  = './cmd/pocctl'
+      why  = 'a box the model scored below its own emit floor is drawn as a ghost while a box it did emit is refused, so the screen shows objects that are not there and omits objects that are. The run completes and every number in the report is computed over that picture'
+    },
+    @{
+      # A closed set of three trigger modes and a hand-written branch per mode,
+      # where the mode that became the shipped default is the one nobody added a
+      # branch for. This one printed, on the first screen of the headline
+      # command, that the run was going to be refused — and the run completed.
+      name = 'the banner describes the trigger the demo actually runs'
+      file = 'cmd\pocctl\demo.go'
+      from = 'case soak.TriggerDetector:'
+      to   = 'case "not-a-mode":'
+      pkg  = './cmd/pocctl'
+      why  = 'the banner is derived from the configuration on purpose, and a sentence borrowed from another mode tells an operator reading a cost argument that this run has no ONNX in it while the model and its SHA-256 are printed two lines below'
     }
   )
   Push-Location $PWD
@@ -841,7 +888,37 @@ file = 'internal\detect\engine.go'
           Pass "$($c.name) removed -> the suite went red, as it must"
         }
       } finally {
-        [System.IO.File]::WriteAllText($full, $original)
+        # The restore is RETRIED, and it fails LOUDLY if it genuinely cannot happen.
+        #
+        # A bare `[System.IO.File]::WriteAllText` here left production files
+        # MUTATED whenever the write lost a race: on Windows a `go test` binary
+        # that has just exited can still hold the source file mapped for a moment,
+        # the write throws sharing-violation, the exception escapes a `finally`
+        # and the loop stops — and the file on disk is now the mutation. The next
+        # `go build`, the next `git diff` and the next person all read a broken
+        # tree, and nothing in the output says why.
+        #
+        # So: a handful of attempts a few hundred milliseconds apart, because the
+        # window is the runtime tearing down its own mapping, and then a hard
+        # failure naming the file. It is deliberately NOT swallowed. A restore this
+        # gate cannot complete means the remaining controls were never run and the
+        # table's count is a lie, so the gate must exit non-zero and say which file
+        # is still mutated rather than print a green summary over a modified tree.
+        $restoredCleanly = $false
+        for ($attempt = 1; $attempt -le 10; $attempt++) {
+          try {
+            [System.IO.File]::WriteAllText($full, $original)
+            $restoredCleanly = $true
+            break
+          } catch {
+            if ($attempt -eq 10) {
+              Fail "could not restore $($c.file) after mutating it for '$($c.name)'. The file on disk is the MUTATION, not the source: $($_.Exception.Message)"
+              Fail 'the red check stopped with production code mutated. Do not commit anything from this worktree. Fix the file above by hand, then re-run.'
+            }
+            Start-Sleep -Milliseconds (100 * $attempt)
+          }
+        }
+        if (-not $restoredCleanly) { throw "red check could not restore $($c.file); stopping rather than running further controls against a mutated tree" }
       }
     }
     # The output is printed on failure. A red that says only "the suite is red"

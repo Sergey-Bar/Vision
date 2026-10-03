@@ -77,7 +77,23 @@ func cmdDemo(args []string) error {
 	if model == "" {
 		model = filepath.Join(root, "models", "yolov8n.onnx")
 	}
-	anchors := filepath.Join(root, "models", "yolov8n.anchors.txt")
+	// The anchors file is DERIVED FROM THE MODEL rather than named beside it.
+	//
+	// `--model` has always existed, and the anchors path was a literal
+	// `models\yolov8n.anchors.txt` with no flag of its own. So every model except
+	// the one the literal happened to name was paired with the WRONG anchor file:
+	// `pocctl demo --model models\yolov4n.onnx` asked the detector to run one
+	// export and told the sidecar another one's anchors. The demo refused at step 1
+	// on a file the operator never asked for, which reads as "the demo is broken"
+	// rather than as "two values in one slice disagree".
+	//
+	// The pairing is not a guess. An anchored export's anchors live in the model's
+	// own `.cfg` and are shipped beside the weights under the same base name, so
+	// the sibling is the only coherent choice and it is the one `pocctl
+	// fetch-model` writes. A base name with no `.onnx` suffix is left alone: a
+	// caller who named something that is not an `.onnx` file gets the file they
+	// named rather than a guessed sibling of it.
+	anchors := anchorsBeside(model, root)
 	dataRoot := flags["data-root"]
 	if dataRoot == "" {
 		dataRoot = filepath.Join(root, ".demo-data")
@@ -862,7 +878,28 @@ func demoEnv(root, dataRoot, clip, zones, model, anchors, simAddr, uiAddr string
 		// startup. It is a model property rather than a preference: letterboxing a
 		// frame into a square the model was not exported for produces boxes, not an
 		// error, and those boxes are in the wrong place by a scale factor.
-		"SP_POC_DET_INPUT=640",
+		//
+		// 416, and it was 640. The demo's own default model is
+		// `models\yolov8n.onnx`, and the committed record of that model —
+		// `pyworker/fixtures/yolov8n.contract.json`, written by a CPU run through
+		// the sidecar's own load path — declares `input_w: 416, input_h: 416`.
+		// `watch` opens the session and compares the two, so `pocctl demo` with no
+		// flags at all died at step 6 of 7 with
+		//
+		//	SP_POC_DET_INPUT=640 does not match the model's declared input 416x416
+		//
+		// after it had built both binaries, passed the fault rehearsal and started
+		// the push target. The value 640 is `SP_POC_AI_INPUT_WIDTH`'s number — the
+		// SIDE's input width, a different variable for a different decoder — and it
+		// was written into the detector's slot while the demo was still a novelty
+		// run that never opened a session to disagree with it.
+		//
+		// There is no flag to override it, for the same reason there was no flag for
+		// the anchors: `--model` takes a path, and this value is a property OF that
+		// path's contents. `pocctl detector --selftest` prints the declared shape of
+		// whatever model you point it at, and that is where a different export's
+		// number comes from.
+		"SP_POC_DET_INPUT=416",
 		// The score threshold is on a DIFFERENT SCALE for each trigger, and this demo
 		// now always runs the novelty one, so this is a novelty number and not the
 		// sidecar's 0.4.
@@ -900,9 +937,9 @@ func demoEnv(root, dataRoot, clip, zones, model, anchors, simAddr, uiAddr string
 		// zero crossings and no error, and that is the most likely way a demo with a
 		// real detector finds nothing.
 		"SP_POC_CLASSES=other,car,bird,person,truck,bus",
-		// The score CHAIN, which must read left to right:
+		// The score CHAIN, which must ASCEND:
 		//
-		//	DET_SCORE (0.05) <= GHOST_MIN_SCORE (0.005) <= SCORE_THRESHOLD (0.02)
+		//	DET_SCORE (0.005) <= GHOST_MIN_SCORE (0.01) <= SCORE_THRESHOLD (0.02)
 		//
 		// An inverted chain lies in BOTH directions at once, which is why it cannot be
 		// caught downstream: a box the model never emitted is drawn as a ghost, and a
@@ -911,7 +948,25 @@ func demoEnv(root, dataRoot, clip, zones, model, anchors, simAddr, uiAddr string
 		//
 		// The emit floor is deliberately LOW and the approval bar is well above it, so
 		// the band between them is where the two-stage ghost recovery reads from.
-		"SP_POC_DET_SCORE=0.05",
+		//
+		// These two values were INVERTED and the comment above them asserted the
+		// inverted order as if it were correct — it read
+		// `DET_SCORE (0.05) <= GHOST_MIN_SCORE (0.005)`, which is false, because 0.05
+		// is above 0.005. `config.Validate` refuses an inverted chain by name, so
+		// `pocctl demo` — the headline command, and the one an operator runs in front
+		// of a customer — died at STEP 6 OF 7 in `watch`, after building, after the
+		// fault rehearsal and after starting the push target. The banner had already
+		// told the operator the run was fine.
+		//
+		// It got here the way every defect in this file gets here: a value in a
+		// hand-built slice, changed on one side of a relationship whose other side
+		// lives in another slice. `SP_POC_DET_SCORE` was raised to 0.05 when the demo
+		// moved to the detector, and `SP_POC_GHOST_MIN_SCORE` had been set to 0.005
+		// for the novelty engine, whose score is a change FRACTION and therefore
+		// genuinely tiny. Both numbers were right for the trigger that wrote them and
+		// together they are wrong, and nothing in the slice could see it.
+		"SP_POC_DET_SCORE=0.005",
+		"SP_POC_GHOST_MIN_SCORE=0.01",
 		// The detector's own knobs. The two NMS thresholds are SEPARATE and the global
 		// one is looser on purpose: class-aware suppression at 0.45 collapses duplicates
 		// of one class, and the class-agnostic pass at 0.75 is the only thing that can
@@ -926,11 +981,15 @@ func demoEnv(root, dataRoot, clip, zones, model, anchors, simAddr, uiAddr string
 		// once the crossing box is Kalman-filtered, replay reads THIS table and not the
 		// decisions table.
 		"SP_POC_BOX_LOG_FRAMES=20000",
-		// These four arrived with the approved/rejected split and the family
-		// taxonomy, and they are REQUIRED with no defaults. The demo had never
-		// been updated for them, which means `pocctl demo` — the headline command
-		// of the whole module — died in `config.Load` before it printed a step.
-		"SP_POC_GHOST_MIN_SCORE=0.005",
+		// `SP_POC_GHOST_MIN_SCORE` used to live HERE, as one of "these four arrived
+		// with the approved/rejected split", at 0.005. It now lives beside
+		// `SP_POC_DET_SCORE` above, because the two are one assertion — the validator
+		// compares them — and a relationship whose halves sit 30 lines apart in a list
+		// of strings is a relationship nobody re-checks when they change one half.
+		// A duplicate would also have been a silent hazard rather than a harmless
+		// repeat: `runEnv` hands the slice to a child process, and which of the two
+		// entries that reader believed would depend on its own order.
+		//
 		// `SP_POC_MIN_BOX_AREA` is in NORMALISED area (fraction of the frame), not
 		// thousandths, and a novelty region is measured rather than drawn by a model,
 		// so it is small. 0.0001 is a hundredth of a percent of the frame.
@@ -1141,6 +1200,30 @@ func withoutPOC(env []string) []string {
 func printTriggerBanner(env []string) {
 	mode := envValue(env, "SP_POC_TRIGGER_MODE")
 	switch mode {
+	case soak.TriggerDetector:
+		// This case was MISSING, and its absence is the exact defect the rest of
+		// this file's comments are about.
+		//
+		// `detector` became the shipped mode — it is the structural default in
+		// `internal/config` and it is what `demoEnv` hardcodes — and this switch
+		// was never given a branch for it. So the mode the whole module ships with
+		// fell through to `default` and the banner announced, in bold, on the first
+		// screen of the headline command:
+		//
+		//	trigger: "detector" — not a mode this build operates. The run will
+		//	refuse by name.
+		//
+		// The run does not refuse. `soak.NewRunner` builds a detector-mode runner
+		// happily and the run completes, so the banner was not merely missing a
+		// sentence — it stated the opposite of what happened, on screen, in the one
+		// place whose stated job is to be derived from the measurement rather than
+		// written beside it. An operator who reads that line has learned to
+		// disbelieve this module's cost claims, which is the failure the function
+		// exists to prevent.
+		fmt.Println("  trigger: the in-process ONNX detector. Real classes and real scores per")
+		fmt.Println("  frame, which is what makes a precision number possible at all. The model")
+		fmt.Println("  is SP_POC_DET_MODEL and the runtime is SP_POC_ORT_LIB; both are named in")
+		fmt.Println("  the run row, and the report says which decoder produced every box.")
 	case soak.TriggerSidecar:
 		fmt.Println("  trigger: the per-frame ONNX sidecar. The model runs on EVERY frame at 5 fps,")
 		fmt.Println("  not once per event, and the report says which mode produced the boxes.")
@@ -1148,9 +1231,20 @@ func printTriggerBanner(env []string) {
 		fmt.Println("  trigger: the local novelty engine. model: pure Go, no ONNX, no Python, no")
 		fmt.Println("  sidecar. The verifier is the model in SP_POC_VLM_MODEL, called ONCE per event.")
 	default:
-		// An unrecognised mode is not a third sentence to print. `config.Load` refuses
-		// it by name moments later; this says so first and names the value it saw,
-		// rather than describing a run that is not configured.
+		// The two failures are different sentences, and conflating them is how a
+		// banner ends up describing a run that is not configured.
+		//
+		// An EMPTY mode is the structural default resolving to a real mode, which
+		// happens when a caller assembled an environment by hand and left the
+		// variable out. Saying "not a mode this build operates" about an absent
+		// variable names a value nobody wrote, and the reader cannot act on it.
+		if mode == "" {
+			fmt.Printf("  trigger: %q — the schema's structural default for this variable.\n",
+				config.TriggerModeDetector)
+			break
+		}
+		// A mode this build genuinely does not operate. `config.Load` refuses it by
+		// name moments later; this says so first and names the value it saw.
 		fmt.Printf("  trigger: %q — not a mode this build operates. The run will refuse by name.\n", mode)
 	}
 	fmt.Printf("  approved classes %s\n", envValue(env, "SP_POC_CLASSES"))
@@ -1179,6 +1273,29 @@ var (
 	_ = xpsim.Name
 	_ = time.Now
 )
+
+// anchorsBeside is the anchor-box file that belongs to a model, by base name.
+//
+// It is the one function that knows an anchored export's anchors ship beside its
+// weights, and it is called once so that `--model` and `SP_POC_AI_ANCHORS` cannot
+// disagree. Two spellings of one fact in one hand-built slice is the defect this
+// repository keeps finding: the slice is a list of strings and nothing checks that
+// the strings are about the same run.
+func anchorsBeside(model, root string) string {
+	base := strings.TrimSuffix(model, ".onnx")
+	if base == model {
+		// Not an `.onnx` path. Guessing a sibling of a file whose name says
+		// nothing about its exports would produce a second wrong answer instead
+		// of no answer, so the caller gets the sibling of the literal.
+		return model + ".anchors.txt"
+	}
+	if filepath.IsAbs(base) || strings.ContainsRune(base, '/') || strings.ContainsRune(base, '\\') {
+		return base + ".anchors.txt"
+	}
+	// A bare name is resolved the way the demo resolves a bare model: against the
+	// module root, not against whatever the working directory happened to be.
+	return filepath.Join(root, base+".anchors.txt")
+}
 
 // ortLibraryName is the shared library's filename on this platform.
 //
