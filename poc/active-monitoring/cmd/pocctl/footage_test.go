@@ -265,3 +265,58 @@ func TestTheWindowDescriptionCarriesTheFrameCount(t *testing.T) {
 		}
 	}
 }
+
+// TestALicenceReadingNotRecordedIsRefusedOnItsOwnStopsFiring is RC-35b, and it is the
+// reason the gate's licence test above is not sufficient on its own.
+//
+// That test asserts the refusal mentions `cleared_for_external_use`, which means it passes
+// because the SECOND field failed. It cannot tell whether the licence check fired at all,
+// and it does not fire: the row in the committed table reads "NOT RECORDED, and it is not
+// recoverable from this file", and `upper(licence) == "NOT RECORDED"` does not match a
+// sentence. Today a second check catches that row by accident. A row whose licence reads
+// NOT RECORDED while its clearance field says true would be measured and its numbers
+// quoted, and no test in this repository would notice.
+//
+// So this row is the shape nothing else here holds: an UNRECORDED licence and an explicit
+// CLEARED flag. Only the licence check can refuse it.
+//
+// It is also not a strange shape to invent. Somebody who cleared a clip for internal use
+// and wrote "NOT RECORDED" in the licence field has recorded both facts, and the gate has
+// to refuse on the one that says nothing was recorded.
+//
+// The same file's `summariseLicence` already used a prefix test for this phrase, which is
+// what makes the equality in the gate an oversight rather than a decision.
+//
+// REDCHECK RC-35b: put `upper(licence) == licenceUnrecorded` back in `refuseUncleared`
+// and this goes red.
+func TestALicenceReadingNotRecordedIsRefusedOnItsOwnStopsFiring(t *testing.T) {
+	yes := true
+	row := clipLabel{
+		File:       "mine/cleared-but-unrecorded.mp4",
+		Licence:    "NOT RECORDED, and it is not recoverable from this file",
+		Cleared:    &yes,
+		Provenance: "mine",
+	}
+	// The clearance field alone must NOT refuse this row, or the test would pass for the
+	// wrong reason all over again.
+	if cleared, known := row.clearedForExternalUse(); !known || !cleared {
+		t.Fatalf("the fixture is not cleared, so this test cannot tell the two checks apart: cleared=%v known=%v",
+			cleared, known)
+	}
+	err := refuseUncleared("mine/cleared-but-unrecorded.mp4", row, true)
+	if err == nil {
+		t.Fatal("a row whose licence says nothing was recorded was measured, even though its clearance " +
+			"field says yes. The numbers would be quotable and there are no terms to quote them under")
+	}
+	if !strings.Contains(err.Error(), "NOT RECORDED") {
+		t.Fatalf("the refusal does not name the field that failed: %v", err)
+	}
+	// And the positive side: a real licence that merely MENTIONS the words later is a grant,
+	// not a declaration that nothing was recorded, and refusing it would train people to
+	// reword their provenance table.
+	ok := row
+	ok.Licence = "CC0. The words NOT RECORDED do not appear in this grant as a statement about terms."
+	if err := refuseUncleared("mine/cleared-but-unrecorded.mp4", ok, true); err != nil {
+		t.Fatalf("a real licence was refused because it mentions the phrase later on: %v", err)
+	}
+}

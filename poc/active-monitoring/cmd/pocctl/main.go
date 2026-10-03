@@ -131,6 +131,11 @@ func usage() {
                            from its store and opens no model
   label                    mark a run's proposed boxes: accept or reject each one, and draw
                            the objects the detector missed. Serves a page on --addr.
+  footage --clip <path>    measure the crop pass against the whole-frame pass on the SAME
+                            frames, over a window of material whose licence row is recorded
+                            and cleared. Per-class precision and recall for both settings,
+                            side by side, and NOT RUN with a reason wherever they cannot be
+                            computed.
 
 Run 'pocctl <subcommand> --help' for a subcommand's own flags.
 

@@ -1,0 +1,73 @@
+RED-CHECK TRANSCRIPTS - pocctl footage, after the merge with contract
+machine: SERGEY-PC   module: poc/active-monitoring
+
+=== RC-31  TestPadThenClampKeepsAnEdgeRegionsPadInsideTheFrame
+CLAIM     padThenClamp CLAMPS the padded region to the frame, and clamps before it returns
+REMOVED   cmd/pocctl/footage_crop.go
+            '\tx0 := clampInt(int(math.Round(padded.X1*float64(frameW))), 0, frameW)'  ->  '\tx0 := int(math.Round(padded.X1 * float64(frameW)))'
+COST      a region at the frame edge records a pad that fell outside it, `Rect.Clamp` then disagrees with the rectangle we recorded, and every box the detector maps back onto the frame is placed against a crop it never saw
+EXIT      1  (a red check that is not red is not a red check)
+RED AS    the rectangle comes back with X below zero, and the test also fails its Clamp-agrees check
+TRANSCRIPT --- FAIL: TestPadThenClampKeepsAnEdgeRegionsPadInsideTheFrame (0.00s) //     footage_measure_test.go:53: a padded region came back at -32,270 192x108, outside the 1280x720 frame. The pad is then measured against pixels that do not exist and every mapped-back box is misplaced // FAIL
+RESTORE   proved by sha256 7917E85A168F018E9B453B10C9887E92A5F6D7C8F3DE3ABA0B2657616E89007B
+GREEN     exit 0 after the restore
+
+=== RC-32  TestARegionAlreadyCoveredIsDroppedRatherThanMeasuredAgain
+CLAIM     a region already inside the accepted union is dropped rather than measured again
+REMOVED   cmd/pocctl/footage_crop.go
+            '\t\tif coveredByAny(r, accepted, p.CoveredFraction) {\n\t\t\tplan.Dedupe++\n\t\t\tcontinue\n\t\t}'  ->  ''
+COST      novelty returns several components per moving object; measuring a component already inside an accepted one counts a single object as several true positives and the crop pass reports a recall it did not earn
+EXIT      1  (a red check that is not red is not a red check)
+RED AS    two regions survive where one belongs
+TRANSCRIPT --- FAIL: TestARegionAlreadyCoveredIsDroppedRatherThanMeasuredAgain (0.00s) //     footage_measure_test.go:122: 2 regions survived; a component already inside an accepted region adds nothing and measuring it again counts one object twice // FAIL
+RESTORE   proved by sha256 7917E85A168F018E9B453B10C9887E92A5F6D7C8F3DE3ABA0B2657616E89007B
+GREEN     exit 0 after the restore
+
+=== RC-35b  TestALicenceReadingNotRecordedIsRefusedOnItsOwnStopsFiring
+CLAIM     the licence check is a PREFIX test, so the one row that says NOT RECORDED inside a sentence is caught
+REMOVED   cmd/pocctl/footage.go
+            '} else if strings.HasPrefix(upper(licence), licenceUnrecorded) {'  ->  '} else if upper(licence) == licenceUnrecorded {'
+COST      the single most important row in the provenance table is measured, and a row whose licence says nothing was recorded while its clearance field says yes is measured and quoted. This is the only place this branch deliberately changed an upstream line
+EXIT      1  (a red check that is not red is not a red check)
+RED AS    a row with an unrecorded licence and a cleared flag is accepted; upstream own test passes today only because that row clearance field is false, so a SECOND check catches it by accident
+TRANSCRIPT --- FAIL: TestALicenceReadingNotRecordedIsRefusedOnItsOwnStopsFiring (0.00s) //     footage_test.go:308: a row whose licence says nothing was recorded was measured, even though its clearance field says yes. The numbers would be quotable and there are no terms to quote them under // FAIL
+RESTORE   proved by sha256 22C1310EA21C7205A0A19F347E81A6FD5B31006E5E2DCD6A3B18E5C674B68F40
+GREEN     exit 0 after the restore
+
+=== RC-39  TestAMeasurementOverRefusalsRendersNotRunAndNeverZero
+CLAIM     renderNotMeasured has an arm for a measurement the decoder refused everywhere
+REMOVED   cmd/pocctl/footage_measure.go
+            '\tcase r.Whole.Refusals+r.Crop.Refusals > 0:'  ->  '\tcase false:'
+COST      the section goes quiet about the one thing it exists to say, and on this export that arm IS the result: a run of refusals would read like a run of zeros
+EXIT      1  (a red check that is not red is not a red check)
+RED AS    the report stops saying UNKNOWN, which is the honest result
+TRANSCRIPT --- FAIL: TestAMeasurementOverRefusalsRendersNotRunAndNeverZero (0.00s) //     footage_measure_test.go:553: the report does not say that whether the crop pass finds anything is unknown: // FAIL
+RESTORE   proved by sha256 A4BD0B2D68194D5C5A58AE0027C6EC2E5A3330119E3B7701C002C72999AB52B1
+GREEN     exit 0 after the restore
+
+=== RC-40  TestARateWithNoDenominatorPrintsNotRunAndNeverZero
+CLAIM     a rate with an empty denominator prints NOT RUN rather than a zero
+REMOVED   cmd/pocctl/footage_sidebyside.go
+            '\trec := notRun'  ->  '\trec := "0.000"'
+COST      a recall of zero over no drawn boxes claims nothing was found when nothing was there to find; 0.000 is the most reassuring thing a table can print and the one most likely to be wrong
+EXIT      1  (a red check that is not red is not a red check)
+RED AS    the kite row loses its NOT RUN recall cell and prints 0.000
+TRANSCRIPT --- FAIL: TestARateWithNoDenominatorPrintsNotRunAndNeverZero (0.00s) //     footage_measure_test.go:414: the kite row carries 0 NOT RUN cells, one per side: // FAIL
+RESTORE   proved by sha256 8F73F68CC3CFB8F81B188C3BEA11991416A09784F320B90623FBEB77CB9E6BFC
+GREEN     exit 0 after the restore
+
+=== RC-41  TestTrailingBytesAreRefusedRatherThanDropped
+CLAIM     a stream that ends mid-frame is refused
+REMOVED   cmd/pocctl/footage_frames.go
+            '\tif n <= 0 {\n\t\treturn nil\n\t}'  ->  '\tif true {\n\t\treturn nil\n\t}'
+COST      the last sample is silently dropped and the sample count is a lie, or a half frame is measured and the number describes a picture nobody decoded
+EXIT      1  (a red check that is not red is not a red check)
+RED AS    a stream that ended mid-frame is accepted
+TRANSCRIPT --- FAIL: TestTrailingBytesAreRefusedRatherThanDropped (0.00s) //     footage_measure_test.go:610: a stream that ended mid-frame was accepted; the last sample would be a partial picture // FAIL
+RESTORE   proved by sha256 C343918DE400D090561FC53C280DB81014F7C87C36254EF09648BBC002594898
+GREEN     exit 0 after the restore
+
+checks run: 6   problems: 0
+controls moved upstream with their code and guarded there: crop-to-frame geometry
+(internal/ortdetect/crop_test.go), per-class partition (internal/bench/perclass_test.go),
+gate no-row / ambiguous-lookup / absent-clearance (footage_test.go, upstream's own tests).

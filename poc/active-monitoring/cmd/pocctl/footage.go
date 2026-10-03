@@ -246,7 +246,23 @@ func refuseUncleared(path string, c clipLabel, wantExternal bool) error {
 	if licence == "" {
 		problems = append(problems, "`licence` is empty or absent, so nothing is recorded about who "+
 			"granted permission. An ABSENT field is not a permissive field")
-	} else if upper(licence) == "NOT RECORDED" {
+	} else if strings.HasPrefix(upper(licence), licenceUnrecorded) {
+		// A PREFIX and not an equality test, and this is the one place this branch
+		// deliberately changed an upstream line rather than deferring to it.
+		//
+		// The row this whole command exists for carries `licence`: "NOT RECORDED, and
+		// it is not recoverable from this file". An equality test does not match a
+		// sentence, so the check that is supposed to block the one unrecorded licence in
+		// the table does not fire on it. It passes today only because that same row also
+		// records `cleared_for_external_use: false`, so a SECOND check catches it - and a
+		// row whose licence reads NOT RECORDED while its clearance field says true would
+		// be measured and quoted.
+		//
+		// REDCHECK RC-35b: put the `==` back and
+		// TestALicenceReadingNotRecordedIsRefusedOnItsOwnStopsFiring goes red. That test
+		// pins a row with an UNRECORDED licence and a CLEARED flag, which is the shape
+		// nothing else in this repository holds and the only way to tell the two checks
+		// apart.
 		problems = append(problems, "`licence` reads NOT RECORDED. That is a real state and it is the "+
 			"one that blocks a measurement: the rights holder has not been asked, so nothing is known "+
 			"about what may be done with this file")
@@ -273,6 +289,13 @@ func refuseUncleared(path string, c clipLabel, wantExternal bool) error {
 }
 
 func upper(s string) string { return strings.ToUpper(strings.TrimSpace(s)) }
+
+// licenceUnrecorded is the phrase a licence field carries when nothing was recorded.
+//
+// It is a PREFIX because the real row says it inside a sentence, and a constant rather
+// than a literal because the same phrase has to be recognised by the gate and by the
+// summary that prints it above a status line.
+const licenceUnrecorded = "NOT RECORDED"
 
 // parseClock reads `MM:SS`, `HH:MM:SS` or a plain number of seconds.
 //
