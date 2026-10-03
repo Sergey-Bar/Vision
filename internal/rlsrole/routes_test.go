@@ -46,6 +46,19 @@ func TestEveryRouteDeclaresACapability(t *testing.T) {
 		return found
 	}
 
+	// isBareNil reports whether an argument is the literal `nil`.
+	//
+	// A bare `nil` is an `*ast.Ident` whose name happens to be "nil"; a real
+	// resolver is a call (`siteOfIncident(d)`) or a function literal. Anything that
+	// is not the bare identifier is a resolver, including forms this check does not
+	// know about -- which is the right default here, because the failure being
+	// guarded against is a gate that was wired with no resolver at all, not one
+	// wired with an unusual one.
+	isBareNil := func(e ast.Expr) bool {
+		ident, ok := e.(*ast.Ident)
+		return ok && ident.Name == "nil"
+	}
+
 	exempt := map[string]string{
 		"POST /v1/auth/login":      "a caller has no session yet, so there is nothing to authorise",
 		"POST /v1/auth/mfa/verify": "the challenge is itself the credential: single-use and short-lived",
@@ -110,6 +123,34 @@ func TestEveryRouteDeclaresACapability(t *testing.T) {
 		case "requireCapability":
 			if !namesCapability(gate) {
 				problems = append(problems, route+": gated by requireCapability with no capability")
+			}
+		case "requireCapabilityAtSite":
+			// Added when the per-site check moved into the router. It is a gate, and
+			// it names a capability, so it is here rather than on the exempt list --
+			// which matters, because the alternative reading of a new wrapper's name
+			// being unrecognised is "not an authorisation gate", and a wrapper that
+			// resolves an incident's site and calls `AuthorizeSite` is precisely one.
+			//
+			// It is listed separately from `requireCapability` rather than folded into
+			// it because the two are not interchangeable: this one refuses an id that
+			// resolves to no site, and `requireCapability` cannot. Naming both in one
+			// case would lose the distinction and let the weaker wrapper be used on a
+			// site-bound route without anything noticing.
+			if !namesCapability(gate) {
+				problems = append(problems, route+": gated by requireCapabilityAtSite with no capability")
+			}
+			// And it must actually resolve a site. `requireCapabilityAtSite(cap, nil, h)`
+			// would panic on the first request rather than refuse it, and a panic on
+			// the authorisation path is a refusal only by accident.
+			//
+			// Checked by type rather than by source text: a bare `nil` argument is an
+			// `*ast.Ident` named "nil", and anything else -- a call, a selector, a
+			// function literal, which is what `siteOfIncident(d)` is -- is a resolver.
+			// Comparing the rendered source instead would need a printer and would
+			// then be a check on formatting.
+			if len(gate.Args) < 3 || isBareNil(gate.Args[1]) {
+				problems = append(problems, route+": gated by requireCapabilityAtSite with no site "+
+					"resolver, so it cannot check the site it is named for")
 			}
 		case "requirePrincipal":
 			problems = append(problems, route+": registered with requirePrincipal and no "+

@@ -168,6 +168,102 @@ by hand would stop covering one the moment a control was added somewhere new, an
 the gate meant to prove the table left the tree alone would be the gate not
 watching the table's own footprint.
 
+### The site gate: `AuthorizeSite` wired, and a control that refused to be a table entry
+
+`identity.Principal.AuthorizeSite` carried `TEST-ONLY` in the dead-export ledger:
+holding the capability is not being assigned to the place, the function existed and
+was correct, and the console's per-site routes did not call it. They called
+`p.CanSeeSite(site)` by hand, inside each handler that knew a site, after that
+handler had already fetched the thing the site belonged to.
+
+Two things were wrong with that. The site check was a **second thing to remember**,
+so a handler added tomorrow would be written with `requireCapability` because that is
+what every sibling looks like, and nothing in the router could notice. And it ran
+**after** the handler's work, so a caller who was not assigned could make the server
+read a row and only then learn no.
+
+`internal/api.requireCapabilityAtSite` is now the wrapper the five incident-addressed
+routes go through: it resolves the incident's site and calls `AuthorizeSite` before
+the handler runs, and an id that resolves to no site is refused with the same 404 an
+unassigned site gets. `GET /v1/incidents` stays on `requireCapability` and filters
+per row, because "every site I may see" is the correct answer for a scope-wide read
+rather than an exemption from the gate.
+
+Nine subtests were added to `TestHoldingACapabilityIsNotBeingAssignedToThePlace`,
+which previously had exactly one cross-site case and it covered the list route:
+
+| Subtest | What it asserts |
+|---|---|
+| refused on the incident detail / explanation / evidence list / disposition / console page | each of the five routes answers **404** for an incident at a site the principal is not assigned to |
+| an id that resolves to no site is refused, not served | the `site == ""` arm, and that the answer is the same 404 |
+| an incident at the principal's own site is served on the same routes | **200**, because a filter that refuses everything is not a filter |
+
+Baseline green, mutation applied, restore green:
+
+```
+ok  	github.com/Sergey-Bar/Ai-Captain/internal/api	4.641s
+baseline exit=0   (must be 0)
+--- FAIL: .../an_incident_at_an_unassigned_site_is_refused_on_the_incident_detail
+    handlers_test.go:951: an incident at unassigned site "site-not-mine" returned 200, want 404:
+        {"incidentId":"inc_site-not-mine_1791060224211697600","siteId":"site-not-mine","state":"open",...
+--- FAIL: .../an_incident_at_an_unassigned_site_is_refused_on_the_explanation
+    handlers_test.go:951: returned 409, want 404: {"code":"no_active_bundle",...
+--- FAIL: .../an_incident_at_an_unassigned_site_is_refused_on_the_evidence_list
+    handlers_test.go:951: returned 200, want 404: {"items":null}
+--- FAIL: .../an_incident_at_an_unassigned_site_is_refused_on_the_disposition
+    handlers_test.go:951: returned 201, want 404: {"incidentId":"inc_site-not-mine_...","state":"dispositioned"}
+--- FAIL: .../an_incident_at_an_unassigned_site_is_refused_on_the_console_page
+    handlers_test.go:951: returned 200, want 404
+ok  	github.com/Sergey-Bar/Ai-Captain/internal/api	5.250s
+restore exit=0   (must be 0)
+```
+
+The **201** is the one to read twice: with both gates gone, a principal assigned to
+one site could record a disposition on another site's incident. The 200s carry the
+full incident including its rule id, bundle version, verification state and
+supporting event ids.
+
+**This control is NOT in `scripts/verify.ps1`'s table, and the reason is the
+finding rather than an omission.** It is three substitutions across three files, and
+**each one alone leaves the suite green**:
+
+| Mutation | Result |
+|---|---|
+| the router's `AuthorizeSite` call only | **green.** Every handler still has its own `CanSeeSite` |
+| `handlers.go`'s `!p.CanSeeSite(detail.SiteID)` only | **green.** The router gate catches it |
+| `console.go`'s `!p.CanSeeSite(detail.SiteID)` only | **green**, and the console-page subtest above is not exercised at all, because the substitution never reached the file |
+
+A table entry mutates one line in one file and reports the red it got. Three
+entries that each report green would be three entries claiming a control nobody can
+prove, which is the failure `AGENTS.md` names when it says entries are added only
+after being run by hand and watched go red. The table's format cannot express a
+control that lives in three files, so the transcript is here and the gap is stated.
+
+Two earlier attempts at the mutation produced **compile errors**, not failures, and
+both are recorded here because a compile error is not evidence that a control was
+removed:
+
+  - replacing the handler check with `false` or `true` leaves `detail` unused in
+    `handleIncidentExplain` and `handleDisposition`, which use it for nothing else.
+    The replacement is a comparison against a site id no row can have.
+  - replacing it with `true /* ... */` commented out the `{` on the next line.
+
+**One of the new subtests was passing for the wrong reason.** The disposition case
+sent `"agreement": true`, and `dispositionRequest.Agreement` is a **string** in a
+closed set that migration 0005's `dispositions_agreement_check` enforces. It passed
+because the gate refuses before the body is decoded, so the malformed body was never
+reached. The fixture was only read when the gate was removed to red-check it, and
+the test failed on a 400 about JSON rather than on the 404 that would have said the
+incident was served. A test whose fixture is never parsed is a test whose fixture is
+not a test, and this one would have kept passing for as long as the gate held.
+
+**The dead-export ledger's own rule caught the wiring.** `AuthorizeSite`'s entry said
+`TEST-ONLY`, and the gate's unused-declaration check failed the moment the console
+called it: `the allow-list excuses internal/identity.AuthorizeSite and nothing
+matches it any more. Delete the entry rather than leaving it to look like a decision
+that was made`. The entry is deleted. Four of the five other unwired controls remain
+and are listed in Part I.6's backlog below.
+
 ### Eight controls had no transcript at all, and the gate said so
 
 The new `tree-state` gate asserts that every red-check entry's name appears in this

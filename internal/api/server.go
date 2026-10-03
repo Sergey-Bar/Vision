@@ -3,7 +3,7 @@
 // Two surfaces, one binary, because they enforce the same things. The JSON API
 // has no content negotiation: it is JSON or it is a 406. The console is HTML with
 // no inline script, which is what makes a strict Content-Security-Policy
-// achievable at all — an inline <script> anywhere would mean a CSP with 'unsafe-
+// achievable at all â€” an inline <script> anywhere would mean a CSP with 'unsafe-
 // inline' and no benefit.
 //
 // Every state-changing method requires a CSRF token, every session cookie is
@@ -19,6 +19,7 @@ import (
 	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -73,7 +74,7 @@ type Server struct {
 	// Metrics is the observability registry, read for the SLO verdicts.
 	//
 	// Nil means this install has not wired one and the endpoint says so rather
-	// than reporting every objective as met — "zero breached" from a process that
+	// than reporting every objective as met â€” "zero breached" from a process that
 	// never evaluated anything is the one answer here that would be a lie.
 	Metrics *observability.Registry
 
@@ -378,6 +379,104 @@ func (s *Server) requireCapability(needed identity.Capability, h func(http.Respo
 	}
 }
 
+// requireCapabilityAtSite is requireCapability plus the site check, in one call.
+//
+// # Why the site check belongs HERE rather than in each handler
+//
+// `p.CanSeeSite` was called by hand, inside each handler that knew a site, after
+// that handler had fetched the thing the site belonged to. Two consequences, and
+// the second is the one that mattered:
+//
+//   - It was a SECOND thing to remember. A handler added tomorrow that took a site
+//     from the path or the query would be written with `requireCapability`, because
+//     that is what every sibling looks like, and it would hand another site's rows
+//     to a principal not assigned to them. Nothing in the router could notice: the
+//     capability check passed. The RLS canary connects as the PRODUCTION role,
+//     which is assigned per site and so does catch this -- but only for the one
+//     route the canary names, and only once somebody writes that row.
+//   - It ran AFTER the handler's own work, so a caller who is not assigned could
+//     make the server read a row and only then learn no. Migration 21's RESTRICTIVE
+//     `site_isolation` policy is the database side of this rule and is real; this
+//     is the application edge of the same rule, and it belongs beside the capability
+//     check rather than scattered through the handlers that remembered.
+//
+// # What `resolve` is, and why failing to resolve is a refusal
+//
+// `resolve` maps the request, for the principal it will run as, to the site the
+// addressed resource belongs to. It returns an empty string when the site cannot be
+// established: an unknown id, a failed lookup, a request that names no site.
+//
+// An unresolvable site is a REFUSAL, not a pass. The alternative is to fall through
+// to `Authorize(cap)` alone, which is exactly the behaviour this function exists to
+// remove -- a route whose site cannot be determined becomes a route with no site
+// check at all, and it fails silently.
+//
+// The answer it gives is a 404 carrying the SAME text as the existing per-handler
+// refusal, rather than a 403 naming the site. "That incident does not exist" and
+// "that incident is not yours" must not be distinguishable, or the 403 is a
+// confirmation that the row exists.
+//
+// `GET /v1/incidents` is the one route that legitimately means "every site I may
+// see", so it stays on `requireCapability` and filters per row. That is the correct
+// answer for a scope-wide read, not an exemption from this one.
+func (s *Server) requireCapabilityAtSite(
+	needed identity.Capability,
+	resolve func(*http.Request, identity.Principal) string,
+	h func(http.ResponseWriter, *http.Request, identity.Principal),
+) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		p, ok := s.principal(w, r)
+		if !ok {
+			return
+		}
+		if err := s.authorizeAtSite(p, needed, resolve(r, p)); err != nil {
+			s.auditDenied(r, p, needed)
+			WriteError(w, http.StatusNotFound, "not_found", err.Error(), requestID(r))
+			return
+		}
+		h(w, r, p)
+	}
+}
+
+// errNotYours is the answer for both "no such row" and "not your site", and it is
+// one constant rather than two strings written out twice, because the two must stay
+// identical: a caller who can tell them apart has an oracle for which incident ids
+// exist at another site.
+var errNotYours = errors.New("no such incident, or you are not assigned to its site")
+
+// authorizeAtSite is the check itself, so a handler that already knows its site can
+// ask the same question the router asks.
+//
+// It is here rather than inline in the wrapper because the two must never be able to
+// disagree. A handler that re-implemented the check could return a different answer
+// for the same request, and the one that is weaker would be the one that ships.
+func (s *Server) authorizeAtSite(p identity.Principal, needed identity.Capability, site string) error {
+	if strings.TrimSpace(site) == "" {
+		return errNotYours
+	}
+	if err := p.AuthorizeSite(needed, site); err != nil {
+		return errNotYours
+	}
+	return nil
+}
+
+// siteOfIncident is `resolve` for every route addressed by incident id.
+//
+// It is the one lookup all of them were doing anyway, hoisted into the router so the
+// authorisation decision happens before the handler rather than inside it. The
+// handler still re-reads the incident; that read is now redundant, and removing it
+// is a follow-up rather than something to do in the same commit as the gate that
+// makes it safe to remove.
+func siteOfIncident(d Deps) func(*http.Request, identity.Principal) string {
+	return func(r *http.Request, p identity.Principal) string {
+		detail, err := d.Incidents.Get(r.Context(), p.TenantID, r.PathValue("id"))
+		if err != nil {
+			return ""
+		}
+		return detail.SiteID
+	}
+}
+
 // csrfExempt lists the routes a CSRF token cannot protect.
 //
 // Login and its second step are exempt because a caller has no session yet, and
@@ -634,7 +733,7 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 
 // sloNotEvaluated is the one status this endpoint must not get wrong. "met" from
 // a process that has measured nothing is the only response here that would be a
-// lie, and it is the one an operator reads most often — on a site that has just
+// lie, and it is the one an operator reads most often â€” on a site that has just
 // been installed, and every few seconds after that.
 const sloNotEvaluated = "not evaluated"
 

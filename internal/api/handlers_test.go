@@ -604,7 +604,7 @@ func adminUserID(t *testing.T, tenant string) string {
 //
 // `Resolve` rotates the session token on every call, and `handleConsoleRoot`
 // discarded the new value. The browser kept the old one, which no longer matched
-// the row, so the next request bounced to /login. `s.principal` — and therefore
+// the row, so the next request bounced to /login. `s.principal` â€” and therefore
 // every other handler - sends the rotated cookie back; this one was the
 // exception, and it is the first page an operator sees.
 func TestVisitingTheConsoleRootDoesNotLogTheOperatorOut(t *testing.T) {
@@ -903,6 +903,125 @@ func TestHoldingACapabilityIsNotBeingAssignedToThePlace(t *testing.T) {
 		if theirs.Code != http.StatusNotFound {
 			t.Errorf("the refusal returned %d, want 404. A 403 discloses that the evidence "+
 				"exists", theirs.Code)
+		}
+	})
+
+	// The four routes addressed by incident id. They are one case each because they
+	// were one case each in the ROUTER once, and there was no test below this level
+	// that could tell a site check from its absence: `p.CanSeeSite` was called by
+	// hand inside each handler, and the only cross-site test in the file covered the
+	// LIST route's `?siteId=`, which takes a different path through the code.
+	//
+	// Which is exactly how `identity.Principal.AuthorizeSite` stayed unwired with
+	// `TEST-ONLY` in the dead-export ledger: the function existed, was correct, and
+	// had no caller, because the behaviour it was written for was present in four
+	// other places and none of them was named.
+	//
+	// The refusal is 404 with the "no such incident" text on every route, and that
+	// is the assertion with teeth: a 403, or a 404 that says "not assigned to
+	// site-b", is a confirmation that the id exists at another site, which is the
+	// same oracle a 200 would have carried.
+	for _, tc := range []struct {
+		name   string
+		method string
+		path   func(string) string
+		body   any
+	}{
+		{"the incident detail", http.MethodGet, func(id string) string { return "/v1/incidents/" + id }, nil},
+		{"the explanation", http.MethodGet, func(id string) string { return "/v1/incidents/" + id + "/explanation" }, nil},
+		{"the evidence list", http.MethodGet, func(id string) string { return "/v1/incidents/" + id + "/evidence" }, nil},
+		{"the disposition", http.MethodPost, func(id string) string { return "/v1/incidents/" + id + "/dispositions" },
+			// `agreement` is a STRING and a CLOSED SET: migration 0005's
+			// `dispositions_agreement_check` admits only some values. It was a bool
+			// here first, and the subtest still passed with the gate in place --
+			// because the gate refuses before the body is ever decoded, so the
+			// malformed body was never reached. Both fixtures only got read when the
+			// site check was removed to red-check it, and the test failed on a 400
+			// about JSON instead of on the 404 that would have said the incident was
+			// served. A test whose fixture is never parsed is a test whose fixture is
+			// not a test.
+			map[string]any{"outcome": "true_positive", "reasonCode": "reviewed", "agreement": "agreed"}},
+		{"the console page", http.MethodGet, func(id string) string { return "/incidents/" + id }, nil},
+	} {
+		t.Run("an incident at an unassigned site is refused on "+tc.name, func(t *testing.T) {
+			theirs := seedIncident(t, tenant, siteB)
+
+			rec := callAs(t, s, "op-a", "operator-a-passphrase", tc.method, tc.path(theirs), tc.body)
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("an incident at unassigned site %q returned %d, want 404: %s",
+					siteB, rec.Code, rec.Body)
+			}
+			// The body must be indistinguishable from a nonexistent id, or the 404
+			// still leaks that this one exists.
+			missing := callAs(t, s, "op-a", "operator-a-passphrase", tc.method, tc.path("no-such-incident"), tc.body)
+			if rec.Code != missing.Code {
+				t.Errorf("a real incident at another site answered %d and a nonexistent one "+
+					"answered %d; the difference is an existence oracle", rec.Code, missing.Code)
+			}
+		})
+	}
+
+	t.Run("an id that resolves to no site is refused, not served", func(t *testing.T) {
+		// The `site == ""` arm of the gate, which is the one the other two mutations
+		// cannot reach. Its first red-check attempt came back GREEN: removing the
+		// empty-site refusal changed nothing, because every route that goes through
+		// `requireCapabilityAtSite` had a resolvable site in every test above.
+		//
+		// That is the exact coverage hole this assertion is here to close, and it is
+		// worth being precise about why it matters. An unknown id resolves to no site,
+		// so with the refusal removed the request falls through to
+		// `p.AuthorizeSite(needed, "")`, which reaches `CanSeeSite("")` -- and a
+		// principal assigned to a site does NOT see the empty string. The route is
+		// still refused, by accident, one layer down, by a different check. A gate
+		// that relies on that is a gate whose behaviour depends on a subtlety in an
+		// unrelated predicate, and the day `CanSeeSite` gains an "empty means
+		// everything" case -- which is a reasonable thing to add for a scope-wide
+		// query -- this route starts serving rows to callers assigned to nothing.
+		//
+		// So the assertion is not "an unknown id is refused". It is that the refusal
+		// is the SAME refusal an unassigned site gets, with no dependence on
+		// `CanSeeSite`'s treatment of an empty string.
+		for _, tc := range []struct {
+			name   string
+			method string
+			path   func(string) string
+			body   any
+		}{
+			{"the incident detail", http.MethodGet, func(id string) string { return "/v1/incidents/" + id }, nil},
+			{"the explanation", http.MethodGet, func(id string) string { return "/v1/incidents/" + id + "/explanation" }, nil},
+			{"the evidence list", http.MethodGet, func(id string) string { return "/v1/incidents/" + id + "/evidence" }, nil},
+			{"the disposition", http.MethodPost, func(id string) string { return "/v1/incidents/" + id + "/dispositions" },
+				map[string]any{"outcome": "true_positive", "reasonCode": "reviewed", "agreement": "agreed"}},
+			{"the console page", http.MethodGet, func(id string) string { return "/incidents/" + id }, nil},
+		} {
+			rec := callAs(t, s, "op-a", "operator-a-passphrase", tc.method, tc.path("no-such-incident"), tc.body)
+			if rec.Code != http.StatusNotFound {
+				t.Errorf("%s for an id that resolves to no site returned %d, want 404: %s",
+					tc.name, rec.Code, rec.Body)
+			}
+		}
+	})
+
+	t.Run("an incident at the principal's own site is served on the same routes", func(t *testing.T) {
+		// The other direction, because a filter that refuses everything is not a
+		// filter. `siteOfIncident` resolves the site by looking the row up, and a
+		// refusal here would be the gate refusing its own site rather than another.
+		mine := seedIncident(t, tenant, siteA)
+		for _, tc := range []struct {
+			name   string
+			method string
+			path   func(string) string
+			body   any
+		}{
+			{"the incident detail", http.MethodGet, func(id string) string { return "/v1/incidents/" + id }, nil},
+			{"the evidence list", http.MethodGet, func(id string) string { return "/v1/incidents/" + id + "/evidence" }, nil},
+			{"the console page", http.MethodGet, func(id string) string { return "/incidents/" + id }, nil},
+		} {
+			rec := callAs(t, s, "op-a", "operator-a-passphrase", tc.method, tc.path(mine), tc.body)
+			if rec.Code != http.StatusOK {
+				t.Errorf("%s at the principal's own site returned %d, want 200: %s",
+					tc.name, rec.Code, rec.Body)
+			}
 		}
 	})
 }

@@ -107,28 +107,41 @@ func (s *Server) RegisterRoutes(d Deps) func(*http.ServeMux) {
 		mux.HandleFunc("DELETE /v1/auth/session", s.requirePrincipal(s.handleLogout))
 
 		// Incidents.
+		//
+		// The list route is the one that means "every site I may see", so it filters
+		// per row inside the handler and stays on `requireCapability`. Every route
+		// addressed by incident id goes through `requireCapabilityAtSite`, which
+		// resolves the incident's site and refuses before the handler runs. That is
+		// the application edge of migration 21's RESTRICTIVE `site_isolation`
+		// policy: the policy is what the database enforces if the edge is missed, and
+		// this is what stops a caller who is not assigned from reaching the row at
+		// all.
 		mux.Handle("GET /v1/incidents",
 			s.requireCapability(identity.CapIncidentRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
 				s.handleIncidentList(w, r, p, d)
 			}))
 		mux.Handle("GET /v1/incidents/{id}",
-			s.requireCapability(identity.CapIncidentRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
-				s.handleIncidentGet(w, r, p, d)
-			}))
+			s.requireCapabilityAtSite(identity.CapIncidentRead, siteOfIncident(d),
+				func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+					s.handleIncidentGet(w, r, p, d)
+				}))
 		mux.Handle("GET /v1/incidents/{id}/explanation",
-			s.requireCapability(identity.CapIncidentRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
-				s.handleIncidentExplain(w, r, p, d)
-			}))
+			s.requireCapabilityAtSite(identity.CapIncidentRead, siteOfIncident(d),
+				func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+					s.handleIncidentExplain(w, r, p, d)
+				}))
 		mux.Handle("POST /v1/incidents/{id}/dispositions",
-			s.requireCapability(identity.CapIncidentDisposition, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
-				s.handleDisposition(w, r, p, d)
-			}))
+			s.requireCapabilityAtSite(identity.CapIncidentDisposition, siteOfIncident(d),
+				func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+					s.handleDisposition(w, r, p, d)
+				}))
 
 		// Evidence.
 		mux.Handle("GET /v1/incidents/{id}/evidence",
-			s.requireCapability(identity.CapEvidenceRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
-				s.handleIncidentEvidence(w, r, p, d)
-			}))
+			s.requireCapabilityAtSite(identity.CapEvidenceRead, siteOfIncident(d),
+				func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+					s.handleIncidentEvidence(w, r, p, d)
+				}))
 		// `evidence.fetch`, not `evidence.read`.
 		//
 		// The two capabilities are distinct in the role table and in the seed the
@@ -203,7 +216,7 @@ func (s *Server) RegisterRoutes(d Deps) func(*http.ServeMux) {
 			func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
 				s.handleConsoleIncidents(w, r, p, d)
 			}))
-		mux.Handle("GET /incidents/{id}", s.requireCapability(identity.CapIncidentRead,
+		mux.Handle("GET /incidents/{id}", s.requireCapabilityAtSite(identity.CapIncidentRead, siteOfIncident(d),
 			func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
 				s.handleConsoleIncident(w, r, p, d)
 			}))

@@ -182,7 +182,49 @@ func TestAMutationTheTableClaimsForAnotherFileIsStillFound(t *testing.T) {
 	}
 }
 
-// TestAMutationStringThatOccursHarmlesslyElsewhereIsNotAFinding is the fixture for a
+// TestAGateThatQuotesItsOwnMutationsIsNotItselfAFinding is the fixture for the third
+// false positive this gate has found on its own live run.
+//
+// This file contains four of the tables' `to` strings verbatim, because testing a
+// detector requires writing down the thing it detects. Every fixture that quotes a
+// `to` without also quoting its `from` is, to a mutation search, an applied control.
+//
+// It is checked here as an exclusion rather than in the assertion itself: the
+// live-tree test deletes `internal/treestate/` from the file set and says why. This
+// fixture records the shape -- a quoted `to`, an absent `from`, and the correct
+// answer being silence once the package is excluded.
+func TestAGateThatQuotesItsOwnMutationsIsNotItselfAFinding(t *testing.T) {
+	const to = "return DegradedTimeout"
+	files := map[string]string{
+		"internal/treestate/treestate_test.go": "		To:   \"" + to + "\",\n",
+	}
+	present := map[string]bool{"internal/treestate/treestate_test.go": true}
+	muts := []treestate.Mutation{{
+		Table: "scripts/verify.ps1", Control: "c",
+		From: "	return DegradedAbsent", To: to,
+	}}
+
+	// Unfiltered, the search does match the fixture -- which is the defect, stated
+	// as a fact rather than asserted away.
+	if got := treestate.CheckMutationsAbsent(files, present, muts); len(got) != 1 {
+		t.Fatalf("an unfiltered search found %d findings, want 1; this fixture is what the "+
+			"live-tree test has to exclude, so it has to actually match", len(got))
+	}
+
+	// And the live-tree test's remedy is a path prefix, which is what makes this
+	// close to a real control rather than a special case.
+	for p := range files {
+		if strings.HasPrefix(p, "internal/treestate/") {
+			delete(files, p)
+			delete(present, p)
+		}
+	}
+	if got := treestate.CheckMutationsAbsent(files, present, muts); len(got) != 0 {
+		t.Errorf("the gate's own package was still searched: %v", got)
+	}
+}
+
+// TestAMutationThatOccursHarmlesslyElsewhereIsNotAFinding is the fixture for a
 // false positive this gate found on its own first live run.
 //
 // internal/rules/match.go contains `return DegradedTimeout` legitimately, inside the
@@ -806,6 +848,36 @@ func TestTheRealTreeHasNoRedCheckMutationApplied(t *testing.T) {
 	if len(files) == 0 {
 		t.Fatal("no files were read, so this assertion checked nothing")
 	}
+
+	// **This gate's own package is excluded, and it is not an exemption.**
+	//
+	// `treestate_test.go` contains four of the mutations verbatim, as fixtures for
+	// the checks that detect an applied mutation. A detector that must be tested
+	// against a real instance of the thing it detects has to write that thing down,
+	// and the file it writes it in then matches every search for it.
+	//
+	// The first live run of this assertion reported four findings against
+	// `internal/treestate/treestate.go` and `treestate_test.go` -- one per fixture
+	// that quotes a mutation's `to` without also quoting its `from`. The controls
+	// named were real and the tree was clean, which is the worst combination this
+	// gate can produce: a reader who sees "its mutation is APPLIED in
+	// internal/treestate/treestate_test.go" concludes the detector is broken, and
+	// then cannot find the bug, because there is not one.
+	//
+	// The exclusion is by path and it is exact: this package, and nothing else. A
+	// second gate doing this work would have the same problem and would need the
+	// same line, which is a cost worth paying once and complaining about twice.
+	const selfPackage = "internal/treestate/"
+	for p := range files {
+		if strings.HasPrefix(p, selfPackage) {
+			delete(files, p)
+			delete(present, p)
+		}
+	}
+	if len(files) == 0 {
+		t.Fatal("every file was excluded, so this assertion checked nothing")
+	}
+
 	got := treestate.CheckMutationsAbsent(files, present, muts)
 	if len(got) > 0 {
 		t.Errorf("the real tree has an applied red-check mutation:\n%s", treestate.Report(got))
