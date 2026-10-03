@@ -1002,6 +1002,34 @@ func TestHoldingACapabilityIsNotBeingAssignedToThePlace(t *testing.T) {
 		}
 	})
 
+	t.Run("a second operator assigned elsewhere gets the mirror answer", func(t *testing.T) {
+		// Two principals, two sites, and the gate has to follow the SCOPE rather than
+		// the identity. A check that keyed off "is this the operator the tests use"
+		// would pass every assertion above and still be wrong, and the way to know it
+		// follows the scope is to have a second principal with the mirror assignment
+		// and require the opposite answer on the same incident.
+		if err := s.Identity.EnsureUser(ctx(), tenant, "op-b", "op-b", "Operator B",
+			string(identity.RoleTenantAdmin), []string{siteB}, "admin"); err != nil {
+			t.Fatalf("provision the second operator: %v", err)
+		}
+		if err := s.Identity.SetPassword(ctx(), tenant, "op-b", "",
+			"operator-b-passphrase", "admin"); err != nil {
+			t.Fatalf("set the second operator's password: %v", err)
+		}
+		theirs := seedIncident(t, tenant, siteB)
+
+		mine := callAs(t, s, "op-a", "operator-a-passphrase", http.MethodGet, "/v1/incidents/"+theirs, nil)
+		if mine.Code != http.StatusNotFound {
+			t.Errorf("site-b's incident returned %d to an operator scoped to site %q, want 404",
+				mine.Code, siteA)
+		}
+		yours := callAs(t, s, "op-b", "operator-b-passphrase", http.MethodGet, "/v1/incidents/"+theirs, nil)
+		if yours.Code != http.StatusOK {
+			t.Errorf("site-b's incident returned %d to the operator scoped to site %q, want 200: %s",
+				yours.Code, siteB, yours.Body)
+		}
+	})
+
 	t.Run("an incident at the principal's own site is served on the same routes", func(t *testing.T) {
 		// The other direction, because a filter that refuses everything is not a
 		// filter. `siteOfIncident` resolves the site by looking the row up, and a

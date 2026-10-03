@@ -516,6 +516,74 @@ func TestAnUndeployedFeedDoesNotLookLikeAFault(t *testing.T) {
 	}
 }
 
+// A pass that cannot establish which site it is ingesting for must ingest NOTHING.
+//
+// The defect this pins: `PollOnce` used to resolve its scope inside `loadCursor`,
+// and `loadCursor`'s failure was read as "no cursor is not fatal, it means a full
+// re-read". Which is true of a cursor and was applied to a site binding. So with
+// `Deps.SiteID` unset the pass logged the line, polled the adapter anyway, and
+// wrote every record it got into `inbox_events` through a connection with no tenant
+// context bound.
+//
+// Under RLS a write with no tenant context is refused by the database. Through the
+// pool's owner role it is not, because the owner bypasses the policies -- and that
+// is the role the tests and the daemon's own pool run as. So the refusal `Scoped`
+// performs was the only thing between a misconfigured daemon and tenant-scoped rows
+// written with nothing scoping them, and the one path that wrote rows was the one
+// path that skipped it.
+func TestAnIngestPassWithNoSiteIngestsNothing(t *testing.T) {
+	h := setup(t, bundle, `[
+		{"Id":"e1","Type":"Motion","Timestamp":"2026-03-01T09:00:00Z","Source":"Cam [cam-1]"}
+	]`)
+	ctx := context.Background()
+
+	// The harness's own site, so the only thing wrong is the binding.
+	h.loops.Deps.SiteID = ""
+
+	before := h.registry.Counters.Snapshot()[observability.CounterInboxAccepted]
+	h.loops.PollOnce(ctx)
+
+	var rows int
+	if err := h.loops.Deps.Pool.For(h.tenant, "test").QueryRow(ctx,
+		`SELECT count(*) FROM inbox_events WHERE tenant_id = $1`, h.tenant).Scan(&rows); err != nil {
+		t.Fatalf("count inbox rows: %v", err)
+	}
+	if rows != 0 {
+		t.Errorf("a pass with no site id wrote %d inbox row(s). The pass must be refused "+
+			"before the adapter is polled, not after the first query that happens to need "+
+			"a connection", rows)
+	}
+	if after := h.registry.Counters.Snapshot()[observability.CounterInboxAccepted]; after != before {
+		t.Errorf("the accepted counter moved from %d to %d on a refused pass, so the "+
+			"refusal happened after the work rather than before it", before, after)
+	}
+}
+
+// The other direction, because a pass that always refuses is not a pass. The
+// harness sets a site, and this is what the wiring has to leave working.
+func TestAnIngestPassWithASiteIngests(t *testing.T) {
+	h := setup(t, bundle, `[
+		{"Id":"e1","Type":"Motion","Timestamp":"2026-03-01T09:00:00Z","Source":"Cam [cam-1]"}
+	]`)
+	ctx := context.Background()
+
+	if h.loops.Deps.SiteID == "" {
+		t.Fatal("the harness has no site, so this test would assert nothing about the " +
+			"wired path")
+	}
+	h.loops.PollOnce(ctx)
+
+	var rows int
+	if err := h.loops.Deps.Pool.For(h.tenant, "test").QueryRow(ctx,
+		`SELECT count(*) FROM inbox_events WHERE tenant_id = $1`, h.tenant).Scan(&rows); err != nil {
+		t.Fatalf("count inbox rows: %v", err)
+	}
+	if rows == 0 {
+		t.Error("a pass with a site id ingested nothing; the scope is now resolved up front " +
+			"and something upstream of the write is refusing")
+	}
+}
+
 // The counter that was supposed to be wired. A metrics assertion that passes on
 // an empty wiring proves nothing, so this one requires a non-zero reading after
 // real work.

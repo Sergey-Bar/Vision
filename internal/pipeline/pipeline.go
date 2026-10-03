@@ -497,6 +497,33 @@ func (l *Loops) runIngest(ctx context.Context) {
 // triggers one on SIGHUP so an operator can pull a feed without restarting the
 // service, and the end-to-end test drives the loop without a ticker.
 func (l *Loops) PollOnce(ctx context.Context) {
+	// The scope is resolved ONCE, here, before anything is written.
+	//
+	// It used to be resolved inside `loadCursor`, and that call's error was treated
+	// as "no cursor is not fatal: it means a full re-read". Which is true, and is
+	// the reason the guard did nothing. `Scoped` refuses when `SP_SITE_ID` is unset,
+	// because a loop with no site is not a loop that can see the whole tenant -- and
+	// that refusal was being read as a missing optimisation, so the pass carried on,
+	// polled the adapter, and wrote every record it got straight into `inbox_events`
+	// through a connection with no tenant context set.
+	//
+	// The write is the part that matters. Under RLS a write with no tenant context is
+	// refused by the database; through the pool's owner role it is not, because the
+	// owner bypasses the policies. So the refusal `Scoped` performs was the ONLY
+	// thing standing between a misconfigured daemon and an ingest that writes
+	// tenant-scoped rows with nothing scoping them, and the ingest path was the one
+	// path that skipped it.
+	//
+	// Refusing the whole pass is the correct shape: a pass that cannot establish
+	// which site it is ingesting for should not ingest anything, and the cursor is
+	// unchanged so the next pass re-reads the same window once the operator fixes it.
+	if _, err := l.Deps.IngestScoped(); err != nil {
+		l.log("the ingest pass was refused before it began",
+			"error", err.Error(),
+			"hint", "set SP_SITE_ID to the site this integration feeds; nothing was polled and nothing was written")
+		return
+	}
+
 	var since *time.Time
 	cursor, err := l.loadCursor(ctx)
 	if err != nil {

@@ -264,6 +264,62 @@ matches it any more. Delete the entry rather than leaving it to look like a deci
 that was made`. The entry is deleted. Four of the five other unwired controls remain
 and are listed in Part I.6's backlog below.
 
+### The ingest path was the one path that wrote rows without a site binding
+
+`pipeline.Deps.IngestScoped` was in the dead-export ledger as `UNWIRED`: the
+tenant-scoped ingest entry point nothing called. It existed for one reason, stated
+in its own doc comment: the ingest path should get **one** call site, so a missing
+site id is refused at the start of every pass rather than at the first query that
+happens to need a connection.
+
+The connection was instead built inside `loadCursor`, and `loadCursor`'s error was
+read as *"no cursor is not fatal: it means a full re-read"*. Which is true of a
+cursor, and was applied to a site binding. So with `SP_SITE_ID` unset, a pass
+logged that line, **polled the adapter anyway, and wrote every record it got into
+`inbox_events`** through a connection with no tenant context bound.
+
+That is the whole severity of it. Under RLS a write with no tenant context is
+refused by the database — but the write is done by the pool's owner role, and an
+owner bypasses the policies. So `Scoped`'s refusal was the only thing between a
+misconfigured daemon and tenant-scoped rows written with nothing scoping them, and
+the one path that writes rows was the one path that skipped it.
+
+`PollOnce` now resolves the scope once, before anything is polled, and refuses the
+whole pass. The cursor is untouched, so the next pass re-reads the same window once
+an operator has set `SP_SITE_ID`.
+
+| Control | Mutation | Result |
+|---|---|---|
+| an ingest pass with no site id writes nothing | the `if _, err := l.Deps.IngestScoped(); err != nil {` call deleted, which still compiles | `TestAnIngestPassWithNoSiteIngestsNothing` FAIL: `a pass with no site id wrote 1 inbox row(s)` and `the accepted counter moved from 0 to 1 on a refused pass` |
+
+```
+ok  	github.com/Sergey-Bar/Ai-Captain/internal/pipeline	3.724s   (baseline)
+ok  	github.com/Sergey-Bar/Ai-Captain/internal/pipeline	2.842s   (after restore)
+```
+
+Two tests, both directions: `TestAnIngestPassWithNoSiteIngestsNothing` asserts zero
+rows **and** an unmoved counter — the counter is the sharper half, because a row
+count of zero is also what a broken adapter produces, while a counter that moved on
+a refused pass means the refusal happened *after* the work. And
+`TestAnIngestPassWithASiteIngests` asserts the pass still works, because a guard that
+refuses everything is not a guard.
+
+This is in the table, unlike the site gate above, because it is **one line in one
+file** and removing it leaves a function that compiles. The table's format can
+express that; it cannot express the site gate's three files.
+
+The dead-export ledger's unused-declaration check caught the wiring on its own:
+`the allow-list excuses internal/pipeline.IngestScoped and nothing matches it any
+more. Delete the entry rather than leaving it to look like a decision that was
+made.` Deleted.
+
+And `tree-state`'s fourth assertion caught the omission this paragraph fixes: the
+moment RC-12 was added to `scripts/verify.ps1`, the gate reported it as
+`an ingest pass with no site id writes nothing -- is in scripts/verify.ps1 and
+appears nowhere in its transcript document`. A control in the table with no record
+of being watched fail is a control that is a comment, and the gate says so without
+being asked which is the only way anyone finds out.
+
 ### Eight controls had no transcript at all, and the gate said so
 
 The new `tree-state` gate asserts that every red-check entry's name appears in this

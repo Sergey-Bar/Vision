@@ -246,7 +246,7 @@ type Mutation struct {
 //
 //   - `internal/rules/match.go` has a `switch` that legitimately contains
 //     `return DegradedTimeout`, which is the mutation string of a control in
-//     `internal\other\place.go`. The mutation was applied nowhere.
+//     in some other package. The mutation was applied nowhere.
 //   - the presence-mode entry's mutation is
 //     `{Name: "SP_POC_ZONES", kind: kindString,` — a **prefix** of the line it
 //     replaces. The correct line contains the broken one, so the broken one can

@@ -523,6 +523,27 @@ Invoke-Gate 'red-check' {
             why  = 'the migrator was told to authenticate as the role the DSN names and authenticated as whoever ran it, so a correct DSN fails with a password error naming a user the operator never wrote down'
         }
         @{
+            # The one path that WRITES rows was the one path that skipped the site
+            # binding. The refusal `Scoped` performs used to be read as "no cursor is
+            # not fatal", because it was made inside loadCursor -- and a cursor being
+            # an optimisation is true while a site binding being an optimisation is
+            # not. So with SP_SITE_ID unset the pass logged, polled the adapter anyway
+            # and wrote every record into inbox_events with no tenant context bound.
+            # Under RLS the database would refuse that; through the pool's owner role,
+            # which bypasses the policies, it does not.
+            #
+            # Red-checked by deleting the call, which leaves a function that still
+            # compiles: TestAnIngestPassWithNoSiteIngestsNothing then reports one
+            # inbox row written and the accepted counter moved from 0 to 1.
+            name = 'an ingest pass with no site id writes nothing'
+            file = 'internal\pipeline\pipeline.go'
+            from = '	if _, err := l.Deps.IngestScoped(); err != nil {'
+            to   = '	if _, err := (*dbx.Tenant)(nil), error(nil); err != nil { // REDCHECK RC-12'
+            test = 'TestAnIngestPassWithNoSiteIngestsNothing'
+            pkg  = './internal/pipeline'
+            why  = 'a loop that ingested nothing while believing it was ingesting everything, or that ingested everything while believing it was ingesting one site. The first is silent; the second writes tenant-scoped rows with nothing scoping them and the database cannot stop it, because the role that does the writing owns the tables'
+        }
+        @{
             # The other half, and it is a half on its own: the role has to be rendered
             # into the connection string even when no password arrives with it.
             name = 'the configured role reaches the connection string'

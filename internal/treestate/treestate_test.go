@@ -1,6 +1,8 @@
 package treestate_test
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Sergey-Bar/Ai-Captain/internal/treestate"
 )
@@ -586,13 +589,32 @@ func repoRoot(t *testing.T) string {
 	return ""
 }
 
+// git runs one git command in dir and returns its stdout.
+//
+// `gosec` flags G204 here -- a subprocess launched with a variable -- and the flag
+// is right about the shape and wrong about the risk: every `args` value in this file
+// is a literal, and the variable being passed is `dir`, not a command line. So it is
+// suppressed on the line with that reasoning rather than by a file-wide exclusion,
+// because a file-wide one would silence the finding everywhere including on a call
+// somebody adds later that really does build a command line out of data.
+//
+// `noctx` is NOT suppressed: a `git` with no deadline is a gate that can hang
+// forever, and a verification script that hangs is a gate that gets skipped. The
+// context is the test's own, so the bound is the go test timeout.
+//
+// The `errors.As` is not the same story as G204: `*exec.ExitError` comes back
+// wrapped, so the type assertion would not fire on exactly the failures this wants
+// to report git's stderr for.
 func git(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", args...)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", args...) //nolint:gosec // G204: every argument below is a literal; see above.
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
 			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, ee.Stderr)
 		}
 		t.Fatalf("git %s: %v", strings.Join(args, " "), err)

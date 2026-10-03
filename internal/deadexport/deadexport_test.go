@@ -160,7 +160,6 @@ var (
 		"internal/outbox.ErrLeaseLost":            {Symbol: "internal/outbox.ErrLeaseLost", Why: "sentinel: the relay returns it when a lease lapsed, which is the zero-duplicate-side-effect path, and the reason is recorded on the message row"},
 		"internal/release.ErrVerification":        {Symbol: "internal/release.ErrVerification", Why: "sentinel: release verification returns it and `securityctl verify-release` prints the reason to the operator, so the identity is published as prose"},
 		"internal/pipeline.InvalidateBundleCache": {Symbol: "internal/pipeline.InvalidateBundleCache", Why: "UNWIRED. The bundle cache invalidation hook nothing calls. Close it by having bundles.Activate call it, so an activated bundle takes effect without a restart, or delete it"},
-		"internal/pipeline.IngestScoped":          {Symbol: "internal/pipeline.IngestScoped", Why: "UNWIRED. The tenant-scoped ingest entry point nothing calls. Close it by having the adapters call it instead of the unscoped path, or delete it"},
 
 		"internal/rtsp.DefaultPort": {Symbol: "internal/rtsp.DefaultPort", Why: "published constant: the RTSP port a site binds, stated in the network requirements the deployment document lists"},
 		"internal/rtsp.UserAgent":   {Symbol: "internal/rtsp.UserAgent", Why: "published constant: the User-Agent this product presents to a camera. It is part of the product's external identity and is asserted by the camera's own logs"},
