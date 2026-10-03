@@ -209,9 +209,9 @@ func TestSignalsAreAssembledFromStoredFacts(t *testing.T) {
 	if !tr.NormalizedAt.Equal(epoch.Add(10 * time.Second)) {
 		t.Errorf("trigger normalized_at is %s", tr.NormalizedAt)
 	}
-	if !tr.ObservedAt.Equal(epoch.Add(10 * time.Second)) {
-		t.Errorf("trigger observed_at is %s", tr.ObservedAt)
-	}
+	// The source's own claim is deliberately not on the signal. It used to be,
+	// scanned from a column nothing read, and `internal/predicatecov` now fails
+	// the build if the field or the column comes back.
 	if tr.Tier != rules.TierA {
 		t.Errorf("trigger tier is %q, want A", tr.Tier)
 	}
@@ -624,7 +624,6 @@ func render(payload []byte) string { return string(payload) }
 func triggerLine(s rules.Signal) []byte {
 	return []byte(strings.Join([]string{
 		"TRIGGER", s.EventID, s.EventType, "tier=" + string(s.Tier),
-		"observed_at=" + s.ObservedAt.UTC().Format(time.RFC3339),
 		"normalized_at=" + s.NormalizedAt.UTC().Format(time.RFC3339),
 	}, " "))
 }

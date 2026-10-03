@@ -70,6 +70,7 @@ or from the site configuration.`,
 		auditCommand(),
 		identityCommand(),
 		releaseKeyCommand(),
+		demoCommand(),
 	)
 	return root
 }

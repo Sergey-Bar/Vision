@@ -17,22 +17,75 @@ is not, and neither is the commit history.
 Green means: written, building, and covered by a test that would fail if it broke.
 Everything in the table below is that. Where a thing is not done it says why.
 
-**Verification:** `scripts/verify.ps1` green - seventeen gates: contract-check
+**One item in this record is awaiting a human signature.** `AGENTS.md` reserves
+migrations, auth and anything touching an invariant to a human who reads the
+diff. The 2026-10-02 work touched all three — the test harness now creates a
+database per package and the product roles under a cluster-wide lock, and
+migration 0008's role DDL is now retried under concurrency. That is recorded as
+**R13** in [`docs/ratification.md`](ratification.md) with the decision, the diff,
+the evidence, the alternative, and the one thing in it that deserves the most
+scrutiny: the harness issues cluster-scoped DDL against whatever host
+`SP_TEST_DATABASE_URL` names. It is written as per-package **database** isolation
+rather than the per-package **schema** the plan asked for, because migration 0008
+hardcodes `public` and a per-schema harness would apply **no row-level security at
+all**; the reason is in R13.
+
+**Verification:** `scripts/verify.ps1` green - twenty-one gates: contract-check
 across all three published contract surfaces, contract-sync, vet, gofmt,
 `golangci-lint` (including gosec), the generated-code check,
-`go test -race -p 1 -count=1 ./...`, red-check, migration-phases, sql-guard,
-skills-audit, rules-lint, the RLS canary and the Python runtime suite - against
-a real Postgres 16, with `SP_TEST_DATABASE_URL` set so the database-backed suites
-ran rather than skipped. `contractcheck` reports 20 messages and 22 enums
-compatible with the baseline, plus 7 JSON Schemas (248 properties) and the
-OpenAPI document's 20 paths. No data races. The run is
-`dist/verification/verify-20261002-144151.json`, `verified: true`, seventeen
-gates, zero failed, zero skipped, against a real database — including
+`go test -race -count=1 -json -coverprofile ./...`, skip-audit, cover-floor, dead-export, predicate-cov,
+red-check, migration-phases, sql-guard, skills-audit, rules-lint, the RLS canary
+and the Python runtime suite - against a real Postgres 16, with
+`SP_TEST_DATABASE_URL` set so the database-backed suites ran rather than skipped.
+`contractcheck` reports 20 messages and 22 enums compatible with the baseline, plus
+7 JSON Schemas (248 properties) and the OpenAPI document's 20 paths. No data
+races. The most recent dated run record is
+`dist/verification/verify-20261002-144151.json`, `verified: true`, with a gate list
+of seventeen, zero failed, zero skipped, against a real database - including
 `recovery-drill`, which is the gate that skips whenever the database variable is
-absent, and which was the reason the previous run of this paragraph was not
-evidence even though it was green. `red-check` is 7 of 7 controls proved in 12
-seconds; `skills-audit` is 1 second, because it checks freshness rather than
-rescanning 67 skills.
+absent, and which was the reason the previous run of that record was not evidence
+even though it was green. The twenty-one gates above are a later tree than that
+record: skip-audit, cover-floor, dead-export and predicate-cov were added after it, so the
+record's own gate list is a statement about that run, not about today's script.
+`red-check` is 7 of 7 controls proved in 12 seconds; `skills-audit` is 1 second,
+because it checks freshness rather than rescanning 67 skills.
+
+**The four gates added with the 2026-10-02 pass, and what they caught.** All four
+are about the run rather than the product, which is where this repository's
+defects have clustered:
+
+| Gate | What it is | What it found on its first run |
+|---|---|---|
+| `skip-audit` | reads the `go test -json` stream and fails on any skip not declared in `internal/skipaudit/declared-skips.json` with a reason | a run of this repository reported exit 0 with ten skips in it, including two installer tests whose skip message said "the rest of this test still runs" while `t.Skip` had prevented exactly that. Both tests now run on Windows, and the two platform-gated declarations carry the `when` field that keeps them honest on Linux |
+| `dead-export` | every exported function, var, const and method must have a reader outside its own package's tests | 213 unread symbols and 23 uncalled methods. The plan named nine of them; the rest are recorded in the allow-list in `internal/deadexport/deadexport_test.go`, each entry saying whether it is a published vocabulary or genuinely unwired. **Six of the unwired ones are controls, not plumbing, and are listed below.** |
+| `predicate-cov` | no SQL predicate may bound `observed_at`, `received_at` or `captured_at`; the canonical-event window query must bound `normalized_at`; and the window query may not mention a source-time column at all, even in a select list | `rules.State` carried an `ObservedAt` field that nothing read, and the correlator selected the column to fill it. The field is gone, the column is out of the select list, and the gate fails if either returns |
+| `cover-floor` | a committed per-package statement-coverage floor, failing both downwards and upwards | nothing in the product — it is the first gate here whose first run was about itself. It then failed on `internal/covercheck` one turn later because the package had gained tests, which is the ratchet working on the gate's own author |
+
+**Six unwired controls, named here because a security reader should not have to
+find them in a test file.** `dead-export`'s allow-list is where they are tracked;
+this is where they are *stated*, because `docs/status.md` is the only source of
+truth for build state and "a backlog made visible" is not a statement an operator
+can act on:
+
+| Symbol | What it is | What is currently holding that role |
+|---|---|---|
+| `identity.AuthorizeSite` | the site-scope authorisation check at the application edge | migration 21's RESTRICTIVE `site_isolation` policy alone. A session can reach another site's rows if any query bypasses the policy |
+| `identity.StepUp` | the step-up proof | nothing. Escalating a sensitive incident presents no fresh factor, so a session that was adequate fifteen minutes ago is the whole basis of the decision |
+| `identity.RotateCSRF` | CSRF rotation on privilege change | nothing. A CSRF token minted before an escalation remains usable after one |
+| `identity.WrapFor` / `UnwrapFor` | row-bound secret sealing | nothing. `SecretStore` — one of the nine dead exports that started this work — is unwired, so a ciphertext copied to another row would still decrypt |
+| `clock.AssessGap` | the clock-gap assessor an exclusion's reason depends on | nothing. The corrector still runs, so `normalized_at` is still written, but nothing *assesses* it and an unverifiable exclusion carries no reason |
+| `pipeline.IngestScoped` | the tenant-scoped ingest entry point | the unscoped path. Adapters do not state which tenant they are ingesting for at the call site |
+
+Four of the six are closed by P5 (the disposition form spends a step-up, rotates
+CSRF, and authorises per site). The other two are harness-and-ingest changes and
+belong with the work that makes the adapters state their tenant.
+
+Each of the four gates also found a defect in itself, which is the only honest way
+to introduce one: `dead-export` reported an unread symbol in its own package,
+`predicatecov` reported the field its own documentation explained the removal of,
+`covercheck` measured generated protobuf as if it were hand-written, and
+`skip-audit` decoded nothing at all on the first run because Windows PowerShell's
+`>` writes UTF-16.
 
 **What this round added, and what it cost.** Three things, all of them about this
 gate rather than the product:
@@ -1298,8 +1351,19 @@ literal was touched.
 
 ### Migrations
 
-Schema version is now 21 â€” the compatibility window in `migrations/compat.json`,
-and the newest migration in `migrations/` is `0021_site_isolation_restrictive.expand.sql`.
+Schema version is now 22 — the compatibility window in `migrations/compat.json`,
+and the newest migration in `migrations/` is
+`0022_observation_hosted_attribution.expand.sql`, which adds `model_identity`,
+`model_contract_version` and `temperature`, drops `model_hash`'s `NOT NULL`, and
+substitutes `ai_observations_attribution_ck` so that an observation must still say
+which model answered — either by the hash of the weights, or by naming the provider
+and the contract version this build pinned. **It is a substitution, not a
+relaxation**: half an attribution (a provider name with no pinned contract
+version) is still refused, and the red-check in
+`internal/observations/attribution_test.go` removes the constraint and asserts the
+refusal stops. The migration is expand-only, with no contract step bundled, so the
+window may widen immediately — a binary predating 0022 reads a database with an
+extra nullable column and ignores it.
 **That sentence is a test.** `migrations/proposal_migration_test.go` fails the build
 if `compat.json` and the migrations on disk disagree, and if this number and
 `compat.json` disagree, because a stale version number in the repository's source

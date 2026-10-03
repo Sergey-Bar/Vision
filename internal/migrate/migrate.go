@@ -15,8 +15,12 @@ package migrate
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -283,30 +287,121 @@ func (r *Runner) Up(ctx context.Context) (Plan, error) {
 	}
 
 	for _, m := range plan.Pending {
-		start := time.Now()
-		tx, err := conn.Begin(ctx)
-		if err != nil {
-			return plan, fmt.Errorf("migrate: begin %s: %w", m.FileName(), err)
-		}
-		if _, err := tx.Exec(ctx, m.SQL); err != nil {
-			_ = tx.Rollback(ctx)
-			return plan, fmt.Errorf("migrate: apply %s: %w", m.FileName(), err)
-		}
-		if _, err := tx.Exec(ctx,
-			`INSERT INTO schema_migrations (version, name, phase, checksum, duration_ms)
-			 VALUES ($1, $2, $3, $4, $5)`,
-			m.Version, m.Name, string(m.Phase), m.Checksum, time.Since(start).Milliseconds()); err != nil {
-			_ = tx.Rollback(ctx)
-			return plan, fmt.Errorf("migrate: record %s: %w", m.FileName(), err)
-		}
-		if err := tx.Commit(ctx); err != nil {
-			return plan, fmt.Errorf("migrate: commit %s: %w", m.FileName(), err)
-		}
-		if r.Logf != nil {
-			r.Logf("applied %s (%s) in %s", m.FileName(), m.Phase, time.Since(start).Round(time.Millisecond))
+		if err := r.applyOne(ctx, conn.Conn(), m, time.Now()); err != nil {
+			return plan, err
 		}
 	}
 	return plan, nil
+}
+
+// catalogContentionSQLState is the Postgres error for `tuple concurrently updated`:
+// two sessions updated the same catalog row and one lost the race and its
+// transaction. It is not a deadlock and not a constraint violation — the
+// transaction is fine to retry.
+const catalogContentionSQLState = "XX000"
+
+// catalogContentionMessage is the one message that SQLSTATE covers and this retry
+// means. See isCatalogContention.
+const catalogContentionMessage = "tuple concurrently updated"
+
+// catalogContentionAttempts bounds the retry, and the pause between them grows.
+//
+// The first version used three attempts 50ms apart, which was derived from the
+// wrong assumption: that the competing session finishes its catalog update in
+// microseconds. It does not. `ALTER ROLE` is inside the same transaction that then
+// builds a policy on every tenant-scoped table, so the catalog row stays locked
+// for as long as step 0008 takes — seconds. `internal/dr` lost three races 50ms
+// apart and reported the failure as an error, which is the correct behaviour for a
+// bound that is too tight.
+//
+// Five attempts at 250ms, 500ms, 1s, 2s covers a contention window of a few
+// seconds with room to spare, and a genuine problem still surfaces as an error
+// rather than as a hang.
+const (
+	catalogContentionAttempts  = 5
+	catalogContentionFirstWait = 250 * time.Millisecond
+)
+
+// applyOne applies one migration file and records it.
+//
+// The retry exists because migration 0008 issues `CREATE ROLE` and
+// `ALTER ROLE ... BYPASSRLS` unconditionally, and a PostgreSQL **role is
+// cluster-wide** while a migration's advisory lock is not: `pg_advisory_lock` on
+// a bigint is scoped to the current database, which is right for two migrators
+// racing on one site and useless for two migrators running against two databases
+// in one cluster. They collide in `pg_authid` and the loser gets
+// `tuple concurrently updated` out of a step it did nothing wrong in.
+//
+// It is not only a test-harness shape. A shared Postgres cluster serving two
+// deployments, a `security-migrate up` in each, is the same race, and the losing
+// deployment's migration is a half-applied identity step.
+func (r *Runner) applyOne(ctx context.Context, conn *pgx.Conn, m migrations.Migration, start time.Time) error {
+	var lastErr error
+	for attempt := range catalogContentionAttempts {
+		err := r.applyOnce(ctx, conn, m, start)
+		if err == nil {
+			return nil
+		}
+		if !isCatalogContention(err) {
+			return err
+		}
+		lastErr = err
+		// Nothing to wait for in state: the whole transaction rolled back, so the
+		// next attempt starts from where this one did. Only the clock matters.
+		wait := catalogContentionFirstWait << attempt
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("migrate: apply %s: %w", m.FileName(), ctx.Err())
+		case <-time.After(wait):
+		}
+	}
+	return fmt.Errorf("migrate: apply %s: still losing the race for a cluster catalog after %d "+
+		"attempts, last error: %w", m.FileName(), catalogContentionAttempts, lastErr)
+}
+
+func (r *Runner) applyOnce(ctx context.Context, conn *pgx.Conn, m migrations.Migration, start time.Time) error {
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("migrate: begin %s: %w", m.FileName(), err)
+	}
+	if _, err := tx.Exec(ctx, m.SQL); err != nil {
+		_ = tx.Rollback(ctx)
+		return fmt.Errorf("migrate: apply %s: %w", m.FileName(), err)
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO schema_migrations (version, name, phase, checksum, duration_ms)
+		 VALUES ($1, $2, $3, $4, $5)`,
+		m.Version, m.Name, string(m.Phase), m.Checksum, time.Since(start).Milliseconds()); err != nil {
+		_ = tx.Rollback(ctx)
+		return fmt.Errorf("migrate: record %s: %w", m.FileName(), err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("migrate: commit %s: %w", m.FileName(), err)
+	}
+	if r.Logf != nil {
+		r.Logf("applied %s (%s) in %s", m.FileName(), m.Phase, time.Since(start).Round(time.Millisecond))
+	}
+	return nil
+}
+
+// isCatalogContention recognises the error by SQLSTATE *and* message, so that only
+// `tuple concurrently updated` is retried.
+//
+// SQLSTATE alone is too wide. `XX000` is the whole internal-error class, so a
+// genuine internal error in a step would be retried five times over about four
+// seconds before surfacing — a delayed failure with a misleading log line, on a
+// path whose entire job is to report a migration failure honestly. The message
+// check is the cheap half of a precise predicate, and precision is the point.
+func isCatalogContention(err error) bool {
+	for err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) {
+			return pgErr.Code == catalogContentionSQLState &&
+				strings.Contains(pgErr.Message, catalogContentionMessage)
+		}
+		err = errors.Unwrap(err)
+	}
+	return false
 }
 
 func (r *Runner) planOn(ctx context.Context, conn *pgx.Conn) (Plan, error) {
