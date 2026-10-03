@@ -29,6 +29,20 @@ type Crossing struct {
 	// Score is the model's confidence in the box the crossing was decided on.
 	// See Confidence.
 	Score float64
+	// Cut records that this decision's box was found by looking at a MAGNIFIED CROP of
+	// the region rather than at the whole frame.
+	//
+	// It is a bool and not the region-source string because this package owns no
+	// vocabulary of sources. `novelty` does. The only two answers the engine can give
+	// are "the crop pass produced this" and "the whole-frame pass did", `soak` carries
+	// them as `novelty.RegionCut` and `novelty.RegionMeasured`, and nobody else needs
+	// the distinction or has a way to spell it.
+	//
+	// It travels on the Crossing rather than being looked up afterwards because a later
+	// reader has to be able to tell two boxes apart from the stored row alone. Per
+	// invariant 2, a fact that is displayed but not stored is a fact that gets
+	// re-derived, and a re-derived region source is a re-inference.
+	Cut bool
 }
 
 // Family is the crossing's class family, resolved from the taxonomy rather than
@@ -81,21 +95,21 @@ type Track struct {
 	// The two flags answer different questions and conflating them is why the
 	// two-stage ghost association could not work at all:
 	//
-	//   - `allowed` is per FRAME — "can this track emit a crossing right now". It is
+	//   - `allowed` is per FRAME Ã¢â‚¬â€ "can this track emit a crossing right now". It is
 	//     cleared every frame and set only by an APPROVED box, because "an object we
 	//     used to see" is not "an object we can see now".
-	//   - `aged` is per TRACK — "has this object existed long enough to be real". It
+	//   - `aged` is per TRACK Ã¢â‚¬â€ "has this object existed long enough to be real". It
 	//     persists, because an object half-occluded by a pole is still the object we
 	//     have been watching, and the frame it dipped in is not the frame it was
 	//     invented.
 	//
 	// The ghost pass gates on `aged`. Gating it on `allowed` made it dead code: a
 	// frame containing nothing but ghosts has no approved box, so nothing sets
-	// `allowed`, so nothing can be resumed — which is precisely the frame the pass
+	// `allowed`, so nothing can be resumed Ã¢â‚¬â€ which is precisely the frame the pass
 	// exists for.
 	aged bool
 	// kalman is this track's position filter. It is EMBEDDED rather than a pointer so
-	// copying a Track — which the overlay does once per frame per track — cannot
+	// copying a Track Ã¢â‚¬â€ which the overlay does once per frame per track Ã¢â‚¬â€ cannot
 	// leave two objects sharing one filter, and a shared filter is a box that jumps
 	// between two objects.
 	kalman Kalman
@@ -110,13 +124,40 @@ type Track struct {
 	// is about one frame, and a report that says "track 7 survived 31 dips" is the
 	// sentence that tells an operator the score threshold is right for this material.
 	resumed int
+	// Cut records that the box this track was last matched to came from a MAGNIFIED
+	// CROP rather than from the whole-frame pass.
+	//
+	// It is set on every match rather than at creation, because it describes the most
+	// recent observation: an object small enough to need the crop pass at one moment
+	// and large enough for the whole-frame pass at the next is a real sequence, and
+	// freezing the answer at creation would report the first.
+	//
+	// Three things read it and they all mean different things by it. The track-minimum
+	// check holds a crop-sourced track to a LOWER bar, because a magnified sighting is
+	// a structurally better observation and two of them are worth more than two
+	// eight-pixel smudges. The presence latch counts one event per track regardless of
+	// it. And the Crossing carries it, so the stored row can say how the box was found
+	// rather than leaving a reader to guess.
+	Cut bool
+	// announced is whether this track has already emitted a presence event.
+	//
+	// It is the presence primitive's latch and it is per TRACK, not per class and not
+	// per line. A line-crossing track can emit twice, once each way, because a line has
+	// two sides and re-arms when the object returns. Presence has no second event to
+	// wait for: "something was here and it is being tracked" is a single fact about a
+	// single object, and a track that re-announced itself every frame while it stayed
+	// on screen would turn one bird into a hundred events.
+	//
+	// It is never cleared, which is the same rule as `aged`: the track is the thing
+	// that remembers.
+	announced bool
 }
 
 // FilteredCentre returns this track's filtered centre and whether the filter has a
 // state at all.
 //
 // A track with no filter state yet returns its raw centre, so a one-frame track is
-// indistinguishable from an unfiltered one — which is the honest answer and what
+// indistinguishable from an unfiltered one Ã¢â‚¬â€ which is the honest answer and what
 // keeps the first frame of every track identical to what it was before the filter
 // existed.
 func (t *Track) FilteredCentre() (cx, cy float64, ok bool) {
@@ -137,7 +178,7 @@ func (t Track) family() string { return string(classify.FamilyOf(t.Class)) }
 
 // Stats are the per-frame counters. They are counters of what the ENGINE saw, not
 // of what happened in the world, and the four that matter across a whole run live
-// in Counters — see split.go, which is where the run-level arithmetic is.
+// in Counters Ã¢â‚¬â€ see split.go, which is where the run-level arithmetic is.
 //
 // `Rejected` is kept for compatibility with the per-frame print and is NOT the
 // run's rejection count: the run's is split by reason, because a single rejected
@@ -160,7 +201,7 @@ type Stats struct {
 	// "wait".
 	DroppedTooNew int
 	// Resumed is how many tracks were held alive this frame by a REFUSED box rather
-	// than by an approved one — a score dip that did not split an object in two.
+	// than by an approved one Ã¢â‚¬â€ a score dip that did not split an object in two.
 	//
 	// It is here because it is the number that tells an operator whether their score
 	// threshold suits the material. A scene full of occlusion with Resumed near zero
@@ -168,7 +209,7 @@ type Stats struct {
 	// and the fix is the threshold rather than the detector.
 	Resumed int
 	// GhostResumed is the same count by refusal reason, so a reader can see whether
-	// the dips are score dips or something the two-stage pass cannot help with —
+	// the dips are score dips or something the two-stage pass cannot help with Ã¢â‚¬â€
 	// an area refusal, say, which is a different problem with a different fix.
 	GhostResumed map[string]int
 }
@@ -192,8 +233,8 @@ type Config struct {
 	// an older measurement needs the older behaviour available by name rather than by
 	// reverting a commit and discovering which of several changes mattered.
 	//
-	// The zero value being ON is a Go wart rather than a choice — a bool that means
-	// "enabled" cannot default to true — so the field is named for DISABLING and
+	// The zero value being ON is a Go wart rather than a choice Ã¢â‚¬â€ a bool that means
+	// "enabled" cannot default to true Ã¢â‚¬â€ so the field is named for DISABLING and
 	// read as "not disabled". A caller cannot switch the filter off by omitting the
 	// field, and cannot switch it on by setting it, which is exactly the pair of
 	// mistakes this arrangement prevents.
@@ -204,7 +245,7 @@ type Config struct {
 	// The engine used to build its own map from Classes, which put the answer in two
 	// places that did not agree: `config.IsApproved` accepts a class whose FAMILY is
 	// approved, and the engine's private map did not. The shipped trigger's class is
-	// `motion` — not a COCO class, family `other` — so `watch` configured with
+	// `motion` Ã¢â‚¬â€ not a COCO class, family `other` Ã¢â‚¬â€ so `watch` configured with
 	// `SP_POC_CLASSES=other` approved it while the engine refused every candidate as
 	// `class not on the approved list`. A predicate and not a second copy of the
 	// list, because a list resolved in two places is a list that will be resolved in
@@ -240,6 +281,30 @@ type Config struct {
 	// enough" is the same decision as the score threshold, and a decision made in
 	// two places is a decision that will eventually disagree with itself.
 	TrackMinFrames int
+	// CutMinFrames is SP_POC_CROP_MIN_FRAMES: how many consecutive sightings a track
+	// whose box came from a MAGNIFIED CROP needs before it may emit.
+	//
+	// It exists because TrackMinFrames is calibrated for the whole-frame pass and the
+	// two measurements are not the same kind of evidence. A vehicle crossing a frame
+	// at 30 km/h from 30 m is on screen for one to two seconds; at the detection
+	// sampling rate that is a handful of samples, and demanding three is what
+	// separates a crossing from a compression artefact. A bird at 30 m is on screen
+	// for about the same second and a half, but after the whole-frame pass shrinks
+	// 1920x1080 to 416x416 it is EIGHT pixels across, which is below the floor at which
+	// any detector is reliable, so the only way it is ever seen at all is through a
+	// crop. Through a crop it arrives as roughly a hundred pixels.
+	//
+	// Two observations of a hundred-pixel bird are worth more than two of an
+	// eight-pixel smudge, and holding them to the same bar erases the smallest object
+	// the system exists to report. So the minimum is SOURCE-AWARE: one constant for a
+	// whole-frame track, a lower one for a crop-sourced track, and the noise the full
+	// bar exists to stop is still stopped, because a shadow the whole-frame pass finds
+	// is a shadow the whole-frame pass still has to see three times.
+	//
+	// It is validated as being at or below TrackMinFrames. A "lower" bar that is
+	// higher is not a lower bar, and a configuration that accepted one would report a
+	// source-aware minimum while applying a single stricter one.
+	CutMinFrames int
 	// MaxBoxesDrawn is SP_POC_MAX_BOXES_DRAWN, the cap on boxes on the picture.
 	// It does not affect the tracker or the events: it is what the SCREEN draws,
 	// and what it left off is counted per family and printed.
@@ -270,6 +335,14 @@ type Engine struct {
 	// picture than the one the report prints.
 	counters Counters
 	tally    Tally
+	// suppressed gates presence while a view change settles, and suppressedEvents
+	// counts what was withheld. Both are here rather than in the caller because the gate
+	// has to be inside the latch's reach: a caller that checked it before calling Feed
+	// would be right until somebody added a second call site.
+	suppressed       bool
+	suppressedEvents int
+	// invalidated counts the tracks dropped by view changes, over the run.
+	invalidated int
 	// lastSplit is the previous frame's split, after the track-minimum-frames
 	// check, for the screen to draw.
 	lastSplit Split
@@ -320,6 +393,32 @@ func New(zone Zone, cfg Config) (*Engine, error) {
 	if cfg.Tolerance < 0 {
 		return nil, fmt.Errorf("detect: the line tolerance %v is negative", cfg.Tolerance)
 	}
+	// The crop-sourced minimum is only meaningful when it is LOWER, so the pair is
+	// resolved as a PAIR rather than two independent numbers.
+	//
+	// A whole-frame minimum of zero or one is the no-op, every sighting qualifies, and
+	// a caller that means "no minimum" must get none from the crop path either.
+	// Defaulting the crop bar to 1 in that case would make the better measurement
+	// STRICTER than the whole-frame one, which is backwards, and would refuse a
+	// configuration that asked for nothing in particular. So below one there is no
+	// minimum to be source-aware about, neither validation below applies, and both bars
+	// stay off.
+	if cfg.TrackMinFrames <= 1 {
+		cfg.CutMinFrames = cfg.TrackMinFrames
+	} else {
+		// A zero here means "a crop-sourced track needs no sightings at all", which is
+		// the exact single-frame-noise failure TrackMinFrames exists to prevent,
+		// reached through a setting nobody chose.
+		if cfg.CutMinFrames == 0 {
+			cfg.CutMinFrames = 1
+		}
+		if cfg.CutMinFrames < 1 {
+			return nil, fmt.Errorf("detect: the crop-sourced minimum is %v sightings; at least one is required, because a track that has been seen zero times is not an object", cfg.CutMinFrames)
+		}
+		if cfg.CutMinFrames > cfg.TrackMinFrames {
+			return nil, fmt.Errorf("detect: the crop-sourced minimum (%d) is above the whole-frame minimum (%d), so the source-aware minimum applies the STRICTER bar to the better measurement and there is no lower bar at all. A crop-sourced sighting is a magnified observation and needs no more of them than a whole-frame one, not more", cfg.CutMinFrames, cfg.TrackMinFrames)
+		}
+	}
 	ok := make(map[string]bool, len(cfg.Classes))
 	for _, c := range cfg.Classes {
 		ok[strings.ToLower(strings.TrimSpace(c))] = true
@@ -353,7 +452,7 @@ func New(zone Zone, cfg Config) (*Engine, error) {
 //
 // It exists because a box and a frame's ANSWER are different facts and the
 // engine needs both. It used to be handed only the boxes, and set the state to
-// `asked_answered` itself — which is a hardcoded `answered` one layer below the
+// `asked_answered` itself Ã¢â‚¬â€ which is a hardcoded `answered` one layer below the
 // screen's hardcoded `answered`, and for the same reason: the engine had no
 // state to print, so it printed a word nobody had claimed.
 type Answer struct {
@@ -370,6 +469,41 @@ type Answer struct {
 	// candidate count beside it cannot be told apart from a decoder that threw
 	// everything away.
 	Candidates int
+	// Cut is the SUBSET of Boxes that the detector found by looking at a magnified crop
+	// of a measured region rather than at the whole frame.
+	//
+	// It is a parallel list and not a field on the box because `proposal.Box`'s JSON
+	// tags are the sidecar's published wire format, pinned by
+	// TestTheJSONTagsAreTheSidecarsWireFormat, and a seventh field would break every
+	// sidecar response this build has ever parsed. The alternative, a second box type
+	// carrying a source, is the wrapper struct that `proposal`'s own header says puts
+	// a conversion at every call site, and a conversion on a coordinate is a place to
+	// rescale one by accident.
+	//
+	// Membership is by value, which is exact rather than approximate: a crop-sourced
+	// box and a whole-frame box on the same object differ in the fields the decoder
+	// produced, so an equal value means the same measurement and nothing else. Boxes
+	// absent from Cut were found by the whole-frame pass.
+	Cut []Box
+}
+
+// CutSet is the membership index for Answer.Cut.
+//
+// It is returned rather than built inside the engine because two entry points need
+// it, [Engine.FeedAnswered] and [Engine.SplitAt], and a per-frame set that lived on
+// the Engine would be one more piece of mutable state that has to be set before the
+// right call and cleared after it. Two orderings and one forgotten clear is a frame's
+// boxes read against the previous frame's source, which produces a run of confident
+// wrong answers with no error anywhere.
+func (a Answer) CutSet() map[Box]bool {
+	if len(a.Cut) == 0 {
+		return nil
+	}
+	m := make(map[Box]bool, len(a.Cut))
+	for _, b := range a.Cut {
+		m[b] = true
+	}
+	return m
 }
 
 // FeedSplitAt runs the split and the track bookkeeping WITHOUT the line-cross
@@ -389,25 +523,63 @@ func (e *Engine) SplitAt(at time.Time, in Answer) Split {
 	split := Apply(in.Boxes, e.thresholds(), e.zone)
 	split.AIState = in.AIState
 	split.Candidates = in.Candidates
-	tracked, _ := e.associate(at, split.Approved)
-	kept, tooNew := MarkTooNew(tracked, e.seenAt, e.cfg.TrackMinFrames)
+	cut := in.CutSet()
+	tracked, _ := e.associate(at, split.Approved, cut)
+	kept, tooNew := MarkTooNew(tracked, e.seenAt, e.minFramesFor(cut))
 	split.Approved = kept
 	split.Ghosts = append(append([]Ghost{}, split.Ghosts...), tooNew...)
 	e.lastSplit = split
 	return split
 }
 
+// minFramesFor is the per-box minimum the track check uses.
+//
+// It reads the FRAME's cut set rather than the track's own flag, deliberately. The
+// question is "how much evidence is behind THIS sighting", and a sighting is either a
+// magnified crop or it is not. Reading the track's flag instead would make the minimum
+// depend on how the track happened to be created: an object first seen small and later
+// seen large would keep the low bar forever, which is the opposite of what "two smudges
+// are not a bird" is for.
+//
+// A nil set means the whole-frame pass produced everything on this frame, and every
+// box is then held to the full TrackMinFrames.
+func (e *Engine) minFramesFor(cut map[Box]bool) func(Box) int {
+	if len(cut) == 0 {
+		return func(Box) int { return e.cfg.TrackMinFrames }
+	}
+	return func(b Box) int {
+		if cut[b] {
+			return e.cfg.CutMinFrames
+		}
+		return e.cfg.TrackMinFrames
+	}
+}
+
+// trackMinFor is how many sightings a TRACK needs before it may emit.
+//
+// It is the track's own rather than the frame's, because `aged` and `allowed` are
+// properties of the track's history: they are set from a match and read on a later
+// frame, possibly one the crop pass did not contribute to. The one place this could
+// drift is that decision, and it does not, because the flag it sets and the permission
+// FeedAnswered grants are both read from the track here.
+func (e *Engine) trackMinFor(t *Track) int {
+	if t.Cut {
+		return e.cfg.CutMinFrames
+	}
+	return e.cfg.TrackMinFrames
+}
+
 // associate is step 2: match approved boxes to live tracks, greedily by best IoU,
 // and return the boxes that are attached to a track plus how many tracks exist.
 //
-// It is a method rather than inline code in Feed so the ORDER — split, associate,
-// demote, cross — is visible as a list of five calls rather than as one block,
+// It is a method rather than inline code in Feed so the ORDER Ã¢â‚¬â€ split, associate,
+// demote, cross Ã¢â‚¬â€ is visible as a list of five calls rather than as one block,
 // and so a test can exercise association without the crossing machine.
 //
 // A greedy pass is the right size for this: the alternative is an assignment
 // problem whose optimum nobody here can verify, and a slightly worse association
 // costs nothing that the report claims to measure.
-func (e *Engine) associate(at time.Time, approved []Box) ([]Box, int) {
+func (e *Engine) associate(at time.Time, approved []Box, cut map[Box]bool) ([]Box, int) {
 	// Retire tracks that have not been seen for MaxAge, BEFORE associating.
 	// Associating first would let a track that vanished for a minute be matched
 	// to whatever appears now, and a re-appearing object after a long occlusion
@@ -442,8 +614,8 @@ func (e *Engine) associate(at time.Time, approved []Box) ([]Box, int) {
 	// with no error.
 	//
 	// Touching is also the tightest rule that fixes it. It admits a box whose centre
-	// is within half the two boxes' combined width and height — exactly the case
-	// where two regions abut — and refuses everything with a gap between them. Two
+	// is within half the two boxes' combined width and height Ã¢â‚¬â€ exactly the case
+	// where two regions abut Ã¢â‚¬â€ and refuses everything with a gap between them. Two
 	// objects that are near each other therefore do not merge: association below is
 	// greedy and one-to-one, so each box joins its single nearest track and a
 	// second box gets a second track. The cost of a looser gate here is identity
@@ -484,6 +656,7 @@ func (e *Engine) associate(at time.Time, approved []Box) ([]Box, int) {
 	for id, bi := range assigned {
 		t := e.live[id]
 		t.Box = approved[bi]
+		t.Cut = cut[approved[bi]]
 		t.Seen++
 		t.Last = at
 		// The filter is updated HERE, on the measurement, and NOT from the ghost pass
@@ -496,10 +669,10 @@ func (e *Engine) associate(at time.Time, approved []Box) ([]Box, int) {
 		}
 		t.kalman.Update(cx, cy, dt, e.kalmanParams())
 		t.lastKF = at
-		// `aged` is set here and NEVER cleared — see the field's comment. It is the
+		// `aged` is set here and NEVER cleared Ã¢â‚¬â€ see the field's comment. It is the
 		// track's own answer to "have I existed long enough", and it is the flag the
 		// ghost pass gates on.
-		if t.Seen >= e.cfg.TrackMinFrames {
+		if t.Seen >= e.trackMinFor(t) {
 			t.aged = true
 		}
 	}
@@ -513,7 +686,7 @@ func (e *Engine) associate(at time.Time, approved []Box) ([]Box, int) {
 		e.next++
 		e.live[e.next] = &Track{
 			ID: e.next, Class: b.Class, Box: b, Seen: 1, First: at, Last: at,
-			Side: map[string]int{}, Latched: map[string]bool{},
+			Side: map[string]int{}, Latched: map[string]bool{}, Cut: cut[b],
 		}
 		attached = append(attached, b)
 	}
@@ -553,12 +726,12 @@ func absf(v float64) float64 {
 //
 // The ORDER below is load-bearing and it is the same order every time:
 //
-//  1. split by validity, class, score, area, zone  — what is a candidate at all
-//  2. track the APPROVED boxes only                — the tracker never sees a ghost
-//  3. demote tracks below SP_POC_TRACK_MIN_FRAMES — time is the only thing that
+//  1. split by validity, class, score, area, zone  Ã¢â‚¬â€ what is a candidate at all
+//  2. track the APPROVED boxes only                Ã¢â‚¬â€ the tracker never sees a ghost
+//  3. demote tracks below SP_POC_TRACK_MIN_FRAMES Ã¢â‚¬â€ time is the only thing that
 //     tells an object from a compression artefact
-//  4. run the line-cross machine on what survived  — only those can be events
-//  5. fold the run-level counters                  — on the SAME frame
+//  4. run the line-cross machine on what survived  Ã¢â‚¬â€ only those can be events
+//  5. fold the run-level counters                  Ã¢â‚¬â€ on the SAME frame
 //
 // The previous order fed the tracker everything over the score threshold, so
 // lowering the threshold to catch smaller vehicles also created tracks for lamp
@@ -580,7 +753,7 @@ func (e *Engine) Feed(at time.Time, boxes []Box) ([]Crossing, []Track, Stats) {
 // This is the only way a frame with no answer can reach the tracker at all, and
 // it has to exist: a `degraded` or `not_asked` frame arrives with an empty box
 // list, and if the pipeline skipped the engine for it the counters would see only
-// the frames that worked — which is exactly how a run with a dead sidecar ends up
+// the frames that worked Ã¢â‚¬â€ which is exactly how a run with a dead sidecar ends up
 // reporting a clean detection rate.
 func (e *Engine) FeedAnswered(at time.Time, in Answer) ([]Crossing, []Track, Stats) {
 	var st Stats
@@ -609,12 +782,14 @@ func (e *Engine) FeedAnswered(at time.Time, in Answer) ([]Crossing, []Track, Sta
 	st.Approved = len(approved)
 
 	// 2. The tracker sees APPROVED boxes only.
-	tracked, tracks := e.associate(at, approved)
+	cut := in.CutSet()
+	minFrames := e.minFramesFor(cut)
+	tracked, tracks := e.associate(at, approved, cut)
 	st.Tracks = tracks
 	st.TracksAlive = len(e.live)
 
 	// 3. A track that has not been seen long enough cannot be an object yet.
-	tracked, tooNew := MarkTooNew(tracked, e.seenAt, e.cfg.TrackMinFrames)
+	tracked, tooNew := MarkTooNew(tracked, e.seenAt, minFrames)
 	st.DroppedTooNew = len(tooNew)
 	for _, g := range tooNew {
 		st.Ghosts++
@@ -625,7 +800,7 @@ func (e *Engine) FeedAnswered(at time.Time, in Answer) ([]Crossing, []Track, Sta
 	// as it is being seen; a track that is not seen this frame loses it, because
 	// "an object we used to see" is not "an object we can see now".
 	for _, b := range tracked {
-		if e.seenAt(b) >= e.cfg.TrackMinFrames {
+		if e.seenAt(b) >= minFrames(b) {
 			for _, t := range e.live {
 				if strings.EqualFold(t.Class, b.Class) && iou(t.Box, b) > 0 {
 					t.allowed = true
@@ -644,14 +819,14 @@ func (e *Engine) FeedAnswered(at time.Time, in Answer) ([]Crossing, []Track, Sta
 	// a vehicle half-occluded by a pole scores below the approval bar while the same
 	// vehicle unoccluded scores above it. Under a one-stage tracker that frame is
 	// simply refused, the approved boxes on either side have no track to join, and
-	// one object becomes two tracks each too young to cross — which reads on a
+	// one object becomes two tracks each too young to cross Ã¢â‚¬â€ which reads on a
 	// report as a detector that found nothing, and is the single most likely reason
 	// a real detector with a real model produces zero crossings on real footage.
 	//
 	// It runs HERE, after step 3 and not immediately after the approved association,
 	// and the position is load-bearing: it checks `t.allowed`, and that flag is set
 	// by step 3. Placed before it, the pass read a flag the same frame had not yet
-	// written and resumed nothing at all — which is the failure this ordering
+	// written and resumed nothing at all Ã¢â‚¬â€ which is the failure this ordering
 	// comment exists to prevent, and it looked exactly like the feature not working.
 	//
 	// It is still after the approved association, so an approved box has already
@@ -674,7 +849,7 @@ func (e *Engine) FeedAnswered(at time.Time, in Answer) ([]Crossing, []Track, Sta
 	// `step` both OBSERVES and EMITS, and a track that was approaching the line
 	// for three frames must be OBSERVED during those three frames. Gating the
 	// whole call on `allowed` would mean the first side reading a track ever got
-	// was taken after it aged in — so a vehicle that drove up to the line and
+	// was taken after it aged in Ã¢â‚¬â€ so a vehicle that drove up to the line and
 	// across it was recorded as having been on the far side all along, and its
 	// crossing was never detected. That is a real detector, crossing a real
 	// line, producing no event.
@@ -708,7 +883,7 @@ func (e *Engine) FeedAnswered(at time.Time, in Answer) ([]Crossing, []Track, Sta
 	return crossings, out, st
 }
 
-// splitIndex is not used for identity — it exists only so `Feed` can count a box
+// splitIndex is not used for identity Ã¢â‚¬â€ it exists only so `Feed` can count a box
 // that was refused below the ghost floor. It is kept as a method rather than an
 // inline loop so the "was this box drawn" question has one answer in the package.
 func (e *Engine) splitIndex(s Split, b Box) (int, bool) {
@@ -743,6 +918,55 @@ func (e *Engine) seenAt(b Box) int {
 	}
 	return best
 }
+
+// InvalidateAll drops every live track and returns how many there were.
+//
+// It exists for the view-change case and the reason is arithmetic rather than
+// architectural. After a camera moves, every track describes a position the camera is
+// no longer looking at, and the association threshold would happily match the new view's
+// boxes to the old view's tracks: a wall that was at x=0.1 is still at x=0.1 in the new
+// view's noise, and IoU does not know the camera moved. So the tracks have to go, and
+// the count comes back because "a view change invalidated 14 tracks" is the number an
+// operator needs to understand what their event stream just did, and "a view change
+// happened" alone does not say it.
+//
+// It does NOT clear the counters or the cooldown. Those describe the run, not the view.
+func (e *Engine) InvalidateAll() int {
+	n := len(e.live)
+	e.live = make(map[int]*Track, len(e.live))
+	e.next = 0
+	e.invalidated += n
+	return n
+}
+
+// LiveTrackCount is how many tracks the engine currently holds.
+//
+// It exists so a caller can report the invalidated count against something it measured
+// rather than against a constant it expected, which is the difference between an
+// assertion and a hope. It is a COUNT and not the `LiveTracks` list, which is for
+// drawing and which allocates.
+func (e *Engine) LiveTrackCount() int { return len(e.live) }
+
+// SetSuppressed gates presence events until it is cleared.
+//
+// It gates PRESENCE and not crossings, because a line crossing is a claim about two
+// positions and a view change destroys the frame's geometry rather than its content: a
+// line-crossing deployment has named lines drawn on a fixed installation, and a camera
+// that moved from its installation is a camera-integrity event, not fifty crossings.
+func (e *Engine) SetSuppressed(v bool) { e.suppressed = v }
+
+// Suppressed reports whether presence is gated.
+func (e *Engine) Suppressed() bool { return e.suppressed }
+
+// SuppressedEvents is how many presence events were withheld while gated.
+//
+// It is a COUNT and not a boolean because "nothing was emitted because nothing happened"
+// and "nothing was emitted because the camera moved" are the same absence and only one
+// of them is a finding. A gate with no counter is silence.
+func (e *Engine) SuppressedEvents() int { return e.suppressedEvents }
+
+// InvalidatedTracks is how many tracks a view change has dropped, over the run.
+func (e *Engine) InvalidatedTracks() int { return e.invalidated }
 
 // thresholds adapts the engine's Config to the split's Thresholds, so the split
 // has one description of the decisions and the engine has one description of the
@@ -788,7 +1012,7 @@ func (e *Engine) LastSplit() Split { return e.lastSplit }
 // stationary vehicle. Deciding on the filtered centre removes that, because the
 // filtered centre of an object that is not moving does not move.
 //
-// The size is NOT filtered — see [FilteredBox] — so the box that reaches the report
+// The size is NOT filtered Ã¢â‚¬â€ see [FilteredBox] Ã¢â‚¬â€ so the box that reaches the report
 // and the evidence store has the width the MODEL reported. A reader comparing a
 // crossing against the picture should find the same extent they can see.
 //
@@ -803,6 +1027,14 @@ func (e *Engine) crossingBox(t *Track) Box {
 }
 
 func (e *Engine) step(at time.Time, t *Track) []Crossing {
+	// The presence machine, and the ONLY difference between it and the crossing one is
+	// that it has no line to test. A zone with no lines is the primary configuration,
+	// not a degenerate one: the question becomes "was something tracked here at all",
+	// and the answer is one event per object rather than one event per side-change of a
+	// drawn segment.
+	if len(e.zone.Lines) == 0 {
+		return e.presence(at, t)
+	}
 	// The centre the test is decided on is the track's FILTERED centre, while the
 	// box on the event carries the same filtered centre with the model's own width.
 	// See [Engine.crossingBox] for why the split is in that order.
@@ -854,8 +1086,8 @@ func (e *Engine) step(at time.Time, t *Track) []Crossing {
 			TrackID: t.ID, Class: t.Class, Line: l.Name, Direction: l.Direction,
 			// The FILTERED box, not the measured one. This is the single line where
 			// that decision is made, and it is the reason a Crossing's box can no
-			// longer be recomputed from this row alone — see [Engine.crossingBox].
-			At: at, Box: e.crossingBox(t), Frames: t.Seen, Score: t.Box.Score,
+			// longer be recomputed from this row alone. See [Engine.crossingBox].
+			At: at, Box: e.crossingBox(t), Frames: t.Seen, Score: t.Box.Score, Cut: t.Cut,
 		})
 		t.Side[l.Name] = sign
 	}
@@ -877,6 +1109,72 @@ func (e *Engine) step(at time.Time, t *Track) []Crossing {
 }
 
 func cooldownKey(line, class string) string { return line + "|" + class }
+
+// presenceLine is the cooldown namespace presence events share.
+//
+// It is a NAME and not an empty string on purpose. The cooldown is keyed per
+// (namespace, class) so a bird and a car do not suppress each other, and reusing ""
+// would collide with any real line an operator happened to leave unnamed. Zone.Validate
+// forbids that, so the collision cannot happen, but only by accident of a rule written
+// for a different reason. A reserved namespace is not an accident.
+const presenceLine = "\x00presence"
+
+// presence emits one event for a track the first time it is old enough to be real.
+//
+// Four rules, and each of them is a rule the crossing machine also has:
+//
+//   - `allowed` gates it, so the track-minimum check decides what counts as an object.
+//     That is the whole anti-jitter mechanism and it is reused rather than
+//     re-implemented; a second copy would be a second opinion about how much evidence
+//     is enough.
+//   - `announced` latches it, so ONE TRACK is ONE EVENT. A crossing re-arms because a
+//     line has two sides; presence has no second side, and a track that stayed on
+//     screen for four seconds at two samples a second would otherwise be eight events.
+//   - The per-class cooldown is reused unchanged, so a second bird inside the window is
+//     suppressed the same way a second car inside it is.
+//   - `Line` and `Direction` are EMPTY, and empty is the honest value. There is no line
+//     and there is no direction, and inventing either would put a name on an event that
+//     never crossed anything.
+//
+// The box is the track's FILTERED box, for the same reason the crossing's is: a single
+// frame's box jitters, and an event whose box breathes is an event an operator has to
+// check twice.
+func (e *Engine) presence(at time.Time, t *Track) []Crossing {
+	if !t.allowed || t.announced {
+		return nil
+	}
+	// Suppression is checked here, at the ONE place a presence event is produced,
+	// rather than at each caller.
+	//
+	// It is here because the gate has to be inside the latch's reach and outside the
+	// caller's ability to forget. A caller that checked `Suppressed()` before calling
+	// `Feed` would be correct until somebody added a second call site, and a view change
+	// that arrived on a frame handled by that second call site would be gated for one
+	// path and not the other.
+	//
+	// `announced` is NOT set while suppressed. A track that was suppressed and then
+	// cleared emits when the view settles, which is correct: the object was really
+	// there. Latching it would lose the event permanently.
+	if e.suppressed {
+		e.suppressedEvents++
+		return nil
+	}
+	key := cooldownKey(presenceLine, t.Class)
+	if last, ok := e.cooldown[key]; ok && at.Sub(last) < e.cfg.Cooldown {
+		// Inside the window. The track is NOT latched, so the event is emitted as soon
+		// as the window has elapsed and the track is still there, which is the same
+		// shape the crossing machine uses when a cooldown suppresses a side change.
+		return nil
+	}
+	t.announced = true
+	e.cooldown[key] = at
+	return []Crossing{{
+		TrackID: t.ID, Class: t.Class,
+		// No line, no direction, and both say so rather than being left empty for a
+		// reader to guess at.
+		At: at, Box: e.crossingBox(t), Frames: t.Seen, Score: t.Box.Score, Cut: t.Cut,
+	}}
+}
 
 func (e *Engine) lineApplies(l Line, class string) bool {
 	if len(l.Classes) == 0 {

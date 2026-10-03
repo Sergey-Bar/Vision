@@ -28,8 +28,8 @@ this writes, so a change in the export changes the fixture rather than invalidat
 it.
 
 Usage:
-    python probe_model.py --model models/yolov8n.onnx --clip testdata/youtube/sTF-6_xinUU.mp4
-    python probe_model.py --model models/yolov8n.onnx --write
+    python probe_model.py --model models/yolov4n.onnx --clip testdata/youtube/sTF-6_xinUU.mp4
+    python probe_model.py --model models/yolov4n.onnx --write
 """
 
 from __future__ import annotations
@@ -157,7 +157,7 @@ def measure(engine: server.Engine, rgb: np.ndarray) -> dict:
             "ANCHORED: this export publishes one output per stride and its box coordinates are "
             "offsets from per-cell anchor boxes. The anchors are in the model's .cfg and are NOT "
             "in the ONNX file, so this export cannot be decoded without them. See "
-            "models/yolov8n.anchors.txt and the --anchors flag."
+            "models/yolov4n.anchors.txt and the --anchors flag."
             if anchored else
             "FUSED: this export publishes one output with final coordinates, so no anchor step is "
             "applied and none is needed."
@@ -249,7 +249,7 @@ def render(contract: dict) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Measure an ONNX export before decoding it.")
-    ap.add_argument("--model", default="models/yolov8n.onnx")
+    ap.add_argument("--model", default="models/yolov4n.onnx")
     ap.add_argument("--anchors", default="", help="the darknet anchor file, for an anchored export")
     ap.add_argument("--clip", default="", help="a real clip to take one frame from; empty means mid grey")
     ap.add_argument("--width", type=int, default=640)

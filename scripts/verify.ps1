@@ -19,8 +19,18 @@
       vet              Go's own static checks
       gofmt            formatting, without rewriting files
       lint             golangci-lint, including gosec. Skipped with a visible
-                       warning where the binary is absent â€” never a quiet pass
-      test-race        the full suite with the race detector, -p 1
+                       warning where the binary is absent — never a quiet pass
+      test              the full suite with the race detector, -p 8, with the
+                       run's own JSON stream kept for skip-audit
+      skip-audit       no suite skipped anything it was supposed to run; every
+                       skip is declared with a reason in a committed file
+      cover-floor      no package's committed coverage floor moved, in either
+                       direction. Upwards asks for the floor to be raised
+      dead-export      no exported function, var, const or method exists that
+                       nothing outside its own package's tests reads
+      predicate-cov    no time-window predicate reads a source-clock column, and
+                       the canonical-event window query still bounds
+                       normalized_at
       migration-phases every migration declares a phase and no expand ships
                        with its contract step
       generated-code  the checked-in .pb.go is what protoc produces from the
@@ -72,7 +82,7 @@ $repo = Split-Path -Parent $PSScriptRoot
 Set-Location $repo
 
 # The race detector needs cgo, which needs a C compiler. Without one,
-# `go test -race` fails to build and the whole gate stops â€” so the toolchain is
+# `go test -race` fails to build and the whole gate stops — so the toolchain is
 # located here and the gate says plainly which mode it ran in rather than
 # reporting a pass it did not earn.
 #
@@ -86,9 +96,9 @@ $env:CGO_ENABLED = if ($haveCC) { '1' } else { '0' }
 # Gates report through the exit code, and only through the exit code.
 #
 # With 'Stop' in effect, PowerShell turns anything a native command writes to
-# stderr into a terminating error, so a tool that prints a diagnostic â€” a
+# stderr into a terminating error, so a tool that prints a diagnostic — a
 # contract mismatch it wants to show you, a deprecation notice, a warning about
-# a malformed document it worked around â€” aborts the whole script before the
+# a malformed document it worked around — aborts the whole script before the
 # exit code is ever read. The first two gates of this script never wrote to
 # stderr, so it went unnoticed for as long as it went unnoticed; adding the
 # OpenAPI gate surfaced it on a warning, not on a failure.
@@ -96,8 +106,8 @@ $env:CGO_ENABLED = if ($haveCC) { '1' } else { '0' }
 # 'Continue' is the right setting here precisely because $LASTEXITCODE is the
 # signal and stderr is not. A gate that fails still fails, and a diagnostic is
 # still printed. What stops happening is a diagnostic being promoted to a
-# failure because of where it was written. Anything that genuinely must abort â€”
-# a missing interpreter, an unreadable file â€” calls exit itself.
+# failure because of where it was written. Anything that genuinely must abort —
+# a missing interpreter, an unreadable file — calls exit itself.
 $ErrorActionPreference = 'Continue'
 
 # Go is installed but not on PATH. Resolve it rather than assuming.
@@ -229,8 +239,8 @@ Invoke-Gate 'gofmt' {
 # that raised on its own failure path at the 31st attempt.
 #
 # A linter that is not in the gate is a linter nobody has decided to run, which
-# is what this comment used to be able to say and no longer can. It is skipped â€”
-# loudly, and as a skip rather than a pass â€” where the binary is absent, because
+# is what this comment used to be able to say and no longer can. It is skipped —
+# loudly, and as a skip rather than a pass — where the binary is absent, because
 # a gate that quietly turns itself off is the thing this whole revision is about.
 $golangciCmd = Get-Command golangci-lint -ErrorAction SilentlyContinue
 $golangci = if ($golangciCmd) { $golangciCmd.Source } else { $null }
@@ -249,7 +259,7 @@ if (-not $golangci) {
 # A single-element array from an `if` expression is unrolled to a scalar, so
 # `@race` splatted the *string* '-race' into its characters and the test gate ran
 # `go test -p 1 -count=1 - r a c e ./...`. It failed, loudly, which is how this was
-# found â€” but the race detector this gate claims to run has never actually run.
+# found — but the race detector this gate claims to run has never actually run.
 # The comma keeps it an array.
 #
 # It runs now, and it runs for real: cgo is enabled above when a C compiler is
@@ -265,7 +275,109 @@ if (-not $NoRace) {
         Write-Host "    race detector is skipped. Install MinGW-w64 at C:\msys64 to run it." -ForegroundColor Yellow
     }
 }
-Invoke-Gate 'test' { & $go test -p 1 -count=1 @race ./... }
+
+# The suite runs with -json so that `skip-audit` below has something to read.
+#
+# `go test` reports a package whose every test skipped as `ok`, and on a machine
+# with no database that is most of them. A run of this repository reported exit 0
+# with ten skips in it, and a human reading the transcript saw a clean green line
+# per package. The stream is the only place the skips are visible, so the stream is
+# what gets kept.
+#
+# The transcript is not thrown away with it. `go test` prints nothing at all for a
+# passing package, so on a failing run the JSON lines are filtered down to the
+# failing packages' own output and printed in the ordinary shape a developer
+# expects. A gate that replaces a readable failure with a JSON file is a gate whose
+# failures people stop reading.
+#
+# `>` under Windows PowerShell 5.1 writes UTF-16LE with a BOM. `skipaudit` decodes
+# that deliberately, because this script is the gate's only producer and a gate
+# that reads only UTF-8 fails on the machine it was written on. It was found by
+# running the gate on a real stream and reading "no test binary reported at all".
+$testStream = Join-Path ([System.IO.Path]::GetTempPath()) ("sp-testrun-" + [guid]::NewGuid().ToString('N') + '.json')
+
+# The coverage profile is produced by the same run rather than by a second one.
+#
+# A coverage run is this run with `-coverprofile` added, and paying for the suite
+# twice would be the fastest way to get the coverage gate switched off. The file is
+# in the temp directory for the same reason the stream is: it is an intermediate,
+# and a coverage profile written to the repository root is a file every developer
+# has to remember is ignored.
+$coverProfile = Join-Path ([System.IO.Path]::GetTempPath()) ("sp-cover-" + [guid]::NewGuid().ToString('N') + '.out')
+
+Invoke-Gate 'test' {
+    # The `-coverprofile=` argument is quoted deliberately. PowerShell does not
+    # expand a variable inside a bare word, so an unquoted
+    # `-coverprofile=$coverProfile` is passed through as the literal text and Go
+    # writes the profile to a file called `$coverProfile` in the working directory.
+    # The gate below then failed with "open <temp path>: no such file or
+    # directory", which is a worse report than the mistake deserves.
+    & $go test -p 8 -count=1 -json "-coverprofile=$coverProfile" -covermode=atomic @race ./... > $testStream
+    $code = $LASTEXITCODE
+    if ($code -ne 0) {
+        Write-Host "    failing packages, from the run's own stream:"
+        Get-Content -LiteralPath $testStream -ErrorAction SilentlyContinue |
+            ForEach-Object { $_.Trim() } |
+            Where-Object { $_ -like '{*' } |
+            ForEach-Object {
+                try { $_ | ConvertFrom-Json } catch { $null }
+            } |
+            Where-Object { $_ -and ($_.Action -eq 'output' -or $_.Action -eq 'fail') } |
+            ForEach-Object { Write-Host "    $($_.Output)" -NoNewline }
+    }
+    $global:LASTEXITCODE = $code
+}
+
+# Did the run actually test anything?
+#
+# A green `go test` and a green run in which the database-backed suites declined to
+# start are the same line on the console. This gate reads the stream the run just
+# produced and fails on any skip not declared in
+# `internal/skipaudit/declared-skips.json` with a reason. It also fails on a
+# declaration that no longer fires, because an exemption for a test that was
+# deleted is an exemption for whatever gets named next.
+Invoke-Gate 'skip-audit' {
+    & $go run ./tools/skipaudit -input $testStream
+    $global:LASTEXITCODE = $LASTEXITCODE
+}
+
+# Per-package coverage floors, in both directions.
+#
+# A floor that only fails downwards gets lowered once, by whoever is having a bad
+# afternoon, and everything above it is free. A package that rises above its floor
+# plus the margin also fails and is told the number to record, so raising the floor
+# is a one-line edit rather than a measurement somebody has to redo.
+Invoke-Gate 'cover-floor' {
+    # The build mode is passed through because coverage is not a property of the
+    # source: `internal/migrate` measures 78.6% without -race and 71.4% with it on
+    # an unchanged tree. A floor from one mode is not a floor for the other, and a
+    # gate that compares them fires on a package nobody touched -- which is what
+    # this gate did, on consecutive runs, before the mode was carried through.
+    # The baseline names the modes its floors hold for; a run under any other one
+    # is reported as unmeasured rather than compared.
+    $build = if ($race.Count -gt 0) { 'race' } else { 'norace' }
+    & $go run ./tools/covercheck -profile $coverProfile -build $build
+    $global:LASTEXITCODE = $LASTEXITCODE
+}
+
+# The "exported symbol with no reader" class.
+#
+# Nine of the runnable-core defects found in one review were this shape, and
+# nothing in `go build`, `go vet` or `go test` can see it: the code was correct and
+# nothing called it. `slo.Breaches` was an SLO evaluator with a test and no
+# caller, so the SLOs were a document. The gate parses rather than greps, because a
+# grep misses build-tagged producers and counts a declaration as a use of itself.
+Invoke-Gate 'dead-export' { & $go test -p 1 -count=1 ./internal/deadexport/... }
+
+# `normalized_at` is the only field a time-window predicate may read.
+#
+# The rule is in AGENTS.md and in three package comments and is enforced nowhere. A
+# camera forty seconds fast puts its events forty seconds from where they happened,
+# so a window on `observed_at` is a window on the camera's belief about itself.
+# The gate has the positive direction too: deleting the window query fails it,
+# because a gate that only forbids the wrong column passes when the right one is
+# removed.
+Invoke-Gate 'predicate-cov' { & $go test -p 1 -count=1 ./internal/predicatecov/... }
 
 # ---------------------------------------------------------------------------
 # The red-check: the controls, removed, each of which must turn the suite red.
@@ -510,8 +622,8 @@ if (-not $protoc) {
             }
             # Compare the sorted, non-empty lines, not the raw bytes.
             #
-            # The committed files are formatted with goimports â€” this repository's
-            # .golangci.yml names it as a formatter â€” which regroups and reorders
+            # The committed files are formatted with goimports — this repository's
+            # .golangci.yml names it as a formatter — which regroups and reorders
             # the import block. protoc-gen-go emits one flat sorted block, and
             # gofmt does not regroup. A raw byte compare therefore calls every one
             # of these files stale for a difference that is only where an import
@@ -519,8 +631,8 @@ if (-not $protoc) {
             #
             # Sorting the lines is the normalisation that matches what is actually
             # being asked: "is the code compiled from the published .proto the code
-            # in the tree". A stale file differs in a declaration â€” a field name, a
-            # type, a tag, a number â€” and every one of those is a whole line, so
+            # in the tree". A stale file differs in a declaration — a field name, a
+            # type, a tag, a number — and every one of those is a whole line, so
             # line-order-insensitive comparison catches all of them and only those.
             # The contract-check gate is the one that reads the wire.
             function Normalise([string]$path) {
@@ -691,8 +803,8 @@ Invoke-Gate 'rules-lint' { & $go run ./cmd/securityctl rules lint --bundle rules
 # It is a package test today, which means it runs as part of `go test ./...` and
 # its failure is one line in a list of thirty packages. It is the only thing in
 # this repository that proves a decision still replays after the database and
-# the checkpoint material are both gone â€” the property the whole append-only,
-# hash-chained design exists for â€” and burying it in a package count is how a
+# the checkpoint material are both gone — the property the whole append-only,
+# hash-chained design exists for — and burying it in a package count is how a
 # check stops being looked at.
 Invoke-Gate 'recovery-drill' { & $go test -p 1 -count=1 -timeout 900s -v -run TestRecoveryDrill ./internal/dr/... }
 

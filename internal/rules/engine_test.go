@@ -17,7 +17,6 @@ func signal(id, eventType string, offsetMS int64) rules.Signal {
 		SourceEventID: id,
 		EventType:     eventType,
 		NormalizedAt:  base.Add(time.Duration(offsetMS) * time.Millisecond),
-		ObservedAt:    base.Add(time.Duration(offsetMS) * time.Millisecond),
 		DeviceID:      "cam-1",
 		DeviceKind:    "camera",
 		ZoneID:        "zone-loading-bay",

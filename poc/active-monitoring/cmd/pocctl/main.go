@@ -35,6 +35,10 @@ func main() {
 		err = cmdReview(os.Args[2:])
 	case "search":
 		err = cmdSearch(os.Args[2:])
+	case "unsearchable":
+		err = cmdUnsearchable(os.Args[2:])
+	case "footage":
+		err = cmdFootage(os.Args[2:])
 	case "brief":
 		err = cmdBrief(os.Args[2:])
 	case "preflight":
@@ -71,8 +75,6 @@ func main() {
 		err = cmdBench(os.Args[2:])
 	case "label":
 		err = cmdLabel(os.Args[2:])
-	case "footage":
-		err = cmdFootage(os.Args[2:])
 	case "-h", "--help", "help":
 		usage()
 		return

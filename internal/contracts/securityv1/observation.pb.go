@@ -7,13 +7,12 @@
 package securityv1
 
 import (
-	reflect "reflect"
-	sync "sync"
-	unsafe "unsafe"
-
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
+	reflect "reflect"
+	sync "sync"
+	unsafe "unsafe"
 )
 
 const (
@@ -41,6 +40,32 @@ type AIObservation struct {
 	PromptTemplateId     string `protobuf:"bytes,10,opt,name=prompt_template_id,json=promptTemplateId,proto3" json:"prompt_template_id,omitempty"`
 	PromptVersion        string `protobuf:"bytes,11,opt,name=prompt_version,json=promptVersion,proto3" json:"prompt_version,omitempty"`
 	ModelBundleSignature string `protobuf:"bytes,12,opt,name=model_bundle_signature,json=modelBundleSignature,proto3" json:"model_bundle_signature,omitempty"`
+	// --- hosted-provider attribution ---
+	//
+	// A hosted vision-language provider returns a model identifier and nothing
+	// else: its weights are not ours, are not addressable, and change on the
+	// provider's schedule. There is therefore no `model_hash` to record for it,
+	// and the two ways to keep that column honest are both worse than leaving it
+	// empty -- writing a synthetic hash satisfies a length check and defeats the
+	// one thing the column exists for, which is proving which weights answered.
+	//
+	// So the fields below substitute a weaker, labelled kind of attribution rather
+	// than removing attribution. `model_hash` becomes optional; `model_identity`
+	// and `model_contract_version` together carry the hosted case, and
+	// `ai_observations_attribution_ck` refuses a row with neither. Half of the
+	// hosted pair is refused too: a provider name with no pinned contract version
+	// says which model the provider called itself this week and nothing about
+	// what was asked of it, so two rows with the same name and different prompts
+	// would be indistinguishable -- the exact replay failure `model_hash` exists
+	// to prevent.
+	//
+	// Migration: `0022_observation_hosted_attribution.expand.sql`.
+	ModelIdentity        string `protobuf:"bytes,26,opt,name=model_identity,json=modelIdentity,proto3" json:"model_identity,omitempty"`
+	ModelContractVersion string `protobuf:"bytes,27,opt,name=model_contract_version,json=modelContractVersion,proto3" json:"model_contract_version,omitempty"`
+	// The sampling temperature requested. An answer at 0.9 is not the answer at
+	// 0.01, and a replay that does not record it cannot say which it compared
+	// against. Unset when the provider does not expose it.
+	Temperature *float64 `protobuf:"fixed64,28,opt,name=temperature,proto3,oneof" json:"temperature,omitempty"`
 	// --- provenance of the input ---
 	InputEvidenceIds    []string `protobuf:"bytes,13,rep,name=input_evidence_ids,json=inputEvidenceIds,proto3" json:"input_evidence_ids,omitempty"`
 	InputEvidenceHashes []string `protobuf:"bytes,14,rep,name=input_evidence_hashes,json=inputEvidenceHashes,proto3" json:"input_evidence_hashes,omitempty"`
@@ -177,6 +202,27 @@ func (x *AIObservation) GetModelBundleSignature() string {
 	return ""
 }
 
+func (x *AIObservation) GetModelIdentity() string {
+	if x != nil {
+		return x.ModelIdentity
+	}
+	return ""
+}
+
+func (x *AIObservation) GetModelContractVersion() string {
+	if x != nil {
+		return x.ModelContractVersion
+	}
+	return ""
+}
+
+func (x *AIObservation) GetTemperature() float64 {
+	if x != nil && x.Temperature != nil {
+		return *x.Temperature
+	}
+	return 0
+}
+
 func (x *AIObservation) GetInputEvidenceIds() []string {
 	if x != nil {
 		return x.InputEvidenceIds
@@ -272,7 +318,7 @@ var File_security_v1_observation_proto protoreflect.FileDescriptor
 
 const file_security_v1_observation_proto_rawDesc = "" +
 	"\n" +
-	"\x1dsecurity/v1/observation.proto\x12\vsecurity.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1asecurity/v1/incident.proto\"\xa1\b\n" +
+	"\x1dsecurity/v1/observation.proto\x12\vsecurity.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1asecurity/v1/incident.proto\"\xb5\t\n" +
 	"\rAIObservation\x12%\n" +
 	"\x0eobservation_id\x18\x01 \x01(\tR\robservationId\x12\x1b\n" +
 	"\ttenant_id\x18\x02 \x01(\tR\btenantId\x12\x17\n" +
@@ -289,7 +335,10 @@ const file_security_v1_observation_proto_rawDesc = "" +
 	"\x12prompt_template_id\x18\n" +
 	" \x01(\tR\x10promptTemplateId\x12%\n" +
 	"\x0eprompt_version\x18\v \x01(\tR\rpromptVersion\x124\n" +
-	"\x16model_bundle_signature\x18\f \x01(\tR\x14modelBundleSignature\x12,\n" +
+	"\x16model_bundle_signature\x18\f \x01(\tR\x14modelBundleSignature\x12%\n" +
+	"\x0emodel_identity\x18\x1a \x01(\tR\rmodelIdentity\x124\n" +
+	"\x16model_contract_version\x18\x1b \x01(\tR\x14modelContractVersion\x12%\n" +
+	"\vtemperature\x18\x1c \x01(\x01H\x00R\vtemperature\x88\x01\x01\x12,\n" +
 	"\x12input_evidence_ids\x18\r \x03(\tR\x10inputEvidenceIds\x122\n" +
 	"\x15input_evidence_hashes\x18\x0e \x03(\tR\x13inputEvidenceHashes\x122\n" +
 	"\x15output_schema_version\x18\x0f \x01(\tR\x13outputSchemaVersion\x124\n" +
@@ -305,7 +354,8 @@ const file_security_v1_observation_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\x17 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12:\n" +
 	"\x19supersedes_observation_id\x18\x18 \x01(\tR\x17supersedesObservationId\x12-\n" +
-	"\x12production_profile\x18\x19 \x01(\bR\x11productionProfileBKZIgithub.com/Sergey-Bar/Ai-Captain/internal/contracts/securityv1;securityv1b\x06proto3"
+	"\x12production_profile\x18\x19 \x01(\bR\x11productionProfileB\x0e\n" +
+	"\f_temperatureBKZIgithub.com/Sergey-Bar/Ai-Captain/internal/contracts/securityv1;securityv1b\x06proto3"
 
 var (
 	file_security_v1_observation_proto_rawDescOnce sync.Once
@@ -341,6 +391,7 @@ func file_security_v1_observation_proto_init() {
 		return
 	}
 	file_security_v1_incident_proto_init()
+	file_security_v1_observation_proto_msgTypes[0].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

@@ -1,0 +1,202 @@
+{
+  "note": [
+    "The per-package coverage floors. Written by `tools/covercheck -write-baseline` from a real run, and read by the same tool as a gate.",
+    "",
+    "These are floors, not targets. A package below its floor fails the build. A package above its floor plus the margin also fails, and asks for the floor to be raised — a floor that only fails downwards is a floor somebody lowers once and everything above it is free afterwards.",
+    "",
+    "They are statement coverage from `go test -coverprofile`, not branch coverage: `go test` does not produce branch coverage, and a metric this repository cannot measure with a flag is a metric it reports without measuring.",
+    "",
+    "The floors hold for the build modes in `build`. Coverage is not a property of the source: internal/migrate measures 78.6% without -race and 71.4% with it on an unchanged tree, so a floor from one mode is not a floor for the other, and `check` reports that it could not measure rather than comparing numbers that do not belong together.",
+    "",
+    "`cmd/`, `migrations/` and `tools/` are named in `excluded` and are not floored. `migrations` is SQL with a Python harness beside it and no Go statements, and a floor of zero for a directory with no code teaches a reader to ignore this file."
+  ],
+  "package": "github.com/Sergey-Bar/Ai-Captain",
+  "mode": "atomic",
+  "margin": 2,
+  "floors": {
+    "internal/airuntime": {
+      "percent": 34.2,
+      "measured": "2026-10-03"
+    },
+    "internal/api": {
+      "percent": 62.6,
+      "measured": "2026-10-03"
+    },
+    "internal/audit": {
+      "percent": 14.5,
+      "measured": "2026-10-03"
+    },
+    "internal/bundles": {
+      "percent": 68.9,
+      "measured": "2026-10-03"
+    },
+    "internal/checkpoint": {
+      "percent": 46.8,
+      "measured": "2026-10-03"
+    },
+    "internal/clock": {
+      "percent": 95.4,
+      "measured": "2026-10-03"
+    },
+    "internal/clocksub": {
+      "percent": 64.8,
+      "measured": "2026-10-03"
+    },
+    "internal/command": {
+      "percent": 91.1,
+      "measured": "2026-10-03"
+    },
+    "internal/config": {
+      "percent": 91.6,
+      "measured": "2026-10-03"
+    },
+    "internal/contracts/schemasync": {
+      "percent": 50,
+      "measured": "2026-10-03"
+    },
+    "internal/correlator": {
+      "percent": 88.6,
+      "measured": "2026-10-03"
+    },
+    "internal/covercheck": {
+      "percent": 77.2,
+      "measured": "2026-10-03"
+    },
+    "internal/dbx": {
+      "percent": 52.9,
+      "measured": "2026-10-03"
+    },
+    "internal/deadexport": {
+      "percent": 89.5,
+      "measured": "2026-10-03"
+    },
+    "internal/detector": {
+      "percent": 90,
+      "measured": "2026-10-03"
+    },
+    "internal/evaluation": {
+      "percent": 95.7,
+      "measured": "2026-10-03"
+    },
+    "internal/evidence": {
+      "percent": 78.6,
+      "measured": "2026-10-03"
+    },
+    "internal/fixture": {
+      "percent": 76,
+      "measured": "2026-10-03"
+    },
+    "internal/graph": {
+      "percent": 67.4,
+      "measured": "2026-10-03"
+    },
+    "internal/hafnia": {
+      "percent": 81.1,
+      "measured": "2026-10-03"
+    },
+    "internal/identity": {
+      "percent": 67.7,
+      "measured": "2026-10-03"
+    },
+    "internal/inbox": {
+      "percent": 62,
+      "measured": "2026-10-03"
+    },
+    "internal/incidents": {
+      "percent": 82.4,
+      "measured": "2026-10-03"
+    },
+    "internal/jobs": {
+      "percent": 38.3,
+      "measured": "2026-10-03"
+    },
+    "internal/lifecycle": {
+      "percent": 81,
+      "measured": "2026-10-03"
+    },
+    "internal/migrate": {
+      "percent": 71.4,
+      "measured": "2026-10-03"
+    },
+    "internal/milestone": {
+      "percent": 82.6,
+      "measured": "2026-10-03"
+    },
+    "internal/mp4": {
+      "percent": 83.6,
+      "measured": "2026-10-03"
+    },
+    "internal/normalize": {
+      "percent": 75,
+      "measured": "2026-10-03"
+    },
+    "internal/observability": {
+      "percent": 97.6,
+      "measured": "2026-10-03"
+    },
+    "internal/observations": {
+      "percent": 84.2,
+      "measured": "2026-10-03"
+    },
+    "internal/outbox": {
+      "percent": 81.4,
+      "measured": "2026-10-03"
+    },
+    "internal/pipeline": {
+      "percent": 58.6,
+      "measured": "2026-10-03"
+    },
+    "internal/predicatecov": {
+      "percent": 89.6,
+      "measured": "2026-10-03"
+    },
+    "internal/release": {
+      "percent": 73.8,
+      "measured": "2026-10-03"
+    },
+    "internal/rtsp": {
+      "percent": 80.3,
+      "measured": "2026-10-03"
+    },
+    "internal/rules": {
+      "percent": 75,
+      "measured": "2026-10-03"
+    },
+    "internal/simulate": {
+      "percent": 55.9,
+      "measured": "2026-10-03"
+    },
+    "internal/skipaudit": {
+      "percent": 87.6,
+      "measured": "2026-10-03"
+    },
+    "internal/soak": {
+      "percent": 69.1,
+      "measured": "2026-10-03"
+    },
+    "internal/sqlguard": {
+      "percent": 92,
+      "measured": "2026-10-03"
+    },
+    "internal/statuscheck": {
+      "percent": 73.9,
+      "measured": "2026-10-03"
+    },
+    "internal/testutil": {
+      "percent": 54.8,
+      "measured": "2026-10-03"
+    },
+    "migrations": {
+      "percent": 77.3,
+      "measured": "2026-10-03"
+    }
+  },
+  "excluded": [
+    "cmd/",
+    "tools/",
+    "migrations/"
+  ],
+  "build": [
+    "race"
+  ]
+}

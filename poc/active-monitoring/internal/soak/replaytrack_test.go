@@ -112,7 +112,7 @@ func seedTrackRun(t *testing.T, st *store.Store) (runID, detectionID string) {
 		RegionTop:    int(c.Box.Y1 * 1000), RegionLeft: int(c.Box.X1 * 1000),
 		RegionBottom: int(c.Box.Y2 * 1000), RegionRight: int(c.Box.X2 * 1000),
 		FrameSeq: crossingFrame, ReferenceSHA: "ref",
-		ModelIdentity: strp("yolov8n"), ModelSHA256: &sha, ModelLicence: &lic,
+		ModelIdentity: strp("yolov4n"), ModelSHA256: &sha, ModelLicence: &lic,
 		InputSize: &size, NMSClassIOU: &classIOU, NMSGlobalIOU: &globalIOU,
 	}); err != nil {
 		t.Fatal(err)
@@ -264,7 +264,7 @@ func seedNeverCrossingRun(t *testing.T, st *store.Store) {
 		TriggerClass: "car", Score: 0.9, Threshold: thr, RegionSource: "measured",
 		RegionTop: 349, RegionLeft: 470, RegionBottom: 780, RegionRight: 560,
 		FrameSeq:      13,
-		ModelIdentity: strp("yolov8n"), ModelSHA256: &sha, ModelLicence: &lic,
+		ModelIdentity: strp("yolov4n"), ModelSHA256: &sha, ModelLicence: &lic,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -300,7 +300,7 @@ func TestTheTrackReplayIsNotRunWhenThereAreNoBoxes(t *testing.T) {
 		TriggerClass: "car", Score: 0.9, Threshold: 0.45,
 		RegionSource: "measured", FrameSeq: 6,
 		RegionTop: 349, RegionLeft: 470, RegionBottom: 780, RegionRight: 560,
-		ModelIdentity: strp("yolov8n"), ModelSHA256: &sha, ModelLicence: &lic,
+		ModelIdentity: strp("yolov4n"), ModelSHA256: &sha, ModelLicence: &lic,
 	}); err != nil {
 		t.Fatal(err)
 	}

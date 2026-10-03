@@ -1,315 +1,416 @@
 package main
 
-// footage.go - the licence gate and the sampling window for `pocctl footage`.
+// footage: measure the detector over real material, and refuse material whose licence
+// nobody wrote down.
 //
-// # Why the gate is a separate file with no model in it
+// # Why this command exists
 //
-// The gate has one job and it is the job the rest of the module cannot do for
-// itself: decide whether this project is ALLOWED to hold a number derived from
-// this material. A measurement taken over footage whose licence nobody recorded
-// is not a weaker measurement; it is a number that may not be quoted, printed in
-// a report, or shown to a judge. So the gate is pure - no session, no frame, no
-// ffmpeg - and it runs to completion before a single pixel is decoded.
+// The plan's Phase 0.5 is four measurements, and three of them need a camera. This is
+// the tool that takes whatever material you HAVE and produces the same four numbers, so
+// the moment you point it at something you are allowed to use it works. It does not
+// fetch anything. Fetching is a separate question with a separate answer per source,
+// and a tool that both fetches and measures makes the licence gate optional by
+// accident: the gate is one argument away from being bypassed by the fetch.
 //
-// It is pure so a test can drive every refusal in a table without a model and
-// without a clip. A gate that needed the thing it gates would be a gate that
-// could not be exercised on the case that matters most, which is "refuse this".
+// # The gate, and why it is a refusal rather than a warning
 //
-// # The four refusals, and what each one stops
+// `testdata/labels.json` records, per clip, where it came from, what licence covers it
+// and whether it is cleared to be shown to anyone. This command reads that record and
+// REFUSES a clip whose entry says the licence is not recorded, or whose
+// `cleared_for_external_use` is false.
 //
-//  1. No row in testdata/labels.json for this material. Provenance that nobody
-//     wrote down is not provenance.
-//  2. An absent `licence`. Empty is refused rather than defaulted, for the same
-//     reason: a licence field filled from what would be convenient to claim is
-//     worse than an absent one, because an absent one is visible.
-//  3. A licence reading `NOT RECORDED`. This is checked as a PREFIX and the reason
-//     is worth stating: the real row in this repository reads "NOT RECORDED, and
-//     it is not recoverable from this file", so an equality test would let the
-//     one row that matters through. A sentence that BEGINS by saying nothing was
-//     recorded is a declaration that nothing was recorded.
-//  4. An absent `cleared_for_external_use`, or one that is false.
+// A warning would be useless here, because a warning is printed and then the numbers
+// appear, and a reader who has six numbers on a screen does not remember a caveat above
+// them. This repository's own argument applies: a measurement whose input nobody can
+// account for is a number that may not be quoted, and the tool that produces it is the
+// right place to enforce that rather than the reader.
 //
-// Refusal 4 is a POINTER, not a bool, and that is the entire control. A `bool`
-// field cannot tell "cleared: false" from "this row never answered", and those
-// two are opposite answers. On this tree the difference decides the whole
-// measurement: `car-crossing.mp4` and `bird-synthetic.mp4` carry a recorded
-// licence and no clearance field at all, so a bool would let them through and
-// the pointer refuses them.
+// It is deliberately STRICT about the three fields. An entry that omits `licence` is
+// refused, not treated as permissive. An omitted field is an unrecorded fact, and the
+// whole point of the table is that unrecorded is a distinct state from permissive.
 //
-// # The window
+// # What it prints, and what it deliberately does not
 //
-// A sampling interval longer than 1.5 s is refused, and the reason is a property
-// of the product rather than a taste: the smallest object the system exists to
-// report is on screen for about that long. Sample a 4-second road at a 3-second
-// interval and a pedestrian is in two of your four samples - and if they are in
-// neither, you report a clean road over material where somebody was standing.
+// Both detection settings over the same frames, side by side, with per-class
+// precision and recall for each. That comparison IS Phase 0.5.4: the same material,
+// the same detector, the only difference being whether a small region was measured at
+// full resolution.
+//
+// It does not print an mAP, and the report says so: a still set of a few hundred
+// frames supports a precision and a recall and not a mean average precision.
 
 import (
+	"encoding/json"
 	"fmt"
-	"math"
 	"os"
-	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
-	"time"
 )
 
-// maxSamplingInterval is the longest gap between sampled frames this command
-// accepts.
+// clipLabel is one row of `testdata/labels.json`.
 //
-// 1.5 s, from the duration of the smallest object this system reports. It is a
-// refusal and not a warning because the measurement it protects against is the
-// most convincing kind of wrong: four frames of an empty road look exactly like a
-// detector that works.
-const maxSamplingInterval = 1500 * time.Millisecond
-
-// footageLabel is one row of the `clips` array in testdata/labels.json.
-//
-// Only the fields the gate reads are declared. A gate that parsed the whole row
-// would be able to be confused by a note, and the notes in this file are long
-// prose written for a person.
-type footageLabel struct {
+// The fields this command reads are all declared as POINTERS. That is not pedantry:
+// a missing field and a field whose value is the empty string are different facts, and
+// "a licence nobody recorded" must not be indistinguishable from "a licence that records
+// nothing applies".
+type clipLabel struct {
 	File       string `json:"file"`
 	Provenance string `json:"provenance"`
+	SourceURL  string `json:"source_url"`
 	Licence    string `json:"licence"`
-	// Cleared is a POINTER. See the file comment: this is the control that
-	// distinguishes "the row says no" from "the row never said".
+	Retrieved  string `json:"retrieved"`
+	// Cleared is a POINTER because it is genuinely a tri-state in this data: `true`,
+	// `false`, and ABSENT are three different answers and the field has to survive all
+	// three. The real table has one row with `true`, one with `false`, and rows that
+	// omit it entirely.
 	Cleared *bool `json:"cleared_for_external_use"`
-	// ClearedNote is carried so the refusal can quote the row's own reason rather
-	// than a sentence this file invented.
-	ClearedNote string `json:"cleared_for_external_use_note"`
-	Attribution string `json:"attribution"`
-	SHA256      string `json:"sha256"`
+	// ContainsPeople is PROSE OR A BOOLEAN in this table, and that is not an
+	// inconsistency to tidy away -- it is the two answers a careful labeler gives.
+	// `car-crossing.mp4` says `false`, because a testsrc pattern has nobody in it. The
+	// YouTube row says `unknown - a night road camera; no pedestrian was observed in the
+	// frames examined, and no claim is made that none is present`, because that is what
+	// the person who looked actually knows.
+	//
+	// Declaring it as one type broke the other: a `*bool` refused to parse the row that
+	// carries the most caution in the table, and a `string` refused to parse the rows
+	// that do not. Either way the whole table became unreadable, and an unreadable
+	// table is a gate that gates nothing.
+	ContainsPe proseOrBool `json:"contains_people"`
+	SHA256     string      `json:"sha256"`
+	Bytes      int64       `json:"bytes"`
+	// Notes is carried and not parsed. It is where the human reasoning lives, and a
+	// gate that discards it would be a gate that hides the explanation of why a row
+	// says what it says.
+	Notes []string `json:"notes"`
+	// LocalCopy names a file on this machine that is not committed, which is how the
+	// table describes material that exists but must not travel.
+	LocalCopy string `json:"local_copy"`
 }
 
-// footageLabels is the shape of testdata/labels.json.
-type footageLabels struct {
-	Clips []footageLabel `json:"clips"`
-}
-
-// readFootageLabels reads the provenance table.
+// proseOrBool is a JSON value that may be `true`, `"yes"` or a paragraph.
 //
-// A file that is not readable is a refusal rather than an empty table, because an
-// empty table would be read downstream as "no material has a licence", which is
-// a claim about the world rather than about this command's failure to find a
-// file.
-func readFootageLabels(path string) ([]footageLabel, error) {
+// It exists because the field it reads is genuinely two things, and a struct that
+// accepted only one of them would make the other rows unreadable rather than merely
+// imprecise. A boolean that arrives renders as `true`/`false`; a string arrives as
+// itself; and an absent field arrives empty, which the caller renders as NOT RECORDED
+// rather than as a default.
+type proseOrBool string
+
+// UnmarshalJSON accepts either spelling.
+//
+// The error is deliberately not swallowed: a number where prose was expected is a
+// mistake in the table and the reader should be told which row and which field.
+func (p *proseOrBool) UnmarshalJSON(b []byte) error {
+	s := strings.TrimSpace(string(b))
+	switch {
+	case s == "true", s == "false":
+		*p = proseOrBool(s)
+		return nil
+	case len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"':
+		var str string
+		if err := json.Unmarshal(b, &str); err != nil {
+			return err
+		}
+		*p = proseOrBool(str)
+		return nil
+	case s == "null":
+		*p = ""
+		return nil
+	}
+	return fmt.Errorf("`contains_people` must be true, false, or a sentence saying what is known; "+
+		"got %s. The field is two things on purpose -- `false` for material with nobody in it, and a "+
+		"sentence for material where the answer is `unknown`", s)
+}
+
+// Word renders the value for a status line, or NOT RECORDED when it is absent.
+func (p proseOrBool) Word() string {
+	s := strings.TrimSpace(string(p))
+	if s == "" {
+		return "NOT RECORDED"
+	}
+	return s
+}
+
+// labelsFile is `testdata/labels.json`.
+type labelsFile struct {
+	Clips []clipLabel `json:"clips"`
+}
+
+// loadLabels reads the provenance table and indexes it by the path it stores.
+//
+// The index key is the row's own `file` value rather than a base name, because the
+// table stores a path (`youtube/x.mp4`) and matching on a base name would let two
+// directories hold two clips with the same name and pick whichever came last.
+func loadLabels(path string) (map[string]clipLabel, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("the provenance table is not readable: %w. Without it no material in this "+
-			"project may be measured, because a measurement over footage whose terms nobody wrote down "+
-			"is a number nobody may quote", err)
+		return nil, fmt.Errorf("footage: cannot read the provenance table %s: %w", path, err)
 	}
-	var file footageLabels
-	if err := jsonUnmarshal(raw, &file); err != nil {
-		return nil, fmt.Errorf("%s is not readable as a provenance table: %w", path, err)
+	var f labelsFile
+	if err := json.Unmarshal(raw, &f); err != nil {
+		return nil, fmt.Errorf("footage: %s is not a provenance table this build understands: %w", path, err)
 	}
-	return file.Clips, nil
+	out := make(map[string]clipLabel, len(f.Clips))
+	for _, c := range f.Clips {
+		if c.File == "" {
+			continue
+		}
+		out[normPath(c.File)] = c
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("footage: %s lists no clips. A provenance table with nothing in it describes "+
+			"nothing, and this command measures material", path)
+	}
+	return out, nil
 }
 
-// resolveLabel finds the one row that describes MATERIAL.
+// normPath makes a path comparable: forward slashes, no leading "./".
+func normPath(p string) string {
+	p = strings.ReplaceAll(p, "\\", "/")
+	return strings.TrimPrefix(p, "./")
+}
+
+// labelFor finds the row for a clip, by full path and then by base name.
 //
-// Exact match on the recorded path first, and base-name match only if no exact
-// match exists. The order matters: `testdata/youtube/sTF-6_xinUU.mp4` and
-// `testdata/youtube2/eO19UTm93GQ.mp4` have different base names, so neither is
-// ambiguous, while a material named only by its base name could match a row in
-// either directory.
-//
-// Zero matches and two matches are both refusals, and they are different
-// sentences because they need different work from the operator: one needs the
-// row written, the other needs the operator to say which file they meant.
-func resolveLabel(clips []footageLabel, material string) (footageLabel, error) {
-	wantSlash := filepath.ToSlash(material)
-	for _, c := range clips {
-		if filepath.ToSlash(c.File) == wantSlash {
-			return c, nil
+// The base-name fallback exists because a caller names a file on a command line and the
+// table stores a path relative to `testdata`. It is a FALLBACK and not the primary
+// path, and when two rows share a base name the match is refused rather than resolved
+// -- an ambiguous licence lookup is exactly the situation where guessing is worst.
+func labelFor(labels map[string]clipLabel, path string) (clipLabel, error) {
+	key := normPath(path)
+	if c, ok := labels[key]; ok {
+		return c, nil
+	}
+	base := key
+	if i := strings.LastIndex(base, "/"); i >= 0 {
+		base = base[i+1:]
+	}
+	var found []clipLabel
+	for _, c := range labels {
+		if baseOf(c.File) == base {
+			found = append(found, c)
 		}
 	}
-	base := filepath.Base(material)
-	var byBase []footageLabel
-	for _, c := range clips {
-		if filepath.Base(filepath.ToSlash(c.File)) == base {
-			byBase = append(byBase, c)
-		}
-	}
-	switch len(byBase) {
+	switch len(found) {
 	case 0:
-		return footageLabel{}, fmt.Errorf("no row in the provenance table describes %q. The table holds %d row(s) "+
-			"(%s). A material with no provenance here is a material whose numbers may not be quoted, so this is "+
-			"refused rather than measured and labelled later", material, len(clips), clipNames(clips))
+		return clipLabel{}, fmt.Errorf("footage: %s has NO ROW in the provenance table. Material with no "+
+			"recorded provenance produces numbers nobody may quote, so it is refused rather than "+
+			"measured. Add a row recording where it came from, what licence covers it, and whether it "+
+			"may be shown outside this machine", path)
 	case 1:
-		return byBase[0], nil
+		return found[0], nil
 	default:
-		names := make([]string, 0, len(byBase))
-		for _, c := range byBase {
+		names := make([]string, 0, len(found))
+		for _, c := range found {
 			names = append(names, c.File)
 		}
 		sort.Strings(names)
-		return footageLabel{}, fmt.Errorf("%q is ambiguous: %d rows in the provenance table have that base name (%s). "+
-			"This command will not pick one for you, because the two rows carry different licences and picking the "+
-			"wrong one measures material under terms that were never granted. Pass the full relative path",
-			base, len(names), strings.Join(names, ", "))
+		return clipLabel{}, fmt.Errorf("footage: %s matches %d rows in the provenance table (%s), so "+
+			"the licence lookup is ambiguous. Name the full path, or remove the duplicate row: an "+
+			"ambiguous licence lookup is the one situation where guessing which licence applies is worst",
+			path, len(found), strings.Join(names, ", "))
 	}
 }
 
-func clipNames(clips []footageLabel) string {
-	names := make([]string, 0, len(clips))
-	for _, c := range clips {
-		names = append(names, c.File)
+func baseOf(p string) string {
+	p = normPath(p)
+	if i := strings.LastIndex(p, "/"); i >= 0 {
+		return p[i+1:]
 	}
-	sort.Strings(names)
-	if len(names) == 0 {
-		return "it holds none"
-	}
-	return strings.Join(names, ", ")
+	return p
 }
 
-// licenceUnrecorded is the prefix a licence field carries when nothing was
-// recorded.
+// clearedForExternalUse resolves the tri-state boolean.
 //
-// A prefix and not an equality test, because the row in this repository that
-// matters reads "NOT RECORDED, and it is not recoverable from this file", and an
-// equality test would wave the single most important row in the table through a
-// gate whose whole purpose is to stop it.
-const licenceUnrecorded = "NOT RECORDED"
-
-// checkLicenceGate returns every reason MATERIAL may not be measured, or nil.
-//
-// All the reasons are collected rather than returned one at a time. An operator
-// fixing a provenance row wants to know everything wrong with it in one go, and a
-// gate that reports one problem per run turns one edit into four runs.
-//
-// The order is fixed and it is the order of severity, so the printed list reads
-// as the reason it is refusing rather than as the order the fields happen to sit
-// in the JSON.
-func checkLicenceGate(c footageLabel) error {
-	var why []string
-	if strings.TrimSpace(c.Licence) == "" {
-		why = append(why, "the row carries no licence. An absent licence is refused rather than defaulted: "+
-			"a licence field filled from what would be convenient to claim is worse than an absent one, "+
-			"because an absent one is visible")
-	} else if strings.HasPrefix(normaliseSentence(c.Licence), licenceUnrecorded) {
-		why = append(why, fmt.Sprintf("the licence reads %q. Nothing was recorded, so there are no terms to "+
-			"measure under. Pass the path as it is recorded and the row's own note says what is missing",
-			trimTo(c.Licence, 60)))
+// The three states are REAL and the function says which is which, because they are
+// three different answers: `true` may be shown, `false` may not, and ABSENT is a
+// licence nobody wrote down. Collapsing the third into the first is the failure this
+// command exists to prevent.
+func (c clipLabel) clearedForExternalUse() (bool, bool) {
+	if c.Cleared == nil {
+		return false, false // known: NOT cleared, because nobody said otherwise
 	}
+	return *c.Cleared, true
+}
+
+// refuseUncleared is THE gate.
+//
+// It returns an error naming the file and the three fields that are wrong, because a
+// refusal that says only "licence not recorded" is a complaint and a refusal that says
+// which three fields to fill is a fix.
+func refuseUncleared(path string, c clipLabel, wantExternal bool) error {
+	var problems []string
+
+	licence := strings.TrimSpace(c.Licence)
+	if licence == "" {
+		problems = append(problems, "`licence` is empty or absent, so nothing is recorded about who "+
+			"granted permission. An ABSENT field is not a permissive field")
+	} else if strings.HasPrefix(upper(licence), licenceUnrecorded) {
+		// A PREFIX and not an equality test, and this is the one place this branch
+		// deliberately changed an upstream line rather than deferring to it.
+		//
+		// The row this whole command exists for carries `licence`: "NOT RECORDED, and
+		// it is not recoverable from this file". An equality test does not match a
+		// sentence, so the check that is supposed to block the one unrecorded licence in
+		// the table does not fire on it. It passes today only because that same row also
+		// records `cleared_for_external_use: false`, so a SECOND check catches it - and a
+		// row whose licence reads NOT RECORDED while its clearance field says true would
+		// be measured and quoted.
+		//
+		// REDCHECK RC-35b: put the `==` back and
+		// TestALicenceReadingNotRecordedIsRefusedOnItsOwnStopsFiring goes red. That test
+		// pins a row with an UNRECORDED licence and a CLEARED flag, which is the shape
+		// nothing else in this repository holds and the only way to tell the two checks
+		// apart.
+		problems = append(problems, "`licence` reads NOT RECORDED. That is a real state and it is the "+
+			"one that blocks a measurement: the rights holder has not been asked, so nothing is known "+
+			"about what may be done with this file")
+	}
+
+	cleared, known := c.clearedForExternalUse()
 	switch {
-	case c.Cleared == nil:
-		why = append(why, "the row carries no `cleared_for_external_use` field. Absent is not the same answer as "+
-			"false: the first says nobody decided, and this command will not decide for them. "+
-			"`car-crossing.mp4` and `bird-synthetic.mp4` are both in this state today")
-	case !*c.Cleared:
-		note := c.ClearedNote
-		if note == "" {
-			note = "the row records no reason"
-		}
-		why = append(why, fmt.Sprintf("the row records `cleared_for_external_use: false` (%s). This material may "+
-			"be watched on this machine and may not be measured into a number anybody else can be shown", trimTo(note, 70)))
+	case !known:
+		problems = append(problems, "`cleared_for_external_use` is absent. It must be an explicit true "+
+			"or false: \"the licence is unknown\" and \"the licence is known and permissive\" are "+
+			"different answers and a reader should not have to infer which one applies")
+	case wantExternal && !cleared:
+		problems = append(problems, "`cleared_for_external_use` is false, so this material is explicitly "+
+			"NOT cleared to leave this machine, and you asked for numbers to quote")
 	}
-	if len(why) == 0 {
+
+	if len(problems) == 0 {
 		return nil
 	}
-	return &licenceRefusal{File: c.File, Reasons: why}
+	return fmt.Errorf("footage: %s is not cleared to be measured for quoting, and no number will be "+
+		"printed for it.\n  %s\n  Fix the row in the provenance table, or point --clip at material whose "+
+		"licence you can state in full: the source, the rights holder, and the permission.",
+		path, strings.Join(problems, "\n  "))
 }
 
-// licenceRefusal is the gate's error, carrying the reasons so the command can
-// print them one per line instead of folding four sentences into one string that
-// a terminal wraps into soup.
-type licenceRefusal struct {
-	File    string
-	Reasons []string
-}
+func upper(s string) string { return strings.ToUpper(strings.TrimSpace(s)) }
 
-func (r *licenceRefusal) Error() string {
-	return fmt.Sprintf("%s may not be measured: %s", r.File, strings.Join(r.Reasons, "; "))
-}
+// licenceUnrecorded is the phrase a licence field carries when nothing was recorded.
+//
+// It is a PREFIX because the real row says it inside a sentence, and a constant rather
+// than a literal because the same phrase has to be recognised by the gate and by the
+// summary that prints it above a status line.
+const licenceUnrecorded = "NOT RECORDED"
 
-// ReasonLines returns the refusal as printable lines.
-func (r *licenceRefusal) ReasonLines() []string { return r.Reasons }
-
-// normaliseSentence upper-cases and collapses whitespace, so a licence field
-// that has been wrapped across lines is compared the way it was written.
-func normaliseSentence(s string) string {
-	return strings.ToUpper(strings.Join(strings.Fields(s), " "))
-}
-
-// trimTo shortens a quoted field for a one-line refusal, marking that it did.
-func trimTo(s string, n int) string {
-	s = strings.Join(strings.Fields(s), " ")
-	if len(s) <= n {
-		return s
+// parseClock reads `MM:SS`, `HH:MM:SS` or a plain number of seconds.
+//
+// It is a function and not a `time.Parse` because the caller is typing a video offset,
+// and `15:30` for a video is thirty minutes and fifteen seconds while `time.Parse`
+// would want an hour field and an hour-only layout would refuse it. A refusal that
+// does not understand the obvious spelling trains people to look the format up.
+func parseClock(s string) (float64, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, nil
 	}
-	if n <= 3 {
-		return s[:n]
+	// A bare number is seconds. It is a common spelling and an unambiguous one.
+	if f, err := strconv.ParseFloat(s, 64); err == nil {
+		if f < 0 {
+			return 0, fmt.Errorf("footage: %q is a negative offset", s)
+		}
+		return f, nil
 	}
-	return s[:n-3] + "..."
+	parts := strings.Split(s, ":")
+	if len(parts) < 2 || len(parts) > 3 {
+		return 0, fmt.Errorf("footage: %q is not an offset. Use MM:SS, HH:MM:SS, or a number of "+
+			"seconds", s)
+	}
+	var total float64
+	for i, p := range parts {
+		v, err := strconv.ParseFloat(strings.TrimSpace(p), 64)
+		if err != nil {
+			return 0, fmt.Errorf("footage: %q has a part %q that is not a number", s, p)
+		}
+		// The RIGHTMOST part is seconds, so the multiplier for part i is 60 raised to
+		// the number of parts to its right. Walking leftward instead -- the way the
+		// multiplier reads most naturally -- turns `1:30` into 1801 seconds, which is
+		// a silent thirty-fold error on the one number a caller types by hand.
+		mult := 1.0
+		for j := len(parts) - 1; j > i; j-- {
+			mult *= 60
+		}
+		total += v * mult
+	}
+	return total, nil
 }
 
-// footageWindow is a validated sampling window.
+// footageWindow is the declared region of a clip to measure.
 type footageWindow struct {
-	From  time.Duration
-	To    time.Duration
-	Every time.Duration
-	// Declared is how many frames this window promises at this interval. It is
-	// DECLARED, not measured: the reader reports what it actually got, and the
-	// two differing is a finding rather than a rounding.
-	Declared int
+	At    float64 // seconds from the start
+	For   float64 // how many seconds
+	Every float64 // the sampling interval
 }
 
-// Seconds is the window's length.
-func (w footageWindow) Seconds() float64 { return w.To.Seconds() - w.From.Seconds() }
-
-// validateFootageWindow refuses a window that cannot answer the question.
+// validate refuses a window that cannot be measured, and says why.
 //
-// Three refusals, and the second is the load-bearing one:
-//
-//   - an interval of zero or less, which is a division by zero;
-//   - an interval LONGER THAN 1.5 s, because the smallest object this system
-//     exists to report is on screen for about that long, and a longer interval
-//     does not sample the object at all;
-//   - an empty or inverted window, which samples nothing.
-//
-// The interval check comes before the window check so the message an operator
-// gets for `--from 2 --to 8 --every 3` is about the interval, which is the thing
-// they have to change.
-func validateFootageWindow(from, to, every time.Duration) (footageWindow, error) {
-	if every <= 0 {
-		return footageWindow{}, fmt.Errorf("the sampling interval is %v. It must be positive: an interval of zero "+
-			"or less does not divide", every)
+// The dwell arithmetic is here rather than at the call site because it is the reason a
+// window of 30 minutes at one frame a second is NOT automatically a good idea: at one
+// frame a second a bird crossing in 1.5 s is proposed one or two times, and the whole
+// crop pass's argument is that it needs three.
+func (w footageWindow) validate() error {
+	if w.At < 0 {
+		return fmt.Errorf("footage: the offset %v is negative", w.At)
 	}
-	if every > maxSamplingInterval {
-		return footageWindow{}, fmt.Errorf("the sampling interval is %v and this command refuses anything over %v.\n"+
-			"  The smallest object this system exists to report is on screen for about %v, so a longer interval "+
-			"does not sample it at all. Sample the same window more often, or measure a window in which the "+
-			"object is present for longer - a wider interval makes an empty road look like a clean result, which "+
-			"is the most convincing kind of wrong number this module can print", every, maxSamplingInterval, maxSamplingInterval)
+	if w.For <= 0 {
+		return fmt.Errorf("footage: the duration %v is not positive, so the window is empty and every "+
+			"number over it would be an average over nothing", w.For)
 	}
-	if to <= from {
-		return footageWindow{}, fmt.Errorf("the window [%v, %v] is empty. There is nothing to sample, and a "+
-			"measurement over no frames reports no numbers rather than zero of them", from, to)
+	if w.Every <= 0 {
+		return fmt.Errorf("footage: the sampling interval %v is not positive", w.Every)
 	}
-	return footageWindow{From: from, To: to, Every: every, Declared: declaredSamples(from, to, every)}, nil
+	if w.Every > w.For {
+		return fmt.Errorf("footage: sampling every %v s over a %v s window is one frame in total. The "+
+			"report would be a number about a single frame with no variance beside it", w.Every, w.For)
+	}
+	samples := w.For / w.Every
+	if samples < NoveltySamplesNeeded {
+		return fmt.Errorf("footage: %v s at every %v s is %.0f sample(s), and the smallest object this "+
+			"system exists to report is on screen for about %.1f s and needs %d proposals inside that. "+
+			"Widen the window or sample faster, or the measurement cannot speak to the case the crop "+
+			"pass was built for",
+			w.For, w.Every, samples, NoveltyDwellSeconds, NoveltySamplesNeeded)
+	}
+	// The SECOND check, and it is the one that catches the case a count alone misses.
+	//
+	// Thirty minutes sampled every 300 s is SIX samples, which clears the count above and
+	// is still useless: an object on screen for 1.5 s cannot be present in six frames
+	// spread five minutes apart, so the table would have a row for `bird` and a zero in
+	// it, and the zero would look like a detector that cannot see birds rather than a
+	// sampling plan that never looked.
+	//
+	// The rule is therefore about the INTERVAL and not about the total: a sampling
+	// interval longer than the shortest dwell cannot see a short-dwell object at all,
+	// and no number over such a window may be quoted about one.
+	if w.Every > NoveltyDwellSeconds {
+		return fmt.Errorf("footage: sampling every %v s cannot see an object on screen for %.1f s, "+
+			"which is the smallest thing this system exists to report. The window holds %d samples "+
+			"and that count looks fine, which is the trap: the table would carry a row for the small "+
+			"object and a zero in it, and the zero would read as a detector limitation rather than a "+
+			"sampling plan that never looked. Sample at %.1f s or faster",
+			w.Every, NoveltyDwellSeconds, int(samples), NoveltyDwellSeconds)
+	}
+	return nil
 }
 
-// declaredSamples is how many frames a window promises at an interval.
+// The dwell figures, restated here so the window check and the printed report cannot
+// disagree about them.
+const (
+	// NoveltyDwellSeconds is the plan's own figure for a bird at 30 m.
+	NoveltyDwellSeconds = 1.5
+	// NoveltySamplesNeeded is how many proposals a region needs to be reliably cropped.
+	NoveltySamplesNeeded = 3
+)
+
+// describeWindow is the one line the report prints about what it measured.
 //
-// CEIL and not floor+1, because the window is HALF-OPEN: it covers [from, to). A
-// six-second window sampled every half second covers 1.0, 1.5, ... 5.5 and stops
-// at 6.0, which is twelve frames rather than thirteen. The reader is driven by
-// ffmpeg's own `-t`, which is half-open, so declaring floor+1 would print a
-// mismatch on every exact-multiple window - and a reader who sees "11 declared, 10
-// read" on every run learns to ignore the row that exists to catch a real shortfall.
-//
-// The consequence is stated because it is the reader's business: a frame sitting
-// exactly on `to` is NOT sampled. Raise `to` by one interval if the material
-// matters right up to it.
-func declaredSamples(from, to, every time.Duration) int {
-	if every <= 0 || to <= from {
-		return 0
-	}
-	n := math.Ceil(float64(to-from) / float64(every))
-	if n < 1 {
-		return 1
-	}
-	return int(n)
+// It carries the window, the sampling and the FRAME COUNT, because a rate over an
+// unstated number of samples is a rate nobody can check.
+func (w footageWindow) describeWindow() string {
+	return fmt.Sprintf("%.1fs .. %.1fs, sampled every %.1fs (%d frames)",
+		w.At, w.At+w.For, w.Every, int(w.For/w.Every))
 }

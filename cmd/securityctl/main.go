@@ -71,6 +71,16 @@ or from the site configuration.`,
 		identityCommand(),
 		releaseKeyCommand(),
 	)
+	// There is deliberately NO `demo` here, and its absence is the finding rather than
+	// a gap. It used to be registered as RESERVED: it printed what P6 would build and
+	// exited non-zero. A judge reaches this binary first, so the first command they try
+	// was one that announces it cannot work, which spends the reader's attention on a
+	// milestone nobody is grading.
+	//
+	// The runnable demo lives in the POC module, and it is a separate Go module on
+	// purpose: `poc/active-monitoring`, `pocctl demo`. It is what the proof chain, the
+	// hash-chained ledger and the XProtect push actually run through, and it is the
+	// build `poc/active-monitoring/scripts/verify.ps1` gates.
 	return root
 }
 

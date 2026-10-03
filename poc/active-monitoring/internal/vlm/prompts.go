@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"sort"
 	"strings"
 )
@@ -37,6 +38,15 @@ type Prompt struct {
 	// Class is the human label for the report and the screen. It is never a
 	// field on the wire and never a value the parser sees.
 	Class string
+	// ObservedClass is the class substituted into the prompt by [PromptSet.GetFor], and
+	// it is empty for an unparameterised [PromptSet.Get].
+	//
+	// It is on the prompt rather than only in the text because the attribution record
+	// has to be able to say what the model was TOLD as well as what it said. Two runs
+	// with the same prompt id and the same contract version, differing only in the class
+	// they were told, produced answers from different questions, and a reader comparing
+	// them would otherwise be comparing them as though they were the same one.
+	ObservedClass string
 }
 
 // PromptSet is the embedded set, indexed by class.
@@ -92,7 +102,22 @@ type ManifestPrompt struct {
 // add a field the parser does not know is a manifest whose answers would be
 // validated against the wrong shape.
 func EmbeddedPrompts() (*PromptSet, error) {
-	raw, err := promptFS.ReadFile("prompts/manifest.json")
+	return loadPrompts(promptFS)
+}
+
+// loadPrompts is [EmbeddedPrompts] with the filesystem as a parameter.
+//
+// The split exists so that the refusals in this function are TESTABLE. Every one of
+// them is a load-time decision about a file that only exists inside the binary, and an
+// untestable refusal is a comment: a prompt with a second placeholder, a manifest whose
+// output shape disagrees with the parser, an entry with no file. None of them can be
+// made to happen to a caller, so none of them is watched by anything, and a unit test of
+// the helper alone would pass just as happily if the call site were deleted.
+//
+// fstest.MapFS supplies a prompt set in a test with no file on disk and no build step,
+// which is what makes "refuse this prompt, by name" an assertion rather than a claim.
+func loadPrompts(fsys fs.FS) (*PromptSet, error) {
+	raw, err := fs.ReadFile(fsys, "prompts/manifest.json")
 	if err != nil {
 		return nil, fmt.Errorf("vlm: the embedded prompt manifest is missing: %w", err)
 	}
@@ -124,9 +149,15 @@ func EmbeddedPrompts() (*PromptSet, error) {
 		if _, dup := set.byID[p.ID]; dup {
 			return nil, fmt.Errorf("vlm: the manifest declares the class %q twice", p.ID)
 		}
-		body, err := promptFS.ReadFile("prompts/" + p.File)
+		body, err := fs.ReadFile(fsys, "prompts/"+p.File)
 		if err != nil {
 			return nil, fmt.Errorf("vlm: the manifest names prompts/%s and it is not embedded: %w", p.File, err)
+		}
+		if extra := strayPlaceholder(string(body)); extra != "" {
+			return nil, fmt.Errorf("vlm: prompts/%s contains the placeholder %s, and this build performs exactly "+
+				"one substitution (%s). A prompt with a second placeholder would send the placeholder itself "+
+				"to the provider, which is a prompt the model reads and this module cannot account for",
+				p.File, extra, classPlaceholder)
 		}
 		set.byID[p.ID] = Prompt{
 			ID: p.ID, Version: p.Version, Class: p.Class,
@@ -164,11 +195,78 @@ func shapeInstruction(fields []string) string {
 }
 
 // Get returns one class's prompt, refusing an unknown one by name.
+//
+// The returned prompt is UNPARAMETERISED: any `{{class}}` placeholder is left in
+// place. Use [PromptSet.GetFor] to send a prompt. Both exist because the two questions
+// have different answers, "which prompt file is this" has a file and "what exactly do we
+// send for this detection" has text, and a single method returning one of them by
+// accident is a prompt sent with a placeholder in it.
 func (s *PromptSet) Get(id string) (Prompt, error) {
 	p, ok := s.byID[id]
 	if !ok {
 		return Prompt{}, fmt.Errorf("vlm: no prompt for the incident class %q; this build carries %v", id, s.Classes())
 	}
+	return p, nil
+}
+
+// classPlaceholder is the ONE substitution this package performs.
+//
+// One, deliberately. A templating engine would be a second language to get wrong, and a
+// prompt is the largest single determinant of the answer this module attributes, so a
+// substitution it cannot see through is a substitution it cannot report. A prompt with a
+// second placeholder is therefore a load-time refusal rather than a silently
+// unsubstituted token on the wire.
+const classPlaceholder = "{{class}}"
+
+// strayPlaceholder returns the first `{{name}}` in a prompt that is not the one
+// substitution this build performs, or the empty string.
+//
+// It is a REFUSAL rather than a best-effort substitution because the alternative is
+// sending a prompt to a third party containing a literal `{{region}}`, which the model
+// reads as text and which nothing in this module's attribution record accounts for. An
+// answer produced from a prompt nobody can quote is an answer nobody can reproduce, and
+// reproducibility is the property this whole package exists to protect.
+func strayPlaceholder(body string) string {
+	rest := body
+	for {
+		i := strings.Index(rest, "{{")
+		if i < 0 {
+			return ""
+		}
+		rest = rest[i:]
+		j := strings.Index(rest, "}}")
+		if j < 0 {
+			// An unterminated placeholder is the same defect: the author meant a
+			// substitution and this build cannot perform it.
+			return rest
+		}
+		tok := rest[:j+2]
+		if tok != classPlaceholder {
+			return tok
+		}
+		rest = rest[j+2:]
+	}
+}
+
+// GetFor returns one class's prompt with the detected class substituted into it.
+//
+// `detected` is what the LOCAL pipeline measured the object to be, and it may be empty:
+// a novelty run proposes a region and has no class at all. An empty substitution is not
+// an error and does not leave a placeholder behind. It yields the class-agnostic
+// wording, which is the honest prompt for a run that measured a change and named
+// nothing.
+//
+// The substituted text is returned rather than the template so the two can never be
+// confused at a call site, and `Prompt.ObservedClass` carries the substituted value so
+// the attribution record says what the model was actually told.
+func (s *PromptSet) GetFor(id, detected string) (Prompt, error) {
+	p, err := s.Get(id)
+	if err != nil {
+		return Prompt{}, err
+	}
+	detected = strings.TrimSpace(detected)
+	p.Text = strings.ReplaceAll(p.Text, classPlaceholder, detected)
+	p.ObservedClass = detected
 	return p, nil
 }
 

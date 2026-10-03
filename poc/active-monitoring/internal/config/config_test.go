@@ -40,7 +40,7 @@ func complete(t *testing.T) map[string]string {
 		"SP_POC_SOURCE_ARG":         `testdata\car-crossing.mp4`,
 		"SP_POC_SOURCE_RELAY":       "false",
 		"SP_POC_AI_ADDR":            "127.0.0.1:8099",
-		"SP_POC_AI_MODEL":           `models\yolov8n.onnx`,
+		"SP_POC_AI_MODEL":           `models\yolov4n.onnx`,
 		"SP_POC_SIDECAR_SCRIPT":     `pyworker/server.py`,
 		"SP_POC_AI_FPS":             "5",
 		"SP_POC_AI_DEADLINE_MS":     "800ms",
@@ -472,7 +472,7 @@ func TestTheNewNumbersHaveBoundsWorthHaving(t *testing.T) {
 // reason.
 func conditionalValues() map[string]string {
 	return map[string]string{
-		"SP_POC_DET_MODEL":      `models\yolov8n.onnx`,
+		"SP_POC_DET_MODEL":      `models\yolov4n.onnx`,
 		"SP_POC_DET_INPUT":      "640",
 		"SP_POC_DET_NMS_CLASS":  "0.45",
 		"SP_POC_DET_NMS_GLOBAL": "0.75",
@@ -480,6 +480,32 @@ func conditionalValues() map[string]string {
 		"SP_POC_DET_SCORE":      "0.05",
 		"SP_POC_ORT_LIB":        `models\onnxruntime.dll`,
 		"SP_POC_ORT_THREADS":    "4",
+		// The crop pass's on/off switch is the only NON-structural gated variable, and it
+		// is here for the same reason the others are: it is required rather than
+		// defaulted because the default is the dangerous one. A detector that cannot see
+		// a bird at 30 m and a report claiming to report everything that passes are the
+		// same run, and nothing in the output says otherwise.
+		//
+		// False, not true, so the fixture exercises the LESS demanding path: a world with
+		// the crop pass off must still load, which is the rollback.
+		"SP_POC_CROP_PASS": "false",
+		// The crop pass's four knobs are STRUCTURAL, so they are never subjects of
+		// TestEveryVariableIsRequiredByName, but they share its `when` condition and the
+		// test refuses to run unless the fixture can state a value for every sibling under
+		// a condition it exercises. That refusal is correct and it is why these four are
+		// here rather than relying on their defaults: a sibling whose value is only known
+		// to the loader is a sibling whose absence the table cannot distinguish from its
+		// own removal.
+		"SP_POC_CROP_MIN_AREA":    "0.0004",
+		"SP_POC_CROP_PAD":         "0.35",
+		"SP_POC_CROP_MAX_REGIONS": "4",
+		"SP_POC_CROP_MIN_FRAMES":  "2",
+		// Zero is EVERY DECODED FRAME, which is the honest choice for a one-camera POC:
+		// at the measured 3.5 ms per 1080p frame, novelty on every frame costs 8.8% of
+		// one core and removes the question of whether a bird gets proposed often enough.
+		// The rate exists for the scale case, not for this one, and picking a number
+		// here would mean picking a number nobody has measured a need for.
+		"SP_POC_NOVELTY_FPS": "0",
 	}
 }
 

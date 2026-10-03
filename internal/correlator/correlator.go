@@ -239,12 +239,20 @@ func conditionWindow(c rules.Condition) int {
 // triggerColumns is the select list for an event row, shared by the trigger read
 // and the candidate read so the two cannot drift apart.
 //
+// `e.observed_at` is not in this list, and its absence is the point. It used to
+// be here, scanned into a `rules.Signal` field that nothing in the rule engine
+// read: a window predicate's input is the drift-corrected instant, and carrying
+// the source's own claim alongside it is an invitation to the next person to
+// write a condition against the camera's belief about itself. `internal/clock`
+// explains why, and `internal/predicatecov` fails the build if the column comes
+// back.
+//
 // devices has no tags column: `attributes` is a JSONB bag and the tag list lives
 // under its `tags` key. Selecting the whole document and decoding it in Go is
 // deliberate - a site that puts something else in attributes is not a query
 // error, and a rule that wants a tag nobody has set simply matches nothing.
 const triggerColumns = `
-	e.event_id, e.source_event_id, e.event_type, e.normalized_at, e.observed_at,
+	e.event_id, e.source_event_id, e.event_type, e.normalized_at,
 	COALESCE(e.device_id, ''), COALESCE(e.zone_id, ''), e.clock_drift_ms, e.payload,
 	COALESCE(d.kind, ''), COALESCE(d.attributes, '{}'::jsonb), COALESCE(z.path, '')`
 
@@ -317,7 +325,7 @@ func (c *Correlator) readTrigger(ctx context.Context, tenant, site, eventID stri
 		  FROM canonical_events e`+triggerJoins+clockJoin+observationJoins+`
 		 WHERE e.tenant_id = $1 AND e.event_id = $2`,
 		tenant, eventID).Scan(
-		&s.EventID, &s.SourceEventID, &s.EventType, &s.NormalizedAt, &s.ObservedAt,
+		&s.EventID, &s.SourceEventID, &s.EventType, &s.NormalizedAt,
 		&s.DeviceID, &s.ZoneID, &s.ClockDriftMS, &payload,
 		&s.DeviceKind, &attributes, &s.ZonePath,
 		&band, &drift, &obsID, &profile, &structured,
@@ -375,7 +383,7 @@ func (c *Correlator) readCandidates(
 		var insufficient bool
 
 		if err := rows.Scan(
-			&s.EventID, &s.SourceEventID, &s.EventType, &s.NormalizedAt, &s.ObservedAt,
+			&s.EventID, &s.SourceEventID, &s.EventType, &s.NormalizedAt,
 			&s.DeviceID, &s.ZoneID, &s.ClockDriftMS, &payload,
 			&s.DeviceKind, &attributes, &s.ZonePath,
 			&band, &drift, &obsID, &profile, &structured,

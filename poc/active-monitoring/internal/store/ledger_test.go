@@ -11,7 +11,7 @@ import (
 )
 
 // seedRun starts one run so the ledger rows have a run to belong to in the
-// operator's head. The ledger itself is not keyed by run � it is one chain per
+// operator's head. The ledger itself is not keyed by run — it is one chain per
 // database, which is the correct shape: a chain per run would let somebody move a
 // row from one run to another without breaking anything.
 func seedRun(t *testing.T, s *Store) string {

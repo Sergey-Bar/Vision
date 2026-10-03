@@ -63,8 +63,12 @@ type Detector struct {
 	// mu guards the reusable buffers. The frame loop is the only caller, but the
 	// latency collector and the session are both shared state and a run that later
 	// adds a second consumer must not find a data race in the detector.
-	mu      sync.Mutex
-	tensor  []float32
+	mu     sync.Mutex
+	tensor []float32
+	// cropBuf is the reusable extraction buffer for a crop pass. It is guarded by mu
+	// for the same reason `tensor` is: two detections must not share it, and the
+	// session and the latency collector are shared state.
+	cropBuf []byte
 	geom    Geometry
 	input   InputSpec
 	classes int
@@ -140,20 +144,44 @@ type Answer struct {
 	// zero and not a degraded run: it is a named reason, and it is what makes a
 	// detection rate of zero diagnosable instead of merely observable.
 	Refusal *Refusal
+	// Crop is the region that was measured, and it is the empty Rect for a
+	// whole-frame pass.
+	//
+	// It is on the answer rather than supplied by the caller because the caller's
+	// rectangle is a REQUEST and this one is what was actually measured, after
+	// clamping. A crop that ran off the edge of the frame was measured on less than
+	// was asked for, and a caller reading back its own request would print the wrong
+	// one. Per invariant 2 it is stored: a report that says "found in a 200x150 crop"
+	// has to be able to name which crop, and re-deriving it from a rounded region is a
+	// re-inference.
+	Crop Rect
 }
 
-// Detect measures one frame.
+// Detect measures one frame, or one crop of one frame.
+//
+// crop is the region to look at and is the zero Rect meaning the whole frame. It is a
+// parameter and not a second method because there is exactly ONE implementation of the
+// crop path, and a second entry point would be a second place for the letterbox, the
+// decode and the mapping back to disagree. The zero Rect means the whole frame, so a
+// caller with no crop pass passes `Rect{}` and this is behaviourally identical to what
+// Detect did before the parameter existed.
 //
 // The order is fixed and each step can refuse by name:
 //
-//	letterbox  -> the model's own layout, with the content geometry
-//	infer      -> the model, with the output shapes READ BACK from the runtime
-//	decode     -> boxes and telemetry, or a refusal naming the axis and the field count
+//	extract     -> the crop's pixels, contiguous, or a refusal naming the frame
+//	letterbox   -> the model's own layout, with the content geometry
+//	infer       -> the model, with the output shapes READ BACK from the runtime
+//	decode      -> boxes in CROP coordinates, or a refusal naming the axis
+//	uncrop      -> boxes in FRAME coordinates
 //
 // The output shapes are read back rather than trusted from the declaration, because
-// a dynamic-axis export declares -1 for its record count and the declaration is
-// then a lie the decoder would act on.
-func (d *Detector) Detect(seq uint64, rgb []byte, frameW, frameH int) Answer {
+// a dynamic-axis export declares -1 for its record count and the declaration is then a
+// lie the decoder would act on.
+//
+// The caller owns the ordering of a whole-frame pass against a crop pass, because
+// only the caller knows whether a crop is worth an inference, and the answer depends
+// on what the whole-frame pass already found.
+func (d *Detector) Detect(seq uint64, rgb []byte, frameW, frameH int, crop Rect) Answer {
 	started := time.Now()
 	ans := Answer{Seq: seq}
 
@@ -191,7 +219,34 @@ func (d *Detector) Detect(seq uint64, rgb []byte, frameW, frameH int) Answer {
 	}
 	buf := d.tensor[:need]
 
-	tensor, geom, err := Letterbox(rgb, frameW, frameH, in.W, in.H, in.Layout)
+	// The crop is extracted first, and everything downstream is then UNCHANGED: the
+	// letterbox sees a plain packed RGB buffer whose width is the crop's, the decoder
+	// sees the crop's own geometry, and the result is normalised against the CROP. That
+	// is what makes the crop path a whole-frame pass over a smaller picture rather than
+	// a second kind of measurement.
+	src, viewW, viewH := rgb, frameW, frameH
+	if !crop.Empty() {
+		rect, cerr := crop.Clamp(frameW, frameH)
+		if cerr != nil {
+			ans.Refusal = toRefusal(cerr)
+			ans.State = StateFor(ans.Refusal, 0)
+			ans.LatencyMS = msSince(started)
+			d.lat.Observe(ans.LatencyMS)
+			return ans
+		}
+		bufRGB, eerr := rect.Extract(rgb, frameW, frameH, d.cropBuf)
+		if eerr != nil {
+			ans.Refusal = toRefusal(eerr)
+			ans.State = StateFor(ans.Refusal, 0)
+			ans.LatencyMS = msSince(started)
+			d.lat.Observe(ans.LatencyMS)
+			return ans
+		}
+		d.cropBuf = bufRGB
+		src, viewW, viewH, crop = bufRGB, rect.W, rect.H, rect
+	}
+
+	tensor, geom, err := Letterbox(src, viewW, viewH, in.W, in.H, in.Layout)
 	if err != nil {
 		ans.Refusal = toRefusal(err)
 		ans.State = StateFor(ans.Refusal, 0)
@@ -238,12 +293,23 @@ func (d *Detector) Detect(seq uint64, rgb []byte, frameW, frameH int) Answer {
 	ans.Boxes = res.Boxes
 	ans.Telemetry = res.Telemetry
 	ans.Refusal = res.Refusal
+	// The boxes come back normalised against the CROP, and everything downstream in
+	// this module, the tracker, the report, the pushed event and the stored decision, is
+	// normalised against the FRAME. Uncropping happens HERE and nowhere else, on the one
+	// line, so there is no second mapping to get wrong. See [Rect.Uncrop] for why it is
+	// a named method rather than three lines of arithmetic.
+	if !crop.Empty() {
+		for i := range ans.Boxes {
+			ans.Boxes[i] = crop.Uncrop(ans.Boxes[i], frameW, frameH)
+		}
+	}
 	// The geometry is attached to the answer rather than left to the caller to
 	// correlate, so a report printing a detection rate can print beside it the
 	// model's input, the content size and the pad that produced those boxes.
 	ans.Telemetry.InputW, ans.Telemetry.InputH = geom.InputW, geom.InputH
 	ans.Telemetry.ContentW, ans.Telemetry.ContentH = geom.ContentW, geom.ContentH
 	ans.Telemetry.PadX, ans.Telemetry.PadY = geom.PadX, geom.PadY
+	ans.Crop = crop
 	ans.State = StateFor(ans.Refusal, len(ans.Boxes))
 	ans.LatencyMS = msSince(started)
 	d.lat.Observe(ans.LatencyMS)

@@ -25,7 +25,7 @@ import (
 func TestTheFooterIsEmptyWhenThereIsNothingToSay(t *testing.T) {
 	plain, withFooter := newFrame(320, 240), newFrame(320, 240)
 	Draw(plain, Spec{})
-	Draw(withFooter, Spec{Footer: Footer{Detector: "yolov8n"}})
+	Draw(withFooter, Spec{Footer: Footer{Detector: "yolov4n"}})
 
 	if countNonBlack(withFooter) <= countNonBlack(plain) {
 		t.Fatalf("a footer with a model line drew %d pixels over %d — nothing was drawn for it",
@@ -39,7 +39,7 @@ func TestTheFooterIsEmptyWhenThereIsNothingToSay(t *testing.T) {
 // TestTheFooterSaysWhatTheModelWasAndWhatItCost is the reason the strip is here at
 // all.
 func TestTheFooterSaysWhatTheModelWasAndWhatItCost(t *testing.T) {
-	f := DetectorFooter("yolov8n", "abcdef0123456789abcdef", "640x640",
+	f := DetectorFooter("yolov4n", "abcdef0123456789abcdef", "640x640",
 		38.2, 52.0, 61.2, true, "30.0 fps", "5 fps")
 	lines := f.lines()
 	if len(lines) < 2 {
@@ -47,7 +47,7 @@ func TestTheFooterSaysWhatTheModelWasAndWhatItCost(t *testing.T) {
 	}
 	joined := strings.Join(lines, "\n")
 	for _, want := range []string{
-		"yolov8n",             // the model
+		"yolov4n",             // the model
 		"640x640",             // the input it ran at
 		"sha256:abcdef012345", // the hash, abbreviated to something a person reads
 		"p50 38.2ms", "p95 52.0ms", "p99 61.2ms",

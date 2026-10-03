@@ -28,16 +28,26 @@ type Pool struct {
 // read from the encrypted secret store at connect time and passed to the driver
 // directly, so it cannot land in a config file, a log line, or a process dump.
 type Config struct {
-	Host                string
-	Port                int
-	Database            string
-	User                string
-	SSLMode             string
-	MaxOpenConns        int
-	MaxIdleConns        int
-	ConnMaxLifetime     time.Duration
-	StatementTimeout    time.Duration
-	ApplicationName     string
+	Host             string
+	Port             int
+	Database         string
+	User             string
+	SSLMode          string
+	MaxOpenConns     int
+	MaxIdleConns     int
+	ConnMaxLifetime  time.Duration
+	StatementTimeout time.Duration
+	ApplicationName  string
+	// SearchPath is the schema unqualified names resolve in.
+	//
+	// Empty means the server's default, which is what a single-deployment site
+	// wants and what every migration in `migrations/` is written against: not one
+	// of them qualifies a table name. It is here because a second deployment in
+	// the same database, and the test harness, both need the same thing — and a
+	// caller that had to set `search_path` by hand per connection would set it
+	// on some connections and not others, which is the failure mode
+	// `app.tenant_id` is documented about three functions above.
+	SearchPath          string
 	connectionMaxWait   time.Duration
 	HealthCheckInterval time.Duration
 }
@@ -98,11 +108,22 @@ func ConfigForTarget(dsnFlag, envVar string) (Config, error) {
 }
 
 // DSN renders the connection string with the password omitted. Safe to log.
+//
+// The user is included, because a DSN without one is not the same connection: it
+// resolves the user from the environment, which for a libpq client means the OS
+// user, and the resulting error is "password authentication failed for
+// user <your-login>" — a message about a role nobody asked for. It was omitted
+// until a test harness rewrote `SP_TEST_DATABASE_URL` with `DSN()` and every
+// package that opens its own connection started authenticating as whatever the
+// developer is logged in as.
 func (c Config) DSN() string {
 	u := url.URL{
 		Scheme: "postgres",
 		Host:   fmt.Sprintf("%s:%d", c.Host, c.Port),
 		Path:   "/" + c.Database,
+	}
+	if c.User != "" {
+		u.User = url.User(c.User)
 	}
 	q := u.Query()
 	if c.SSLMode != "" {
@@ -116,6 +137,25 @@ func (c Config) DSN() string {
 // Open builds a pool. password is supplied out of band, never read from a
 // config file or an environment variable that ends up in a diagnostic dump.
 func Open(ctx context.Context, cfg Config, password string) (*Pool, error) {
+	if cfg.User == "" {
+		// Refused rather than attempted.
+		//
+		// A DSN with an empty user resolves the user from the environment, which
+		// for a libpq client means the OS user — so the connection authenticates as
+		// whoever happens to be logged in and the failure reads "password
+		// authentication failed for user <your-login>", a message about a role
+		// nobody asked for. `ApplyDSN` leaves `User` empty when the DSN carries no
+		// `user=`, so this is reachable from a hand-written DSN.
+		//
+		// `DSN()` renders the user for the same reason, and the two were fixed
+		// separately: the rendering path first, because a log line without a user is
+		// unreadable, and this one second, because the rendering path is not the one
+		// that authenticates.
+		return nil, fmt.Errorf(
+			"dbx: no user is configured, so the connection would authenticate as the OS user. " +
+				"Set SP_DATABASE_URL with a user= component, or pass a Config with User set")
+	}
+
 	connStr := cfg.DSN()
 	if password != "" {
 		u, err := url.Parse(connStr)
@@ -136,6 +176,14 @@ func Open(ctx context.Context, cfg Config, password string) (*Pool, error) {
 	poolCfg.MaxConnIdleTime = 5 * time.Minute
 	poolCfg.HealthCheckPeriod = cfg.HealthCheckInterval
 	poolCfg.ConnConfig.RuntimeParams["application_name"] = cfg.ApplicationName
+
+	// Applied as a runtime parameter rather than as a `SET` per connection, so it
+	// cannot be missed on a pooled connection opened later. A connection that
+	// resolved unqualified names against a different schema would read another
+	// deployment's tables and, with row-level security on, silently see nothing.
+	if cfg.SearchPath != "" {
+		poolCfg.ConnConfig.RuntimeParams["search_path"] = cfg.SearchPath
+	}
 
 	if cfg.StatementTimeout > 0 {
 		// A statement that runs forever on a site holding a live incident feed

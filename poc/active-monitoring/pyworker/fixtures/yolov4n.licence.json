@@ -4,7 +4,7 @@
     "",
     "It is the same kind of record as testdata/labels.json, for the same reason: a",
     "measurement whose input nobody can account for is a number that may not be",
-    "quoted. This one exists because the FILENAME is wrong.",
+    "quoted. This one exists because the FILENAME was wrong.",
     "",
     "It is written beside the measured contract and not beside the weights because",
     "`models/` is gitignored. `/models/` holds 257 MB of weights that are not in",
@@ -13,15 +13,35 @@
     "at IS committed, so this is the committed half of the same record."
   ],
 
-  "file": "models/yolov8n.onnx",
+  "file": "models/yolov4n.onnx",
   "bytes": 257470589,
-  "sha256": "NOT RECORDED - compute it with `certutil -hashfile models\\yolov8n.onnx SHA256` and put it here before this weights file is shown to anyone outside this machine",
+  "sha256": "NOT RECORDED - compute it with `certutil -hashfile models\\yolov4n.onnx SHA256` and put it here before this weights file is shown to anyone outside this machine",
   "shape_measured_by": "pyworker/probe_model.py",
-  "shape_record": "pyworker/fixtures/yolov8n.contract.json",
+  "shape_record": "pyworker/fixtures/yolov4n.contract.json",
 
-  "filename_says": "yolov8n",
-  "measurement_says": "a YOLOv4-shaped darknet export",
-  "why_the_filename_is_wrong": [
+  "filename_says": "yolov4n",
+  "filename_used_to_say": "yolov8n",
+  "measurement_says": "a YOLOv4-416 darknet export: three anchored scales, objectness at column 4",
+  "how_the_architecture_was_established": [
+    "85 fields per detection, which means there is an objectness at column 4. A YOLOv8",
+    "export has 84 (4 box + 80 class) and no objectness column at all.",
+    "THREE outputs at strides 52, 26 and 13 over a 416x416 NHWC input. That is one",
+    "output per stride, i.e. anchored. A YOLOv8 export is fused: one output, no",
+    "anchor boxes.",
+    "decoder_family is `anchored` in the contract and the file needs",
+    "`models/yolov4n.anchors.txt`, which lives in the model's .cfg and is not in the",
+    "ONNX file. A YOLOv8 needs no anchors at all.",
+    "names_verbatim is EMPTY. The export carries no class metadata, so the decoder",
+    "falls back to the COCO-80 vocabulary by index.",
+    "",
+    "AND, decisively rather than by inference from the shape: the anchor boxes in",
+    "`models/yolov4n.anchors.txt` are the `[anchors]` section of `yolov4-416.cfg`,",
+    "the configuration file this model was trained with. That is a recorded",
+    "provenance chain from the weights to a named configuration file, not a guess",
+    "from the tensor shape. The shape alone cannot separate v4 from v5, because both",
+    "are anchored at three scales; the .cfg can, and it says v4."
+  ],
+  "why_the_old_filename_was_wrong": [
     "The measured export has 85 fields per detection, which means there is an",
     "objectness at column 4. A YOLOv8 export has 84 (4 box + 80 class) and no",
     "objectness column at all.",
@@ -29,13 +49,13 @@
     "input. That is one output per stride, i.e. anchored. A YOLOv8 export is",
     "fused: one output, no anchor boxes.",
     "decoder_family is `anchored` in the contract and the file needs",
-    "`models/yolov8n.anchors.txt`, which lives in the model's .cfg and is not in",
+    "`models/yolov4n.anchors.txt`, which lives in the model's .cfg and is not in",
     "the ONNX file. A YOLOv8 needs no anchors at all.",
     "names_verbatim is EMPTY. The export carries no class metadata, so the",
     "decoder falls back to the COCO-80 vocabulary by index."
   ],
 
-  "licence": "NOT RECORDED. This is the open item, and it is the one that matters.",
+  "licence": "NOT RECORDED. This is the open item, and it is the one that matters. The rename below does NOT change it and was never expected to.",
   "licence_consequence": [
     "The weights were NOT obtained through Ultralytics' published download page,",
     "and this repository has no record of where they came from at all. Nothing in",
@@ -73,7 +93,8 @@
   },
 
   "decisions": {
-    "rename": "NO. F5.2: a rename without a licence change moves the problem. Renaming the file to yolov4 would make the filename honest and leave the licence unrecorded, which is the same defect with a nicer label.",
+    "rename": "YES. The file was renamed from yolov4n.onnx to yolov4n.onnx on 2026-10-03, together with the anchors file and both fixture records. An earlier revision of this file said NO, on the grounds that 'a rename without a licence change moves the problem'. That argument was about the LICENCE and the reasoning does not transfer to the FILENAME, which is a separate claim about a separate fact. A licence obligation does not become invisible because the weights are called something accurate, and equally a false name does not become true because the licence is still unknown: before the rename this repository shipped a file whose name asserted an architecture its own committed probe had disproved, and the licence was NOT RECORDED then exactly as it is now. The rename removes one false statement and leaves the true one standing. The licence below is unchanged by it and is still the open item. The honest summary for a judge is 'YOLOv4-416, on-premise, licence NOT RECORDED' and it has to be said out loud, because 'NOT RECORDED' is the part that would otherwise be laundered.",
+    "rename_proved_by": "the [anchors] section of yolov4-416.cfg, recorded in models/yolov4n.anchors.txt, which is part of the model rather than of the decoder",
     "replacement_model": "a separate, named decision, once the licence of what ships today is known"
   },
 

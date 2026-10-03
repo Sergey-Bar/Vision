@@ -438,8 +438,8 @@ $ortGOOS = (& $go env GOOS).Trim()
 $ortLib = 'models/libonnxruntime.so'
 if ($ortGOOS -eq 'windows') { $ortLib = 'models\onnxruntime.dll' }
 elseif ($ortGOOS -eq 'darwin') { $ortLib = 'models/libonnxruntime.dylib' }
-$ortModel = 'models\yolov8n.onnx'
-if (-not (Test-Path -LiteralPath $ortModel)) { $ortModel = 'models/yolov8n.onnx' }
+$ortModel = 'models\yolov4n.onnx'
+if (-not (Test-Path -LiteralPath $ortModel)) { $ortModel = 'models/yolov4n.onnx' }
 
 if ($pyCmd -and (Test-Path -LiteralPath $ortLib) -and (Test-Path -LiteralPath $ortModel)) {
   & $go test -count=1 -run 'TestCrossDecoderParity' -tags parity ./internal/ortdetect/
@@ -654,10 +654,10 @@ if ($SkipRedCheck) {
     @{
       name = 'RC-19 a ghost cannot create or age a track'
 file = 'internal\detect\engine.go'
-      from = 'if t.Seen >= e.cfg.TrackMinFrames {'
+      from = 'if t.Seen >= e.trackMinFor(t) {'
       to   = 'if true { // REDCHECK RC-19: a track ages on its FIRST sighting'
       pkg  = './internal/detect'
-      why  = 'a box the model approved once would be treated as an object that exists, so a refused box beside it could hold it alive and age it past the minimum. The gate is the AGED ASSIGNMENT and not the check: mutating the check to `if false` makes the recovery pass inert rather than permissive, which a test asserting "nothing was resumed" cannot see. Single-line controls only — PowerShell single quotes do not expand a newline, so a multi-line match string is a control that silently never fires.'
+      why  = 'a box the model approved once would be treated as an object that exists, so a refused box beside it could hold it alive and age it past the minimum. The gate is the AGED ASSIGNMENT and not the check: mutating the check to `if false` makes the recovery pass inert rather than permissive, which a test asserting "nothing was resumed" cannot see. The comparison is against e.trackMinFor(t) rather than e.cfg.TrackMinFrames because the minimum became SOURCE-AWARE; the control is the assignment, and this line was re-pointed when the expression changed rather than left to skip. Single-line controls only — PowerShell single quotes do not expand a newline, so a multi-line match string is a control that silently never fires.'
     },
     @{
       name = 'RC-20 the per-frame box log records whether a frame was MEASURED'
@@ -807,6 +807,466 @@ file = 'internal\detect\engine.go'
       to   = '		shape = ort.NewShape(1, c, h, w) // REDCHECK RC-30: NHWC is fed as NCHW'
       pkg  = './internal/ortdetect'
       why  = 'a tensor of exactly the right size fed in the wrong order decodes to boxes that are plausible and wrong, while every artefact describing the model says the layout was honoured'
+    },
+    # --- presence mode and the crop pass ---------------------------------------
+    #
+    # Sixteen controls added together, and the reason they are a block is that they are
+    # ONE claim: "everything that passes, with nothing configured". Each control is a
+    # line whose removal breaks a specific half of it, and each was run by hand against
+    # this table before being added: the whole batch was green on the clean tree, then
+    # green with each line mutated, and every one of the sixteen went RED.
+    #
+    # Three of them did NOT go red on the first attempt, and the fixes are in the tests
+    # rather than in the claims. Those three are the reason this table exists:
+    #
+    #   * the presence latch passed because a ten-second cooldown was doing the latch's
+    #     work. The headline test is still there and still worth having, and a second one
+    #     now runs with the cooldown at zero so nothing but the latch can suppress
+    #     anything.
+    #   * the crop-stride mutation `src+c.W*3+3` was a NO-OP: copy() clamps to the
+    #     destination's length, so the extra three bytes were dropped and the pixels came
+    #     out identical. The control now drops the ROW offset, which shears.
+    #   * the second-placeholder refusal was tested on the helper and not on the LOAD,
+    #     so deleting the call site would have left it green. `loadPrompts` now takes a
+    #     filesystem and the refusal is asserted on a prompt set built in memory.
+    #
+    # The claim being protected is that a smallest-object detection is a measurement
+    # with a provenance, not a hope. A bird 40 px across at 30 m is delivered as eight
+    # pixels by a whole-frame pass, below the floor at which any detector is reliable,
+    # and roughly a hundred through a 200x150 crop. Every control below exists because a
+    # number that is right with the wrong label, or right for the wrong reason, is the
+    # failure this repository exists to end.
+    @{
+      name = 'presence: a line-less zone runs the presence machine'
+      file = 'internal\detect\engine.go'
+      from = 'if len(e.zone.Lines) == 0 {'
+      to   = 'if false { // REDCHECK: presence mode became unreachable'
+      pkg  = './internal/detect'
+      why  = 'the primary configuration reports nothing at all. A zone with no line is the DEFAULT, so this is a run that looks healthy, records zero detections and raises no error, which is the most expensive silence in the module.'
+    },
+    @{
+      name = 'presence: one track is one event'
+      file = 'internal\detect\engine.go'
+      from = 'if !t.allowed || t.announced {'
+      to   = 'if !t.allowed { // REDCHECK: the per-track latch was removed'
+      pkg  = './internal/detect'
+      why  = 'a track that stays on screen re-announces itself every sample, so one bird becomes a hundred events and the event rate in the report becomes a function of the frame rate. A crossing can re-arm because a line has two sides; presence has no second side to wait for.'
+    },
+    @{
+      name = 'source-aware minimum: a crop-sourced sighting uses the LOWER bar'
+      file = 'internal\detect\engine.go'
+      from = 'if cut[b] {'
+      to   = 'if false { // REDCHECK: every sighting was held to the whole-frame bar'
+      pkg  = './internal/detect'
+      why  = 'the crop pass still runs and still costs an extra inference per region, and the smallest object the system exists to report is erased by the anti-jitter rule anyway. A bird at 30 m is on screen about a second and a half, which at the detection rate is two or three samples.'
+    },
+    @{
+      name = 'source-aware minimum: a crop minimum ABOVE the whole-frame one is refused'
+      file = 'internal\detect\engine.go'
+      from = 'if cfg.CutMinFrames > cfg.TrackMinFrames {'
+      to   = 'if false { // REDCHECK: the stricter bar on the better measurement was accepted'
+      pkg  = './internal/detect'
+      why  = 'the run reports a source-aware minimum while applying one stricter bar to both, so the crop pass costs a whole extra inference per sighting and buys nothing. A magnified sighting and a whole-frame one are not the same kind of evidence.'
+    },
+    @{
+      name = 'crop pass: a region a detection covers is not inferred twice'
+      file = 'internal\soak\crop.go'
+      from = 'if coveredByAny(region, f, whole) {'
+      to   = 'if false { // REDCHECK: overlapping crops are inferred again'
+      pkg  = './internal/soak'
+      why  = 'a crop is letterboxed to the same 416x416 as the whole-frame pass, so a second inference over pixels already answered costs a full inference to find the same car, and the union then has to deduplicate what the gate should have refused.'
+    },
+    @{
+      name = 'crop pass: an ABUTTING region is still inferred'
+      file = 'internal\ortdetect\crop.go'
+      from = 'return a.X1 < b.X2 && b.X1 < a.X2 && a.Y1 < b.Y2 && b.Y1 < a.Y2'
+      to   = 'return a.X1 <= b.X2 && b.X1 <= a.X2 && a.Y1 <= b.Y2 && b.Y1 <= a.Y2 // REDCHECK: touching counted as overlapping'
+      pkg  = './internal/ortdetect'
+      why  = 'regions sharing no pixels are treated as overlapping, so every crop beside a large detection goes unmeasured. A flock against a wall is a row of small regions along one big box and all of them vanish.'
+    },
+    @{
+      name = 'crop pass: the same object from two passes is one box'
+      file = 'internal\soak\crop.go'
+      from = 'if overlapsAnyAbove(c, whole, cropDedupeIOU) {'
+      to   = 'if false { // REDCHECK: both passes report one object'
+      pkg  = './internal/soak'
+      why  = 'one car appears twice in the overlay, twice in the class histogram and as two tracks with two histories, while the whole-frame box wins the union anyway, so the second box is a duplicate with no evidence behind it.'
+    },
+    @{
+      name = 'region_source: a crop-sourced box records cut, not measured'
+      file = 'internal\soak\trigger.go'
+      from = 'if cut {'
+      to   = 'if false { // REDCHECK: every box recorded `measured`'
+      pkg  = './internal/soak'
+      why  = 'the stored column claims the box was measured at the pipeline own resolution when it was found in a magnified crop. Per invariant 2 a fact that is displayed but not stored gets re-derived, and a re-derived region source is a re-inference on the one field a reader uses to tell the two passes apart.'
+    },
+    @{
+      name = 'crop geometry: the crop OFFSET is applied on the way back'
+      file = 'internal\ortdetect\crop.go'
+      from = 'X1: (rx + b.X1*rw) / fx,'
+      to   = 'X1: (b.X1*rw) / fx, // REDCHECK: the crop offset was dropped'
+      pkg  = './internal/ortdetect'
+      why  = 'every crop-sourced box lands at the origin of the crop with plausible coordinates and no error anywhere. This is the letterbox-divisor defect in a new place: the arithmetic is a couple of additions and forgetting one of them is invisible until somebody reports a bird in the wrong tree.'
+    },
+    @{
+      name = 'crop geometry: every row of a crop reads its OWN row'
+      file = 'internal\ortdetect\crop.go'
+      from = 'src := ((c.Y+row)*frameW + c.X) * 3'
+      to   = 'src := ((c.Y)*frameW + c.X) * 3 // REDCHECK: the row offset was dropped'
+      pkg  = './internal/ortdetect'
+      why  = 'every row of the crop is the first row, so the crop is a horizontally striped image of the object. A detector answers confidently about a sheared picture, and the box it returns is the box for the wrong pixels.'
+    },
+    @{
+      name = 'prompt: the detected class is substituted into the prompt'
+      file = 'internal\vlm\prompts.go'
+      from = 'p.Text = strings.ReplaceAll(p.Text, classPlaceholder, detected)'
+      to   = 'p.Text = strings.ReplaceAll(p.Text, classPlaceholder, "") // REDCHECK: the class was dropped'
+      pkg  = './internal/vlm'
+      why  = 'the model is told its own evidence is weaker than it is. A detector that placed a box on a bird it was confident about, and a novelty run that measured a brightness change and named nothing, send the SAME prompt, so the verifier decides on a premise about the clip that is false for one of them.'
+    },
+    @{
+      name = 'prompt: a second placeholder is refused at load'
+      file = 'internal\vlm\prompts.go'
+      from = 'if extra := strayPlaceholder(string(body)); extra != "" {'
+      to   = 'if extra := ""; extra != "" { // REDCHECK: an unsubstituted token would be sent'
+      pkg  = './internal/vlm'
+      why  = 'a literal placeholder token reaches the provider, the model reads it as text, and nothing in the attribution record accounts for it. An answer produced from a prompt nobody can quote is an answer nobody can reproduce.'
+    },
+    @{
+      name = 'config: the track minimum may not exceed the samples a dwell produces'
+      file = 'internal\config\config.go'
+      from = 'if c.AIFPS > 0 && c.TrackMinFrames > 0 {'
+      to   = 'if false { // REDCHECK: the two were validated independently again'
+      pkg  = './internal/config'
+      why  = 'a minimum of 9 samples at 2 inferences per second is unreachable for an object on screen about two seconds, so every object the run exists to report is silently dropped. The rule that erases them is working exactly as written, which is why nothing reports an error.'
+    },
+    @{
+      name = 'config: a crop minimum above the global one is refused'
+      file = 'internal\config\config.go'
+      from = '} else if c.CropMinFrames > c.TrackMinFrames {'
+      to   = '} else if false { // REDCHECK: the inverted pair loads'
+      pkg  = './internal/config'
+      why  = 'the same defect one layer earlier, at load rather than at New, so it is caught before a session is opened and before any frame is decoded'
+    },
+    @{
+      name = 'config: an empty SP_POC_ZONES is presence mode, not a refusal'
+      file = 'internal\config\config.go'
+      from = '{Name: "SP_POC_ZONES", kind: kindString, structural: true, structuralVal: "",'
+      to   = '{Name: "SP_POC_ZONES", kind: kindString,'
+      pkg  = './internal/config'
+      why  = 'the primary configuration is refused. This line exists because a guard written against an earlier engine outlived the engine: crossing was the only mode when SP_POC_ZONES was required, and the presence path made the refusal false without anything noticing.'
+    },
+    @{
+      name = 'config: the crop on/off switch is required by name'
+      file = 'internal\config\config.go'
+      from = '{Name: "SP_POC_CROP_PASS", kind: kindBool, when: "SP_POC_TRIGGER_MODE=detector",'
+      to   = '{Name: "SP_POC_CROP_PASS", kind: kindBool, structural: true, structuralVal: "false", when: "SP_POC_TRIGGER_MODE=detector",'
+      pkg  = './internal/config'
+      why  = 'a run that cannot see a bird at 30 m and a report claiming to report everything that passes are the same run, and nothing in the output says otherwise. Same reasoning as SP_POC_CAMERA_INTEGRITY: the default is the dangerous one, so it cannot be a default.'
+    },
+    # --- the novelty rate (0.6.5), the view-change rule (0.6.4), the search surface (4b) ---
+    #
+    # Twenty more controls, each run BY HAND before it entered this table: green on the
+    # clean tree, green with the line mutated, red with the line mutated.
+    #
+    # SIX of these twenty-eight in total did not go red on the first attempt, and every
+    # fix was in the TEST rather than in the claim. They are the reason this table exists
+    # and they are the reason its entries are worth reading:
+    #
+    #   * the presence latch was masked by the class cooldown (a zero-cooldown test now).
+    #   * the crop-stride mutation was a no-op, because copy() clamps to the destination.
+    #   * the second-placeholder refusal was tested on the helper and not on the LOAD.
+    #   * InvalidateAll's control let 19 seconds elapse between the last sighting and the
+    #     re-sighting, so the tracks aged out on their own and a mutation that KEPT them
+    #     passed a test that had already removed them by other means.
+    #   * a "camera move is declared once" control stayed green because the SETTLING
+    #     WINDOW already covers the frames after a change, so the agreement counter is
+    #     never read again during it.
+    #   * the search-scope control mutated `if len(scope) == 0` to `if false`, which
+    #     reaches the same empty IN list by a different route and is a no-op.
+    #
+    # And ONE line is deliberately NOT in this table: the agreement counter is cleared at
+    # BOTH the declaration site and the ordinary-frame branch, and neither clear is
+    # individually red-checkable because the other one covers it. Redundant by design,
+    # and a control that cannot be removed is not a control. The BEHAVIOUR is protected --
+    # a second camera move an hour later still needs its two frames -- and the claim is
+    # made about the behaviour rather than about a line.
+    @{
+      name = 'novelty gate: a nil gate means every frame'
+      file = 'internal\novelty\gate.go'
+      from = 'if g == nil {
+		return true
+	}'
+      to   = 'if g == nil { // REDCHECK: a nil gate dereferences itself'
+      pkg  = './internal/novelty'
+      why  = 'a caller that does not watch view integrity or does not carry a crop pass passes nil, and nil reads as every frame. An earlier revision wrote the nil case as a branch condition that fell through to mark(), which dereferences it -- so the cost of reading nil as every frame rather than as a decision is a panic in the frame loop.'
+    },
+    @{
+      name = 'novelty gate: the interval is rounded DOWN, so the gate is never slower than asked'
+      file = 'internal\novelty\gate.go'
+      from = 'if frames := g.intervalNS / frameNS; frames >= 1 {'
+      to   = 'if frames := (g.intervalNS / frameNS) + 1; frames >= 1 { // REDCHECK: rounded UP'
+      pkg  = './internal/novelty'
+      why  = 'the rounding direction is the decision and it is not symmetric. At 25 fps a 10/s request rounds to 8.4/s rounding up and 12.5/s rounding down. Over-shooting costs arithmetic and finds more; under-shooting silently narrows the set of regions that get cropped, and the smallest object this system exists to report is exactly a region the gate did not propose. One of those two errors shows up on a cost projection and the other never shows up at all.'
+    },
+    @{
+      name = 'novelty gate: a rate it could not meet is SAID, not absorbed'
+      file = 'internal\novelty\gate.go'
+      from = 'if g.Clamped() {'
+      to   = 'if false { // REDCHECK: the shortfall is absorbed silently'
+      pkg  = './internal/novelty'
+      why  = 'a gate prints the requested rate next to counters produced by another rate. That is the shape of claim this repository exists to refuse, and the cheapest way to commit it is to quantise the interval and not mention it.'
+    },
+    @{
+      name = 'novelty rate: a rate that cannot propose is refused BY NAME'
+      file = 'internal\novelty\gate.go'
+      from = 'return got, fmt.Errorf('
+      to   = 'return got, nil && fmt.Errorf( // REDCHECK: a refusal that is not a refusal'
+      pkg  = './internal/novelty'
+      why  = 'a bird on screen 1.5 s proposed once is a bird whose detection depends on where in its dwell the gate happened to sample. The refusal has to name SP_POC_NOVELTY_FPS and say the sample shortfall, because "raise the rate" is advice and "you are one sample short of a bird" is a number.'
+    },
+    @{
+      name = 'view change: one frame of movement is not a camera move'
+      file = 'internal\novelty\viewchange.go'
+      from = 'if v.agree < v.cfg.SustainFrames {'
+      to   = 'if false { // REDCHECK: a single frame declares a camera move'
+      pkg  = './internal/novelty'
+      why  = 'one frame of a wide change is a door opening, a curtain or a compression artefact. It is exactly the case SP_POC_TRACK_MIN_FRAMES exists to reject, and applying a different standard to the same phenomenon is how a pipeline ends up with a jitter rule and a no-jitter rule.'
+    },
+    @{
+      name = 'view change: brightness alone is not enough'
+      file = 'internal\novelty\viewchange.go'
+      from = 'moved := absF(sc.Illumination) >= v.cfg.MinIllumination && absF(sc.Spread) >= v.cfg.MinSpread'
+      to   = 'moved := absF(sc.Illumination) >= v.cfg.MinIllumination // REDCHECK: the spread term was dropped'
+      pkg  = './internal/novelty'
+      why  = 'a cloud crossing a window moves the whole frame luma without moving the camera, and the illumination offset is large. A rule using one term suppresses every presence event for the duration of a cloud, which is worse than the flood it prevents.'
+    },
+    @{
+      name = 'view change: the SIGNED offset is compared, so a tilt either way fires'
+      file = 'internal\novelty\viewchange.go'
+      from = 'moved := absF(sc.Illumination) >= v.cfg.MinIllumination && absF(sc.Spread) >= v.cfg.MinSpread'
+      to   = 'moved := sc.Illumination >= v.cfg.MinIllumination && absF(sc.Spread) >= v.cfg.MinSpread // REDCHECK'
+      pkg  = './internal/novelty'
+      why  = 'a camera tilting toward the sky and one tilting toward the ground are the same event and the offset is negative as often as it is positive. A detector that only fires on one of them works in half the rooms.'
+    },
+    @{
+      name = 'view change: a frame with no measurement decides NOTHING'
+      file = 'internal\novelty\viewchange.go'
+      from = 'if sc.Reason == ReasonCorrupt || sc.Reason == ReasonFirstFrame {'
+      to   = 'if false { // REDCHECK: an unmeasurable frame is scored as a change'
+      pkg  = './internal/novelty'
+      why  = 'deciding on a frame the engine could not score is how a detector starts declaring camera faults on a run whose camera is fine. A corrupt frame is neither a change nor a confirmation, and it must not consume a sustain frame either, or a stream of them would hold the gate shut indefinitely.'
+    },
+    @{
+      name = 'view change: opening the gate by hand does not CLAIM a detection'
+      file = 'internal\novelty\viewchange.go'
+      from = 'v.settle = v.cfg.SettleFrames
+	v.agree = 0
+}'
+      to   = 'v.settle = v.cfg.SettleFrames
+	v.agree = 0
+	v.changes++ // REDCHECK: an operator opening the gate was counted as a detection'
+      pkg  = './internal/novelty'
+      why  = 'an operator who knows the camera moved has to be able to gate presence WITHOUT the system claiming it detected anything. Conflating the two puts a number on the report that nobody can audit, and it is the one number the demo would quote.'
+    },
+    @{
+      name = 'view change: the presence gate withholds events'
+      file = 'internal\detect\engine.go'
+      from = 'if e.suppressed {
+		e.suppressedEvents++
+		return nil
+	}'
+      to   = 'if false { // REDCHECK: presence is emitted straight through a moved camera'
+      pkg  = './internal/detect'
+      why  = 'this is where the flood comes from. Every box in the panned view falls inside some old track neighbourhood, the association threshold matches them, and one physical camera move becomes fifty presence events beside a correct camera-integrity event.'
+    },
+    @{
+      name = 'view change: InvalidateAll drops the tracks, not just the count'
+      file = 'internal\detect\engine.go'
+      from = 'e.live = make(map[int]*Track, len(e.live))
+	e.next = 0'
+      to   = '// REDCHECK: the tracks were counted and kept
+	e.next = 0'
+      pkg  = './internal/detect'
+      why  = 'a wall at x=0.1 is still at x=0.1 in the new view noise and IoU does not know the camera moved, so keeping the map re-associates the old tracks to the new view. The count would be right and the behaviour wrong, which is the combination a count-only test cannot see.'
+    },
+    @{
+      name = 'crop pass: the rate gate runs BEFORE the novelty engine'
+      file = 'internal\soak\crop.go'
+      from = 'if !cp.Gate.Due(f.Seq, f.AtNS) {'
+      to   = 'if false { // REDCHECK: novelty is paid on every frame and the answer discarded'
+      pkg  = './internal/soak'
+      why  = 'the operator who set SP_POC_NOVELTY_FPS=2 is buying 12x on the novelty pass. Calling the engine and then throwing its answer away spends the whole cost the gate exists to save, while leaving the proposer at one call per frame.'
+    },
+    @{
+      name = 'crop pass: a gated frame is COUNTED'
+      file = 'internal\soak\crop.go'
+      from = 'ct.GatedOut++'
+      to   = '// REDCHECK: the gate dropped frames without saying so'
+      pkg  = './internal/soak'
+      why  = 'a gate that skipped everything and reported zero is indistinguishable from a detector that cannot see small objects, which is the fault the crop pass was built to remove. A cap that silently drops is a cap that lies.'
+    },
+    @{
+      name = 'crop pass: a changed view discards the regions it proposed'
+      file = 'internal\soak\crop.go'
+      from = 'ct.ViewChanges++
+		return ct, true'
+      to   = 'ct.ViewChanges++
+		return ct, false // REDCHECK: the regions are cropped from a frame mid-pan'
+      pkg  = './internal/soak'
+      why  = 'a region found on a frame whose view has changed describes a position the camera was pointing at for one frame. Cropping it measures a place that no longer exists, and deferring carries it into the next frame where it does not exist either.'
+    },
+    @{
+      name = 'search: an empty scope matches NOTHING rather than everything'
+      file = 'internal\store\search.go'
+      from = 'return []string{r}
+	}
+	if len(q.RunIDs) == 0 {
+		return nil
+	}'
+      to   = 'return []string{r}
+	}
+	if len(q.RunIDs) == 0 {
+		return []string{q.RunID} // REDCHECK: an empty scope resolves to a run nobody named
+	}'
+      pkg  = './internal/store'
+      why  = 'a camera filter is not a run. It names one level up in runs.source_arg, and answering a question about no particular run is not a narrower answer to this question. A filter that silently widens to every run looks like it worked, which is worse than no filter at all.'
+    },
+    @{
+      name = 'search: every card carries the run id it came from'
+      file = 'internal\store\searchcards.go'
+      from = 'h.RunID, h.RunLabel, h.SourceArg = runID.String, runLabel.String, sourceArg.String'
+      to   = 'h.RunLabel = runLabel.String // REDCHECK: the run id is blanked'
+      pkg  = './internal/store'
+      why  = 'a run has its own model identity, its own contract version and its own source, so answers from two runs are not comparable unless both are visible on the card itself. The same reasoning that refuses to compare a v1 answer with a v2 answer refuses to compare two runs without their labels.'
+    },
+    @{
+      name = 'search: a reviewer own note is findable'
+      file = 'internal\store\searchcards.go'
+      from = 'OR lower(g.note) LIKE ?'
+      to   = 'OR 1=0 -- REDCHECK: the judgement of the reviewer is unretrievable'
+      pkg  = './internal/store'
+      why  = 'the highest value per line in the whole search phase. An operator who wrote "that is the barrier shadow, not a stopped car" can find it by typing three words. Searching only the model sentence makes the reviewer judgement unretrievable, which is the whole reason the column exists.'
+    },
+    @{
+      name = 'search: the confidence flag comes from the ANSWER, not the number'
+      file = 'internal\store\searchcards.go'
+      from = 'h.HasConfidence = h.AIState == aistate.Asked'
+      to   = 'h.HasConfidence = h.Confidence > 0 -- REDCHECK: a model answering zero shows no number'
+      pkg  = './internal/store'
+      why  = 'confidence is NOT NULL DEFAULT 0, so a row nobody asked about carries 0 and a model may legitimately answer 0. Treating the number as the flag prints a fabricated measurement for one and hides a real answer for the other.'
+    },
+    @{
+      name = 'search: a card with no clip does not lose the whole search'
+      file = 'internal\store\search.go'
+      from = 'var tb, te sql.NullString
+		if err := rows.Scan(&h.DetectionID, &at, &h.Class, &h.Summary, &h.Verdict, &h.AIState,'
+      to   = 'var tb, te string
+		if err := rows.Scan(&h.DetectionID, &at, &h.Class, &h.Summary, &h.Verdict, &h.AIState,'
+      pkg  = './internal/store'
+      why  = 'evidence is a LEFT JOIN and a decision can be stored without its clip, because the clip may have been rotated away by the disk budget. Scanned into plain strings, one such row aborts the entire search with "converting NULL to string is unsupported" -- losing every card in the window because ONE of them had no evidence.'
+    },
+    @{
+      name = 'config: the novelty rate must cover the smallest dwell'
+      file = 'internal\config\config.go'
+      from = 'if _, nerr := novelty.NoveltyRateCoversDwell(c.NoveltyFPS, novelty.SmallestDwellSeconds,'
+      to   = 'if _, nerr := error(nil), error(nil); false && nerr != nil { // REDCHECK'
+      pkg  = './internal/config'
+      why  = 'the failure this refuses is a rate that cannot propose a region often enough for the smallest object, which looks exactly like a detector that cannot see small objects. Same symptom, different owner, and only one of them is fixable by a better model.'
+    },
+    # --- the per-class table (0.6.3) and the crop self-test (0.5.4) ---
+    #
+    # Eight more, each run by hand before entering the table.
+    #
+    # TWO of them are here because this session's own work produced a wrong number and a
+    # test caught it, and both are the kind of defect this repository exists to end:
+    #
+    #   * the per-class PRECISION denominator omitted matched detections, so precision
+    #     came out at 2.000 on a frame with two hits and one false positive. A rate
+    #     above one is not a subtle error; it is a table nobody should read, and it got
+    #     there by an omission that no compiler and no reviewer would have noticed.
+    #   * the wrong-class match counted as a true positive for BOTH sides, so a bird
+    #     found as a car reported a perfect run on a frame where the species was wrong.
+    @{
+      name = 'per class: a MATCHED detection still counts in the precision denominator'
+      file = 'internal\bench\perclass.go'
+      from = 'if det != nil {
+			det.Detected++
+		}
+		if gt != nil && det != nil && gt == det {'
+      to   = 'if det != nil && gt != nil && gt != det {
+			det.Detected++
+		}
+		if gt != nil && det != nil && gt == det {'
+      pkg  = './internal/bench'
+      why  = 'precision came out at 2.000 on a frame with two hits and one false positive. A rate above one is not a subtle error: it is a table nobody should read, and it got there by an omission no compiler and no reviewer would have caught.'
+    },
+    @{
+      name = 'per class: a wrong-class match is not a true positive for either side'
+      file = 'internal\bench\perclass.go'
+      from = 'if gt != nil && det != nil && gt == det {
+			gt.TruePositives++
+			continue
+		}'
+      to   = 'if gt != nil && det != nil {
+			gt.TruePositives++
+			det.TruePositives++
+			continue
+		}'
+      pkg  = './internal/bench'
+      why  = 'a bird found as a car would count as a hit for bird AND a hit for car, producing two correct-looking rates for one mistake. It is a miss for the class it is and a false positive for the class it was called, and counting it once in either column makes one of the two rates wrong.'
+    },
+    @{
+      name = 'per class: a precision over ZERO detections is NOT RUN, not zero'
+      file = 'internal\bench\perclass.go'
+      from = 'if c.Detected == 0 {
+		return 0, false
+	}'
+      to   = 'if c.Detected == 0 {
+		return 0, true // REDCHECK: a printed 0.00 claims every detection was wrong, and there were none
+	}'
+      pkg  = './internal/bench'
+      why  = 'a printed 0.00 over no detections is a claim that every detection was wrong when there were none -- and the class with no detections is usually exactly the one a reader most wants a number for, so the absent figure is the one that gets quoted.'
+    },
+    @{
+      name = 'per class: an INEXPRESSIBLE class is dropped, not counted as a miss'
+      file = 'internal\bench\perclass.go'
+      from = 'if g.Ignored || !g.Expressible || usedGT[gi] {'
+      to   = 'if g.Ignored || usedGT[gi] { // REDCHECK: a vocabulary penalty became a detector failure'
+      pkg  = './internal/bench'
+      why  = 'a class this build cannot name is a vocabulary penalty. Counting it as a false negative reports a recall figure that is really a statement about the labels, and it does so on exactly the classes nobody labelled.'
+    },
+    @{
+      name = 'crop self-test: the whole-frame pass must come out BELOW the floor'
+      file = 'cmd\pocctl\cropselftest.go'
+      from = 'case wholePx >= floorPx:'
+      to   = 'case false: // REDCHECK: a frame size that needs no crop is reported as proving one does'
+      pkg  = './cmd/pocctl'
+      why  = 'the row claims a whole-frame pass cannot see a bird at 30 m. If the measured delivery is at or above the floor then this frame size does NOT demonstrate that, and reporting it as a win is the failure the whole row exists to prevent.'
+    },
+    @{
+      name = 'crop self-test: a crop that stays below the floor FAILS'
+      file = 'cmd\pocctl\cropselftest.go'
+      from = 'case cropPx < floorPx:'
+      to   = 'case false: // REDCHECK: a crop that does not magnify is reported as a win'
+      pkg  = './cmd/pocctl'
+      why  = 'a crop that delivers less than the floor is a whole inference spent on nothing, and it is paid on every frame novelty proposes a region. Reporting it as a win is how a crop pass becomes unaffordable while looking healthy.'
+    },
+    @{
+      name = 'crop self-test: a factor under fourfold FAILS'
+      file = 'cmd\pocctl\cropselftest.go'
+      from = 'case ratio < 4:'
+      to   = 'case ratio < 0.0001: // REDCHECK: any margin at all is reported as a win'
+      pkg  = './cmd/pocctl'
+      why  = 'the cost argument rests on the order of magnitude, not on an improvement. A factor of two is destroyed by one number changing in the crop size, and a thin margin presented as a thick one is the arithmetic version of the false-positive-rate story this module was written to refuse.'
+    },
+    @{
+      name = 'crop self-test: a crop box outside the crop rectangle FAILS'
+      file = 'cmd\pocctl\cropselftest.go'
+      from = 'return b.X1 >= loX-tol && b.X2 <= hiX+tol && b.Y1 >= loY-tol && b.Y2 <= hiY+tol'
+      to   = 'return true // REDCHECK: the crop offset being dropped on the way back is invisible'
+      pkg  = './cmd/pocctl'
+      why  = 'dropping the crop offset when mapping a box back puts every box at the frame origin, with plausible coordinates and no error anywhere. That is the letterbox divisor defect in a new place, and the containment test is the only thing that notices it.'
     }
   )
   Push-Location $PWD
@@ -841,7 +1301,32 @@ file = 'internal\detect\engine.go'
           Pass "$($c.name) removed -> the suite went red, as it must"
         }
       } finally {
-        [System.IO.File]::WriteAllText($full, $original)
+        # The restore is RETRIED, and the reason is not theoretical.
+        #
+        # `go test` leaves a compiled test binary holding the source files it read.
+        # On Windows that is an open mapping, and a single WriteAllText over a mapped
+        # file fails with "the requested operation cannot be performed on a file
+        # with a user-mapped section open". The failure then propagates out of the
+        # `finally`, the gate aborts, and the file is left MUTATED -- so the next run
+        # of the gate is measuring a tree that a control broke.
+        #
+        # That happened: this gate aborted with a control still applied, and the
+        # symptom was a test failing for a reason nobody had written. A red-check
+        # harness that can leave the tree broken is worse than one that does not run,
+        # because the damage is discovered by the next person rather than by the run
+        # that caused it.
+        $restored = $false
+        for ($try = 0; $try -lt 12 -and -not $restored; $try++) {
+          try {
+            [System.IO.File]::WriteAllText($full, $original)
+            $restored = $true
+          } catch {
+            Start-Sleep -Milliseconds 250
+          }
+        }
+        if (-not $restored) {
+          Fail "$($c.name): the control was NOT restored. $full is left MUTATED. Close anything holding it (a running test binary, an editor) and `git checkout --` that file before trusting any further run of this gate."
+        }
       }
     }
     # The output is printed on failure. A red that says only "the suite is red"

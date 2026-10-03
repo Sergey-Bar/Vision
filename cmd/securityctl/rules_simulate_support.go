@@ -149,7 +149,6 @@ func signalFromRecord(r milestone.RawRecord) rules.Signal {
 		SourceEventID: r.SourceEventID,
 		EventType:     r.EventType,
 		NormalizedAt:  observed,
-		ObservedAt:    observed,
 		DeviceID:      r.SourceDeviceRef,
 		Tier:          rules.TierA,
 		Payload:       payload,

@@ -131,12 +131,22 @@ func stripAnnotations(v any) any {
 	}
 }
 
-// Validate checks the geometry. A zone with no line is refused rather than
-// loaded, because it can only ever produce zero events.
+// Validate checks the geometry.
+//
+// A zone with NO lines is legal, and it is the primary intended configuration rather
+// than a degenerate one: presence mode reports that a tracked object was seen, with no
+// line drawn and nothing to configure. The refusal that used to sit here said a
+// line-less zone "can only ever produce zero events", which was true of the crossing
+// machine and false of the engine, because the engine grew a presence path. A guard
+// written against an earlier engine outliving the engine is how a default becomes a
+// refusal.
+//
+// Every OTHER check is kept, and each of them is a real geometry error rather than a
+// missing drawing: a duplicate name counts one crossing twice, identical endpoints have
+// no direction, and a point outside the frame is not on the picture the operator drew
+// it on. A line-less zone does not make any of those go away. It only means there are
+// none to make.
 func (z Zone) Validate() error {
-	if len(z.Lines) == 0 {
-		return fmt.Errorf("there are no lines, so nothing can ever cross one and every run would report zero events as if the model had found nothing")
-	}
 	seen := map[string]bool{}
 	for i, l := range z.Lines {
 		if l.Name == "" {

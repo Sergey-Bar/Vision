@@ -271,20 +271,29 @@ func numbers(status string, d Derived) []Finding {
 	return out
 }
 
-// gateWords maps the spellings English uses for 1-20 to their values.
+// gateWords maps the spellings English uses for 1-30 to their values.
 //
 // The document writes the gate count as a word because it is prose, and both
 // halves of that comparison are small closed sets, so this is a table rather than
-// a parser. It stops at twenty because a gate list of twenty-one would be a thing
-// worth saying out loud in the document rather than counting.
+// a parser.
+//
+// It goes past twenty because the tree did, and the sentence in `gateClaim`'s
+// comment below — "a gate list of twenty-one would be a thing worth saying out
+// loud" — turned out to be the one prediction this gate got wrong. It stops at
+// thirty, and the reason to stop is worth keeping: a matcher that has to be taught
+// every spelling is a matcher whose author will decide to teach only the ones they
+// have seen. Thirty is comfortably past any gate list this repository will reach,
+// and when it is passed the failure is a loud one rather than a silent miss.
 var gateWords = map[string]int{
 	"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
 	"eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13,
 	"fourteen": 14, "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18,
-	"nineteen": 19, "twenty": 20,
+	"nineteen": 19, "twenty": 20, "twenty-one": 21, "twenty-two": 22,
+	"twenty-three": 23, "twenty-four": 24, "twenty-five": 25, "twenty-six": 26,
+	"twenty-seven": 27, "twenty-eight": 28, "twenty-nine": 29, "thirty": 30,
 }
 
-var gateCountRe = regexp.MustCompile(`(?i)\b([a-z]+)\s+gates\b`)
+var gateCountRe = regexp.MustCompile(`(?i)\b((?:[a-z]+-)?[a-z]+)\s+gates\b`)
 
 // gateClaim asserts the spelled-out gate count against the number of distinct gate
 // names in scripts/verify.ps1.
@@ -303,6 +312,26 @@ func gateClaim(block string, d Derived) []Finding {
 		word := strings.ToLower(block[m[2]:m[3]])
 		got, ok := gateWords[word]
 		if !ok {
+			// Reported rather than skipped.
+			//
+			// Silently continuing is what makes this check defeatable by rewording:
+			// replacing "twenty-one gates" with "the gates above" turns the gate off
+			// with no failure anywhere, and a reader cannot tell a document that
+			// makes no count from one that makes a count nobody checked. A
+			// misspelling and a deliberate evasion look identical from here, and
+			// the only safe reading of an unrecognised word is that the sentence
+			// changed.
+			//
+			// `Want` is the count the tree holds and `Got` is -1, which no count
+			// can be, so the message says "cannot be checked" rather than "is
+			// wrong": the document has not been shown to be false, it has been shown
+			// to be unverifiable.
+			out = append(out, Finding{
+				Label: `"` + word + `" gates`,
+				Want:  d.Gates,
+				Got:   -1,
+				Line:  lineOf(block, m[0]),
+			})
 			continue
 		}
 		if got == d.Gates {

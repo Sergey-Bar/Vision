@@ -44,7 +44,7 @@ func TestEverySubcommandFlagSpecParsesItsOwnFlags(t *testing.T) {
 			[]string{"--source-kind", "loop", "--source-arg", "c.mp4", "--days", "7"}},
 		{"sim", map[string]string{"addr": "127.0.0.1:8098"},
 			[]string{"--addr", "127.0.0.1:8188"}},
-		{"fetch-model", map[string]string{"url": "", "out": "models/yolov8n.onnx"},
+		{"fetch-model", map[string]string{"url": "", "out": "models/yolov4n.onnx"},
 			[]string{"--url", "https://example/m.onnx"}},
 	}
 

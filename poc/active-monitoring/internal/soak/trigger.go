@@ -67,13 +67,41 @@ type Trigger interface {
 // exactly as it was. Its twenty-odd tests still pass against it, which is the
 // evidence that this was an addition rather than a refactor.
 type Detector interface {
-	// Detect measures one frame and reports what it found and what it cost.
+	// Detect measures one frame, or one crop of one frame, and reports what it found and
+	// what it cost.
 	//
-	// `seq` is the frame's sequence number and it is echoed on the answer, because
-	// a refusal has to be traceable to the frame it happened on. A run that reports
-	// "14 degraded frames" cannot be acted on; a run that reports "14 degraded
-	// frames, at 3011, 3012, 3017" can.
-	Detect(seq uint64, rgb []byte, w, h int) DetectAnswer
+	// `seq` is the frame's sequence number and it is echoed on the answer, because a
+	// refusal has to be traceable to the frame it happened on. A run that reports "14
+	// degraded frames" cannot be acted on; a run that reports "14 degraded frames, at 3011,
+	// 3012, 3017" can.
+	//
+	// `crop` is the region to measure and is the zero Rect for the whole frame. It is a
+	// parameter and not a second method because there is one implementation of the crop
+	// path and two entry points would be two places for it to drift. See
+	// `ortdetect.Detector.Detect` and `ortdetect.Rect.Uncrop` for why the mapping back to
+	// frame coordinates belongs to that package and not here.
+	Detect(seq uint64, rgb []byte, w, h int, crop ortdetect.Rect) DetectAnswer
+}
+
+// RegionProposer is where the crop pass gets its candidates.
+//
+// It is deliberately two methods and it is satisfied by `*novelty.Engine` as it
+// stands, with no adapter: the crop pass needs the measured regions and the score that
+// produced them, and everything else on the engine belongs to the trigger path it is
+// not part of.
+//
+// The reason it is an interface at all is that a test has to be able to propose a
+// region without 2,304 luma cells and a connected-components flood fill, and
+// `RunnerOptions.Detector` is already an interface for the same reason. It is NOT a
+// third implementation of `Trigger`: `Trigger` also requires `Watch`, `PinAndStore`,
+// `Pinned` and `LastFinding`, all of which belong to the reference trigger and none of
+// which the crop pass would ever call.
+type RegionProposer interface {
+	// Candidates returns the measured regions this frame proposes, in normalised 0..1
+	// coordinates.
+	Candidates(rgb []byte, w, h int) ([]novelty.Candidate, novelty.Score)
+	// Last is the most recent score, for the report and for the decision row.
+	Last() novelty.Score
 }
 
 // DetectAnswer is one frame's measurement.
@@ -102,6 +130,9 @@ type DetectAnswer struct {
 	// zero and not a degraded run: it is a named reason, and it is what makes a
 	// detection rate of zero diagnosable instead of merely observable.
 	Refusal *ortdetect.Refusal
+	// Crop is the region actually measured, after clamping. The empty Rect is a
+	// whole-frame pass.
+	Crop ortdetect.Rect
 }
 
 // NoveltyTrigger adapts internal/novelty.Engine to [Trigger] and owns the two
@@ -202,7 +233,14 @@ func (t *NoveltyTrigger) Pinned() bool { return t.engine.Pinned() }
 // provider even by accident. The absence of this parameter is the guarantee.
 type Observer interface {
 	// Observe asks one question about one clip.
-	Observe(ctx context.Context, detectionID, class string, clip []byte, mediaType string) vlm.Observation
+	//
+	// `promptID` is the INCIDENT class, which question is being asked, and
+	// `detectedClass` is what the local pipeline measured the object to be. They are
+	// separate because a detector that confidently said `bird` and a novelty run that
+	// measured a change and named nothing ask the same question about different
+	// evidence, and the prompt says which produced the clip. One argument carrying either
+	// would send the model a false statement about its own evidence.
+	Observe(ctx context.Context, detectionID, promptID, detectedClass string, clip []byte, mediaType string) vlm.Observation
 	// PromptIDFor resolves an incident class to a prompt, so the runner can record
 	// the prompt version without reaching into the client's prompt set.
 	PromptIDFor(class string) (id, version string, err error)
@@ -370,16 +408,40 @@ func sanitizeTag(s string) string {
 
 // toTriggerEvent converts a line crossing into the shared shape.
 //
-// It is a conversion rather than a second implementation: the crossing already
-// carries everything a temporal trigger event needs, and a trigger event that was
-// built by hand from a crossing would be a second place for the box to be scaled.
+// It is a conversion rather than a second implementation: the crossing already carries
+// everything a temporal trigger event needs, and a trigger event built by hand from a
+// crossing would be a second place for the box to be scaled.
+//
+// The region source is CARRIED, not assumed. It used to be hardcoded to
+// `RegionMeasured`, which was true by accident: the crossing machine only ran on a
+// zone with lines, so no crossing could come from anywhere else. The presence primitive
+// and the crop pass removed that accident, and a hardcoded `measured` would now write
+// "this region was measured and presented at the pipeline's own resolution" for a box
+// found by looking at a 200x150 crop, which is a false stored fact on the column the
+// replay reads.
 func toTriggerEvent(c detect.Crossing, promptID string, score novelty.Score) TriggerEvent {
 	return TriggerEvent{
 		DetectionClass: c.Class, PromptID: promptID, Line: c.Line, Direction: c.Direction,
 		At: c.At, Box: [4]float64{c.Box.X1, c.Box.Y1, c.Box.X2, c.Box.Y2},
 		TrackID: c.TrackID, Frames: c.Frames, Score: c.Confidence(),
-		Novelty: score, RegionSource: novelty.RegionMeasured,
+		Novelty: score, RegionSource: regionSourceFor(c.Cut),
 	}
+}
+
+// regionSourceFor is the one place a crop-sourced detection becomes a stored
+// region_source.
+//
+// It is a function and not an inline choice at each of the call sites because the
+// mapping is a claim: `cut` says the box was found by looking at a magnified crop, and
+// every reader of the column, the report, the search card and the replay, depends on
+// that word meaning the same thing. Three call sites choosing between two strings is
+// three opportunities for one of them to swap them, and the swap is undetectable from
+// the row.
+func regionSourceFor(cut bool) novelty.RegionSource {
+	if cut {
+		return novelty.RegionCut
+	}
+	return novelty.RegionMeasured
 }
 
 // decisionFrom builds the stored decision inputs from a trigger event.

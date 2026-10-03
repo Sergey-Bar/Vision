@@ -169,30 +169,35 @@ func Apply(boxes []Box, th Thresholds, zone Zone) Split {
 
 // MarkTooNew demotes approved boxes whose track has not been seen long enough.
 //
-// It takes the minimum as an int rather than the whole Thresholds, because the
-// only thing it needs from the configuration is that one number. Passing the
-// whole struct would make it look like a second place the decisions are made,
-// and it is not: it is the last of the five steps in Feed, applied to what the
-// first two produced.
+// It takes the minimum as a FUNCTION OF THE BOX rather than as a constant, because the
+// minimum is a property of where the box was measured and the two are not the same
+// number: a magnified crop produces a structurally better observation per sighting than
+// a downscaled whole frame, and [Config.CutMinFrames] exists to say so. Passing the
+// whole Thresholds would make it look like a second place the decisions are made, and
+// it is not: it is the last of the five steps in Feed, applied to what the first two
+// produced.
 //
-// The reason it is a SEPARATE function from Apply is that the tracker's state is
-// not available to a pure function of the boxes. A track with one frame behind
-// it is not yet an object: a shadow, a reflection and a compression artefact all
-// look like an object for exactly one frame, and only time tells them apart.
+// A function and not a second parameter for the second bar, because the rule is per box
+// and not per run: on one frame a car is found whole-frame and a bird is found in a
+// crop, and both have to be held to their own bars in the same pass.
 //
-// It runs AFTER the tracker's update and BEFORE the line-cross machine, which is
-// the only order in which "has this track been seen long enough" is a fact rather
-// than a guess.
-func MarkTooNew(approved []Box, seen func(bx Box) int, minFrames int) ([]Box, []Ghost) {
-	if seen == nil || minFrames <= 1 {
-		// A minimum of one means every box qualifies, which is the no-op and is
-		// spelled out rather than left to fall out of the comparison.
+// It is a SEPARATE function from Apply because the tracker's state is not available to
+// a pure function of the boxes. A track with one frame behind it is not yet an object:
+// a shadow, a reflection and a compression artefact all look like an object for exactly
+// one frame, and only time tells them apart.
+//
+// It runs AFTER the tracker's update and BEFORE the crossing machine, which is the only
+// order in which "has this track been seen long enough" is a fact rather than a guess.
+func MarkTooNew(approved []Box, seen func(bx Box) int, minFrames func(bx Box) int) ([]Box, []Ghost) {
+	if seen == nil || minFrames == nil {
 		return approved, nil
 	}
 	kept := make([]Box, 0, len(approved))
 	var ghosts []Ghost
 	for _, b := range approved {
-		if seen(b) >= minFrames {
+		// A minimum of one means every box qualifies, which is the no-op and is
+		// spelled out rather than left to fall out of the comparison.
+		if min := minFrames(b); min <= 1 || seen(b) >= min {
 			kept = append(kept, b)
 			continue
 		}

@@ -258,6 +258,7 @@ func FormatRunBench(runID string, b RunBench) string {
 		out.WriteString("  PRECISION     NOT RUN — precision over marked boxes needs a marking session, and\n")
 		out.WriteString("                over unmarked ones it would be a claim about nobody's attention.\n")
 	}
+	writePerClass(&out, b.Report)
 	if b.Stability == nil {
 		out.WriteString("  STABILITY     NOT RUN — this run has no per-frame box log, so there is nothing\n")
 		out.WriteString("                to count track identity over. Run with SP_POC_BOX_LOG_FRAMES above 0.\n")

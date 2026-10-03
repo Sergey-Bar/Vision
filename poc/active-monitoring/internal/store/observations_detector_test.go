@@ -44,7 +44,7 @@ func TestADetectorDecisionMustNameItsModel(t *testing.T) {
 		TriggerMode: TriggerModeDetector, TriggerClass: "car",
 		Score: 0.9, Threshold: 0.45, Release: 0.2,
 		RegionTop: 100, RegionLeft: 200, RegionBottom: 300, RegionRight: 400,
-		ModelIdentity: str("yolov8n"), ModelSHA256: str("abc123"), ModelLicence: str("AGPL-3.0"),
+		ModelIdentity: str("yolov4n"), ModelSHA256: str("abc123"), ModelLicence: str("AGPL-3.0"),
 		InputSize: inum(640), NMSClassIOU: num(0.45), NMSGlobalIOU: num(0.75),
 		InferMS: num(41.2), DetLatencyP50MS: num(38), DetLatencyP95MS: num(52), DetLatencyP99MS: num(61),
 		TrackID: inum(4),
@@ -92,7 +92,7 @@ func TestADetectorDecisionMustNameItsModel(t *testing.T) {
 			seedDecision(t, s, "r1", "d-"+strings.ReplaceAll(name, " ", "-"))
 			d := good
 			d.DetectionID = "d-" + strings.ReplaceAll(name, " ", "-")
-			d.ModelIdentity = str("yolov8n")
+			d.ModelIdentity = str("yolov4n")
 			d.ModelSHA256 = str("abc123")
 			mut(&d)
 			err := s.PutDecision(ctx, d)
