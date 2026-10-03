@@ -413,11 +413,30 @@ func EvidenceWindow(h SearchHit) string {
 	if CardAction(h) == ActionNone {
 		return ActionNone
 	}
-	return fmt.Sprintf("%s [%s .. %s] sha256=%s",
+	return fmt.Sprintf("%s [%s] sha256=%s",
 		h.StorageRef,
-		h.TimeBegin.UTC().Format(time.RFC3339),
-		h.TimeEnd.UTC().Format(time.RFC3339),
+		EvidenceBounds(h),
 		shortHash(h.SHA256))
+}
+
+// EvidenceBounds is the recorded window's bounds as one printable string, or an
+// explicit statement that there are none.
+//
+// `evidence` is a LEFT JOIN, so a hit can be a real answer whose clip was never
+// stored, and then both bounds are the zero time. Formatting that renders as
+// "0001-01-01T00:00:00Z .. 0001-01-01T00:00:00Z", which reads as a measured window
+// at the year 1 and is indistinguishable, at a glance, from a clip somebody kept.
+// `CardAction` already refuses to call such a card "the recorded window"; this is
+// the same refusal for the bounds printed beside that verdict, so a card that says
+// "no clip retained" does not then print a window.
+//
+// It is a FUNCTION and not a format string at the call sites because there are two of
+// them (the card and `EvidenceWindow`) and two renderings of one fact are two answers.
+func EvidenceBounds(h SearchHit) string {
+	if h.TimeBegin.IsZero() || h.TimeEnd.IsZero() {
+		return "bounds NOT RECORDED"
+	}
+	return h.TimeBegin.UTC().Format(time.RFC3339) + " .. " + h.TimeEnd.UTC().Format(time.RFC3339)
 }
 
 // ProveCommand is the one-click reproduction: re-derive the decision from stored facts

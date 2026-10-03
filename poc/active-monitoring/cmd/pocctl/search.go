@@ -59,7 +59,7 @@ func cmdSearch(args []string) error {
 	// command name. The flag keeps the discovery path short and the standalone command
 	// keeps the thing scriptable on its own.
 	if flags["unsearchable"] == "true" {
-		return cmdUnsearchable(append([]string{}, argsWithout(args, "--unsearchable")...))
+		return cmdUnsearchable(unsearchableArgs(flags))
 	}
 	query := strings.TrimSpace(flags["query"])
 	if query == "" {
@@ -278,8 +278,12 @@ func printCard(h store.SearchHit) {
 	// only in the header, because an answer from two runs is not comparable unless both
 	// are visible on the card itself.
 	fmt.Printf("    run %s (%s), source %s\n", h.RunLabel, h.RunID, h.SourceArg)
-	fmt.Printf("    evidence: %s  sha256 %s  %s .. %s\n", store.EvidenceWindow(h), short(h.SHA256),
-		h.TimeBegin.UTC().Format(time.RFC3339), h.TimeEnd.UTC().Format(time.RFC3339))
+	// The bounds come from `store.EvidenceBounds` rather than being formatted here, so
+	// a hit whose clip was never stored prints "bounds NOT RECORDED" beside the
+	// "no clip retained" above it, and not a window at the year 1. One fact, one
+	// rendering, two callers.
+	fmt.Printf("    evidence: %s  sha256 %s  %s\n", store.EvidenceWindow(h), short(h.SHA256),
+		store.EvidenceBounds(h))
 	fmt.Printf("    asked as %s by %s at temperature %.1f, contract %s, output %s\n",
 		h.PromptID, h.ModelIdentity, h.Temperature, h.ContractVersion, short(h.OutputHash))
 	fmt.Printf("    aistate %s, reason %s\n", h.AIState, h.ReasonCode)
@@ -322,18 +326,25 @@ func confidenceVerdict(h store.SearchHit) string {
 	return fmt.Sprintf("%.0f%% - %s (%s)", h.Confidence*100, h.Verdict, h.Class)
 }
 
-// argsWithout removes one boolean flag and its optional `=value` form.
+// unsearchableArgs is the forwarding from the `--unsearchable` spelling to the
+// standalone command, and it forwards PARSED values rather than the raw argv.
 //
-// It exists because a boolean flag consumes no value, so dropping the token is enough
-// and dropping nothing would leave `--unsearchable` in the argument list for the command
-// being forwarded to -- which would then refuse it as a flag it does not have.
-func argsWithout(args []string, flag string) []string {
-	out := make([]string, 0, len(args))
-	for _, a := range args {
-		if a == flag || a == flag+"=true" || a == flag+"=false" {
-			continue
-		}
-		out = append(out, a)
+// It replaces `argsWithout`, which stripped the `--unsearchable` token out of the
+// raw argv and forwarded everything else. That was wrong in a way the flag's own
+// existence makes obvious: `pocctl search --unsearchable --query magpie` handed
+// `--query magpie` to a subcommand whose flags are `data-root`, `run` and
+// `limit`, and the flag the whole feature exists to offer refused the command it
+// is a spelling of. A flag that is a spelling of another command must be that
+// command, including the flags it accepts and the ones it does not: the search's
+// own arguments mean nothing to a list of stretches, and passing them through is
+// passing on a question nobody asked.
+func unsearchableArgs(searchFlags map[string]string) []string {
+	out := []string{}
+	if root := strings.TrimSpace(searchFlags["data-root"]); root != "" {
+		out = append(out, "--data-root", root)
+	}
+	if run := strings.TrimSpace(searchFlags["run"]); run != "" {
+		out = append(out, "--run", run)
 	}
 	return out
 }

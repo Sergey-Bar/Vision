@@ -349,23 +349,31 @@ func (s *Store) searchSummary(ctx context.Context, q SearchQuery, sum *SearchSum
 	}
 
 	// COALESCE on every SUM: over a LEFT JOIN with no rows at all, SUM is NULL and a
-	// NULL int is a crash. A crash on "the window is empty" would be an absurd way
-	// to say nothing, and it is exactly what happened the first time.
+	// NULL int is a crash. A crash on "the window is empty" would be an absurd way to
+	// say nothing, and it is exactly what happened the first time.
 	//
 	// The three placeholders in the SELECT list come BEFORE the ones in `where`, so
 	// the arguments are in that order: SQLite binds by position in the statement's
 	// text, and a list ordered by where-clause-then-select binds the state names to
 	// the run id and returns a perfectly plausible zero.
+	//
+	// `Answered` counts rows in `asked_answered` and NOT rows that merely have an
+	// observation. Those are different questions, and the difference is the whole
+	// point of the column: a `degraded` ask was sent and failed, so counting it as
+	// answered puts "asked and answered 2" over a window where one answer came back,
+	// and it inflates `cannot_tell` by the same amount, because `cannot_tell` is the
+	// residue of `answered`. The partition this produces is exhaustive, and it is
+	// meant to be: Proposed = Answered + Degraded + NotAsked, every time.
 	err := s.db.QueryRowContext(ctx, `
 		SELECT
 		  COUNT(*),
-		  COALESCE(SUM(CASE WHEN v.detection_id IS NOT NULL THEN 1 ELSE 0 END),0),
+		  COALESCE(SUM(CASE WHEN v.aistate=? THEN 1 ELSE 0 END),0),
 		  COALESCE(SUM(CASE WHEN v.aistate=? AND v.verdict=? THEN 1 ELSE 0 END),0),
 		  COALESCE(SUM(CASE WHEN v.detection_id IS NOT NULL AND v.aistate<>? THEN 1 ELSE 0 END),0),
 		  COALESCE(SUM(CASE WHEN v.detection_id IS NULL THEN 1 ELSE 0 END),0)
 		FROM detections d LEFT JOIN vlm_observations v ON v.detection_id=d.id
 		`+where,
-		append([]any{aistate.Asked, verdictNoObjects, aistate.Asked}, args...)...).
+		append([]any{aistate.Asked, aistate.Asked, verdictNoObjects, aistate.Asked}, args...)...).
 		Scan(&sum.Proposed, &sum.Answered, &sum.NoObjects, &sum.Degraded, &sum.NotAsked)
 	if err != nil {
 		return fmt.Errorf("store: cannot summarise the window for run %s: %w", q.RunID, err)

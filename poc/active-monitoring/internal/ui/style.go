@@ -124,6 +124,19 @@ tbody tr:hover{background:var(--panel2)}
 body .nodata p{margin:0 0 6px}
 body .nodata p:last-child{margin:0;color:var(--fg3);font-size:11.5px}
 
+/* ---- the absence panel: four counts, four causes, and no number for a row
+       nobody asked about ---- */
+.absent-sum{font-size:13px;color:var(--fg2);margin-bottom:10px}
+.absent-sum b{color:var(--fg)}
+table.causes{font-size:12.5px}
+table.causes td.name{font-weight:600;white-space:nowrap}
+table.causes td.why{color:var(--fg3);font-size:11.5px;line-height:1.45}
+table.causes tr.pass .name{color:var(--pass)}
+table.causes tr.fail .name{color:var(--fail)}
+table.causes tr.notrun .name{color:var(--notrun)}
+.absent-more{color:var(--fg3);font-size:11.5px;margin-top:12px;line-height:1.5}
+.absent-more code{font-size:11.5px}
+
 /* ---- faults ---- */
 .fault{border:1px solid var(--line);border-left:3px solid var(--fail);border-radius:var(--r);padding:10px 12px;margin-bottom:8px;background:#14171c}
 .fault .h{display:flex;gap:9px;align-items:baseline;flex-wrap:wrap}
