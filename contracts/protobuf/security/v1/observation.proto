@@ -26,6 +26,33 @@ message AIObservation {
   string prompt_version = 11;
   string model_bundle_signature = 12;
 
+  // --- hosted-provider attribution ---
+  //
+  // A hosted vision-language provider returns a model identifier and nothing
+  // else: its weights are not ours, are not addressable, and change on the
+  // provider's schedule. There is therefore no `model_hash` to record for it,
+  // and the two ways to keep that column honest are both worse than leaving it
+  // empty -- writing a synthetic hash satisfies a length check and defeats the
+  // one thing the column exists for, which is proving which weights answered.
+  //
+  // So the fields below substitute a weaker, labelled kind of attribution rather
+  // than removing attribution. `model_hash` becomes optional; `model_identity`
+  // and `model_contract_version` together carry the hosted case, and
+  // `ai_observations_attribution_ck` refuses a row with neither. Half of the
+  // hosted pair is refused too: a provider name with no pinned contract version
+  // says which model the provider called itself this week and nothing about
+  // what was asked of it, so two rows with the same name and different prompts
+  // would be indistinguishable -- the exact replay failure `model_hash` exists
+  // to prevent.
+  //
+  // Migration: `0022_observation_hosted_attribution.expand.sql`.
+  string model_identity         = 26;
+  string model_contract_version = 27;
+  // The sampling temperature requested. An answer at 0.9 is not the answer at
+  // 0.01, and a replay that does not record it cannot say which it compared
+  // against. Unset when the provider does not expose it.
+  optional double temperature   = 28;
+
   // --- provenance of the input ---
   repeated string input_evidence_ids = 13;
   repeated string input_evidence_hashes = 14;
