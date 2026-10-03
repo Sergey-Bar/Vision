@@ -19,8 +19,9 @@ type DSNParts struct {
 	Database string
 	User     string
 	SSLMode  string
-	// Password is parsed so a caller can reject a DSN that carries one. Nothing
-	// in this product wants it in the environment or in a URL.
+	// Password is parsed so that a caller can reject a DSN that carries one, and so
+	// that ApplyDSN has one to hand the driver when nothing else supplied it. It is
+	// never rendered back out: DSNParts.String omits it, and so does Config.DSN.
 	Password string
 }
 
@@ -75,8 +76,13 @@ func ParseDSN(dsn string) (DSNParts, error) {
 // when they are not in the DSN, and assigning them unconditionally turned
 // ApplyDSN("postgres://host/db") over a DefaultConfig() into
 // "postgres://:0/db" — a connection string that names a port no listener holds.
-// Password is not applied at all: it is parsed so a caller can reject a DSN that
-// carries one, and it is never read from a config file or the environment.
+//
+// Password is the one field this does apply, into an unexported field that DSN()
+// and String() never render. It used to be parsed and then discarded, on the
+// reasoning that a password must never be read from the environment — which is a
+// true claim about a variable and a false one about a URL the operator wrote, and
+// it cost every caller whose credentials lived in the DSN the ability to connect
+// at all. The dedicated password variable still overrides it; see Open.
 func (c *Config) ApplyDSN(dsn string) error {
 	p, err := ParseDSN(dsn)
 	if err != nil {
@@ -92,6 +98,9 @@ func (c *Config) ApplyDSN(dsn string) error {
 	}
 	if p.User != "" {
 		c.User = p.User
+	}
+	if p.Password != "" {
+		c.password = p.Password
 	}
 	if p.SSLMode != "" {
 		c.SSLMode = p.SSLMode
