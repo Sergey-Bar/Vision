@@ -73,12 +73,31 @@ type EvidenceStats struct {
 	Stored     int
 	Verified   int
 	Mismatched int
+	// ReadBack says a read-back was REQUESTED and therefore that Verified and
+	// Mismatched are measurements.
+	//
+	// It exists because `VerifyStats` takes the read-back as a function, and a
+	// caller with no reason to hash every clip passes nil: the operator screen
+	// does, because it renders a page every few seconds and re-hashing a run's
+	// clips per page is not a thing it should be doing. Without this flag the
+	// screen's "clips verified" is a zero that reads as a failure, and a caller
+	// that asks for the count of stored clips cannot tell its own zero from a
+	// verdict. A missing measurement and a clean measurement are different facts
+	// and this is the field that says which one you are holding.
+	ReadBack bool
 }
 
 // VerifyStats re-reads every stored clip and compares the hash. It returns the
 // counts rather than a boolean, because a single mismatch must be locatable.
+//
+// A nil readBack is the count-only mode: Stored is counted and neither Verified
+// nor Mismatched is measured, with `ReadBack` false to say so. It used to be called
+// unconditionally, which meant the operator screen, the one caller that passes nil,
+// panicked with a nil dereference the first time a run stored a clip, taking the
+// whole live page down at the first crossing.
 func (s *Store) VerifyStats(ctx context.Context, runID string, readBack func(Evidence) (string, error)) (EvidenceStats, error) {
 	var st EvidenceStats
+	st.ReadBack = readBack != nil
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT e.id,e.detection_id,e.sha256,e.storage_ref,e.bytes,e.trim,e.time_begin,e.time_end,e.readback_ok,e.created_at
 		FROM evidence e JOIN detections d ON d.id=e.detection_id WHERE d.run_id=?`, runID)
@@ -102,6 +121,9 @@ func (s *Store) VerifyStats(ctx context.Context, runID string, readBack func(Evi
 	}
 	for _, e := range all {
 		st.Stored++
+		if !st.ReadBack {
+			continue
+		}
 		got, err := readBack(e)
 		switch {
 		case err != nil:

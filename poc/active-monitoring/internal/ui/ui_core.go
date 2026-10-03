@@ -357,10 +357,20 @@ type Data struct {
 	Evidence    store.EvidenceStats `json:"evidence"`
 	Push        store.AttemptStats  `json:"push"`
 	Unavailable []string            `json:"unavailable"`
-	Live        Live                `json:"live"`
-	Truth       [2]string           `json:"truth"`
-	DBPath      string              `json:"db_path"`
-	DBError     string              `json:"db_error,omitempty"`
+	// Absence is the run's four-cause breakdown: what was proposed, what was asked,
+	// and what each of the four absence states produced. It is `store.SearchSummary`
+	// rather than a struct of this package's own, and that is the control: the
+	// screen and `pocctl search` must not be able to disagree about what `not_asked`
+	// counts, and two hand-written partitions on two surfaces is how they would.
+	Absence store.SearchSummary `json:"absence"`
+	// AbsenceKnown separates "the store said this window has no proposals" from "the
+	// store could not be asked". Both render, and they are not the same claim: one is
+	// a measurement of an empty window and the other is no measurement at all.
+	AbsenceKnown bool      `json:"absence_known"`
+	Live         Live      `json:"live"`
+	Truth        [2]string `json:"truth"`
+	DBPath       string    `json:"db_path"`
+	DBError      string    `json:"db_error,omitempty"`
 }
 
 // Gather reads the store. A read failure becomes an explicit "unavailable" entry
@@ -430,9 +440,36 @@ func (s *Server) Gather(ctx context.Context) Data {
 	} else {
 		d.Push = p
 	}
+	// The absence breakdown, read through the SAME call `pocctl search` makes. The
+	// hits are discarded and the limit is one: this screen needs the partition of
+	// the window, not the rows in it, and a second implementation of the partition
+	// here would be a second answer to the same question.
+	if sum, err := absenceSummary(ctx, s.Store, s.RunID); err != nil {
+		d.Unavailable = append(d.Unavailable, "the absence breakdown: "+err.Error())
+	} else {
+		d.Absence, d.AbsenceKnown = sum, true
+	}
 	l := s.current()
 	d.Live = l
 	return d
+}
+
+// absenceSummary is the run's window with no query.
+//
+// It refuses a run rather than answering for "no run", for the same reason
+// `SearchObservations` does: a window with no run in it is not a window.
+func absenceSummary(ctx context.Context, st *store.Store, runID string) (store.SearchSummary, error) {
+	_, sum, err := st.SearchObservations(ctx, store.SearchQuery{RunID: runID, Limit: 1})
+	if err != nil {
+		return sum, err
+	}
+	// `HitsFound` counts MATCHES for a query, and no query was asked: the panel is
+	// not a search and carries no ranking. It is cleared rather than left as
+	// `Answered`, which is what the store sets for an empty text, because a field
+	// named HitsFound carrying a count of answers is a wrong number under a right
+	// name.
+	sum.HitsFound = 0
+	return sum, nil
 }
 
 // VerdictFor computes the three-state verdict from the gathered rows. It is the

@@ -181,17 +181,23 @@ func (s *Store) SearchObservations(ctx context.Context, q SearchQuery) ([]Search
 	var out []SearchHit
 	for rows.Next() {
 		var h SearchHit
-		var at, tb, te string
-		var ref, sha sql.NullString
+		var at string
+		// Every evidence column is nullable, and the join is a LEFT JOIN, so all
+		// FOUR of them are scanned as nullable. Two of them were and two were not,
+		// which is not a distinction: a detection whose clip was refused has no
+		// evidence row at all, and one query failing to convert a NULL `time_begin`
+		// took the WHOLE search down, including the window summary beside it, so a
+		// run with one answer and no stored clip could not be reported at all.
+		var ref, sha, tbeg, tend sql.NullString
 		if err := rows.Scan(&h.DetectionID, &at, &h.Class, &h.Summary, &h.Verdict, &h.AIState,
 			&h.ReasonCode, &h.PromptID, &h.ModelIdentity, &h.ContractVersion, &h.Temperature,
-			&h.OutputHash, &ref, &sha, &tb, &te); err != nil {
+			&h.OutputHash, &ref, &sha, &tbeg, &tend); err != nil {
 			return nil, sum, fmt.Errorf("store: cannot read a search row: %w", err)
 		}
 		h.At, _ = time.Parse(time.RFC3339Nano, at)
 		h.StorageRef, h.SHA256 = ref.String, sha.String
-		h.TimeBegin, _ = time.Parse(time.RFC3339Nano, tb)
-		h.TimeEnd, _ = time.Parse(time.RFC3339Nano, te)
+		h.TimeBegin, _ = time.Parse(time.RFC3339Nano, tbeg.String)
+		h.TimeEnd, _ = time.Parse(time.RFC3339Nano, tend.String)
 		out = append(out, h)
 	}
 	return out, sum, rows.Err()
@@ -217,23 +223,31 @@ func (s *Store) searchSummary(ctx context.Context, q SearchQuery, sum *SearchSum
 	}
 
 	// COALESCE on every SUM: over a LEFT JOIN with no rows at all, SUM is NULL and a
-	// NULL int is a crash. A crash on "the window is empty" would be an absurd way
-	// to say nothing, and it is exactly what happened the first time.
+	// NULL int is a crash. A crash on "the window is empty" would be an absurd way to
+	// say nothing, and it is exactly what happened the first time.
 	//
 	// The three placeholders in the SELECT list come BEFORE the ones in `where`, so
 	// the arguments are in that order: SQLite binds by position in the statement's
 	// text, and a list ordered by where-clause-then-select binds the state names to
 	// the run id and returns a perfectly plausible zero.
+	//
+	// `Answered` counts rows in `asked_answered` and NOT rows that merely have an
+	// observation. Those are different questions, and the difference is the whole
+	// point of the column: a `degraded` ask was sent and failed, so counting it as
+	// answered puts "asked and answered 2" over a window where one answer came back,
+	// and it inflates `cannot_tell` by the same amount, because `cannot_tell` is the
+	// residue of `answered`. The partition this produces is exhaustive, and it is
+	// meant to be: Proposed = Answered + Degraded + NotAsked, every time.
 	err := s.db.QueryRowContext(ctx, `
 		SELECT
 		  COUNT(*),
-		  COALESCE(SUM(CASE WHEN v.detection_id IS NOT NULL THEN 1 ELSE 0 END),0),
+		  COALESCE(SUM(CASE WHEN v.aistate=? THEN 1 ELSE 0 END),0),
 		  COALESCE(SUM(CASE WHEN v.aistate=? AND v.verdict=? THEN 1 ELSE 0 END),0),
 		  COALESCE(SUM(CASE WHEN v.detection_id IS NOT NULL AND v.aistate<>? THEN 1 ELSE 0 END),0),
 		  COALESCE(SUM(CASE WHEN v.detection_id IS NULL THEN 1 ELSE 0 END),0)
 		FROM detections d LEFT JOIN vlm_observations v ON v.detection_id=d.id
 		`+where,
-		append([]any{aistate.Asked, verdictNoObjects, aistate.Asked}, args...)...).
+		append([]any{aistate.Asked, aistate.Asked, verdictNoObjects, aistate.Asked}, args...)...).
 		Scan(&sum.Proposed, &sum.Answered, &sum.NoObjects, &sum.Degraded, &sum.NotAsked)
 	if err != nil {
 		return fmt.Errorf("store: cannot summarise the window for run %s: %w", q.RunID, err)

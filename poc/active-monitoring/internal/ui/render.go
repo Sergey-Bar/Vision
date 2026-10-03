@@ -138,7 +138,7 @@ func kpiRow(d Data, verdict string, provisional bool) string {
 	b.WriteString(kpi("crossings this run", itoa(d.Live.Crossings), "committed to the store", ""))
 	b.WriteString(kpi("objects now", familyText(d.Live.Families), "approved boxes, by family", ""))
 	b.WriteString(kpi("live tracks", itoa(d.Live.LiveTracks), "the tracker holds", ""))
-	b.WriteString(kpi("clips verified", itoa(d.Evidence.Verified), fmt.Sprintf("%d stored · %d mismatched", d.Evidence.Stored, d.Evidence.Mismatched), ""))
+	b.WriteString(kpi("clips verified", clipsVerifiedCell(d.Evidence), clipsVerifiedSub(d.Evidence), ""))
 	b.WriteString(kpi("ai state", aiStateCell(d.Live), aiStateSub(d.Live), aiStateClass(d.Live)))
 	b.WriteString(kpi("decode", decodeCell(d.Live.Telemetry), "sidecar self-report, this frame", ""))
 	b.WriteString(kpi("ai p99", aiP99Cell(d.Live.AIP99), "round trip, AC6's clause", ""))
@@ -413,6 +413,13 @@ func handleLive(s *Server) http.HandlerFunc {
 
 		b.WriteString(`</div><div>`) // end the live column
 
+		// ---- why there is no answer ------------------------------------------
+		// First panel in this column, because it is the question an operator asks
+		// mid-run and it is the one the rest of the column cannot answer: the
+		// acceptance tiles score the run, the faults list what broke, and neither
+		// says whether the proposals in between were ever sent to the model.
+		b.WriteString(panel("why there is no answer", "four causes · this run so far", absencePanel(d)))
+
 		// ---- criteria ------------------------------------------------------
 		crit := ""
 		for _, c := range criteriaFor(d) {
@@ -445,6 +452,28 @@ func handleLive(s *Server) http.HandlerFunc {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte(page("Active monitoring — live", b.String())))
 	}
+}
+
+// clipsVerifiedCell is NOT RUN unless a read-back actually ran.
+//
+// The screen counts the run's stored clips and does not re-hash them — it renders a
+// page every few seconds, and hashing a run's clips on every render is not a thing
+// an operator's screen should be doing. So the verified count is NOT RUN here, which
+// is a different claim from `0`, and `0` beside a stored-clip count is the reading a
+// reader takes as "every clip failed to verify".
+func clipsVerifiedCell(e store.EvidenceStats) string {
+	if !e.ReadBack {
+		return "NOT RUN"
+	}
+	return itoa(e.Verified)
+}
+
+func clipsVerifiedSub(e store.EvidenceStats) string {
+	s := fmt.Sprintf("%d stored · %d mismatched", e.Stored, e.Mismatched)
+	if !e.ReadBack {
+		s += " · not re-hashed on this screen"
+	}
+	return s
 }
 
 func ageText(l Live) string {

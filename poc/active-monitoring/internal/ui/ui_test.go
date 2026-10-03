@@ -425,6 +425,54 @@ func TestAMissingSnapshotIsNotFoundNotAGreyBox(t *testing.T) {
 	}
 }
 
+// TestARunWithAStoredClipStillRendersAndSaysItDidNotVerify is a crash guard.
+//
+// `Gather` asks for the evidence counts with a nil read-back, because the screen
+// does not re-hash a run's clips on every page render. `VerifyStats` used to call
+// that nil unconditionally, so the first run that stored a clip, which is the first
+// crossing of any real run, took the whole live page down with a nil dereference,
+// and the second half is the honesty half: a count nobody re-hashed is NOT RUN, not
+// a zero, because zero reads as "every clip failed to verify".
+func TestARunWithAStoredClipStillRendersAndSaysItDidNotVerify(t *testing.T) {
+	s, id := uiStore(t)
+	ctx := context.Background()
+	if err := s.Accept(ctx, store.Detection{
+		ID: "det-clip", RunID: id, At: time.Now(), Class: "car", Family: "vehicle",
+		TrackID: 1, BoxTop: 1, BoxLeft: 1, BoxBottom: 2, BoxRight: 2,
+		Provenance: store.ProvenanceSynthetic,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutEvidence(ctx, store.Evidence{
+		ID: "e-clip", DetectionID: "det-clip", SHA256: strings.Repeat("e", 64),
+		StorageRef: "ab/cd/" + strings.Repeat("e", 64) + ".mp4", Bytes: 10, Trim: "reencode",
+		TimeBegin: time.Now(), TimeEnd: time.Now(), ReadbackOK: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h := newUI(t, s, id).Handler()
+	code, body := get(t, h, "/")
+	if code != http.StatusOK {
+		t.Fatalf("a run with a stored clip answered %d; the page died at the first crossing", code)
+	}
+	d := getJSON(t, h, "/api/summary")
+	if d.Evidence.Stored != 1 {
+		t.Fatalf("stored = %d, want 1", d.Evidence.Stored)
+	}
+	if d.Evidence.ReadBack {
+		t.Fatal("the screen claims it re-hashed a run's clips; it does not hold a read-back")
+	}
+	if !strings.Contains(body, "not re-hashed on this screen") {
+		t.Fatalf("the page does not say the clips were not re-hashed:\n%s", body)
+	}
+	if got := clipsVerifiedCell(store.EvidenceStats{Stored: 1}); got != "NOT RUN" {
+		t.Fatalf("clipsVerifiedCell with no read-back = %q, want NOT RUN; a 0 here reads as every clip failing to verify", got)
+	}
+	if got := clipsVerifiedCell(store.EvidenceStats{Stored: 1, Verified: 1, ReadBack: true}); got != "1" {
+		t.Fatalf("clipsVerifiedCell after a real read-back = %q, want 1", got)
+	}
+}
+
 func TestTheScreenHasNoJavaScriptAndNoEditing(t *testing.T) {
 	s, id := uiStore(t)
 	h := newUI(t, s, id).Handler()

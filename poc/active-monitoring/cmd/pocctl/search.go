@@ -105,8 +105,7 @@ func cmdSearch(args []string) error {
 	for _, h := range hits {
 		fmt.Printf("%s  %s  %s\n", h.At.UTC().Format(time.RFC3339), h.Verdict, h.Class)
 		fmt.Printf("    %s\n", h.Summary)
-		fmt.Printf("    evidence %s  sha256 %s  %s .. %s\n", h.StorageRef, short(h.SHA256),
-			h.TimeBegin.UTC().Format(time.RFC3339), h.TimeEnd.UTC().Format(time.RFC3339))
+		fmt.Printf("    %s\n", evidenceLine(h))
 		fmt.Printf("    asked as %s by %s at temperature %.1f, contract %s, output %s\n",
 			h.PromptID, h.ModelIdentity, h.Temperature, h.ContractVersion, short(h.OutputHash))
 		fmt.Printf("    aistate %s, reason %s\n", h.AIState, h.ReasonCode)
@@ -169,6 +168,27 @@ func printNotAbsence(s store.SearchSummary) {
 	fmt.Printf("  %d of the %d proposals in it were never answered (%d not asked, %d degraded).\n", unsearchable, s.Proposed, s.NotAsked, s.Degraded)
 	fmt.Println("  A match that is absent above is not evidence the model saw nothing. The run did")
 	fmt.Println("  not ask, and this is not the same as the model having answered 'no'.")
+}
+
+// evidenceLine is the RECORDED WINDOW an answer is about: the clip reference, its
+// exact bounds and its hash. Never a video file, because none is written: there is
+// no continuous archive to pull and offering one would be an offer that fails when
+// it is taken.
+//
+// An answer with no stored clip says so in words rather than printing the zero time.
+// A zero-time window reads as a measured window at the year 1, and an answer nobody
+// can pull the clip for is not a finding anybody can adjudicate; the reader has to
+// be able to tell those two apart at a glance.
+func evidenceLine(h store.SearchHit) string {
+	if strings.TrimSpace(h.StorageRef) == "" && strings.TrimSpace(h.SHA256) == "" {
+		return "evidence NONE: no clip was stored for this answer, so there is nothing to pull. " +
+			"This is an answer about a window nobody can watch, and it is NOT a statement about the scene"
+	}
+	bounds := h.TimeBegin.UTC().Format(time.RFC3339) + " .. " + h.TimeEnd.UTC().Format(time.RFC3339)
+	if h.TimeBegin.IsZero() || h.TimeEnd.IsZero() {
+		bounds = "bounds NOT RECORDED"
+	}
+	return fmt.Sprintf("evidence %s  sha256 %s  %s", orNone(h.StorageRef, "no reference"), short(h.SHA256), bounds)
 }
 
 // parseWhen reads an optional RFC3339 bound. Empty is "no bound", which is not the
