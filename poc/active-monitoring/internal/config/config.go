@@ -1160,6 +1160,64 @@ func Load(lookup Lookup) (Config, error) {
 	return cfg, nil
 }
 
+// RequiredUnder returns, in schema order, every variable that is REQUIRED BY
+// NAME for the environment `lookup` describes and does not supply.
+//
+// It is the same enumeration `Load` performs, exposed rather than reimplemented,
+// and it exists for the callers that assemble their OWN environment. `pocctl
+// demo` builds one as a slice of `NAME=value` strings and hands it to a child
+// process; until this existed, the only thing that could tell whether that slice
+// was complete was running `pocctl demo` and reading where it stopped.
+//
+// That is not a small gap. A required variable added to the schema does not reach
+// a hand-built slice, and the schema's own test suite stays green throughout,
+// because the schema does not know the slice exists. Two variables were made
+// required under `SP_POC_TRIGGER_MODE=detector` on one commit and `pocctl demo`
+// — the module's headline command — refused to start at step 6 of 7, after
+// building both binaries, after the fault rehearsal and after the push target was
+// listening. Nothing but running the command found it.
+//
+// Structural variables are NOT listed, and neither is a variable whose `when:`
+// condition does not hold in this environment. Both fill themselves in or do not
+// apply, and listing them would make a caller add values whose absence changes
+// nothing — which is how a caller ends up copying a secret-looking line into a
+// repository to satisfy a check that never needed it.
+//
+// A nil lookup is an empty environment, not the process environment: a caller
+// asking what is required should be told what is required unconditionally rather
+// than what happens to be set on the machine running the test.
+func RequiredUnder(lookup Lookup) []string {
+	if lookup == nil {
+		lookup = func(string) (string, bool) { return "", false }
+	}
+	names := make([]string, 0, len(schema))
+	for _, f := range schema {
+		// The MERGED entry, not the one from `schema`. The two camera credentials
+		// appear in both tables: `schema` describes what they mean and
+		// `structuralDefaults` declares that a fully public camera needs neither.
+		// `schemaByName` is what `get` reads, so it is what decides whether a
+		// variable is required — and reading `schema` alone reported
+		// SP_POC_SOURCE_USER and SP_POC_SOURCE_PASSWORD as missing from every
+		// environment that correctly leaves them unset, which is the refusal this
+		// project exists to avoid making.
+		merged, known := schemaByName[f.Name]
+		if !known {
+			merged = f
+		}
+		if merged.structural {
+			continue
+		}
+		if merged.when != "" && !conditionHolds(lookup, merged.when) {
+			continue
+		}
+		if raw, present := lookup(merged.Name); present && strings.TrimSpace(raw) != "" {
+			continue
+		}
+		names = append(names, merged.Name)
+	}
+	return names
+}
+
 // conditionHolds reports whether a `<VAR>=<value>` condition is satisfied by the
 // environment.
 //

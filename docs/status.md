@@ -217,6 +217,45 @@ suite red, before being put in the table:
 | the configured role reaches the connection string | `if c.User != ""` becomes `if c.User != "" && false` in `renderDSN` | `TestTheRoleReachesTheConnectionStringWithNoPasswordAtAll` FAIL, and the failure printed the whole pre-fix connection string with no role in it |
 | a password held by Config cannot be printed out of it | delete `func (c Config) String() string` | `TestTheRenderedDSNCarriesTheRoleAndNeverThePassword` FAIL: `%+v printed the database password` and `%v printed the database password` |
 
+### The caller side: three more, in the POC module's own table
+
+The eleven controls above all remove a guard from inside the pipeline. These three
+remove a NAME or a VALUE from `demoEnv` — a slice of `NAME=value` strings in
+`cmd/pocctl` that `pocctl demo` hands to a child process. They are in
+`poc/active-monitoring/scripts/verify.ps1`, which is the POC module's table, and
+they guard the one defect class neither table could see: a required variable added
+to `internal/config` does not reach a hand-built slice, **every test in
+`internal/config` stays green**, and the demo refuses to start at step 6 of 7 —
+after two builds, after the fault rehearsal, and after the push target is
+listening. The schema does not know the slice exists, so nothing in the schema
+could catch it. Only running the command did.
+
+`config.RequiredUnder` is what makes the slice checkable: the enumeration `Load`
+already performs, exposed so a caller assembling its OWN environment can be held
+against the schema rather than against a comment.
+
+Baseline before the batch, and after the restore: `go test -count=1 ./cmd/pocctl/`
+**exit 0** in both. Each control was then applied by hand, in the file, and watched
+go red:
+
+| Control | Mutation | Result |
+|---|---|---|
+| the demo environment names every variable the schema requires | `"SP_POC_DET_MODEL=" + model,` becomes `"SP_POC_DET_MODEL_RENAMED_BY_REDCHECK=" + model,` | exit 1 — `TestTheDemoEnvironmentIsOneTheDemoOwnChildWouldAccept` and `TestTheScoreChainInTheDemoAscends` FAIL |
+| the score chain in the demo environment ascends | `"SP_POC_DET_SCORE=0.005",` becomes `"SP_POC_DET_SCORE=0.5",` | exit 1 — the same two FAIL. `config.Validate` refuses an inverted chain by name, so the demo dies in `watch` |
+| the banner describes the trigger the demo actually runs | `case soak.TriggerDetector:` becomes `case "not-a-mode":` | exit 1 — `TestTheBannerNamesTheShippedTrigger` FAIL |
+
+The first two mutations rename and re-value rather than delete, deliberately. A
+deleted line is a compile error, which this gate reads as a red for the wrong
+reason — the control is not what went red, the compiler is.
+
+**A first attempt at this batch was recorded as proved and was void.** The
+transcripts were taken with `go test -C <dir> -count=1`, and `-C` is only
+recognised as the *first* argument; every run in the batch — baseline included —
+exited 2 on the same flag-parsing error. A control table whose entries are all
+proved by a run that never started is precisely the failure `AGENTS.md` names, so
+the batch was re-run with a real `exit 0` baseline recorded above it. The table is
+only worth what its baseline is worth.
+
 The gate used to be a subset of what it claimed. Three tools it named were not
 installed and their absence was described rather than fixed, so `lint` and
 `-race` were decorative: the config had enabled eleven linters since the

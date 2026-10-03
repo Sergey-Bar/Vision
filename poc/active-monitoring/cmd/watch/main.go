@@ -289,8 +289,38 @@ func run() error {
 		}
 		defer func() { _ = side.Stop(3 * time.Second) }()
 		logf("trigger mode: sidecar — the per-frame ONNX classifier is in the trigger path")
-	} else {
-		logf("trigger mode: novelty — the local novelty engine measures regions and the model verifies each event once")
+	}
+
+	// The mode is announced ONCE, from the value the run was actually configured
+	// with, and the sentence describes THAT mode.
+	//
+	// The novelty line used to live in the `else` of `if usesSidecar`, which made
+	// it the announcement for every mode that was not sidecar — including
+	// `detector`, the shipped default. So every detector run logged
+	//
+	//	trigger mode: novelty — the local novelty engine measures regions...
+	//	trigger mode: detector — models\yolov4n.onnx, sha256 ..., input 416x416
+	//
+	// two lines apart, the first of which is false. A reader who takes the first
+	// line has been told this run has no ONNX and no per-frame model while the
+	// second line names both. The cost argument this module is built on — one
+	// inference per EVENT against one per FRAME — is decided by which of those two
+	// sentences a reader believes, and the run was printing both.
+	//
+	// This is the same shape of defect as the demo's own trigger banner, which had
+	// no `detector` case at all: a closed set of three modes and a hand-written
+	// branch per mode, where the mode that became the default is the one nobody
+	// added a branch for. It is announced from `cfg.TriggerMode` here, so a fourth
+	// mode cannot produce a sentence borrowed from a third.
+	switch cfg.TriggerMode {
+	case soak.TriggerDetector:
+		// Named by the detector block below, once the identity is known. Saying
+		// "detector" twice would be noise, and the identity line is the better one.
+	case soak.TriggerSidecar:
+		// Named by the sidecar block above.
+	default:
+		logf("trigger mode: %s — the local novelty engine measures regions and the model verifies each event once",
+			cfg.TriggerMode)
 	}
 
 	// The in-process detector. Opened here, once, and its IDENTITY printed before

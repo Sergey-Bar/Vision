@@ -1267,6 +1267,53 @@ file = 'internal\detect\engine.go'
       to   = 'return true // REDCHECK: the crop offset being dropped on the way back is invisible'
       pkg  = './cmd/pocctl'
       why  = 'dropping the crop offset when mapping a box back puts every box at the frame origin, with plausible coordinates and no error anywhere. That is the letterbox divisor defect in a new place, and the containment test is the only thing that notices it.'
+    },
+    # --- the caller side: a hand-built environment that fell behind the schema.
+    #
+    # Every control above removes a guard from inside the pipeline. These three
+    # remove a NAME or a VALUE from `demoEnv`, which is a slice of `NAME=value`
+    # strings in `cmd/pocctl` that `pocctl demo` hands to a child process. They are
+    # here because the defect they guard is the one this table could not see at
+    # all: a required variable added to `internal/config` does not reach a
+    # hand-built slice, every test in `internal/config` stays green, and the demo
+    # refuses to start at step 6 of 7 — after two builds, after the fault
+    # rehearsal, and after the push target is listening. The schema does not know
+    # the slice exists, so nothing in the schema could catch it. Only running the
+    # command did.
+    @{
+      # The first entry of the eight `when: SP_POC_TRIGGER_MODE=detector`
+      # variables. One name stands for all eight: they were added to the schema on
+      # one commit and the demo's slice was not updated, and the mutation renames
+      # rather than deletes so the slice still parses — a deleted line is a
+      # compile error, which this gate reads as a red for the wrong reason.
+      name = 'the demo environment names every variable the schema requires'
+      file = 'cmd\pocctl\demo.go'
+      from = '"SP_POC_DET_MODEL=" + model,'
+      to   = '"SP_POC_DET_MODEL_RENAMED_BY_REDCHECK=" + model,'
+      pkg  = './cmd/pocctl'
+      why  = 'the detector opens no file, draws nothing, and reports a zero detection rate at full health with no error anywhere. Every number in the report is true and describes a run that never looked at a frame'
+    },
+    @{
+      # The half of the score chain that is checked ONLY in detector mode, and the
+      # one relation of the three that no downstream arithmetic can detect.
+      name = 'the score chain in the demo environment ascends'
+      file = 'cmd\pocctl\demo.go'
+      from = '"SP_POC_DET_SCORE=0.005",'
+      to   = '"SP_POC_DET_SCORE=0.5",'
+      pkg  = './cmd/pocctl'
+      why  = 'a box the model scored below its own emit floor is drawn as a ghost while a box it did emit is refused, so the screen shows objects that are not there and omits objects that are. The run completes and every number in the report is computed over that picture'
+    },
+    @{
+      # A closed set of three trigger modes and a hand-written branch per mode,
+      # where the mode that became the shipped default is the one nobody added a
+      # branch for. This one printed, on the first screen of the headline
+      # command, that the run was going to be refused — and the run completed.
+      name = 'the banner describes the trigger the demo actually runs'
+      file = 'cmd\pocctl\demo.go'
+      from = 'case soak.TriggerDetector:'
+      to   = 'case "not-a-mode":'
+      pkg  = './cmd/pocctl'
+      why  = 'the banner is derived from the configuration on purpose, and a sentence borrowed from another mode tells an operator reading a cost argument that this run has no ONNX in it while the model and its SHA-256 are printed two lines below'
     }
   )
   Push-Location $PWD
@@ -1301,7 +1348,7 @@ file = 'internal\detect\engine.go'
           Pass "$($c.name) removed -> the suite went red, as it must"
         }
       } finally {
-        # The restore is RETRIED, and the reason is not theoretical.
+# The restore is RETRIED, and the reason is not theoretical.
         #
         # `go test` leaves a compiled test binary holding the source files it read.
         # On Windows that is an open mapping, and a single WriteAllText over a mapped
@@ -1310,22 +1357,34 @@ file = 'internal\detect\engine.go'
         # `finally`, the gate aborts, and the file is left MUTATED -- so the next run
         # of the gate is measuring a tree that a control broke.
         #
-        # That happened: this gate aborted with a control still applied, and the
-        # symptom was a test failing for a reason nobody had written. A red-check
-        # harness that can leave the tree broken is worse than one that does not run,
-        # because the damage is discovered by the next person rather than by the run
-        # that caused it.
+        # That happened, twice and independently: this gate aborted with a control
+        # still applied, and the symptom was a test failing for a reason nobody had
+        # written. A red-check harness that can leave the tree broken is worse than
+        # one that does not run, because the damage is discovered by the next person
+        # rather than by the run that caused it.
+        #
+        # So: a handful of attempts with a growing gap between them, because the
+        # window is the runtime tearing down its own mapping, and then a HARD failure
+        # naming the file. It is deliberately NOT swallowed. A restore this gate
+        # cannot complete means the remaining controls were never run and the table's
+        # count is a lie, so the gate must stop rather than print a green summary
+        # over a modified tree.
         $restored = $false
-        for ($try = 0; $try -lt 12 -and -not $restored; $try++) {
+        for ($try = 1; $try -le 12; $try++) {
           try {
             [System.IO.File]::WriteAllText($full, $original)
             $restored = $true
+            break
           } catch {
-            Start-Sleep -Milliseconds 250
+            if ($try -eq 12) {
+              Fail "$($c.name): the control was NOT restored. $full is left MUTATED: $($_.Exception.Message)"
+            }
+            Start-Sleep -Milliseconds (100 * $try)
           }
         }
         if (-not $restored) {
-          Fail "$($c.name): the control was NOT restored. $full is left MUTATED. Close anything holding it (a running test binary, an editor) and `git checkout --` that file before trusting any further run of this gate."
+          Fail 'the red check stopped with production code mutated. Do not commit anything from this worktree. `git checkout --` the file named above, then re-run.'
+          throw "red check could not restore $($c.file); stopping rather than running further controls against a mutated tree"
         }
       }
     }
