@@ -1,0 +1,100 @@
+RED-CHECK TRANSCRIPTS - pocctl footage
+machine: SERGEY-PC   module: poc/active-monitoring
+
+=== RC-31  TestPadThenClampKeepsAnEdgeRegionsPadInsideTheFrame
+CLAIM     padThenClamp clamps the padded region to the frame
+REMOVED   cmd/pocctl/footage_crop.go:  '\treturn clampRegion(padded)'  ->  '\treturn padded'
+EXIT      1  (a red check that is not red is not a red check)
+TRANSCRIPT --- FAIL: TestPadThenClampKeepsAnEdgeRegionsPadInsideTheFrame (0.00s) //     footage_test.go:296: a padded region came back at {Class: Score:0 X1:-0.025 Y1:0.375 X2:0.125 Y2:0.525}, outside the frame. The pad is then measured against pixels that do not exist and every composed box is misplaced // FAIL
+RESTORE   proved by sha256 86A4F37FC9455F1D3BF7E552ED2F46A92EF29ED53E13F1A83A898FD12F33C6AF
+GREEN     exit 0 after the restore
+
+=== RC-32  TestARegionAlreadyCoveredIsDroppedRatherThanMeasuredAgain
+CLAIM     a region already inside the accepted union is dropped rather than measured again
+REMOVED   cmd/pocctl/footage_crop.go:  '\t\tif coveredByAny(r, accepted, p.CoveredFraction) {\n\t\t\tplan.Dedupe++\n\t\t\tcontinue\n\t\t}'  ->  ''
+EXIT      1  (a red check that is not red is not a red check)
+TRANSCRIPT --- FAIL: TestARegionAlreadyCoveredIsDroppedRatherThanMeasuredAgain (0.00s) //     footage_test.go:364: 2 regions survived; a component already inside an accepted region adds nothing and measuring it again counts one object twice // FAIL
+RESTORE   proved by sha256 86A4F37FC9455F1D3BF7E552ED2F46A92EF29ED53E13F1A83A898FD12F33C6AF
+GREEN     exit 0 after the restore
+
+=== RC-33  TestComposingACropBoxIsTheInverseOfSlicingTheRegion
+CLAIM     composeBox adds the crop own pixel origin
+REMOVED   cmd/pocctl/footage_crop.go:  'X1:    (float64(b.X0) + box.X1*cw64) / fw64,'  ->  'X1:    (box.X1*cw64) / fw64,'
+EXIT      1  (a red check that is not red is not a red check)
+TRANSCRIPT --- FAIL: TestComposingACropBoxIsTheInverseOfSlicingTheRegion (0.00s) //     footage_test.go:461: a box over the whole crop composed back to {Class:car Score:0 X1:0 Y1:0.25 X2:0.75 Y2:0.75}, not to the crop {Class: Score:0 X1:0.5 Y1:0.25 X2:0.75 Y2:0.75} // FAIL
+RESTORE   proved by sha256 86A4F37FC9455F1D3BF7E552ED2F46A92EF29ED53E13F1A83A898FD12F33C6AF
+GREEN     exit 0 after the restore
+
+=== RC-34  TestAMisnamedDetectionIsAFalsePositiveNotATruePositive
+CLAIM     partitionByClass partitions detections and ground truth by class before measuring
+REMOVED   cmd/pocctl/perclass.go:  '\t\tfor n, a := range byClass {'  ->  '\t\tfor n, a := range map[string]*acc{} {'
+EXIT      1  (a red check that is not red is not a red check)
+TRANSCRIPT --- FAIL: TestAMisnamedDetectionIsAFalsePositiveNotATruePositive (0.00s) //     footage_test.go:612: the car detection was not counted as a car false positive: {TruePositives:0 FalsePositives:0 FalseNegatives:0 Dropped:0 GroundTruth:0 Detected:0 Seconds:0} // FAIL
+RESTORE   proved by sha256 DE2B4F5AF3FBE4ADA27629677ED970852D09FE9046FE9A95BBE799F87720DD47
+GREEN     exit 0 after the restore
+
+=== RC-35  TestTheGateRefusesMaterialWithNoProvenanceRow
+CLAIM     resolveLabel refuses material with no row in the provenance table
+REMOVED   cmd/pocctl/footage.go:  '\tcase 0:\n\t\treturn footageLabel{}, fmt.Errorf('  ->  '\tcase 0:\n\t\tif true { return footageLabel{}, nil }\n\t\treturn footageLabel{}, fmt.Errorf('
+EXIT      1  (a red check that is not red is not a red check)
+TRANSCRIPT --- FAIL: TestTheGateRefusesMaterialWithNoProvenanceRow (0.00s) //     footage_test.go:56: material with no row in the provenance table was accepted // FAIL
+RESTORE   proved by sha256 0133F7EB3A421F36217DCED4C6ACDB7D03EEA2D46A8A06174239AADD6EDDEEB5
+GREEN     exit 0 after the restore
+
+=== RC-36  TestTheGateRefusesAnAbsentClearanceField
+CLAIM     the gate refuses a row whose cleared_for_external_use field is absent
+REMOVED   cmd/pocctl/footage.go:  '\tcase c.Cleared == nil:\n\t\twhy = append(why, '  ->  '\tcase false:\n\t\twhy = append(why, '
+EXIT      1  (a red check that is not red is not a red check)
+TRANSCRIPT --- FAIL: TestTheGateRefusesAnAbsentClearanceField (0.00s) // 	C:/VS-Code-Projects/Github/AI AI CAPTAIN/.kilo/worktrees/footage-measurement/poc/active-monitoring/cmd/pocctl/footage_test.go:125 +0x152 // FAIL	github.com/Sergey-Bar/ai-captain-poc/cmd/pocctl	1.299s
+RESTORE   proved by sha256 0133F7EB3A421F36217DCED4C6ACDB7D03EEA2D46A8A06174239AADD6EDDEEB5
+GREEN     exit 0 after the restore
+
+=== RC-37  TestASamplingIntervalOverOneAndAHalfSecondsIsRefused
+CLAIM     a sampling interval over 1.5s is refused
+REMOVED   cmd/pocctl/footage.go:  '\tif every > maxSamplingInterval {'  ->  '\tif false && every > maxSamplingInterval {'
+EXIT      1  (a red check that is not red is not a red check)
+TRANSCRIPT --- FAIL: TestASamplingIntervalOverOneAndAHalfSecondsIsRefused (0.00s) //     footage_test.go:230: a 3 second sampling interval was accepted over a road whose smallest object is on screen 1.5s // FAIL
+RESTORE   proved by sha256 0133F7EB3A421F36217DCED4C6ACDB7D03EEA2D46A8A06174239AADD6EDDEEB5
+GREEN     exit 0 after the restore
+
+=== RC-38  TestTheGateRefusesAnAmbiguousBaseName
+CLAIM     an ambiguous base name is refused rather than resolved
+REMOVED   cmd/pocctl/footage.go:  '\tdefault:\n\t\tnames := make([]string, 0, len(byBase))'  ->  '\tdefault:\n\t\treturn byBase[0], nil\n\t\tnames := make([]string, 0, len(byBase))'
+EXIT      1  (a red check that is not red is not a red check)
+TRANSCRIPT --- FAIL: TestTheGateRefusesAnAmbiguousBaseName (0.00s) //     footage_test.go:190: an ambiguous base name resolved to a row; one of those licences was then measured under // FAIL
+RESTORE   proved by sha256 0133F7EB3A421F36217DCED4C6ACDB7D03EEA2D46A8A06174239AADD6EDDEEB5
+GREEN     exit 0 after the restore
+
+=== RC-35b  TestTheGateRefusesALicenceThatBeginsNotRecorded
+CLAIM     the licence check is a PREFIX test, so the one row that says NOT RECORDED in a sentence is caught
+REMOVED   cmd/pocctl/footage.go:  '} else if strings.HasPrefix(normaliseSentence(c.Licence), licenceUnrecorded) {'  ->  '} else if normaliseSentence(c.Licence) == licenceUnrecorded {'
+EXIT      1  (a red check that is not red is not a red check)
+TRANSCRIPT --- FAIL: TestTheGateRefusesALicenceThatBeginsNotRecorded (0.00s) //     footage_test.go:96: a licence sentence that BEGINS by declaring nothing was recorded was accepted // FAIL
+RESTORE   proved by sha256 0133F7EB3A421F36217DCED4C6ACDB7D03EEA2D46A8A06174239AADD6EDDEEB5
+GREEN     exit 0 after the restore
+
+=== RC-39  TestAMeasurementOverRefusalsRendersNotRunAndNeverZero
+CLAIM     renderNotMeasured has an arm for a measurement the decoder refused everywhere
+REMOVED   cmd/pocctl/footage_cmd.go:  '\tcase r.Whole.Refusals+r.Crop.Refusals > 0:'  ->  '\tcase false:'
+EXIT      1  (a red check that is not red is not a red check)
+TRANSCRIPT --- FAIL: TestAMeasurementOverRefusalsRendersNotRunAndNeverZero (0.00s) //     footage_test.go:917: the section does not say whether the crop pass found anything is unknown: // FAIL
+RESTORE   proved by sha256 269E22B3357B8FF78A37CFD01C973F52275C90D9BE88EF2F197CD4C8F3CC3BB9
+GREEN     exit 0 after the restore
+
+=== RC-40  TestARateWithNoDenominatorPrintsNotRunAndNeverZero
+CLAIM     rate prints NOT RUN when the denominator is empty
+REMOVED   cmd/pocctl/perclass.go:  '\tif !ok {\n\t\treturn padRight(notRun, width)\n\t}\n'  ->  ''
+EXIT      1  (a red check that is not red is not a red check)
+TRANSCRIPT --- FAIL: TestARateWithNoDenominatorPrintsNotRunAndNeverZero (0.00s) //     footage_test.go:685: a rate with no denominator printed "0.000", not NOT RUN // FAIL
+RESTORE   proved by sha256 DE2B4F5AF3FBE4ADA27629677ED970852D09FE9046FE9A95BBE799F87720DD47
+GREEN     exit 0 after the restore
+
+=== RC-41  TestTrailingBytesAreRefusedRatherThanDropped
+CLAIM     a stream that ends mid-frame is refused
+REMOVED   cmd/pocctl/footage_frames.go:  '\tif n <= 0 {\n\t\treturn nil\n\t}'  ->  '\tif true {\n\t\treturn nil\n\t}'
+EXIT      1  (a red check that is not red is not a red check)
+TRANSCRIPT --- FAIL: TestTrailingBytesAreRefusedRatherThanDropped (0.00s) //     footage_test.go:972: a stream that ended mid-frame was accepted; the last sample would be a partial picture // FAIL
+RESTORE   proved by sha256 AD550982E48788ADB5FCB6D7B8A56EC1C5E4A055F9FF15D2AE548651C0CCCC0D
+GREEN     exit 0 after the restore
+
+checks run: 12   problems: 0
