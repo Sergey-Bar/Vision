@@ -30,7 +30,7 @@ func main() {
 
 func run() error {
 	var (
-		dsn          = flag.String("dsn", "", "Postgres DSN without a password. SP_DATABASE_URL is the fallback.")
+		dsn          = flag.String("dsn", "", "Postgres DSN. SP_DATABASE_URL is the fallback. SP_DATABASE_PASSWORD wins over a password in the DSN.")
 		passwordFlag = flag.String("password", "", "Database password. Prefer SP_DATABASE_PASSWORD; a CLI argument is visible in the process list.")
 		asJSON       = flag.Bool("json", false, "Emit machine-readable output.")
 		dryRun       = flag.Bool("dry-run", false, "Print the plan and change nothing.")
@@ -214,11 +214,13 @@ Commands:
   verify     Confirm every applied migration still matches this build.
 
 Flags:
-  -dsn string        Postgres DSN without a password. Falls back to SP_DATABASE_URL.
+  -dsn string        Postgres DSN. Falls back to SP_DATABASE_URL.
                       Required: with neither named, this tool refuses rather than
                       guessing a database from the values compiled into it.
   -password string   Database password. SP_DATABASE_PASSWORD is preferred; a flag
                       argument is visible to anything that can list processes.
+                      A password embedded in the DSN is used when this is absent,
+                      and loses to it when it is present.
   -json              Emit machine-readable output.
   -dry-run           Print the plan and change nothing.
   -timeout duration  Overall timeout (default 10m).

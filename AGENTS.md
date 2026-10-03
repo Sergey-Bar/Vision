@@ -144,13 +144,13 @@ a validation guard or a claimed protection carries a red-check, and the record
 goes in `docs/status.md` with both transcripts. "Not red-checked, and here is what
 would ship" is an acceptable answer; an unlabelled control is not. Where a control
 is red-checkable by removing one line, it belongs in the `red-check` table in
-`scripts/verify.ps1`, which is the part that keeps running. That table holds seven
-entries — two observations, two evidence, three rules — against thirty in the POC
-module. Entries are added only after being run by hand and watched go red, because
-a table seeded with plausible mutations nobody has run reports thirty guarded
-controls and proves none of them. **That rule has teeth: the sixth control tried
-was the path-traversal segment regex, it turned out nothing tested it, and the
-missing test case fell out of the attempt.**
+`scripts/verify.ps1`, which is the part that keeps running. That table holds ten
+entries — two observations, two evidence, three rules, three connection-string —
+against thirty in the POC module. Entries are added only after being run by hand
+and watched go red, because a table seeded with plausible mutations nobody has run
+reports thirty guarded controls and proves none of them. **That rule has teeth: the
+sixth control tried was the path-traversal segment regex, it turned out nothing
+tested it, and the missing test case fell out of the attempt.**
 
 **Third-party skills are untrusted input.** Sixty-five skills are installed on the
 development machine from outside this repository, and a skill is read as

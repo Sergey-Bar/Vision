@@ -114,6 +114,56 @@ by hand would stop covering one the moment a control was added somewhere new, an
 the gate meant to prove the table left the tree alone would be the gate not
 watching the table's own footprint.
 
+**A DSN that carried its own password connected as somebody else. Three new
+controls, so the table holds ten.** `cmd/security-migrate` was given
+`postgres://postgres:postgres@127.0.0.1:55432/security_test` and reached the
+server as the OS account, so the operator's error named a user they had never
+written down:
+
+```
+security-migrate: migrate: acquire connection: failed to connect to
+  `user=Sergey database=security_test`:
+  127.0.0.1:55432 (127.0.0.1): failed SASL auth:
+  FATAL: password authentication failed for user "Sergey" (SQLSTATE 28P01)
+```
+
+The parser was not dropping a field. Two halves failed together, and neither is
+visible in the other. `Config.DSN()` never rendered `Config.User`, so
+`ApplyDSN`'s carefully guarded `c.User = p.User` wrote to a field that every
+rendered connection string then dropped - including the one handed to pgx, the
+one in the startup log, and the one inside the `ErrNoTarget` refusal message. And
+`dbx.Open` attached a role to the connection string only on the branch that had a
+password to attach. A DSN carrying both, which is the only form that carries a
+password when `SP_DATABASE_PASSWORD` is unset, therefore reached pgx naming no
+role at all, and pgx fills a missing role from the OS account. The pre-fix
+connection string was exactly:
+
+```
+postgres://db.internal:55432/security?application_name=security-core&sslmode=require
+```
+
+A missing role is not a missing credential. It is a different identity.
+
+The fix attaches the role unconditionally, and keeps a DSN's password in an
+unexported `Config` field that no rendering can print: `DSN()` omits it, and
+`String()` routes every fmt verb through `DSN()`. `fmt` prints unexported struct
+fields under `%v` and `%+v`, which is why that method is a control rather than a
+formality - without it, a diagnostic written as `"%+v"` carries the credential
+into whatever it was pasted into. `SP_DATABASE_PASSWORD` still overrides a
+password embedded in the URL, so a stale URL cannot override a deliberate
+variable. The refusals are intact and tested: `TestRedactedCarriesNoPassword` and
+`TestTheRenderedDSNCarriesTheRoleAndNeverThePassword` between them assert that no
+verb, `%+v` included, prints it.
+
+Each of the three was run by hand with the mutation applied and watched turn the
+suite red, before being put in the table:
+
+| Control | Mutation | Result |
+|---|---|---|
+| a password carried in the DSN reaches the connection string | `if p.Password != ""` becomes `if false && p.Password != ""` in `ApplyDSN` | `TestADSNPasswordReachesTheConnectionString` FAIL: `the connection string carries password "" (present: false), want the one the DSN carried` |
+| the configured role reaches the connection string | `if c.User != ""` becomes `if c.User != "" && false` in `renderDSN` | `TestTheRoleReachesTheConnectionStringWithNoPasswordAtAll` FAIL, and the failure printed the whole pre-fix connection string with no role in it |
+| a password held by Config cannot be printed out of it | delete `func (c Config) String() string` | `TestTheRenderedDSNCarriesTheRoleAndNeverThePassword` FAIL: `%+v printed the database password` and `%v printed the database password` |
+
 The gate used to be a subset of what it claimed. Three tools it named were not
 installed and their absence was described rather than fixed, so `lint` and
 `-race` were decorative: the config had enabled eleven linters since the
@@ -1563,9 +1613,8 @@ go run ./cmd/security-migrate up --dsn "$SP_TEST_DATABASE_URL"
 cd deploy/ai-runtime && py -m unittest discover
 ```
 
-`security-migrate` defaults to a silent local DSN when none is given. That is
-the same class of defect as a CSRF exemption that is really an absence, and it
-is on the list to fix.
+`security-migrate` used to default to a silent local DSN when none was given. It
+refuses now, and names both ways to name a database rather than guessing one.
 
 Without `SP_TEST_DATABASE_URL` the database-backed tests skip rather than fail,
 and say so. A green run with the variable unset is a run that tested almost

@@ -295,7 +295,7 @@ Invoke-Gate 'test' { & $go test -p 1 -count=1 @race ./... }
 #
 # Every entry here was run by hand with its mutation applied and watched go red.
 # A control that has not been through that is not in this table, which is why it
-# holds two entries and not thirty - seeding it with plausible-looking mutations
+# holds ten entries and not thirty - seeding it with plausible-looking mutations
 # nobody has run would produce a gate that reports thirty guarded controls and
 # proves none of them.
 if ($SkipRedCheck) {
@@ -390,6 +390,45 @@ Invoke-Gate 'red-check' {
             test = 'TestMissingAIObservationDegradesToUnverified'
             pkg  = './internal/rules'
             why  = 'the degraded reason is the only thing that says the AI plane was never asked. Defaulting it to a failure mode sends the operator to debug a timeout that never happened, and hides the fact that the AI path was not live'
+        }
+        @{
+            # The credential a DSN carried has to reach the driver. ParseDSN read it and
+            # ApplyDSN discarded it, while Open only ever attached a role on the branch
+            # that had a password to attach - so postgres://user:pass@host/db, the one
+            # form that carries a password when SP_DATABASE_PASSWORD is unset, reached
+            # pgx naming no role at all and pgx read the OS account instead.
+            name = 'a password carried in the DSN reaches the connection string'
+            file = 'internal\dbx\dsn.go'
+            from = '	if p.Password != "" {'
+            to   = '	if false && p.Password != "" { // REDCHECK RC-8'
+            test = 'TestADSNPasswordReachesTheConnectionString'
+            pkg  = './internal/dbx'
+            why  = 'the migrator was told to authenticate as the role the DSN names and authenticated as whoever ran it, so a correct DSN fails with a password error naming a user the operator never wrote down'
+        }
+        @{
+            # The other half, and it is a half on its own: the role has to be rendered
+            # into the connection string even when no password arrives with it.
+            name = 'the configured role reaches the connection string'
+            file = 'internal\dbx\dbx.go'
+            from = '	if c.User != "" {'
+            to   = '	if c.User != "" && false { // REDCHECK RC-9'
+            test = 'TestTheRoleReachesTheConnectionStringWithNoPasswordAtAll'
+            pkg  = './internal/dbx'
+            why  = 'ApplyDSN filled the user and every rendered DSN then dropped it, so a missing role is not a missing credential but a different identity, and pgx substitutes the OS account'
+        }
+        @{
+            # The refusal that had to survive putting a password into Config at all.
+            # Not decorative: fmt prints unexported struct fields under %v and %+v, so
+            # without String() a diagnostic written as "%+v" carries the credential into
+            # the log or the ticket it was pasted into. Red-checked by deleting the
+            # method, which compiles - the test reaches String() through %v.
+            name = 'a password held by Config cannot be printed out of it'
+            file = 'internal\dbx\dbx.go'
+            from = 'func (c Config) String() string { return c.DSN() }'
+            to   = '// REDCHECK RC-10: String() deleted'
+            test = 'TestTheRenderedDSNCarriesTheRoleAndNeverThePassword'
+            pkg  = './internal/dbx'
+            why  = 'DSN() is the field the startup log and every preflight report use, so the fix that let a DSN password reach the driver must not also let it reach a diagnostic'
         }
     )
 

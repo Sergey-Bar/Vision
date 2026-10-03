@@ -24,9 +24,15 @@ type Pool struct {
 	*pgxpool.Pool
 }
 
-// Config is the non-secret connection policy. The password is never here: it is
-// read from the encrypted secret store at connect time and passed to the driver
+// Config is the connection policy. It holds no secret by default: the password is
+// read from the encrypted secret store at connect time and handed to the driver
 // directly, so it cannot land in a config file, a log line, or a process dump.
+//
+// The one exception is the unexported `password` field below, which is populated
+// only when the DSN itself carried a password and which no rendering of a Config
+// can print. That is a deliberate trade rather than a loosened policy: the
+// alternative was a DSN whose password was silently discarded, and a connection
+// that then authenticated as a role the operator never named.
 type Config struct {
 	Host                string
 	Port                int
@@ -40,6 +46,15 @@ type Config struct {
 	ApplicationName     string
 	connectionMaxWait   time.Duration
 	HealthCheckInterval time.Duration
+
+	// password is set only by ApplyDSN, and only from a DSN that carried one. It is
+	// unexported so that no caller can log it by naming the field, and String()
+	// exists so that no caller can log it by printing the struct - fmt prints
+	// unexported fields under %v and %+v, so without String() a diagnostic written
+	// as "%+v" would carry it into whatever the diagnostic was pasted into.
+	//
+	// The dedicated password variable still wins over this one. See Open.
+	password string
 }
 
 // DefaultConfig is the single-instance, single-site profile from the capacity
@@ -98,11 +113,56 @@ func ConfigForTarget(dsnFlag, envVar string) (Config, error) {
 }
 
 // DSN renders the connection string with the password omitted. Safe to log.
-func (c Config) DSN() string {
+func (c Config) DSN() string { return c.renderDSN("") }
+
+// String is what every fmt verb prints for a Config, and it is DSN().
+//
+// This is a control, not a convenience. fmt prints unexported struct fields under
+// %v and %+v, so once a Config could hold a password at all, the diagnostic
+// written as "%+v" - which is how two test files report what a Config held -
+// would have put the credential into the test output, and into whatever that
+// output was pasted into. Routing every rendering through the password-free DSN
+// is what keeps the field private in the only sense that counts.
+func (c Config) String() string { return c.DSN() }
+
+// connectionString is the string handed to the driver: the DSN with a role, and a
+// password resolved out of band or out of the URL.
+//
+// The role is attached unconditionally. Open used to attach it only on the branch
+// that had a password to attach, so a DSN naming a role and no password reached
+// pgx naming no role at all, and pgx filled the gap with the name of the OS
+// account. A migrator told to authenticate as `postgres` authenticated as whoever
+// ran it.
+//
+// An out-of-band password wins, so the dedicated variable stays authoritative and a
+// stale URL cannot override a deliberate one. A DSN password is used only when
+// nothing was supplied, which is the case it exists for: it is the only credential
+// available when SP_DATABASE_PASSWORD is unset.
+func (c Config) connectionString(outOfBand string) string {
+	if outOfBand == "" {
+		outOfBand = c.password
+	}
+	return c.renderDSN(outOfBand)
+}
+
+// renderDSN is the one place a connection string is built, and the only place a
+// password can enter one.
+func (c Config) renderDSN(password string) string {
 	u := url.URL{
 		Scheme: "postgres",
 		Host:   fmt.Sprintf("%s:%d", c.Host, c.Port),
 		Path:   "/" + c.Database,
+	}
+	if c.User != "" {
+		// Branched rather than always url.UserPassword, because that renders a bare
+		// trailing colon when the password is empty ("postgres://core@db/" would
+		// become "postgres://core:@db/"). DSN() is a log line and a preflight
+		// report; there is no reason for it to change shape.
+		if password == "" {
+			u.User = url.User(c.User)
+		} else {
+			u.User = url.UserPassword(c.User, password)
+		}
 	}
 	q := u.Query()
 	if c.SSLMode != "" {
@@ -113,18 +173,11 @@ func (c Config) DSN() string {
 	return u.String()
 }
 
-// Open builds a pool. password is supplied out of band, never read from a
-// config file or an environment variable that ends up in a diagnostic dump.
+// Open builds a pool. password is supplied out of band and takes precedence over
+// one carried in the DSN, so the dedicated variable stays the authoritative source
+// and a stale URL cannot override a deliberate one.
 func Open(ctx context.Context, cfg Config, password string) (*Pool, error) {
-	connStr := cfg.DSN()
-	if password != "" {
-		u, err := url.Parse(connStr)
-		if err != nil {
-			return nil, fmt.Errorf("dbx: parse dsn: %w", err)
-		}
-		u.User = url.UserPassword(cfg.User, password)
-		connStr = u.String()
-	}
+	connStr := cfg.connectionString(password)
 
 	poolCfg, err := pgxpool.ParseConfig(connStr)
 	if err != nil {
