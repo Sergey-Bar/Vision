@@ -30,12 +30,12 @@ rather than the per-package **schema** the plan asked for, because migration 000
 hardcodes `public` and a per-schema harness would apply **no row-level security at
 all**; the reason is in R13.
 
-**Verification:** `scripts/verify.ps1` green - twenty-one gates: contract-check
+**Verification:** `scripts/verify.ps1` green - twenty-two gates: contract-check
 across all three published contract surfaces, contract-sync, vet, gofmt,
 `golangci-lint` (including gosec), the generated-code check,
 `go test -race -count=1 -json -coverprofile ./...`, skip-audit, cover-floor, dead-export, predicate-cov,
-red-check, migration-phases, sql-guard, skills-audit, rules-lint, the RLS canary
-and the Python runtime suite - against a real Postgres 16, with
+red-check, migration-phases, sql-guard, skills-audit, rules-lint, the RLS canary,
+the Python runtime suite and the tree-state gate - against a real Postgres 16, with
 `SP_TEST_DATABASE_URL` set so the database-backed suites ran rather than skipped.
 `contractcheck` reports 20 messages and 22 enums compatible with the baseline, plus
 7 JSON Schemas (248 properties) and the OpenAPI document's 20 paths. No data
@@ -44,9 +44,10 @@ races. The most recent dated run record is
 of seventeen, zero failed, zero skipped, against a real database - including
 `recovery-drill`, which is the gate that skips whenever the database variable is
 absent, and which was the reason the previous run of that record was not evidence
-even though it was green. The twenty-one gates above are a later tree than that
-record: skip-audit, cover-floor, dead-export and predicate-cov were added after it, so the
-record's own gate list is a statement about that run, not about today's script.
+even though it was green. The twenty-two gates above are a later tree than that
+record: skip-audit, cover-floor, dead-export, predicate-cov and tree-state were added
+after it, so the record's own gate list is a statement about that run, not about
+today's script.
 `red-check` is 7 of 7 controls proved in 12 seconds; `skills-audit` is 1 second,
 because it checks freshness rather than rescanning 67 skills.
 
@@ -166,6 +167,45 @@ package the table mutates and requires green — a restore check that named pack
 by hand would stop covering one the moment a control was added somewhere new, and
 the gate meant to prove the table left the tree alone would be the gate not
 watching the table's own footprint.
+
+### Eight controls had no transcript at all, and the gate said so
+
+The new `tree-state` gate asserts that every red-check entry's name appears in this
+document. It failed on **eight of eleven** — the three DSN controls above had
+transcripts, and the other eight did not, so `scripts/verify.ps1` has been running
+them mechanically while this document claimed only that they had "been run by hand".
+
+They have now been, all eight, with the baseline recorded first because a
+transcript without a baseline is a list of exit codes:
+
+```
+ok  github.com/Sergey-Bar/Ai-Captain/internal/observations  0.295s
+ok  github.com/Sergey-Bar/Ai-Captain/internal/evidence      2.590s
+ok  github.com/Sergey-Bar/Ai-Captain/internal/rules        1.984s
+ok  github.com/Sergey-Bar/Ai-Captain/internal/dbx          0.236s
+baseline exit=0   (must be 0)
+```
+
+| Control | Mutation | What went red |
+|---|---|---|
+| a degraded observation without a reason is refused | `case o.Degraded != DegradationNone && ...` becomes `case false && o.Degraded != ...` | `TestADegradedObservationWithNoReasonIsRefused` FAIL on **all five** degradation values: `no_runtime`, `model_unavailable`, `timeout`, `absent`, `error` — each `a "<value>" degradation with no reason validated; the reason is the only thing that says the model was never asked` |
+| a non-degraded observation carrying a reason is also refused | `if o.Degraded == DegradationNone && ...` becomes `if false && o.Degraded == ...` | `TestANonDegradedObservationWithAReasonIsAlsoRefused` FAIL: `an observation that claims no degradation but carries a reason validated` |
+| a traversal-shaped path segment is refused | the segment regex `^(\.\.?|:|\\|//)` becomes `^(ZZZNOTHING)` | `TestValidateRefRejectsEveryTraversalForm` FAIL: `reference ":foo" was accepted` and `reference "a/:foo" was accepted` |
+| a NUL byte in a reference is refused | `strings.ContainsRune(ref, 0) {` becomes `false && strings.ContainsRune(ref, 0) {` | `TestValidateRefRejectsEveryTraversalForm` FAIL: `reference "a\x00b" was accepted` |
+| a degraded observation is not evidence | `!s.AIObservation.Degraded &&` becomes `!(s.AIObservation.Degraded && false) &&` | `TestDegradedObservationIsNotEvidence` FAIL: `a degraded observation corroborated an incident; degradation is not evidence`, and `degraded reason is "none", want timeout` |
+| insufficient evidence is not a negative answer | `!s.AIObservation.InsufficientEvidence` becomes `!(s.AIObservation.InsufficientEvidence && false)` | `TestInsufficientEvidenceIsNotANegativeAnswer` FAIL: `insufficient evidence was treated as corroboration` |
+| a missing observation reports the absent reason, not a default | `return DegradedAbsent` becomes `return DegradedTimeout` | `TestMissingAIObservationDegradesToUnverified` FAIL: `degraded reason is "timeout", want absent` |
+| a Config with no role is refused rather than attempted | `if cfg.User == "" {` becomes `if false && cfg.User == "" {` | `TestAConfigWithNoRoleIsRefusedRatherThanAttempted` FAIL: `Open returned a pool for a Config with no role. The driver resolves a missing role from the environment, which is the OS user, so this is the wrong identity` |
+
+Restore check afterwards, over every package the batch mutated:
+
+```
+ok  github.com/Sergey-Bar/Ai-Captain/internal/observations  0.107s
+ok  github.com/Sergey-Bar/Ai-Captain/internal/evidence      0.879s
+ok  github.com/Sergey-Bar/Ai-Captain/internal/rules        0.604s
+ok  github.com/Sergey-Bar/Ai-Captain/internal/dbx          0.108s
+restore exit=0   (must be 0)
+```
 
 **A DSN that carried its own password connected as somebody else. Four new
 controls, so the table holds eleven.** `cmd/security-migrate` was given

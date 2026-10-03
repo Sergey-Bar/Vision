@@ -50,6 +50,11 @@
                        owner, because a superuser suite cannot see a missing
                        tenant context
       ai-runtime       the AI runtime's contract in Python
+      tree-state       the tree's own state, which no compiler and no test asks
+                       about: no worktree frozen mid-merge, no red-check
+                       mutation left applied, no branch whose work a merge
+                       dropped, and no red-check control without a record of it
+                       being watched fail
 
     Deliberately absent: golangci-lint (not installed, and `make ci` covers it
     before a release) and the protoc regeneration check.
@@ -859,6 +864,25 @@ Invoke-Gate 'rules-lint' { & $go run ./cmd/securityctl rules lint --bundle rules
 # hash-chained design exists for — and burying it in a package count is how a
 # check stops being looked at.
 Invoke-Gate 'recovery-drill' { & $go test -p 1 -count=1 -timeout 900s -v -run TestRecoveryDrill ./internal/dr/... }
+
+# The tree's own state, which no compiler and no test asks about.
+#
+# Four assertions, and none of them is "the code is wrong": no worktree frozen
+# mid-merge, no red-check mutation left applied, no branch whose work a merge
+# dropped, no control in either red-check table without a record of it being watched
+# fail. Every one of those happened in this repository with `go build`, `go vet`,
+# `go test`, `gofmt` and `golangci-lint` all green, because they are defects of
+# STATE rather than of code and no tool that reads code can see them.
+#
+# It runs before `test` on purpose. A red-check mutation left in the tree makes every
+# later gate measure the broken version, so a run that reports fifteen failures
+# caused by one unrestored control is a worse run than one that reports one.
+Invoke-Gate 'tree-state' {
+    & $go test -count=1 -v ./internal/treestate/... 2>&1 |
+        Select-String -Pattern '^(---|    tree-state)' |
+        ForEach-Object { Write-Host "    $_" }
+    if ($LASTEXITCODE -ne 0) { exit 1 }
+}
 
 # The row-level-security canary is separated from the rest of the suite because
 # it is the one that connects as the production role rather than as the test
