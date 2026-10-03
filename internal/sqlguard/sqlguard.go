@@ -469,7 +469,7 @@ func createTableBlocks(sqlText string) []tableBlock {
 			i += open
 			continue
 		}
-		// `CREATE TABLE [IF NOT EXISTS] name` � the name is the last word before
+		// `CREATE TABLE [IF NOT EXISTS] name` — the name is the last word before
 		// the body opens.
 		name := lastIdentifier(rest[:open])
 		// Walk to the paren that closes the body, counting nesting so a
