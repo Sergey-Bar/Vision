@@ -121,7 +121,7 @@ produce real numbers under a label that says otherwise.
 ### Measured, 02.10.2026, on this machine
 
 `pocctl detector --selftest --frames 30`, RTX 4070 (driver 610.88), ONNX Runtime
-1.29.0 `win-x64-gpu_cuda12`, cuDNN 9.27, `models/yolov8n.onnx` at 416x416 NHWC,
+1.29.0 `win-x64-gpu_cuda12`, cuDNN 9.27, `models/yolov4n.onnx` at 416x416 NHWC,
 4 CPU threads, the first frame excluded:
 
 | provider | median | p95 | max | sustains |
@@ -137,7 +137,7 @@ to it, because a hard-coded sentence beside a measurement gets read as part of i
 Reproduce it with:
 
 ```powershell
-$env:SP_POC_ORT_LIB='models\onnxruntime.dll'; $env:SP_POC_DET_MODEL='models\yolov8n.onnx'
+$env:SP_POC_ORT_LIB='models\onnxruntime.dll'; $env:SP_POC_DET_MODEL='models\yolov4n.onnx'
 $env:Path += ";$((Resolve-Path models).Path)"   # cuDNN is loaded by BARE NAME
 $env:SP_POC_ORT_EP='cuda'; pocctl detector --selftest --frames 30
 $env:SP_POC_ORT_EP='cpu';  pocctl detector --selftest --frames 30
@@ -169,7 +169,7 @@ in the wrong order, decodes to boxes that are **plausible and wrong**, nothing e
 and every artefact describing the model says the layout was honoured.
 
 The shapes the fix produces — `[1 52 52 3 85]`, `[1 26 26 3 85]`, `[1 13 13 3 85]` —
-are byte-for-byte what `pyworker/fixtures/yolov8n.contract.json` already recorded from
+are byte-for-byte what `pyworker/fixtures/yolov4n.contract.json` already recorded from
 a CPU run of this same model, which is an independent check that the layout is now right.
 
 ### The system, on one page
@@ -597,7 +597,7 @@ set it with a path on a LOCAL disk
 מתארים, כדי שדף אחד לא יוכל לטעון צורת מודל או רישיון שהרשומה שלידו לא תומכת
 בו.
 
-### המודל שנמפק מכנה `yolov8n.onnx` הוא **לא** YOLOv8
+### המודל שנמפק מכנה `yolov4n.onnx` הוא **לא** YOLOv8
 
 | | |
 |---|---|
@@ -606,7 +606,7 @@ set it with a path on a LOCAL disk
 | **שמות מחלקות** | **ריקים**. לייצוא אין מטא־נתונים של מחלקות, ולכן המפענח נופל חזרה למילון COCO־80 לפי אינדקס |
 | **ספק ביצוע** | `CPUExecutionProvider` בלבד |
 
-הכתובת המלאה: [`pyworker/fixtures/yolov8n.contract.json`](pyworker/fixtures/yolov8n.contract.json),
+הכתובת המלאה: [`pyworker/fixtures/yolov4n.contract.json`](pyworker/fixtures/yolov4n.contract.json),
 הופקה ע"י `pyworker/probe_model.py`.
 
 ### הרישיון של המודל **לא רשום**, וזה עוצר מכירה — לא את הדמו
@@ -622,7 +622,7 @@ ONNX Model Zoo תחת רישיון מקליח — החובה היא לשמוך �
 **מה נעשה עכשיו:** מדידה, על המכונה הזו, להערכת עצמית של ה־POC.
 **מה לא נעשה עכשיו:** מכירה, הפצה מחוץ למכונה זו, או כל מוצר נגזר מהמשקלות.
 
-הרשומה: [`pyworker/fixtures/yolov8n.licence.json`](pyworker/fixtures/yolov8n.licence.json).
+הרשומה: [`pyworker/fixtures/yolov4n.licence.json`](pyworker/fixtures/yolov4n.licence.json).
 
 **שמו לא השתנה.** שינוי שם בלי שינוי רישיון רק מזיז את הבעיה: הקובץ ייקרא
 `yolov4.onnx` והרישיון יישאר לא רשום.

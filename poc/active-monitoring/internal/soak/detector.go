@@ -44,14 +44,19 @@ func NewORTDetector(d *ortdetect.Detector) (*ORTDetector, error) {
 	return &ORTDetector{d: d, lat: d.Latencies()}, nil
 }
 
-// Detect measures one frame and reports what it found and what it cost.
-func (a *ORTDetector) Detect(seq uint64, rgb []byte, w, h int) DetectAnswer {
-	ans := a.d.Detect(seq, rgb, w, h)
+// Detect measures one frame, or one crop of it, and reports what it found and what it
+// cost.
+//
+// The zero Rect is the whole frame, so every call site that had no crop pass before the
+// parameter existed is unchanged by it.
+func (a *ORTDetector) Detect(seq uint64, rgb []byte, w, h int, crop ortdetect.Rect) DetectAnswer {
+	ans := a.d.Detect(seq, rgb, w, h, crop)
 	out := DetectAnswer{
 		State:     ans.State,
 		Telemetry: ans.Telemetry,
 		LatencyMS: ans.LatencyMS,
 		Refusal:   ans.Refusal,
+		Crop:      ans.Crop,
 	}
 	// The boxes are COPIED, not aliased. The detector reuses its buffers between
 	// frames, so an aliased slice would be rewritten by the next frame while the

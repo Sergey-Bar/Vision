@@ -434,8 +434,8 @@ func (n *Normalizer) loadDrift(ctx context.Context, in Input) (driftReading, err
 // readDrift reads one device_clocks row, or Found=false when there is none.
 //
 // The read is scoped to the site as well as the tenant. `device_clocks` is a
-// site-scoped table and the RLS policy meant to enforce that is PERMISSIVE � it
-// is ORed away by `tenant_isolation` � so the site constraint does not exist at
+// site-scoped table and the RLS policy meant to enforce that is PERMISSIVE — it
+// is ORed away by `tenant_isolation` — so the site constraint does not exist at
 // the database layer. Binding it here means the statement is correct on its own
 // terms and needs no change when the policy becomes RESTRICTIVE.
 func (n *Normalizer) readDrift(ctx context.Context, tenant, site, deviceID string) (driftReading, error) {

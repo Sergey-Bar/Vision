@@ -55,17 +55,34 @@ Always confirm they actually ran.
 
 ```powershell
 docker run -d --name sp-pg -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres `
-  -e POSTGRES_DB=security_test -p 55432:5432 postgres:16
+  -e POSTGRES_DB=security_test -p 55432:5432 postgres:16 -c max_connections=300
 $env:SP_TEST_DATABASE_URL='postgres://postgres@127.0.0.1:55432/security_test?sslmode=disable'
 $env:SP_TEST_DATABASE_PASSWORD='postgres'
 go run ./cmd/security-migrate up
-go test -p 1 -count=1 ./...
+go test -p 8 -count=1 ./...
 ```
 
-`-p 1` is not optional. The database-backed suites share one database and
-rebuild the schema, so package test binaries must not run concurrently; without
-it one suite's `DROP SCHEMA` lands inside another's test and the failures look
-like product bugs.
+**`-p 1` is no longer required, and the container needs a bigger
+`max_connections` than the default.** Each database-backed package now gets its
+own database, derived from its own directory, and the harness points
+`SP_TEST_DATABASE_URL` at it before anything reads it — so `go test -p 8 ./...` is
+safe and is what `scripts/verify.ps1` runs. Two consequences for the test
+instance:
+
+- **Raise `max_connections`.** Postgres defaults to 100 for the cluster. Eight
+  packages, each with a pool plus a second pool where the test needs a different
+  role, goes over that, and the failure is `sorry, too many clients already` on
+  whichever connection arrived last — which reads as a product bug. The setting is
+  passed to `postgres` itself rather than through `docker -c`, because Docker's `-c`
+  is `--cpu-shares` and silently wants an integer.
+- **Roles are cluster-wide, so the harness creates them once.** Migration 0008
+  creates `security_core` and its four siblings with an `IF NOT EXISTS` guard
+  that is not atomic against another session. With per-package databases, eight
+  concurrent `CREATE ROLE security_core` produce `tuple concurrently updated` out
+  of `pg_authid` — a catalog the databases do not share, so the migrator's own
+  advisory lock does not cover it (a one-argument `pg_advisory_lock` is scoped to
+  the current database). `internal/testutil` creates them under a lock on the
+  maintenance database before any package migrates.
 
 `go test -coverprofile=coverage` writes a plain file at the repo root. It is
 ignored; do not stage it. Same for `__pycache__/`.

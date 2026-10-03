@@ -315,7 +315,6 @@ func signalsFrom(d Detail) (rules.Signal, []rules.Signal) {
 			SourceEventID: ev.SourceEventID,
 			EventType:     ev.EventType,
 			NormalizedAt:  ev.NormalizedAt,
-			ObservedAt:    ev.ObservedAt,
 			DeviceID:      ev.DeviceID,
 			ZoneID:        ev.ZoneID,
 			ClockDriftMS:  ev.ClockDriftMS,

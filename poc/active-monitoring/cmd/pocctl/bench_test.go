@@ -48,8 +48,8 @@ func TestARunBenchmarkRefusesToOpenAModel(t *testing.T) {
 		lib, model string
 	}{
 		{"a library only", `models\onnxruntime.dll`, ""},
-		{"a model only", "", "models/yolov8n.onnx"},
-		{"both", `models\onnxruntime.dll`, "models/yolov8n.onnx"},
+		{"a model only", "", "models/yolov4n.onnx"},
+		{"both", `models\onnxruntime.dll`, "models/yolov4n.onnx"},
 		{"a relative library", "onnxruntime.dll", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

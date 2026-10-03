@@ -1,0 +1,46 @@
+{
+  "note": [
+    "The declared skips. Every entry names a test that is allowed to skip and says why.",
+    "",
+    "A skip is a suite whose assertions did not run, so the default answer is that it is a",
+    "failure. `internal/skipaudit` reads this file and fails the gate on anything not declared",
+    "here. The list is printed on every verification run whether or not its entries fired, because",
+    "an exemption list nobody re-reads is one that gets widened without anybody noticing.",
+    "",
+    "The rules this file has to keep:",
+    "  - one test per entry, named `package.Test`, never a package",
+    "  - `why` is mandatory and the gate refuses a blank one",
+    "  - `when`, when present, names the GOOS values the declaration applies to. A skip gated on a",
+    "    platform is conditional in BOTH directions: on the other platform the test runs, so an",
+    "    unscoped declaration would be reported as stale there, and a gate that can only be",
+    "    satisfied on one platform is a gate that gets disabled on the other",
+    "  - a declaration for a test that no longer skips on its platform FAILS the gate, so a removed",
+    "    test cannot leave behind an exemption for whatever gets named next",
+    "  - a missing file is a refusal, not an empty allow-list",
+    "",
+    "These five were read off a real run rather than guessed. Each entry below is a skip this",
+    "repository already makes deliberately, in every run, on this machine."
+  ],
+  "declared": [
+    {
+      "test": "internal/evidence.TestSymlinkEscapeIsRefused",
+      "when": "windows",
+      "why": "creating a symlink on Windows needs SeCreateSymbolicLinkPrivilege, which a test must not assume. This is the strongest evidence-path control in the repository -- a symlink planted inside the evidence root is the escape a path-string validator cannot catch -- so the gate does not pretend a Windows run covered it. It runs on Linux, which is the only platform the product installs on."
+    },
+    {
+      "test": "internal/evidence.TestKilledMidStore_Helper",
+      "when": "windows,linux,darwin",
+      "why": "This is not a test; it is the child process of the kill -9 fault-injection drill at TestKilledMidStore, and it is a Test function only so it can reuse the test binary rather than being a second program. It is gated on an environment variable so an ordinary run does nothing. It appears in every run's skip list, which is noise with a name on it; renaming it would require a separate main package for no other gain, and this entry is what makes the noise accounted for."
+    },
+    {
+      "test": "internal/lifecycle.TestTheEnvironmentFileIsNotWorldReadable",
+      "when": "windows",
+      "why": "Entirely mode assertions. Windows has a read-only flag and nothing else: os.Chmod cannot express 0640 and os.Stat reports a synthesised mode, so running this on Windows would be testing NTFS. Unlike the installer's equivalent, the whole test IS the mode assertion, so a conditional rather than a skip would be an empty test."
+    },
+    {
+      "test": "internal/lifecycle.TestAPreservedEnvironmentFileIsTightenedOnReinstall",
+      "when": "windows",
+      "why": "The same POSIX-modes condition as TestTheEnvironmentFileIsNotWorldReadable, on the re-install path: a preserved env file left world-readable by an older installer must be tightened, and the assertion is a permission bit. Windows cannot express one, so the control runs on Linux only."
+    }
+  ]
+}

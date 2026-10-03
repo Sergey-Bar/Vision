@@ -371,7 +371,7 @@ func probeClip(path string, det *ortdetect.Detector, record *ContractRecord, in 
 	var haveTelemetry bool
 
 	for i, fr := range frames {
-		ans := det.Detect(uint64(i), fr, w, h)
+		ans := det.Detect(uint64(i), fr, w, h, ortdetect.Rect{})
 		record.Frames++
 		if ans.Refusal != nil {
 			record.Refused++

@@ -66,7 +66,7 @@ func TestABundleWithWarningsStillDecides(t *testing.T) {
 // bundle that could not be stored is a bundle that cannot reach the pipeline.
 func TestABundleWithAnErrorNeverReachesThePipeline(t *testing.T) {
 	// A bundle with an error-level problem is refused at the store, and the
-	// harness's own `setup` treats a problem as fatal � so the store's gate is
+	// harness's own `setup` treats a problem as fatal — so the store's gate is
 	// what is under test here, and it is the gate that decides whether such a
 	// bundle can ever reach the pipeline at all.
 	//

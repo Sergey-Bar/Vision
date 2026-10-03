@@ -7,10 +7,10 @@
     {
       "id": "alarm",
       "class": "alarm",
-      "version": "v2",
-      "file": "alarm.v2.txt",
-      "supersedes": "v1",
-      "revision_reason": "Adds the frame-text-is-evidence rule. v1 had no instruction-injection guard, so nothing in the prompt told the model that a sign inside the clip is a picture rather than a command. testdata/injection-hostile.mp4 is the fixture the guard was written against, and it is `synthetic`: colour bars, one filled rectangle and rendered text, with no third-party material anywhere in it."
+      "version": "v3",
+      "file": "alarm.v3.txt",
+      "supersedes": "v2",
+      "revision_reason": "The prompt now says what the local pipeline actually did, parameterised by the detected class. v2 told the model 'cheap arithmetic on pixels: it found that something changed... It has no idea what the change is', which is TRUE of a novelty run and FALSE of a detector run that placed a box on a bird it was confident about. Telling the model its own evidence is weaker than it is is the same defect class as reporting a confidence nobody measured: the answer is produced from a false premise about the input. v3 states both shapes honestly and substitutes the detected class into the detection branch, so one prompt serves every source and there is still no prompt per class. Everything else in v2 is carried forward UNCHANGED, including the verdict vocabulary, the strictness about false_positive, and the whole frame-text-is-evidence section whose fixture is still testdata/injection-hostile.mp4, so the guard's own evidence is not invalidated by this revision. The prompt id is unchanged; this is a version bump and not a new prompt file, and answers produced under v2 are NOT comparable with these."
     },
     {
       "id": "camera_integrity",

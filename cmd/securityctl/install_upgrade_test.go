@@ -145,9 +145,17 @@ func TestInstallPutsTheBinariesTheUnitsAndTheStateOnDisk(t *testing.T) {
 		t.Error("the environment template ships a placeholder value for a required variable")
 	}
 
-	requirePOSIXModesOnThisHost(t)
-	assertMode(t, unit, 0o644, "systemd reads the unit as a different account")
-	assertMode(t, site.envFile, 0o640, "it carries SP_DATABASE_URL and the path to the secret key")
+	// The mode assertions, and only those, are POSIX-only. The previous version of
+	// this called a helper that called `t.Skip`, which aborted the *whole* test on
+	// Windows — so the comment claiming "the rest of this test still runs" was
+	// false, and an install test that verifies the unit's ExecStart, the
+	// EnvironmentFile, every hardening line and the absence of a placeholder
+	// credential ran on Linux and nowhere else. `internal/skipaudit` found it by
+	// naming the skip, which is the point of naming it.
+	if posixModesAvailable() {
+		assertMode(t, unit, 0o644, "systemd reads the unit as a different account")
+		assertMode(t, site.envFile, 0o640, "it carries SP_DATABASE_URL and the path to the secret key")
+	}
 
 	if !strings.Contains(out, "installed 0.1.0") {
 		t.Errorf("the install did not report what it installed:\n%s", out)
@@ -193,8 +201,10 @@ func TestAnUpgradeReplacesTheProgramAndPreservesTheOperatorSEnvFile(t *testing.T
 		t.Errorf("the environment file after the upgrade is:\n%s\nwant the operator's own:\n%s",
 			got, operatorEdit)
 	}
-	requirePOSIXModesOnThisHost(t)
-	assertMode(t, site.envFile, 0o640, "a preserved env file is still a secrets file")
+	// POSIX-only, and only this assertion — see the note in the install test.
+	if posixModesAvailable() {
+		assertMode(t, site.envFile, 0o640, "a preserved env file is still a secrets file")
+	}
 
 	// Replaced: the program, wholesale. B's bytes, B's new file, and none of A's
 	// that B dropped. A partial merge is what leaves a site running two versions'
@@ -705,24 +715,30 @@ func sha256Hex(b []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// requirePOSIXModesOnThisHost skips the mode assertions where the filesystem has
-// no modes to assert.
+// posixModesAvailable reports whether this host's filesystem has permission modes
+// worth asserting.
 //
 // Windows has a read-only flag and nothing else: os.Chmod there cannot express
 // 0640 and os.Stat reports a synthesised mode. The control is about a Linux
-// install, which is the only place this product is installed; a Windows run of
-// the mode assertions would be testing NTFS. It is skipped, loudly, and the rest
-// of the install is still asserted on every platform.
-func requirePOSIXModesOnThisHost(t *testing.T) {
-	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows has no POSIX permission bits; the mode assertions are about a " +
-			"Linux install. The rest of this test still runs")
-	}
-}
+// install, which is the only place this product is installed; a Windows run of the
+// mode assertions would be testing NTFS.
+//
+// It is a predicate rather than a `t.Skip` on purpose. The previous version
+// skipped the whole test, which meant the installer was verified on Linux and
+// nowhere else — the unit's ExecStart, the EnvironmentFile, every hardening line
+// and the absence of a placeholder credential were all inside the skipped region
+// of a test whose own comment claimed otherwise. A platform-gated assertion is a
+// conditional; a platform-gated test is a coverage hole wearing a reason.
+func posixModesAvailable() bool { return runtime.GOOS != "windows" }
 
+// assertMode checks one file's permission bits, or reports that this host has
+// none. It is the assertion, not a skip: a caller that reaches it on a host with
+// no modes has made a logic error rather than a platform one.
 func assertMode(t *testing.T, path string, want os.FileMode, why string) {
 	t.Helper()
+	if !posixModesAvailable() {
+		t.Fatalf("assertMode was called on a host with no POSIX permission bits: %s", path)
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatalf("stat %s: %v", path, err)

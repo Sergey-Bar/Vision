@@ -9,6 +9,42 @@ import (
 
 // The search scan, at the layer that owns the SQL.
 
+// TestAnAnswerWithNoClipPrintsBoundsNotRecorded guards `EvidenceBounds`.
+//
+// `CardAction` already refuses to call such a card "the recorded window", and the
+// bounds printed beside that verdict used to say the opposite: a zero time rendered
+// as RFC3339 is "0001-01-01T00:00:00Z .. 0001-01-01T00:00:00Z", which reads as a
+// measured window and not as an absence. Two renderings of one fact, and the reader
+// is left to decide which one they believe.
+//
+// The mutation is the `if h.TimeBegin.IsZero() || h.TimeEnd.IsZero()` guard.
+func TestAnAnswerWithNoClipPrintsBoundsNotRecorded(t *testing.T) {
+	noClip := SearchHit{DetectionID: "d-1", AIState: "asked_answered"}
+	if got := EvidenceBounds(noClip); got != "bounds NOT RECORDED" {
+		t.Fatalf("EvidenceBounds with no clip = %q; a zero time reads as a window at the year 1", got)
+	}
+	if got := EvidenceWindow(noClip); got != ActionNone {
+		t.Fatalf("EvidenceWindow with no clip = %q, want %q", got, ActionNone)
+	}
+	half := noClip
+	half.TimeBegin = time.Date(2026, 9, 30, 10, 0, 0, 0, time.UTC)
+	if got := EvidenceBounds(half); got != "bounds NOT RECORDED" {
+		t.Fatalf("EvidenceBounds with one bound = %q; half a window is not a window", got)
+	}
+	withClip := noClip
+	withClip.StorageRef = "clips/d1.mp4"
+	withClip.SHA256 = strings.Repeat("e", 64)
+	withClip.TimeBegin = time.Date(2026, 9, 30, 10, 0, 3, 0, time.UTC)
+	withClip.TimeEnd = time.Date(2026, 9, 30, 10, 0, 7, 0, time.UTC)
+	got := EvidenceBounds(withClip)
+	if !strings.Contains(got, "2026-09-30T10:00:03Z") || !strings.Contains(got, "2026-09-30T10:00:07Z") {
+		t.Fatalf("EvidenceBounds with a clip = %q, want the two bounds", got)
+	}
+	if strings.Contains(EvidenceWindow(withClip), "NOT RECORDED") {
+		t.Fatal("a card with a clip says its bounds were not recorded")
+	}
+}
+
 // TestThePartitionIsExhaustive guards the `Answered` column of `searchSummary`.
 //
 // It used to count rows that merely HAD an observation, which counts a `degraded`

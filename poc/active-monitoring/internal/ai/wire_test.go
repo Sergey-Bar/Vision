@@ -65,7 +65,7 @@ func TestTheSidecarTelemetryShapeIsAccepted(t *testing.T) {
 		"boxes":    []Box{},
 		"width":    640,
 		"height":   360,
-		"model":    "yolov8n.onnx",
+		"model":    "yolov4n.onnx",
 		"infer_ms": 12.5,
 	}
 	telemetry := map[string]any{}

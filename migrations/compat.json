@@ -1,8 +1,8 @@
 {
   "minSchemaVersion": 1,
-  "maxSchemaVersion": 21,
+  "maxSchemaVersion": 22,
   "minCoreVersion": "0.1.0",
   "maxCoreVersion": "0.x",
   "contractsVersion": "security/v1",
-  "notes": "M1 schema window. Every release widens the window, never narrows it inside an expand window: the previous binary must remain usable until the matching contract step has shipped and been observed in the field."
+  "notes": "M1 schema window. Every release widens the window, never narrows it inside an expand window: the previous binary must remain usable until the matching contract step has shipped and been observed in the field. Widened to 22 by 0022_observation_hosted_attribution.expand.sql, which is expand-only: it drops a NOT NULL and adds columns and a CHECK, so a binary that predates it reads a database with an extra nullable column and ignores it, which is the direction that window exists to permit."
 }

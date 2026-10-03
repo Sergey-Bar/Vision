@@ -18,13 +18,19 @@ type Signal struct {
 	EventID       string
 	SourceEventID string
 	EventType     string
-	NormalizedAt  time.Time
-	ObservedAt    time.Time
-	DeviceID      string
-	ZoneID        string
-	DeviceKind    string
-	DeviceTags    []string
-	ZonePath      string
+	// NormalizedAt is the drift-corrected instant, and it is the only time a
+	// condition may read. `ObservedAt` used to sit beside it, unread, which is
+	// worse than not having it: a field that is present, correctly typed and
+	// documented is one line away from being used by the next person to write a
+	// time-window condition, and the day it is used the window is a window on the
+	// camera's belief about itself. `internal/predicatecov` now reports the field
+	// as well as the read, so it cannot come back quietly.
+	NormalizedAt time.Time
+	DeviceID     string
+	ZoneID       string
+	DeviceKind   string
+	DeviceTags   []string
+	ZonePath     string
 	// ClockDriftMS is the measured drift of the signal's device, already
 	// applied to NormalizedAt.
 	ClockDriftMS int32

@@ -162,7 +162,7 @@ func benchImages(flags map[string]string) error {
 		if err != nil {
 			return fmt.Errorf("bench: %s: %w", img.Path, err)
 		}
-		ans := det.Detect(0, rgb, w, h)
+		ans := det.Detect(0, rgb, w, h, ortdetect.Rect{})
 		dets := make([]bench.Detection, 0, len(ans.Boxes))
 		for _, b := range ans.Boxes {
 			dets = append(dets, bench.Detection{Frame: img.Name, Box: b})

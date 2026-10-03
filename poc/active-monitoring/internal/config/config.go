@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/Sergey-Bar/ai-captain-poc/internal/classify"
+	"github.com/Sergey-Bar/ai-captain-poc/internal/novelty"
 	"github.com/Sergey-Bar/ai-captain-poc/internal/ortdetect"
 )
 
@@ -160,7 +161,7 @@ var schema = []field{
 		Remedy:      "set SP_POC_AI_ADDR=127.0.0.1:8099"},
 	{Name: "SP_POC_AI_MODEL", kind: kindString, when: "SP_POC_TRIGGER_MODE=sidecar",
 		Consequence: "preflight cannot load the model, and a run that starts without it dies in minute one",
-		Remedy:      "set SP_POC_AI_MODEL to the path of an ONNX file, e.g. models\\yolov8n.onnx"},
+		Remedy:      "set SP_POC_AI_MODEL to the path of an ONNX file, e.g. models\\yolov4n.onnx"},
 	{Name: "SP_POC_SIDECAR_SCRIPT", kind: kindString, when: "SP_POC_TRIGGER_MODE=sidecar",
 		Consequence: "there is no Python worker to send frames to, and every detection would be not_asked",
 		Remedy:      "set SP_POC_SIDECAR_SCRIPT=pyworker/server.py"},
@@ -244,7 +245,7 @@ var schema = []field{
 		Remedy:      "set SP_POC_CLASSES=vehicle,person — a family name or a raw class name; both are accepted, and an entry that is neither is refused by name"},
 	{Name: "SP_POC_AI_ANCHORS", kind: kindString, when: "SP_POC_TRIGGER_MODE=sidecar",
 		Consequence: "an ANCHORED export — one that publishes an output per stride — cannot be decoded without its anchor boxes, and they are in the model's .cfg rather than in the ONNX file. Without them the sidecar refuses the model by name rather than answering 'no objects' for every frame of the run",
-		Remedy:      "set SP_POC_AI_ANCHORS=models\\yolov8n.anchors.txt for an anchored export, or SP_POC_AI_ANCHORS=none to STATE that this model is a fused export and needs none. 'none' rather than an empty value, because a variable set to nothing has said nothing and this module treats it as unset"},
+		Remedy:      "set SP_POC_AI_ANCHORS=models\\yolov4n.anchors.txt for an anchored export, or SP_POC_AI_ANCHORS=none to STATE that this model is a fused export and needs none. 'none' rather than an empty value, because a variable set to nothing has said nothing and this module treats it as unset"},
 	{Name: "SP_POC_MIN_BOX_AREA", kind: kindFloat,
 		Consequence: "a box smaller than this fraction of the frame is a speck, a shadow edge or a letterbox band, and a line-crossing machine that counts specks produces crossings that never happened",
 		Remedy:      "set SP_POC_MIN_BOX_AREA=0.0005"},
@@ -260,9 +261,27 @@ var schema = []field{
 	{Name: "SP_POC_REPORT_METRICS", kind: kindString,
 		Consequence: "the classifier's detection quality and the pipeline's event quality are different measurements, and a report written against both at once is comparable with neither",
 		Remedy:      "set SP_POC_REPORT_METRICS=detectors or SP_POC_REPORT_METRICS=events — exactly one, and no default, because a report whose metric set was inferred would be comparable with a report that chose"},
-	{Name: "SP_POC_ZONES", kind: kindString,
-		Consequence: "there is no line to cross, so the line-cross machine can never reach done and every detection is lost",
-		Remedy:      "set SP_POC_ZONES=testdata\\zones.json"},
+	// STRUCTURAL, and it is the one place a variable is optional because the primary
+	// configuration is its ABSENCE. An empty zones value means PRESENCE MODE: every
+	// tracked object that holds still long enough is reported, with no line drawn and
+	// nothing to configure.
+	//
+	// The refusal that used to sit here said "there is no line to cross, so the
+	// line-cross machine can never reach done and every detection is lost". That was
+	// written when crossing was the only mode, and it has the shape of every other
+	// refusal in this table: a stated consequence and a stated remedy. What changed is
+	// that the consequence is no longer true. `detect.Engine` grew a presence path, and
+	// a line-less zone is now a real zone with a real answer.
+	//
+	// This is NOT a silent default. "The operator configured nothing and got a different
+	// detector than last week" is the failure this whole table exists to prevent. The
+	// difference is that the value is NAMED, the absence is the primary intended
+	// configuration rather than a fallback, and the mode the run is actually in is
+	// printed on the report, the screen and the run row. `watch` logs which one it is
+	// on at startup, in a line, by name.
+	{Name: "SP_POC_ZONES", kind: kindString, structural: true, structuralVal: "",
+		Consequence: "the run is in PRESENCE MODE: there is no line, so every tracked object that is seen often enough is reported once, with its class and its measured box, and nothing has to be drawn or configured first. Set SP_POC_ZONES to a zone file to switch to line-crossing mode, where only objects that cross a named line are reported",
+		Remedy:      "leave SP_POC_ZONES unset for presence mode, or set SP_POC_ZONES=testdata\\zones.json for line-crossing mode. Setting it back is the whole of the rollback: one variable, no state to unwind"},
 	{Name: "SP_POC_COOLDOWN_MS", kind: kindDuration,
 		Consequence: "one bird crossing twice would create two events, and the event rate in the report would be a function of jitter",
 		Remedy:      "set SP_POC_COOLDOWN_MS=10s"},
@@ -286,7 +305,7 @@ var schema = []field{
 	// whose precision number names a file nobody chose.
 	{Name: "SP_POC_DET_MODEL", kind: kindString, when: "SP_POC_TRIGGER_MODE=detector",
 		Consequence: "the run has no detector. `detector` mode without a model is a run that decodes frames, draws nothing, and reports a zero detection rate with no error — which is what the previous build did for two real runs",
-		Remedy:      "set SP_POC_DET_MODEL=models\\yolov8n.onnx, and record its licence and SHA-256 with `pocctl fetch-runtime`"},
+		Remedy:      "set SP_POC_DET_MODEL=models\\yolov4n.onnx, and record its licence and SHA-256 with `pocctl fetch-runtime`"},
 	{Name: "SP_POC_DET_INPUT", kind: kindInt, when: "SP_POC_TRIGGER_MODE=detector",
 		Consequence: "the model has no input size to be letterboxed into. This is a model property and not a preference: a wrong value produces a session error or a silently wrong scale, and the second is the one that ships",
 		Remedy:      "set SP_POC_DET_INPUT=640 — read it from the session, not from a filename; `pocctl fixtureprobe` prints the declared shape"},
@@ -311,6 +330,54 @@ var schema = []field{
 	{Name: "SP_POC_BOX_LOG_FRAMES", kind: kindInt,
 		Consequence: "the per-frame box log is unbounded. SQLite here runs synchronous=FULL on one connection, so at 30 fps an unbounded log is the thing that makes AC1 fail on storage latency rather than on anything about detection",
 		Remedy:      "set SP_POC_BOX_LOG_FRAMES=20000 — at the cap every crossing frame is kept and every Nth of the rest, and the run records box_log_sampled with both counts"},
+
+	// --- the crop pass (SP_POC_TRIGGER_MODE=detector) ---
+	//
+	// Cheap perception proposes where to look; the expensive detector looks there at
+	// full resolution. Without it a whole-frame pass shrinks 1920x1080 to 416x416, a
+	// 4.6x downscale, and a bird 40 px across at 30 m arrives as EIGHT pixels, which is
+	// below the floor at which any detector is reliable. No threshold fixes that and no
+	// replacement model does either: it is what one downscaled pass over a wide frame IS.
+	// The same bird in a 200x150 crop arrives as roughly 100 px.
+	//
+	// The on/off switch is REQUIRED and not defaulted, on the same reasoning as
+	// SP_POC_CAMERA_INTEGRITY: the default here is the dangerous one. A run that cannot
+	// see a bird at 30 m, and a report claiming to report "everything that passes", are
+	// the same run, and nothing in its output says otherwise. "Did the operator mean to
+	// carry the crop pass" has to be something they said.
+	{Name: "SP_POC_CROP_PASS", kind: kindBool, when: "SP_POC_TRIGGER_MODE=detector",
+		Consequence: "the run does not say whether it carries the crop pass, so a run that can see a bird at 30 m and a run that cannot are indistinguishable afterwards, and neither is named in the output",
+		Remedy:      "set SP_POC_CROP_PASS=true to carry the crop pass; set it to false for one downscaled pass over the whole frame, which finds vehicles and people and is silent about everything smaller. False restores the previous behaviour exactly: no state to unwind"},
+	// The four knobs below are STRUCTURAL for the reason the novelty ones are: they are
+	// measurement settings whose values are stored beside every decision they produced,
+	// so a report prints the number rather than naming it. Each is gated on the crop pass
+	// being enabled, so a run that carries none is not asked about the cost of carrying
+	// one.
+	{Name: "SP_POC_CROP_MIN_AREA", kind: kindFloat, structural: true, structuralVal: "0.0004", when: "SP_POC_TRIGGER_MODE=detector",
+		Consequence: "a region smaller than this fraction of the frame is two cells of a 64-wide luma grid, which is the noise floor of a brightness difference rather than an object, and a crop pass that magnifies noise spends a full inference on it",
+		Remedy:      "set SP_POC_CROP_MIN_AREA=0.0004 — a fraction of the FRAME, not a pixel count, so it survives a change of resolution"},
+	{Name: "SP_POC_CROP_PAD", kind: kindFloat, structural: true, structuralVal: "0.35", when: "SP_POC_TRIGGER_MODE=detector",
+		Consequence: "a region is cropped at exactly its own edge, so an object that a connected component clipped to its brightest half is magnified with the rest of itself cut off, and the detector is asked about a partial object",
+		Remedy:      "set SP_POC_CROP_PAD=0.35 — a fraction of the region's own size, added on every side and clamped to the frame"},
+	{Name: "SP_POC_CROP_MAX_REGIONS", kind: kindInt, structural: true, structuralVal: "4", when: "SP_POC_TRIGGER_MODE=detector",
+		Consequence: "there is no ceiling on crops per frame, so a busy scene at 25 fps can issue an unbounded number of inferences and the detector becomes the frame-rate bottleneck rather than the novelty gate. What the ceiling left off is COUNTED and printed, because a cap that silently drops is a cap that lies",
+		Remedy:      "set SP_POC_CROP_MAX_REGIONS=4 — each crop is one more inference at roughly the whole-frame cost, so this is the run's dominant cost knob"},
+	{Name: "SP_POC_CROP_MIN_FRAMES", kind: kindInt, structural: true, structuralVal: "2", when: "SP_POC_TRIGGER_MODE=detector",
+		Consequence: "a crop-sourced track is held to the same minimum as a whole-frame one, and that minimum is calibrated for whole-frame evidence. A bird at 30 m is on screen about a second and a half, which at the detection rate is two or three samples, so a bird is erased by the very rule written to reject compression artefacts, and it is the smallest object the system exists to report",
+		Remedy:      "set SP_POC_CROP_MIN_FRAMES=2 — it must be at or below SP_POC_TRACK_MIN_FRAMES, and the validator refuses it above, because a lower bar that is higher is not a lower bar"},
+	// The novelty RATE is the other load-bearing parameter, and it is required rather
+	// than defaulted for the same reason SP_POC_CROP_PASS is: the default here is the
+	// one that quietly does not work.
+	//
+	// A bird at 30 m is on screen for about 1.5 s. It has to be PROPOSED at least three
+	// times in that window or it is never reliably cropped, and three proposals in 1.5 s
+	// is 2 per second. Two per second is not a margin, it is the floor, and it is
+	// reached only at the optimistic end of the dwell estimate. So the rate is named,
+	// the shortfall arithmetic is a REFUSAL rather than a note, and the gate reports
+	// what it actually achieved when the source cannot deliver what was asked for.
+	{Name: "SP_POC_NOVELTY_FPS", kind: kindInt, when: "SP_POC_TRIGGER_MODE=detector",
+		Consequence: "the run does not say how often it proposes regions, so a novelty rate that cannot cover the smallest object's dwell looks exactly like a detector that cannot see small objects. Those are different faults with different owners and the same symptom",
+		Remedy:      "set SP_POC_NOVELTY_FPS=0 to run the novelty pass on every decoded frame (the honest default for a one-camera POC, measured at 3.5 ms per 1080p frame), or set it to a rate and the validator refuses anything that cannot propose a region three times in the shortest dwell the system claims to report"},
 
 	// --- evidence ---
 	{Name: "SP_POC_CLIP_BEFORE_MS", kind: kindDuration,
@@ -605,7 +672,7 @@ type Config struct {
 	// stride needs anchors and one that publishes a single fused output does not.
 	// The anchors live in the model's `.cfg` and are NOT in the ONNX file, so
 	// there is nothing to infer them from and the sidecar refuses the model
-	// without this. See `models/yolov8n.anchors.txt` and `pocctl model-probe`.
+	// without this. See `models/yolov4n.anchors.txt` and `pocctl model-probe`.
 	AIAnchors string
 	// MinBoxArea is SP_POC_MIN_BOX_AREA: the smallest box, as a fraction of the
 	// frame area, treated as an object at all. Below it a box is a speck, a
@@ -632,8 +699,47 @@ type Config struct {
 	// comparable with a report that chose, and the whole point of the split is
 	// that they are different measurements.
 	ReportMetrics string
-	ZonesPath     string
-	Cooldown      time.Duration
+	// ZonesPath is SP_POC_ZONES, and it is EMPTY in the primary configuration.
+	//
+	// Empty means PRESENCE MODE: no line is drawn, nothing is configured, and every
+	// tracked object that is seen often enough is reported once with its class and its
+	// measured box. Non-empty means line-crossing mode, where only objects that cross a
+	// named line are reported.
+	//
+	// The rollback from presence to crossing is this one variable. That is what makes
+	// presence safe to ship as the default: there is no state to unwind and no second
+	// code path to keep in step.
+	ZonesPath string
+	Cooldown  time.Duration
+
+	// CropPass is SP_POC_CROP_PASS. See the schema entry for why it is required rather
+	// than defaulted.
+	CropPass bool
+	// CropMinArea is SP_POC_CROP_MIN_AREA: the smallest novelty region worth a crop, as
+	// a fraction of the frame.
+	CropMinArea float64
+	// CropPad is SP_POC_CROP_PAD: the context added around a region on every side, as a
+	// fraction of the region's own size.
+	CropPad float64
+	// CropMaxRegions is SP_POC_CROP_MAX_REGIONS, the ceiling on crops per frame. What it
+	// left off is counted, because a cap that silently drops is a cap that lies.
+	CropMaxRegions int
+	// CropMinFrames is SP_POC_CROP_MIN_FRAMES: the minimum number of sightings for a
+	// track whose box came from a magnified crop.
+	//
+	// It is the source-aware half of TrackMinFrames and it is why the minimum exists
+	// twice rather than being lowered globally. Lowering the global minimum re-admits
+	// exactly the single-frame shadow and artefact noise the rule was added to stop, and
+	// that would be visible in the false-positive rate.
+	CropMinFrames int
+	// NoveltyFPS is SP_POC_NOVELTY_FPS: how often the novelty pass runs, in passes per
+	// second. Zero means EVERY DECODED FRAME.
+	//
+	// It is load-bearing rather than a cost knob. Novelty is what PROPOSES the region a
+	// crop is taken from, so a region that is not proposed is not cropped and an object
+	// that is not cropped is never measured at the resolution that finds it. A bird at
+	// 30 m is on screen for about 1.5 s and needs three proposals in that window.
+	NoveltyFPS int
 
 	// --- the in-process ONNX detector ---
 	//
@@ -932,7 +1038,24 @@ func Load(lookup Lookup) (Config, error) {
 	integer(&cfg.MaxBoxesDrawn, "SP_POC_MAX_BOXES_DRAWN")
 	str(&cfg.AIAnchors, "SP_POC_AI_ANCHORS")
 	str(&cfg.ReportMetrics, "SP_POC_REPORT_METRICS")
-	str(&cfg.ZonesPath, "SP_POC_ZONES")
+	// An empty zones value is PRESENCE MODE, not a missing one, so `str` is given what
+	// to do with the empty string rather than refusing it. It is read through the
+	// ordinary `get` so it is still declared as seen: the dead-variable check at the end
+	// of Load panics on a schema entry nobody reads, and a variable that became optional
+	// by being special-cased out of `get` would be exactly that.
+	if raw, ok := get("SP_POC_ZONES"); ok {
+		cfg.ZonesPath = strings.TrimSpace(raw)
+	}
+	// The crop pass's five settings. They are read unconditionally rather than behind the
+	// detector-mode gate so the dead-variable check covers them too: the schema's own
+	// `when` has already refused to demand them outside detector mode, and a structural
+	// default fills them in.
+	boolean(&cfg.CropPass, "SP_POC_CROP_PASS")
+	flt(&cfg.CropMinArea, "SP_POC_CROP_MIN_AREA")
+	flt(&cfg.CropPad, "SP_POC_CROP_PAD")
+	integer(&cfg.CropMaxRegions, "SP_POC_CROP_MAX_REGIONS")
+	integer(&cfg.CropMinFrames, "SP_POC_CROP_MIN_FRAMES")
+	num(&cfg.NoveltyFPS, "SP_POC_NOVELTY_FPS")
 	dur(&cfg.Cooldown, "SP_POC_COOLDOWN_MS")
 	str(&cfg.DetModel, "SP_POC_DET_MODEL")
 	num(&cfg.DetInput, "SP_POC_DET_INPUT")
@@ -1126,6 +1249,20 @@ func MissingNames(err error) []string {
 // Validate checks the combinations that are wrong as a set rather than as
 // individual values. These are refusals by name and consequence too, because
 // they are the ones that are hardest to guess.
+// ceilDiv is a division that rounds UP, for the remedy half of a refusal.
+//
+// A refusal that names a remedy has to name a value that actually works. Rounding DOWN
+// here would print SP_POC_AI_FPS=1 for a minimum of 3 and a dwell of 2 s, which is still
+// one sample short, so an operator who followed the advice exactly would still be
+// refused. A refusal whose remedy does not work is worse than no remedy at all, because
+// it teaches people that the messages are approximate.
+func ceilDiv(a, b int) int {
+	if b <= 0 {
+		return a
+	}
+	return (a + b - 1) / b
+}
+
 func (c Config) Validate() error {
 	var errs []error
 	add := func(f string, format string, args ...any) {
@@ -1368,6 +1505,86 @@ func (c Config) Validate() error {
 	}
 	if c.TrackMinFrames < 1 {
 		add("SP_POC_TRACK_MIN_FRAMES", "%v frames; at least one is required, because a track that has been seen zero times is not an object", c.TrackMinFrames)
+	}
+	// The cross-check that was missing, and it is missing for a specific reason worth
+	// writing down: SP_POC_TRACK_MIN_FRAMES and SP_POC_AI_FPS were validated
+	// INDEPENDENTLY and behave as if no relationship exists, because no relationship had
+	// ever been stated. Nothing in this file related them, and the combination in which
+	// the minimum exceeds the samples a dwell time can produce was accepted.
+	//
+	// The consequence is not subtle and it is not a tuning matter. A vehicle crossing a
+	// frame at 30 km/h from 30 m is on screen for one to two seconds; at 2 detection
+	// samples a second that is 2 to 4 samples. A minimum of 3 is therefore already at the
+	// edge, and a bird 40 px across at 30 m, on screen for about the same second and a
+	// half, reaches 2 to 4 samples against a minimum of 3 and is erased HALF THE TIME.
+	// Not by the detector and not by resolution, but by the rule that exists to reject
+	// single-frame compression artefacts. The smallest object the system exists to
+	// report is the one the anti-jitter rule removes.
+	//
+	// So the combination is refused BY NAME, with the consequence and the remedy stated,
+	// in the same shape as every other refusal in this function. Two remedies are named
+	// because both are correct and the operator knows which one they meant: sample more
+	// often, or, and this is the one the crop pass exists for, accept that a magnified
+	// sighting is worth more per sample and set SP_POC_CROP_MIN_FRAMES below the global
+	// minimum.
+	if c.AIFPS > 0 && c.TrackMinFrames > 0 {
+		// The dwell window a crossing-sized object gets, in samples. Two seconds is the
+		// 1 to 2 s from the object's own arithmetic, taken at its LOW end: refusing on
+		// the pessimistic bound means a configuration is only accepted when it works for
+		// the shortest dwell the system claims to report, which is the only defensible
+		// way to phrase it.
+		const shortestDwellSeconds = 2
+		samples := c.AIFPS * shortestDwellSeconds
+		if c.TrackMinFrames > samples {
+			add("SP_POC_TRACK_MIN_FRAMES",
+				"%d samples required, but at SP_POC_AI_FPS=%d a crossing-sized object is on screen for about %d seconds and yields %d sample(s). The minimum can never be reached, so every object this run exists to report is silently dropped and the run reports a clean zero detections with no error.\n"+
+					"  Raise SP_POC_AI_FPS to at least %d, or lower SP_POC_TRACK_MIN_FRAMES to at most %d.\n"+
+					"  If the object is SMALL rather than slow, a bird at 30 m and not a lorry, the second remedy is SP_POC_CROP_MIN_FRAMES: a magnified sighting is a structurally better observation, and the crop pass is what makes two of them enough. Lowering the global minimum instead re-admits the single-frame shadow and artefact noise this rule was added to stop, and that shows up in the false-positive rate.",
+				c.TrackMinFrames, c.AIFPS, shortestDwellSeconds, samples,
+				ceilDiv(c.TrackMinFrames, shortestDwellSeconds), samples)
+		}
+	}
+	// The crop pass's own chain. Each is a single ordering or a single bound, and each of
+	// them is the difference between a crop pass that finds small objects and one that
+	// either cannot or costs more than it saves.
+	if c.CropPass {
+		if c.CropMinArea <= 0 || c.CropMinArea > 0.5 {
+			add("SP_POC_CROP_MIN_AREA", "%v is not a fraction of the frame between 0 and 0.5; a larger one would reject every region a camera can produce", c.CropMinArea)
+		}
+		if c.CropPad < 0 {
+			add("SP_POC_CROP_PAD", "%v is negative; a negative pad crops away part of the region it is meant to give context to", c.CropPad)
+		}
+		if c.CropMaxRegions < 1 {
+			add("SP_POC_CROP_MAX_REGIONS", "%d; at least one is required, because a crop pass that may infer nothing is a novelty engine with an inference budget of zero. Set it to 0 and SP_POC_CROP_PASS=false to say the run carries no crop pass", c.CropMaxRegions)
+		}
+		// The source-aware minimum is only meaningful when it is LOWER. A value above the
+		// global minimum applies the STRICTER bar to the better measurement, which is the
+		// opposite of what a magnified sighting is worth, and a report calling it
+		// "source-aware" would be describing a bar that never loosens.
+		if c.CropMinFrames < 1 {
+			add("SP_POC_CROP_MIN_FRAMES", "%d sightings; at least one is required, because a track that has been seen zero times is not an object", c.CropMinFrames)
+		} else if c.CropMinFrames > c.TrackMinFrames {
+			add("SP_POC_CROP_MIN_FRAMES",
+				"%d is above SP_POC_TRACK_MIN_FRAMES (%d), so the source-aware minimum holds a MAGNIFIED sighting to the STRICTER bar and there is no lower bar at all. The two measurements are not the same kind of evidence: a box found in a 200x150 crop arrives as roughly 100 px where the whole-frame pass delivered 8, and two of the former are worth more than two of the latter. Set SP_POC_CROP_MIN_FRAMES at or below SP_POC_TRACK_MIN_FRAMES, or drop SP_POC_TRACK_MIN_FRAMES if the whole-frame pass is not meant to report small objects at all",
+				c.CropMinFrames, c.TrackMinFrames)
+		}
+		// The novelty RATE against the smallest dwell the system claims to report.
+		//
+		// This is the refusal the crop pass's headline rests on. Novelty proposes the
+		// region, the crop measures it at a resolution that can find a bird at all, and
+		// so a rate that cannot propose a region often enough means the object is never
+		// cropped and never measured. The symptom is identical to a detector that
+		// cannot see small objects, which is why it has to be a refusal at startup and
+		// not a note in a report: the two faults have different owners and the same
+		// evidence.
+		//
+		// The arithmetic is the plan's own. A bird at 30 m is on screen about 1.5 s, and
+		// it needs three proposals in that window, so three proposals in 1.5 s is 2 per
+		// second, which is the floor rather than a margin.
+		if _, nerr := novelty.NoveltyRateCoversDwell(c.NoveltyFPS, novelty.SmallestDwellSeconds,
+			novelty.ProposalsNeededForACrop); nerr != nil {
+			add("SP_POC_NOVELTY_FPS", "%s", strings.TrimPrefix(nerr.Error(), "novelty: "))
+		}
 	}
 	if c.MaxBoxesDrawn < 1 {
 		add("SP_POC_MAX_BOXES_DRAWN", "%v; a cap of zero draws nothing and a picture with nothing on it is indistinguishable from a camera pointing at a wall", c.MaxBoxesDrawn)

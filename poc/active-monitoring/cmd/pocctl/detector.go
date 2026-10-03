@@ -119,6 +119,20 @@ func cmdDetector(args []string) error {
 
 	fmt.Println()
 	rows, err := liveCheck(cfg, frames)
+	// The crop-pass rows come off the SAME session, deliberately. A second session for
+	// the same weights would double the memory and report a different latency, and the
+	// comparison this command exists to make -- what a crop costs against a whole frame --
+	// is only a comparison on one device in one process.
+	if cropRows, cerr := cropCheckRowsFrom(cfg, frames); cerr != nil {
+		rows = append(rows, ortdetect.Check{
+			Name:  "crop pass: whole-frame vs crop",
+			State: ortdetect.StateFail,
+			Detail: fmt.Sprintf("%v. The rows above settle the DEVICE and this one needs it, so if they "+
+				"passed and this did not the fault is in the crop path rather than in the machine", cerr),
+		})
+	} else {
+		rows = append(rows, cropRows...)
+	}
 	for _, row := range rows {
 		fmt.Printf("  %-8s %s\n", row.State, row.Name)
 		for _, line := range wrapDetail(row.Detail, 88) {

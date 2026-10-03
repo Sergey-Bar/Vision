@@ -28,7 +28,7 @@ POST /infer
 
   200 application/json
   {"seq":41,"boxes":[{"cls":"bird","score":0.87,"x1":0.1,"y1":0.2,"x2":0.3,"y2":0.4}],
-   "width":640,"height":384,"model":"yolov8n","infer_ms":12.5,
+   "width":640,"height":384,"model":"yolov4n","infer_ms":12.5,
    "telemetry":{...}}
 
   x/y are normalised to [0,1] against the ORIGINAL frame, so a model input size
@@ -53,7 +53,7 @@ GET /healthz -> {"ready":bool,"model":str,"input_width":int,"input_height":int,
 GET /probe -> the same as healthz plus the measured export contract, for
               `pocctl model-probe`.
 
-Run:  python server.py --host 127.0.0.1 --port 8099 --model models/yolov8n.onnx
+Run:  python server.py --host 127.0.0.1 --port 8099 --model models/yolov4n.onnx
 """
 
 from __future__ import annotations
@@ -468,7 +468,7 @@ class ExportSpec:
 
       - `decoder_family` decides whether the coordinates need ANCHOR decoding at
         all. This is the case the plan did not enumerate and it is the one the
-        SHIPPED model turns out to be: `models/yolov8n.onnx` is a three-output
+        SHIPPED model turns out to be: `models/yolov4n.onnx` is a three-output
         darknet YOLOv4 export converted by tf2onnx, despite its name. Its box
         fields are anchor-relative, so a "fused" decode of it does not produce
         wrong boxes, it produces NOTHING, and nothing is the hardest failure to
@@ -664,7 +664,7 @@ class Engine:
           - the ONNX model zoo's yolov4 exports rank FIVE: `(1, 52, 52, 3, 85)`.
             The fields are the last axis and everything before it is a spatial
             grid that flattens away. This is the SHIPPED model in this repository,
-            measured, not assumed: `models/yolov8n.onnx` really does come out as
+            measured, not assumed: `models/yolov4n.onnx` really does come out as
             `(1, 52, 52, 3, 85)`.
           - Ultralytics' YOLOv8 exports rank three: `(1, 84, 8400)`, FIELDS FIRST.
 
@@ -1335,7 +1335,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="AI sidecar: RGB in, boxes out. No video, no state, no clock.")
     ap.add_argument("--host", default="127.0.0.1", help="bind address; loopback only by design")
     ap.add_argument("--port", type=int, default=8099)
-    ap.add_argument("--model", default="models/yolov8n.onnx")
+    ap.add_argument("--model", default="models/yolov4n.onnx")
     ap.add_argument("--anchors", default=os.environ.get("SP_POC_AI_ANCHORS", ""),
                     help="the darknet anchor boxes for an anchored export, one 'width,height' per line, "
                          "three scales, finest stride first. Required by, and only by, an export that "

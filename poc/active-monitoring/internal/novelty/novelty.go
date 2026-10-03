@@ -141,12 +141,24 @@ type Finding struct {
 // RegionSource is where a reported region came from.
 type RegionSource string
 
-// The two sources.
+// The three sources.
 const (
 	// RegionMeasured is a box that came out of connected components.
 	RegionMeasured RegionSource = "measured"
 	// RegionWholeFrame is the honest box for a global change: everything.
 	RegionWholeFrame RegionSource = "whole_frame"
+	// RegionCut is a measured region that was MAGNIFIED before the detector saw it.
+	//
+	// It is a third value rather than a flag on the other two because the question the
+	// column answers is "what did the model actually look at", and a crop changes that
+	// answer in a way neither `measured` nor `whole_frame` describes. A bird 40 px
+	// across in a 1920x1080 frame is 8 px after the whole-frame pass shrinks it to
+	// 416x416 and is therefore below the detection floor; the same bird in a 200x150
+	// crop arrives as roughly 100 px and is found easily. Both measurements are real,
+	// both are stored, and a reader comparing two runs has to be able to tell which
+	// one produced the box. Otherwise "the detector improved" is unfalsifiable,
+	// because the only thing that changed was the size of the window.
+	RegionCut RegionSource = "cut"
 	// RegionNone means no region was reported at all.
 	RegionNone RegionSource = "none"
 )
