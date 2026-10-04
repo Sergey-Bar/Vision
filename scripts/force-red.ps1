@@ -284,6 +284,14 @@ foreach ($m in $targets) {
         $results.Add([ordered]@{ gate = $m.gate; outcome = 'no-mutation-file'; note = $m.file })
         continue
     }
+    # The child's output goes to a file and the exit code is read straight after the
+    # call, because `$LASTEXITCODE` read AFTER a pipeline that ends in
+    # `Select-String` is the wrong number: the first version of this script reported
+    # `exit -1` for every gate, which is what PowerShell leaves behind, while the
+    # gates were in fact failing with 1 and the verdicts were right for the wrong
+    # stated reason. A transcript whose exit code is wrong is worse than none,
+    # because it is read.
+    $log = Join-Path ([System.IO.Path]::GetTempPath()) ("force-red-" + $m.gate + ".log")
     $original = [System.IO.File]::ReadAllText($path)
     if (-not $original.Contains($m.find)) {
         Write-Host "  SKIP: the anchor text is not in the file, so this mutation would be a NO-OP" -ForegroundColor Yellow
@@ -292,14 +300,6 @@ foreach ($m in $targets) {
         continue
     }
     [System.IO.File]::WriteAllText($path, $original.Replace($m.find, $m.replace), (New-Object System.Text.UTF8Encoding $false))
-
-    # The child's output goes to a file and the exit code is read straight after the
-    # call, because `$LASTEXITCODE` read AFTER a pipeline that ends in `Select-String`
-    # is the wrong number: the first version of this script reported `exit -1` for
-    # every gate, which is what PowerShell leaves behind, while the gates were in
-    # fact failing with 1 and the verdicts were right for the wrong stated reason.
-    # A transcript whose exit code is wrong is worse than none, because it is read.
-    $log = Join-Path ([System.IO.Path]::GetTempPath()) ("force-red-" + $m.gate + ".log")
 
     Write-Host ""
     Write-Host "--- mutated run (expecting FAIL) ---" -ForegroundColor Yellow
@@ -310,7 +310,28 @@ foreach ($m in $targets) {
         Select-String -Pattern "==> $($m.gate)|FAILED \(|^\s+ok$|unproven" |
         Select-Object -First 8 | ForEach-Object { "    $($_.Line.Trim())" }
 
-    [System.IO.File]::WriteAllText($path, $original, (New-Object System.Text.UTF8Encoding $false))
+    # Restore from the INDEX, and then prove it.
+    #
+    # This was a saved copy in the first version, and it is a saved copy because
+    # `git checkout --` throws away uncommitted work in the same file — which is why
+    # the script refuses a dirty tree at the top. The saved copy then left
+    # `rules/builtin/bundle.yaml` carrying a duplicated rule id across three runs,
+    # which made `rules-lint` red for the wrong reason, which is worse than
+    # `rules-lint` being red.
+    #
+    # So: restore from the index, and then ASK GIT. A restore that cannot be proven
+    # has not happened, and the assertion is what turns "probably restored" into
+    # "restored, and the next run starts from the state this one assumed".
+    & git checkout -- $m.file
+    $stillDirty = @(git status --porcelain -- $m.file)
+    if ($stillDirty.Count -gt 0) {
+        Write-Host "  ABORT: $($m.file) is still modified after the restore. Leaving the run here" -ForegroundColor Red
+        Write-Host "         rather than continuing: every gate after this one would be measured" -ForegroundColor Red
+        Write-Host "         against a tree with a deliberate defect in it, and none of those" -ForegroundColor Red
+        Write-Host "         numbers would mean anything." -ForegroundColor Red
+        exit 1
+    }
+
     Write-Host "--- restored run (expecting PASS) ---" -ForegroundColor Green
     & $gateShell -NoProfile -File (Join-Path $repo 'scripts/verify.ps1') -Only $m.gate -NoRace -SkipRedCheck *>&1 |
         Out-File -FilePath $log -Encoding utf8
