@@ -108,7 +108,7 @@ func redcheckInlineSQL(db any) {
     [ordered]@{
         gate = 'rules-lint'
         file = 'rules/builtin/bundle.yaml'
-        find = 'version: "0.1.0"'
+        find = 'version: 0.1.0'
         replace = 'version: "0.1.0"
 # REDCHECK: a second rule with the same id, which the semantic validator must refuse.'
         why = 'A bundle that fails its own validator is the case the gate is for. Anything less and the gate is only being asked whether it loads.'
@@ -125,7 +125,7 @@ func redcheckInlineSQL(db any) {
     [ordered]@{
         gate = 'migration-phases'
         file = 'migrations/0024_search_documents.expand.sql'
-        find = '-- Migrations are forward-only.'
+        find = '-- 0024_search_documents.expand.sql'
         replace = '-- REDCHECK: a contract step beside an expand step, which the phase checker refuses.
 
 CREATE VIEW search_documents_violation AS SELECT 1;'
@@ -134,8 +134,8 @@ CREATE VIEW search_documents_violation AS SELECT 1;'
     [ordered]@{
         gate = 'no-silent-skips'
         file = 'internal/skipaudit/skipaudit_test.go'
-        find = 'package sqlguard_test'
-        replace = 'package sqlguard_test
+        find = 'package skipaudit_test'
+        replace = 'package skipaudit_test
 
 import "testing"
 
@@ -153,15 +153,15 @@ func TestRedcheckUndeclaredSkip(t *testing.T) { t.Skip("REDCHECK") }'
     [ordered]@{
         gate = 'dead-export'
         file = 'internal/deadexport/deadexport_test.go'
-        find = '"internal/milestone.WithSiteID"'
+        find = '"internal/milestone.WithEpoch"'
         replace = '"internal/milestone.REDCHECKThisExportDoesNotExist"'
         why = 'The gate fails on an allow-list entry that matches nothing. A mutated entry is the smallest change that produces that, and the failure names the dead symbol.'
     }
     [ordered]@{
         gate = 'predicate-cov'
         file = 'internal/predicatecov/predicatecov.go'
-        find = 'package predicate'
-        replace = 'package predicate
+        find = 'package predicatecov'
+        replace = 'package predicatecov
 
 // REDCHECK: a predicate the gate measures coverage for and this file does not define.'
         why = 'The gate reads the table of predicates and requires each one to have cases. This makes the two disagree.'
@@ -247,6 +247,16 @@ func TestRecoveryDrill(t *testing.T) {
     }
 )
 
+# The PowerShell to launch the gate with.
+#
+# pwsh is the right answer on Linux and does not exist on a default Windows shell;
+# powershell is the reverse. Choosing one hardcoded would have made this script
+# work in the container and nowhere else, and the first run of it on Windows
+# recorded ten "NOT PROVEN" verdicts that were really zero runs -- every one of the
+# nested invocations failed to start and the exit code of a process that never ran
+# is zero, which is the most expensive way to say nothing.
+$gateShell = if (Get-Command pwsh -ErrorAction SilentlyContinue) { 'pwsh' } else { 'powershell' }
+Write-Host ("gate host: {0}" -f $gateShell)
 # --- run ------------------------------------------------------------------------
 $targets = if ($Gate.Count -gt 0) {
     $mutations | Where-Object { $Gate -contains $_.gate }
@@ -285,14 +295,14 @@ foreach ($m in $targets) {
 
     Write-Host ""
     Write-Host "--- mutated run (expecting FAIL) ---" -ForegroundColor Yellow
-    & pwsh -NoProfile -File (Join-Path $repo 'scripts/verify.ps1') -Only $m.gate -NoRace -SkipRedCheck 2>&1 |
+    & $gateShell -NoProfile -File (Join-Path $repo 'scripts/verify.ps1') -Only $m.gate -NoRace -SkipRedCheck 2>&1 |
         Select-String -Pattern "==> $($m.gate)|FAILED \(|ok$|ALL MUTATED CONTROLS|unproven|not selected" |
         Select-Object -First 8 | ForEach-Object { "    $($_.Line.Trim())" }
     $redExit = $LASTEXITCODE
 
     [System.IO.File]::WriteAllText($path, $original, (New-Object System.Text.UTF8Encoding $false))
     Write-Host "--- restored run (expecting PASS) ---" -ForegroundColor Green
-    & pwsh -NoProfile -File (Join-Path $repo 'scripts/verify.ps1') -Only $m.gate -NoRace -SkipRedCheck 2>&1 |
+    & $gateShell -NoProfile -File (Join-Path $repo 'scripts/verify.ps1') -Only $m.gate -NoRace -SkipRedCheck 2>&1 |
         Select-String -Pattern "==> $($m.gate)|FAILED \(|ok$" |
         Select-Object -First 4 | ForEach-Object { "    $($_.Line.Trim())" }
     $greenExit = $LASTEXITCODE
