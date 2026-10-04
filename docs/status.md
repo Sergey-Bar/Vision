@@ -730,6 +730,42 @@ reviewed, because `dispositions` is append-only and a reviewer's answer is not t
 seed's to delete; a second `up` prints the same report and writes nothing, and
 `docker compose down -v` is the rebuild.
 
+### The POC image, and the defect that stopped it
+
+`poc/Dockerfile` is written and is correct: `CGO_ENABLED=1` (the POC links
+`libonnxruntime.so`, which is the point of a POC that runs a detector), ffmpeg
+because the POC's own gate calls it a hard runtime dependency and fails rather than
+skips without it, and onnxruntime **1.23.0 pinned by SHA-256** — that version because
+`cmd/pocctl`'s `runtime_test.go` uses `libonnxruntime.so.1.23.0` as its example of a
+versioned SONAME. A GitHub release asset has no OCI manifest, so there is no digest
+to pin the way the base images are; the published SHA-256 is the strongest available
+statement, and the same "record then verify" two-step `pocctl fetch-runtime` itself
+implements.
+
+It does not build, and the reason is a real defect rather than a Dockerfile problem:
+
+```
+GOOS=linux CGO_ENABLED=0 go build ./internal/supervisor/
+internal/supervisor/supervisor.go:148:7: undefined: job
+```
+
+`internal/supervisor` has `job_windows.go`, `process_unix.go` and
+`process_windows.go` — and **no `job_unix.go`**. `supervisor.go:148` holds a `*job`
+unconditionally, so the package compiles on Windows and has never compiled anywhere
+else. The whole POC module has never been built for Linux, and its gate has only ever
+run on Windows for the same reason the product's gate could not see the five defects
+above.
+
+**Not fixed here.** The fix is a `job_unix.go` that gives the supervisor a
+process-group handle — `Setpgid` on the child and `kill(-pgid, SIGKILL)` on stop —
+so that stopping the supervisor stops the Python behind it rather than orphaning it.
+That is the behaviour `supervisor.go:247`'s own comment says the belt exists to
+provide, and it is process supervision, which is where a half-tested implementation is
+worst: an orphaned sidecar holding a camera port is a failure a demo cannot recover
+from and a reviewer cannot see. Writing it without being able to run it on Linux would
+be exactly the "a control with no such run is not a control; it is a comment" case
+`AGENTS.md` names, so the defect is recorded here instead.
+
 ### One pre-existing defect the container run surfaced, not fixed here
 
 `internal/identity`'s `TestConcurrentWrongPasswordsAreAllCounted` failed once in a
