@@ -353,6 +353,73 @@ services:
         exec pwsh -NoProfile -File /src/scripts/verify.ps1 "$$@"
       - --
 
+# --- the demo ---------------------------------------------------------------
+  # Not part of `docker compose up`. It is the thing a judge runs once, and it
+  # writes `dist/demo/transcript.md` -- the artefact that outlives the demo.
+  #
+  #   docker compose --profile demo up demo
+  #
+  # `demo.sh` is a DRIVER and not a feature: every number in the transcript came out
+  # of one of the product's own binaries, so the transcript cannot disagree with the
+  # product. Where a step could not run it says NOT RUN and names why.
+  demo:
+    # The VERIFY target, not `runtime`.
+    #
+    # `runtime` is distroless: no shell, no PowerShell, no Go. A demo driver needs
+    # all three, and a demo image built from the gate's image means the binary that
+    # runs the acceptance report is the one the gate built and the gate that ran the
+    # transcript is the one that gates the repository. One toolchain, one script, no
+    # fork, and no second image to keep in step.
+    #
+    # This image never ships to a site. That is the whole reason the product image
+    # can have no shell without this being a contradiction.
+    build:
+      context: .
+      target: verify
+    image: security-platform-verify:local
+    profiles: ["demo"]
+    environment:
+      SP_DATABASE_URL: *db-url
+      SP_DATABASE_PASSWORD: postgres
+      SP_TEST_DATABASE_URL: "postgres://postgres@db:5432/security_test?sslmode=disable"
+      SP_TEST_DATABASE_PASSWORD: postgres
+      SP_EVIDENCE_ROOT: /var/lib/security-platform/evidence
+      SP_TENANT_ID: *tenant-id
+      SP_SITE_ID: *site-id
+      SP_SECRET_KEY_PATH: /run/security-platform/secret.key
+      SP_TLS_CERT: /run/security-platform/console/console.crt
+      SP_TLS_KEY: /run/security-platform/console/console.key
+      SP_LISTEN_ADDR: 0.0.0.0:8443
+      DEMO_CORE_URL: https://console:8443
+      DEMO_CA: /run/security-platform/console/console.crt
+    volumes:
+      - .:/src
+      - evidence:/var/lib/security-platform/evidence
+      - secrets:/run/security-platform
+      - gomod:/go/pkg/mod
+      - gobuild:/root/.cache/go-build
+    working_dir: /src
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -euo pipefail
+        export PATH="/usr/local/go/bin:/usr/local/bin:$$PATH"
+        echo "==> creating the maintenance database internal/testutil derives from"
+        PGPASSWORD="$$SP_DATABASE_PASSWORD" createdb \
+          --host=db --username=postgres --maintenance-db=postgres \
+          security_test || echo "   (it already exists, which is the second run)"
+        echo "==> migrating it"
+        SP_DATABASE_URL="$$SP_TEST_DATABASE_URL" go run ./cmd/security-migrate up >/dev/null
+        echo "==> building the product binaries the transcript quotes"
+        for c in securityctl security-core; do
+          CGO_ENABLED=0 go build -o "/usr/local/bin/$$c" "./cmd/$$c"
+        done
+        echo "==> running the demo"
+        exec sh /src/scripts/demo.sh
+    depends_on:
+      console:
+        condition: service_healthy
+
 volumes:
   pgdata:
   evidence:
