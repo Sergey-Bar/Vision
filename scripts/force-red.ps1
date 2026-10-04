@@ -345,12 +345,46 @@ foreach ($m in $targets) {
 
     Write-Host ""
     Write-Host "--- mutated run (expecting FAIL) ---" -ForegroundColor Yellow
+    $recordDir = Join-Path $repo 'dist/verification'
+    $before = @(Get-ChildItem -LiteralPath $recordDir -Filter '*.json' -ErrorAction SilentlyContinue).Count
     & $gateShell -NoProfile -File (Join-Path $repo 'scripts/verify.ps1') -Only $m.gate -NoRace -SkipRedCheck *>&1 |
         Out-File -FilePath $log -Encoding utf8
     $redExit = $LASTEXITCODE
     Get-Content -LiteralPath $log |
         Select-String -Pattern "==> $($m.gate)|FAILED \(|^\s+ok$|unproven" |
         Select-Object -First 8 | ForEach-Object { "    $($_.Line.Trim())" }
+
+    # A non-zero exit is NOT proof, and this is the second version of this script to
+    # learn it.
+    #
+    # `tree-state` mutates `scripts/verify.ps1` itself, so a mutation that breaks the
+    # script's own syntax makes the run exit non-zero WITHOUT the gate failing --
+    # and without a record being written, because the script died before it could
+    # write one. The first version recorded that as "proven". It had proved that a
+    # broken PowerShell file exits non-zero.
+    #
+    # So the verdict now requires the EVIDENCE: a new record, naming THIS gate, in
+    # its failed list. `TestAGateThatHasNeverFailedIsNamed` reads exactly those
+    # records, so this is the same evidence the repository will be judged on, not a
+    # second opinion about it.
+    $recordOK = $false
+    $after = @(Get-ChildItem -LiteralPath $recordDir -Filter '*.json' -ErrorAction SilentlyContinue)
+    if ($after.Count -le $before) {
+        Write-Host "    NO NEW RECORD. The run exited non-zero without writing one, so the gate cannot" -ForegroundColor Yellow
+        Write-Host "    be what failed -- the script died before it could report." -ForegroundColor Yellow
+    } else {
+        $newest = $after | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        $recordOK = $false
+        try {
+            $j = ([System.IO.File]::ReadAllText($newest.FullName).TrimStart([char]0xFEFF)) | ConvertFrom-Json
+            if (@($j.failedGates) -contains $m.gate) { $recordOK = $true }
+            else {
+                Write-Host "    the new record names $($j.failedGates -join ', ') and not $($m.gate)." -ForegroundColor Yellow
+            }
+        } catch {
+            Write-Host "    the new record does not parse: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
 
     # Restore from the INDEX, and then prove it.
     #
@@ -382,12 +416,12 @@ foreach ($m in $targets) {
         Select-String -Pattern "==> $($m.gate)|FAILED \(|^\s+ok$" |
         Select-Object -First 4 | ForEach-Object { "    $($_.Line.Trim())" }
 
-    $verdict = if ($redExit -ne 0 -and $greenExit -eq 0) { 'proven' } else { 'NOT PROVEN' }
+    $verdict = if ($redExit -ne 0 -and $greenExit -eq 0 -and $recordOK) { 'proven' } else { 'NOT PROVEN' }
     $colour = if ($verdict -eq 'proven') { 'Green' } else { 'Red' }
-    Write-Host "  VERDICT: $verdict (mutated exit $redExit, restored exit $greenExit)" -ForegroundColor $colour
+    Write-Host "  VERDICT: $verdict (mutated exit $redExit, restored exit $greenExit, red record $recordOK)" -ForegroundColor $colour
     $results.Add([ordered]@{
         gate = $m.gate; outcome = $verdict
-        mutatedExit = $redExit; restoredExit = $greenExit; file = $m.file
+        mutatedExit = $redExit; restoredExit = $greenExit; redRecord = $recordOK; file = $m.file
     })
 }
 
