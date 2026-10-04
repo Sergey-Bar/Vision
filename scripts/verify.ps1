@@ -82,6 +82,19 @@
 param(
     # Skip the race detector. Faster, and not what the gate means.
     [switch]$NoRace,
+    # Run only the named gates, and record the rest as skips.
+    #
+    # It exists for one job: forcing a gate red by hand so the record shows it has
+    # been seen to fail at least once. `TestAGateThatHasNeverFailedIsNamed` in
+    # `internal/statuscheck` reads `dist/verification/*.json` and names every gate
+    # no record has ever shown failing, and seventeen of twenty-five were on that
+    # list -- because proving a gate CAN fail meant running the whole script once
+    # per gate, which is ten minutes each and therefore not done.
+    #
+    # A `-Only` record is never `verified`: the gates it left out are in `skipped`,
+    # and `verified` is false whenever that list is non-empty. So it cannot be
+    # quoted as evidence about the gates it did not run.
+    [string[]]$Only = @(),
     # Skip the red-check. Only for a fast inner loop. A release check must run it,
     # and it prints SKIPPED rather than passing quietly - the same rule as every
     # other omission in this script.
@@ -193,8 +206,34 @@ $script:redCheckUnproven = [System.Collections.Generic.List[string]]::new()
 $results = [System.Collections.Generic.List[object]]::new()
 $skips = [System.Collections.Generic.List[object]]::new()
 
+# The -Only subset, normalised once. Empty means every gate.
+$script:only = @($Only | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+
 function Invoke-Gate {
     param([string]$Name, [scriptblock]$Command)
+
+    # `-Only` runs a subset, and everything it leaves out is recorded as a SKIP.
+    #
+    # It exists so a single gate can be run and RECORDED on its own, which is what
+    # makes forcing a gate red a ten-second job instead of a ten-minute one. Without
+    # it, proving seventeen gates can fail meant seventeen full runs, and the honest
+    # list of never-red gates stayed short because proving it was too expensive.
+    #
+    # The gates left out are SKIPS and not omissions. A skip is in `skipped`, and
+    # `verified` is false whenever `skipped` is non-empty, so a `-Only` record can
+    # never be read as a clean bill of health -- which is the property that matters,
+    # because this file writes the evidence.
+    if ($script:only.Count -gt 0 -and -not ($script:only -contains $Name)) {
+        Write-Host ""
+        Write-Host "==> $Name  (not selected by -Only)" -ForegroundColor DarkGray
+        $script:skips.Add([ordered]@{
+            name = $Name
+            reason = 'not selected by -Only. This record covers a subset of the gates, so verified is false and it is not evidence about the others.'
+        })
+        $script:results.Add([ordered]@{ name = $Name; outcome = 'not-run'; seconds = 0 })
+        return
+    }
+
     Write-Host ""
     Write-Host "==> $Name" -ForegroundColor Cyan
     $started = Get-Date
