@@ -336,6 +336,13 @@ services:
       - |
         set -euo pipefail
         export PATH="/usr/local/go/bin:/usr/local/bin:$$PATH"
+        echo "==> worktrees this container can see"
+        git worktree list
+        echo "   (a registration git calls 'prunable' here is one created on the host with a"
+        echo "    Windows absolute path. The tree-state gate resolves every worktree with"
+        echo "    git rev-parse --git-dir and reports that as a finding. Run"
+        echo "    'git worktree prune' on the HOST to clear it - not in here, because this"
+        echo "    container would delete the registration out from under Agent Manager.)"
         echo "==> creating the maintenance database internal/testutil derives from"
         PGPASSWORD="$$SP_DATABASE_PASSWORD" createdb \
           --host=db --username=postgres --maintenance-db=postgres \

@@ -171,6 +171,16 @@ a Windows-only source file with a unix sibling selected by build tag and so the 
 platforms compile different statement sets out of identical source. Comparing a
 Linux run against Windows floors produced 42 findings on an unchanged tree.
 
+**One gate cannot pass in a container that is a view of a machine with local
+worktrees.** `internal/treestate` resolves every registered git worktree with
+`git rev-parse --git-dir`, and a worktree created by Agent Manager on Windows is
+registered with a host-absolute `C:\...` path that does not resolve inside the
+container. `git worktree list` calls it *prunable* there, and the gate reports it.
+The compose entrypoint prints the worktree list before the gate runs so the cause is
+next to the failure, and the fix is `git worktree prune` **on the host** — running it
+in the container would delete the registration out from under Agent Manager. Every
+other gate passes in the container.
+
 ## Status
 
 Milestone 1 is in progress. `docs/status.md` is the source of truth for what is

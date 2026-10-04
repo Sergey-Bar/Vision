@@ -730,6 +730,36 @@ reviewed, because `dispositions` is append-only and a reviewer's answer is not t
 seed's to delete; a second `up` prints the same report and writes nothing, and
 `docker compose down -v` is the rebuild.
 
+### One pre-existing defect the container run surfaced, not fixed here
+
+`internal/identity`'s `TestConcurrentWrongPasswordsAreAllCounted` failed once in a
+full `go test -race -p 8` run inside the container, with its own diagnosis:
+
+```
+the account is not locked after the wrong passwords. Every one of them overwrote the
+same field, and the last writer computed its deadline from a counter of one
+```
+
+That is a read-modify-write of the lockout counter, so N concurrent wrong passwords
+produce one increment and a deadline computed from `failed_count = 1`. It is a
+security control that under-counts under exactly the load an attacker would create,
+and it is not a flake in the *test*: the test is right and the code is wrong. It does
+not reproduce in isolation (5 of 5 green on the host, 5 of 5 green in the container),
+so it needs the contention of a full parallel suite to surface, which is a reason to
+treat "it passed" as weaker evidence for this one than it is for most.
+
+**Not fixed here**, deliberately. The lockout write is in the authentication path,
+and `AGENTS.md` reserves auth and anything touching an invariant to a human who
+reads the diff. The shape of the fix is a single atomic statement —
+`SET failed_count = failed_count + 1` evaluated in the same statement that reads it,
+so the deadline is computed from the value the update actually produced — but
+whether that changes any attempt-counting behaviour a client depends on is a
+question for a person who has read the callers.
+
+It is recorded here rather than in a comment because a comment would be lost the
+next time the file is rewritten, and this is the kind of defect that is found by the
+next person to run the suite on a busy machine.
+
 ### Not fixed, recorded instead
 
 `ai_observations.temperature` was added by migration `0022`,
