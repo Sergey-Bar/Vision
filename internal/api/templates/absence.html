@@ -1,0 +1,78 @@
+{{define "absence.html"}}
+{{template "head" .}}
+<main>
+  <h1>Coverage</h1>
+  {{template "messages" .}}
+
+  <p class="hint">
+    What this site could <strong>not</strong> see. Every other page in the console
+    shows things that happened; this one shows the gaps, because a security product
+    whose page shows no failures looks exactly like a security product with none.
+  </p>
+  {{if .AbsenceSites}}
+  <p class="hint">Scope: {{range $i, $s := .AbsenceSites}}{{if $i}}, {{end}}<code>{{$s}}</code>{{end}}</p>
+  {{end}}
+
+  {{/*
+    The sentence this page must never contain is "no intrusions detected". A model
+    that did not answer is not a model that saw nothing, and rendering the first as
+    the second is the exact failure this product exists to prevent. So the panel says
+    how many observations were degraded and why, and leaves the rest unsaid.
+  */}}
+  <table>
+    <thead>
+      <tr><th>Blind spot</th><th>Count</th><th>Worst case</th><th>Since</th><th>What it means</th></tr>
+    </thead>
+    <tbody>
+    {{range .Absence}}
+      <tr class="{{if .Breaking}}breaking{{else}}ok{{end}}">
+        <td><code>{{.Kind}}</code></td>
+        <td>{{.Count}}</td>
+        <td>{{if .Worst}}{{.Worst}}{{else}}&mdash;{{end}}</td>
+        <td>{{if .Since}}{{$.Time .Since}}<br><span class="hint">{{.SinceAge.String}}</span>{{else}}&mdash;{{end}}</td>
+        <td class="what">{{.What}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+
+  <p class="hint">
+    A row with a zero is still shown. A row that disappears when it is fine is a row
+    that is only interesting when it is broken, which teaches a reader to stop
+    reading the table.
+  </p>
+
+  {{if .Drift}}
+  <section>
+    <h2>Clock drift</h2>
+    <p class="hint">
+      A time-window predicate reads the corrected time, so a drifting clock means the
+      window itself is wrong. Drift below the band is still shown: it is the trend
+      that matters before it is the breach.
+    </p>
+    <table>
+      <thead><tr><th>Device</th><th>Drift</th><th>Band</th><th>Source</th><th>Sampled</th></tr></thead>
+      <tbody>
+      {{range .Drift}}
+        <tr>
+          <td><code>{{.DeviceID}}</code></td>
+          <td>{{.Drift}}</td>
+          <td>{{.Band}}</td>
+          <td>{{.Source}}</td>
+          <td>{{$.Time .SampledAt}}</td>
+        </tr>
+      {{end}}
+      </tbody>
+    </table>
+  </section>
+  {{end}}
+
+  <p class="hint">
+    <strong>What this page is not.</strong> It is not a health score, and there is no
+    single number here: a score would be a claim this product cannot derive from these
+    facts, and a claim at the top of a page is the one a reader remembers. Four rows,
+    four counts, and you decide what they add up to.
+  </p>
+</main>
+{{template "foot" .}}
+{{end}}

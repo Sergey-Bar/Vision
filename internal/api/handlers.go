@@ -32,6 +32,11 @@ type Deps struct {
 	// should not automatically be able to replay work.
 	DeadLetters DeadLetterReader
 	ClockDrift  ClockDriftReader
+	// Absence backs the coverage panel: what the site could NOT see. A separate
+	// reader rather than a field on Incidents because it counts across incident
+	// state, observations, dead letters and drift -- four tables that are not
+	// incidents and that a reader looking at one of them should not need to know about.
+	Absence AbsenceReader
 	// InboxCounts backs the SLO alert thresholds.
 	InboxCounts func() (Backlog, error)
 	// Metrics is the observability registry. Nil means the route says the
@@ -219,6 +224,20 @@ func (s *Server) RegisterRoutes(d Deps) func(*http.ServeMux) {
 		mux.Handle("GET /incidents/{id}", s.requireCapabilityAtSite(identity.CapIncidentRead, siteOfIncident(d),
 			func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
 				s.handleConsoleIncident(w, r, p, d)
+			}))
+		// The coverage panel: what this site could NOT see.
+		//
+		// Gated on CapIncidentRead rather than a capability of its own, and the
+		// reasoning is worth stating because it is the opposite of the dead-letter
+		// reader's. Dead letters are REPLAYABLE work, so reading them is a distinct
+		// right. The coverage panel is counts and reasons -- "the vendor has not been
+		// polled since 14:02" -- and an operator who can see an incident can see that
+		// the incident is not the whole story. Withholding it would mean an operator
+		// who is not allowed to replay work cannot tell whether there was any work to
+		// replay, which is the question they are actually asking.
+		mux.Handle("GET /coverage", s.requireCapability(identity.CapIncidentRead,
+			func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleConsoleAbsence(w, r, p, d)
 			}))
 		// The console's sign-out. Gated on a principal rather than on a capability,
 		// because the capability that would be right here does not exist: signing out

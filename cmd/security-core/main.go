@@ -187,6 +187,10 @@ func run() error {
 		Bundles:     bundlesSvc,
 		Evidence:    store,
 		DeadLetters: api.DeadLetters{Inbox: inboxSvc, Jobs: jobWorker},
+		// The coverage panel's counts. Supplied here rather than inside `internal/api`
+		// because these tables belong to the packages that own them, and a COUNT over
+		// four of them inside the API package would be the second reader for each.
+		Absence: NewAbsenceReader(pool, cfg.Tenant),
 		ClockDrift: api.ClockDrift{
 			Service: &clocksub.Service{
 				Pool:      pool,

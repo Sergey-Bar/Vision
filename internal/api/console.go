@@ -76,9 +76,13 @@ type consoleData struct {
 	Incidents   []incidents.Summary
 	Drift       []DriftView
 	DeadLetters []DeadLetter
-	SiteID      string
-	Error       string
-	Message     string
+	// Absence is the coverage panel, and AbsenceSites is what it covers. A count
+	// with no scope is a number nobody can check, so the two are always together.
+	Absence      []AbsenceView
+	AbsenceSites []string
+	SiteID       string
+	Error        string
+	Message      string
 }
 
 // SiteTimezone renders a site's time, never the host's.
