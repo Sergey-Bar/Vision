@@ -5,6 +5,10 @@ claim narrowed to what is true; nine of the seventeen never-red gates proven by 
 with a transcript, and the other nine recorded with what was tried and what the failure
 was. See "The 2026-10-04 pass over the acceptance criteria and the never-red list".)
 
+Gate: 25 gates green, `pwsh -File scripts/verify.ps1 -NoRace`, 2026-10-04, 12 of 25 gates
+now recorded red by hand (was 8 before the force-red harness). Acceptance:
+9 pass, 0 fail, 4 not runnable in this build.
+
 Previously 2026-10-04 (Phase 0: the product runs. `Dockerfile`,
 `docker-compose.yml`, `cmd/security-seed`, a distroless runtime image with an
 in-binary health probe, and `docker compose --profile verify run --rm verify`
