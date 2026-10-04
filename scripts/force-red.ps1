@@ -96,22 +96,55 @@ var _ = 1 + "not a number"'
         gate = 'sql-guard'
         file = 'internal/clock/clock.go'
         find = 'package clock'
-        replace = 'package clock
+        replace = @'
+package clock
 
-// REDCHECK: an inline statement, which the rule exists to forbid.
+// REDCHECK: an inline mutation of an append-only table, which is the shape the
+// rule forbids.
 func redcheckInlineSQL(db any) {
-	_, _ = db.(interface{ Exec(string, ...any) (interface{}, error) })
-	_ = `SELECT 1`
-}'
-        why = 'SQL in Go is the thing `sql-guard` exists to forbid. The mutation is the forbidden shape, not a broken one.'
+	_ = redcheckSQL` + "`" + `DELETE FROM audit_ledger` + "`" + `
+}
+'@
+        why = 'The gate''s four patterns are UPDATE, DELETE FROM, INSERT INTO and TRUNCATE -- mutations, not reads. The first version of this mutation used SELECT 1, which is not in the rule set, so the gate correctly passed and the harness recorded NOT PROVEN rather than a red that never happened. DELETE FROM audit_ledger is an append-only table being deleted inline, which is the forbidden shape.'
     }
     [ordered]@{
         gate = 'rules-lint'
         file = 'rules/builtin/bundle.yaml'
-        find = 'version: 0.1.0'
-        replace = 'version: "0.1.0"
-# REDCHECK: a second rule with the same id, which the semantic validator must refuse.'
-        why = 'A bundle that fails its own validator is the case the gate is for. Anything less and the gate is only being asked whether it loads.'
+        find = '- id: core.suppress.camera-offline-during-maintenance'
+        replace = @'
+- id: core.suppress.camera-offline-during-maintenance
+  version: "0.1.0"
+  description: >-
+    REDCHECK: a second rule carrying an id the bundle already uses. The semantic
+    validator has to refuse a bundle with two rules under one id, and refusing it
+    is the only way to know the check ran.
+  source:
+    kind: managed
+  reason: >-
+    REDCHECK. A comment beside a rule is not a rule; the first version of this
+    mutation added a comment and the gate correctly passed.
+  enabled: true
+  eventType: analytics
+  conditions:
+    all:
+      - field: zone.pathPrefix
+        op: in
+        value: ["/restricted"]
+  schedule:
+    invert: true
+    businessHours:
+      days: [MO, TU, WE, TH, FR]
+      start: "08:00"
+      end: "18:00"
+  corroborate:
+    minSignals: 2
+    minEvidenceTier: B
+    requiresAIObservation: true
+  verdict:
+    severity: high
+  createIncident: true
+'@
+        why = 'A bundle that fails its own validator is the case the gate is for. Anything less and the gate is only being asked whether the bundle loads. The first version of this mutation added a COMMENT beside the version, which changes nothing a validator reads.'
     }
     [ordered]@{
         gate = 'generated-code'
@@ -145,10 +178,10 @@ func TestRedcheckUndeclaredSkip(t *testing.T) { t.Skip("REDCHECK") }'
     }
     [ordered]@{
         gate = 'tree-state'
-        file = 'docs/status.md'
-        find = '| a hosted observation is attributed without inventing a hash |'
-        replace = '| REDCHECK: a control with no transcript beside it | a hosted observation is attributed without inventing a hash |'
-        why = '`tree-state` cross-checks the red-check table in verify.ps1 against the transcripts in this document. A row with no transcript is the mismatch it looks for.'
+        file = 'scripts/verify.ps1'
+        find = '        name = ''a hosted observation is attributed without inventing a hash'''
+        replace = '        name = ''REDCHECK a control with no transcript anywhere in docs/status.md'''
+        why = '`tree-state` cross-checks the controls in the script against the transcripts in docs/status.md. A control with no transcript is the mismatch. The first version of this mutation edited the DOCUMENT, which is the side that has to agree; editing the SCRIPT is the side that can disagree.'
     }
     [ordered]@{
         gate = 'dead-export'
@@ -182,9 +215,13 @@ class TestRedcheck(t.unittest.TestCase):
         gate = 'fuzz'
         file = 'internal/rtsp/fuzz_test.go'
         find = 'f.Add([]byte{})'
-        replace = 'f.Add([]byte{})
-	// REDCHECK: unreachable is fine for a function but not for a var.'
-        why = 'The gate runs each target briefly. A compile error in the target file stops it, which is the state that says the target cannot be run at all.'
+        replace = @'
+f.Add([]byte{})
+
+// REDCHECK: undefined, so the target cannot be built and therefore cannot be fuzzed.
+var _ = redcheckUndefinedSymbol
+'@
+        why = 'The gate runs each target briefly. A compile error in the target file stops it, which is the state that says the target cannot be run at all. The first version added a comment, which is valid Go and changed nothing.'
     }
     [ordered]@{
         gate = 'recovery-drill'
@@ -200,8 +237,8 @@ func TestRecoveryDrill(t *testing.T) {
     [ordered]@{
         gate = 'rls-canary'
         file = 'internal/rlsrole/write_canary_test.go'
-        find = 'package rlsrole_test'
-        replace = 'package rlsrole_test
+        find = 'package rlsrole'
+        replace = 'package rlsrole
 
 // REDCHECK: the canary now asserts the opposite of what it was written to prove.'
         why = 'The gate writes as the production role and expects refusal. A canary inverted to expect success fails in exactly the direction that matters: a write that should have been refused.'
@@ -231,19 +268,24 @@ func TestRecoveryDrill(t *testing.T) {
         gate = 'flake'
         file = 'internal/clock/clock.go'
         find = 'package clock'
-        replace = 'package clock
+        replace = @'
+package clock
 
-// REDCHECK: a package with no tests, so the flake gate has nothing to run twice.'
-        why = 'The gate runs a package twice and diffs. A package it cannot build cannot be run twice, which fails it and is the state the gate is supposed to notice.'
+// REDCHECK: undefined, so the package does not build and there is nothing to run
+// twice. A comment does not break a build; the first version of this mutation
+// added one and the gate correctly passed.
+var _ = redcheckUndefinedSymbol
+'@
+        why = 'The gate runs a package repeatedly with -shuffle and diffs. A package it cannot build cannot be run at all, which fails it and is the state the gate is supposed to notice.'
     }
     [ordered]@{
         gate = 'red-check'
-        file = 'internal/evidence/store.go'
-        find = '// Store is a content-addressed evidence store.'
-        replace = '// Store is a content-addressed evidence store.
-//
-// REDCHECK: the doc comment the table''s RC-09 mutation anchors on has moved.'
-        why = 'The red-check gate mutates each control and requires the suite to go red. Moving the anchor out of reach makes it unable to mutate one, which fails it as an UNPROVEN control rather than as a broken one.'
+        file = 'scripts/verify.ps1'
+        find = "    why  = 'a stale reason reads as this run's explanation of a failure it did not have, so an operator debugging a degradation chases a cause that belongs to an earlier row'"
+        replace = @'
+    why  = 'REDCHECK: the anchor the red-check table''s own mutation moves has been renamed'
+'@
+        why = 'The red-check gate mutates each control in THIS table and requires the suite to go red. Renaming the text one mutation matches makes that control unprovable, which the gate reports as an UNPROVEN control rather than as a broken one -- which is the failure mode that says "a control with no such run is not a control". Mutating the table from inside itself is the cheapest way to reach it.'
     }
 )
 
