@@ -22,6 +22,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
+	"github.com/Sergey-Bar/Ai-Captain/internal/observability"
 )
 
 // Message is one outbound side effect.
@@ -120,6 +121,18 @@ type Relay struct {
 	// LeaseDuration is the visibility timeout. A relay that dies mid-delivery
 	// has its message redelivered when the lease expires.
 	LeaseDuration time.Duration
+	// Metrics is optional and nil-tolerant.
+	//
+	// `outbox_delivered_total` was declared and never incremented, while
+	// `DrainOnce` computes the exact number as its return value. The counter was
+	// free and nobody took it, which is why a delivery-rate dashboard built against
+	// the name reads as "nothing has ever been delivered" on an install that has
+	// delivered a million messages.
+	//
+	// Nil-tolerant for the reason it always is here: a relay is constructed in tests
+	// and in single-message paths that have no registry, and a dashboard metric is
+	// not a reason for any of them to acquire one.
+	Metrics *observability.Registry
 	// Logf receives progress. It never receives a payload.
 	Logf func(format string, args ...any)
 }
@@ -228,7 +241,31 @@ func (r *Relay) DrainOnce(ctx context.Context, tenantID, owner string, limit int
 		}
 		delivered++
 	}
+	// Counted in bulk from the number the function already computed, rather than
+	// inside the loop, so the counter and the return value cannot disagree. A counter
+	// incremented per delivery and a count returned from the same loop are two sources
+	// of truth for one fact, and they diverge the first time something `continue`s
+	// between them -- which this loop does, for every delivery whose handler failed.
+	//
+	// `delivered` is successes only, and that is what a `delivered_total` should
+	// count. A message whose handler failed was attempted and is on its way to a dead
+	// letter; counting it as delivered would make the delivery-rate dashboard read as
+	// healthy on an install where every message is failing.
+	//
+	// Unconditional, including on an empty drain: `Add` with zero creates the series
+	// at zero, and a dashboard for a name that does not exist yet is a dashboard that
+	// has to be special-cased to draw a gap.
+	r.addDelivered(int64(delivered))
 	return delivered, nil
+}
+
+// addDelivered is the one place the relay touches metrics, so the nil check has one
+// home rather than being repeated at every call site.
+func (r *Relay) addDelivered(n int64) {
+	if r.Metrics == nil {
+		return
+	}
+	r.Metrics.Counters.Add(observability.CounterOutboxDelivered, n)
 }
 
 func (r *Relay) deliver(ctx context.Context, d Delivery) error {

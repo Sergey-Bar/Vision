@@ -279,6 +279,30 @@ var (
 
 		"internal/rtsp.KeepAlive": {Symbol: "internal/rtsp.KeepAlive", Why: "TEST-ONLY. The RTSP keep-alive. The recorder should send one; nothing does, so a camera that times out a stream stops and the gap looks like a quiet scene rather than a lost camera"},
 		"internal/rtsp.Play":      {Symbol: "internal/rtsp.Play", Why: "TEST-ONLY. The RTSP PLAY verb. The client describes and reads, so the product can only capture from a camera that pushes on its own; a camera that waits for PLAY is a camera this product cannot record"},
+
+		// Three that the gate was NOT reporting, and the reason is in the gate's own
+		// code. `addSelectors` records every selector name in the tree UNQUALIFIED,
+		// because a method is only ever reached through a receiver and a per-package
+		// rule would report every interface method as dead. The qualification it did
+		// apply was "the qualifier names one of THIS repository's packages" -- so a
+		// qualifier that names an IMPORTED package still counted, and:
+		//
+		//	filepath.Walk          in internal/deadexport, internal/predicatecov and
+		//	                       cmd/securityctl/pack.go  gave internal/graph.(*Service).Walk
+		//	                       a reader it has never had
+		//	ed25519.PrivateKey    in three cmd files is a TYPE CONVERSION, and its selector
+		//	                       read gave internal/checkpoint.(*Signer).PrivateKey one too
+		//	fs.Sub/embed.FS        in the schemasync package itself did the same to
+		//	                       internal/contracts/schemasync.FS
+		//
+		// So the gate was reporting dead exports as LIVE, which the package comment
+		// names as the direction that gets a gate switched off rather than the
+		// direction that makes it cry wolf. It was found by adding `runtime.KeepAlive`
+		// to the tree, which did the same thing to `internal/rtsp.KeepAlive` and made
+		// that ledger entry look stale.
+		"internal/graph.Walk":              {Symbol: "internal/graph.Walk", Why: "DEAD. The graph traversal entry point. Nothing in the product calls it -- `filepath.Walk` was the reader the gate saw, three files over. The pipeline's graph service is written and tested and unwired, so the `edges` the decision cites are built by a correlator rather than traversed; the close is either a traversal step in internal/correlator or deleting this, and which of those is a design decision rather than a cleanup"},
+		"internal/checkpoint.PrivateKey":   {Symbol: "internal/checkpoint.PrivateKey", Why: "DEAD. Key material out of a signer. `ed25519.PrivateKey(key)` in three cmd files is a TYPE CONVERSION and its selector read satisfied this gate. There is deliberately no reason for anything in the product to read a signing key back -- key material should flow one way into a Signer -- so the close is most likely DELETING the accessor rather than wiring it"},
+		"internal/contracts/schemasync.FS": {Symbol: "internal/contracts/schemasync.FS", Why: "DEAD. Exposes the embedded schema copies as an fs.FS 'for a caller that wants to compile a validator from them'. No such caller exists yet: schemasync.Bytes and schemasync.Published are what the contract gate and the bundle loader read. The close is a validator that takes the whole directory rather than a single file, which is a real requirement for rule-bundle schemas that $ref each other -- not a one-line wire-up"},
 		// The three gate entry points below are the same shape as one another and
 		// they are this gate's own first finding of itself: correct code, a test
 		// that proves it works, and no caller outside its own test. They are run by
@@ -540,6 +564,73 @@ func (d *Detector) Baseline() int { return d.n }
 	}
 	t.Errorf("a type named Baseline in another package excused an uncalled method of the same name; "+
 		"findings were %v", names)
+}
+
+// TestAnImportedPackageQualifiedSelectorIsNotAMethodCall is the same test for the
+// qualifier that is NOT one of this repository's packages, and it is the one that
+// found three live defects being reported as dead.
+//
+// `TestAPackageQualifiedSelectorIsNotAMethodCall` above covers `shared.Baseline`,
+// where `shared` is a package in the tree, so `r.packageNames` recognises the
+// qualifier. An IMPORTED package is the same syntactic shape and was not recognised:
+// the qualifier was not a local package name, the selector was recorded as a bare
+// `Walk`, and every `.Walk` in the tree became a reader of any method called `Walk`.
+//
+// In this repository that had been hiding three dead exports, which the previous test
+// could not have found for all the world:
+//
+//	filepath.Walk         in internal/deadexport, internal/predicatecov and
+//	                      cmd/securityctl/pack.go masked internal/graph.(*Service).Walk
+//	ed25519.PrivateKey   in three cmd files is a TYPE CONVERSION, and its selector
+//	                      read masked internal/checkpoint.(*Signer).PrivateKey
+//	embed.FS / fs.Sub     in internal/contracts/schemasync masked
+//	                      internal/contracts/schemasync.FS
+//
+// The direction is the one the gate's own package comment calls out as the bad one:
+// reporting a dead export as LIVE. A gate that under-reports is a gate that gets
+// switched off, and this one was switched off in three places without anybody
+// noticing.
+//
+// The fixture is `filepath.Walk` specifically rather than a fictional import, because
+// the thing being asserted is that a selector whose qualifier the file IMPORTED is
+// not a receiver, and `filepath` is the import that caused it.
+func TestAnImportedPackageQualifiedSelectorIsNotAMethodCall(t *testing.T) {
+	dir := fixture(t, map[string]string{
+		"walkpkg/walk.go": `package walkpkg
+
+type Detector struct{ n int }
+
+// Walk shares a spelling with filepath.Walk, which the repository calls in three
+// places, and is called by nobody in product code.
+func (d *Detector) Walk() int { return d.n }
+`,
+		"walker/walker.go": `package walker
+
+import "path/filepath"
+
+// Visiting calls filepath.Walk, whose selector shares the spelling of
+// walkpkg.(*Detector).Walk.
+func Visiting(root string) error {
+	return filepath.Walk(root, func(string, any, error) error { return nil })
+}
+`,
+	})
+	repo := deadexport.LoadDir(dir, []string{"walkpkg", "walker"})
+	findings, errs := repo.Check(nil)
+	for _, e := range errs {
+		t.Fatalf("unexpected error: %v", e)
+	}
+
+	for _, f := range findings {
+		if f.Package == "walkpkg" && f.Symbol == "Walk" {
+			return
+		}
+	}
+	var names []string
+	for _, f := range findings {
+		names = append(names, f.Package+"."+f.Symbol)
+	}
+	t.Errorf("filepath.Walk excused an uncalled method of the same name; findings were %v", names)
 }
 
 // TestAnExemptionWithoutAReasonIsRefused keeps the allow-list from growing blanks.

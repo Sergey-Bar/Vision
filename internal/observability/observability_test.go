@@ -23,7 +23,6 @@ func TestEveryPlannedMetricExists(t *testing.T) {
 		observability.CounterEvidenceFetched,
 		observability.CounterEvidenceFailed,
 		observability.CounterOutboxDelivered,
-		observability.CounterDeadLettersVisible,
 		observability.CounterRuleBundleActivated,
 		observability.CounterCheckpointsSealed,
 		observability.CounterAuditAppends,

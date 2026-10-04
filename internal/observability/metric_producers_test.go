@@ -42,41 +42,73 @@ const repoRoot = "../.."
 const metricsPackage = "internal/observability"
 
 // unproducedMetrics is every declared metric that nothing in the tree writes, and
-// why. The reason is the part that matters: a bare name here would be a backlog
-// item nobody can act on, and the whole point of writing it down is that the next
-// person can pick one up in a minute.
+// why.
 //
-// Two families, and the difference matters:
+// It is EMPTY, and the map is deleted rather than left as `{}`.
 //
-//   - **A subsystem that does not exist yet.** Evidence retrieval is M2's blocker
-//     and `internal/evidence` has no fetch worker, so its two counters are
-//     correctly absent. Wiring them now would mean inventing the thing that
-//     increments them.
-//   - **A subsystem that exists and does the work**, where the number is free and
-//     the only thing missing is that nobody asked. The audit ledger is append-only
-//     and hash-chained; the outbox relay returns a delivery count; the bundle
-//     service has an `Activate` that is a single event. Each of those is one line
-//     and a `*Registry` on a constructor. They are listed separately because they
-//     are the ones a human can close this week.
-var unproducedMetrics = map[string]string{
-	// Exists, and the number is free. See the note above.
-	"CounterAuditAppends":        "audit.Writer appends every row of the hash-chained ledger and counts none of them. One line in the writer, plus a *Registry on its constructor.",
-	"CounterOutboxDelivered":     "the outbox relay knows exactly how many messages it delivered — DrainOnce returns that count — and the metric is never incremented. One line where the count is already computed.",
-	"CounterRuleBundleActivated": "bundles.Service.Activate is a single event on an append-only path. One line in the activation.",
-
-	// The disk and the connection pool have a measurement available and nobody
-	// takes it.
-	"GaugePostgresConns":    "pgxpool exposes its own connection statistics; nothing samples them into this gauge.",
-	"GaugeEvidenceDiskFree": "no evidence-volume sampler exists. This is the one that mattered: evidence_disk breaches below 10 percent free, so an unwritten gauge reads as a permanently full disk.",
-	"GaugeClockDriftMS":     "clocksub measures per-device drift and records it in device_clocks; the gauge is never fed from it, so the SLO's drift input is only in the database.",
-
-	// A subsystem that does not exist yet.
-	"CounterEvidenceFetched": "evidence retrieval is M2's blocker. There is no fetch worker to increment it; inventing one now would be inventing the thing that calls it.",
-	"CounterEvidenceFailed":  "as CounterEvidenceFetched.",
-
-	// A name whose meaning is not settled.
-	"CounterDeadLettersVisible": "sits beside CounterInboxDeadLettered with no stated difference, and nothing increments it. Either it means a distinct thing an operator would want — a dead letter that has been *seen* — or it is a duplicate that should be deleted. Guessing which would put a meaningless series on a dashboard.",
-}
+// `TestTheLedgerIsNotEmpty` is the floor on the ledger's own honesty: while it is
+// non-empty, a metric added without a producer fails with a name and no reason. So
+// leaving an empty map would keep the gate running and make the one thing that can
+// happen to it -- passing because there is nothing to check -- a state a future
+// contributor could reach by deleting every entry instead of every metric. The floor
+// is removed in the same commit as the last entry, which is what the floor says to do.
+//
+// # What the eight entries were, and why each is gone
+//
+// Wired, with the number already computed somewhere nobody looked:
+//
+//	CounterAuditAppends          audit.Writer.Append returns the row's hash on the only
+//	                             path a row reaches the ledger
+//	CounterOutboxDelivered       outbox.Relay.DrainOnce returns the delivered count
+//	                             as its result
+//	CounterRuleBundleActivated   bundles.Service.Activate, one event on an
+//	                             append-only path
+//	GaugePostgresConns           pgxpool.Stat() has counted this in memory since
+//	                             pgxpool existed
+//	GaugeEvidenceDiskFree        **the one that changed a gate.** evidence_disk
+//	                             breaches below 10% free, and `DiskFreeMeasured` is
+//	                             false while nothing writes the gauge -- so the
+//	                             objective printed "not measured" on every install
+//	                             and never once had an opinion. Wiring it needed a
+//	                             platform split, because the standard library has no
+//	                             disk-space call that works on both Linux and Windows
+//	                             (`disk_unix.go`, `disk_windows.go`)
+//	GaugeClockDriftMS            `drift_ms` has been a column on `device_clocks`
+//	                             since the table was created and the SLO's drift
+//	                             input lived only in the database
+//
+// Two entries whose REASON was wrong, which is the more interesting half:
+//
+//	CounterEvidenceFetched       excused with "evidence retrieval is M2's blocker.
+//	CounterEvidenceFailed        There is no fetch worker to increment it; inventing
+//	                             one now would be inventing the thing that calls it."
+//	                             Retrieval has no *worker*, and
+//	                             `GET /v1/evidence/{id}/content` is a perfectly good
+//	                             fetch event: it opens the object, verifies its
+//	                             SHA-256, and writes an `ActionEvidenceFetched` row
+//	                             to the hash-chained ledger, which is a more
+//	                             authoritative record of a fetch than a counter is.
+//	                             The excuse read like a decision, which is exactly
+//	                             why it survived
+//
+// One entry that was a duplicate asking to be guessed at:
+//
+//	CounterDeadLettersVisible    "sits beside CounterInboxDeadLettered with no stated
+//	                             difference, and nothing increments it. Either it
+//	                             means a distinct thing an operator would want -- a
+//	                             dead letter that has been *seen* -- or it is a
+//	                             duplicate that should be deleted."
+//	                             It is deleted. `CounterInboxDeadLettered` counts the
+//	                             fact; a "seen" counter would have to be incremented
+//	                             by whoever renders the dead-letter list, which means
+//	                             it counts operator attention rather than a system
+//	                             state -- and an operator refreshes a page. Every
+//	                             value such a series could take would be a function of
+//	                             how often somebody looked. The operator-attention
+//	                             number this repository cares about is
+//	                             `GaugeIncidentOpen`, and it is defined as states an
+//	                             operator watches, not events they accumulate
+var unproducedMetrics = map[string]string{}
 
 // TestEveryDeclaredMetricHasAProducerOrAnEntryInTheLedger.
 //
@@ -122,20 +154,20 @@ func TestEveryDeclaredMetricHasAProducerOrAnEntryInTheLedger(t *testing.T) {
 	}
 }
 
-// TestTheLedgerIsNotEmpty is the floor on the ledger's own honesty, for the reason
-// given in `TestTheLedgerIsNotEmpty` in the encoding test: deleting the map turns
-// the test above into a gate over nothing, with no failure anywhere.
-func TestTheLedgerIsNotEmpty(t *testing.T) {
-	if len(unproducedMetrics) == 0 {
-		t.Fatal("the unproduced-metric ledger is empty. If every one has been wired, delete the " +
-			"map and this test in the same commit, so nobody can empty it and keep the gate")
-	}
-	for name, reason := range unproducedMetrics {
-		if reason == "" {
-			t.Errorf("the ledger excuses %s without saying why, which is not an excuse", name)
-		}
-	}
-}
+// TestTheLedgerIsNotEmpty is the floor on the ledger's own honesty, and it is
+// DELETED with the last entry rather than kept as an empty check.
+//
+// While the ledger was non-empty, a metric added without a producer failed this gate
+// with a name and no reason attached -- which is the whole value of the ledger.
+// Keeping a test that asserts "the map I emptied is empty" would leave the gate running
+// with nothing for it to do, and the one thing that can then happen to it -- passing
+// because there is nothing to check -- would be a state a future contributor could
+// reach by deleting every entry instead of every metric.
+//
+// So the honest shape of "every declared metric has a producer" is that the ledger is
+// gone and the assertion above is the gate on its own. Deleting the entry
+// `CounterDeadLettersVisible` is what made the map empty, and this test is what said
+// to delete this test in the same commit.
 
 // declaredMetricNames reads the exported name constants out of metrics.go by parsing
 // it, rather than by matching lines: a regexp that stops matching when somebody

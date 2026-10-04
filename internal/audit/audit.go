@@ -27,6 +27,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
+	"github.com/Sergey-Bar/Ai-Captain/internal/observability"
 )
 
 // ActorType enumerates who acted. A principal is either a human with a role, or
@@ -138,6 +139,19 @@ type Writer struct {
 	// The chain includes ts, so a clock that jumps backwards mid-run is
 	// visible to anyone verifying the ledger afterwards.
 	Now func() time.Time
+	// Metrics is optional and nil-tolerant.
+	//
+	// It exists because `audit_appends_total` was declared, the SLO dashboard was
+	// built against it, and no code path anywhere in the tree incremented it. The
+	// number was free: `Append` is the only way a row reaches the ledger, and it
+	// already returns the row's hash. One field and one line.
+	//
+	// Nil-tolerant because an audit writer is constructed in tests, in migrations
+	// and in a rollback path, and a metrics counter is not a reason for any of them
+	// to have to know about a registry. A writer with no registry counts nothing
+	// rather than refusing to append, because refusing to append would turn a
+	// cosmetic dependency into an availability one.
+	Metrics *observability.Registry
 }
 
 func (w *Writer) now() time.Time {
@@ -200,6 +214,19 @@ func (w *Writer) Append(ctx context.Context, tx pgx.Tx, e Entry) (string, error)
 	).Scan(&prevHash, &hash)
 	if err != nil {
 		return "", fmt.Errorf("audit: append entry: %w", err)
+	}
+	// Counted here, after the row is in the CALLER's transaction and before that
+	// transaction is committed -- which is the only place this can be counted
+	// correctly and not counted on a rollback.
+	//
+	// The alternative, counting on commit, would need a transaction hook this
+	// package has no business knowing about. The cost of counting here is that the
+	// counter can read one high for a transaction that later rolls back, which is
+	// the smaller error: an append counter that over-reports by one on a failed
+	// transaction, versus an audit ledger whose row count disagrees with the
+	// counter that is supposed to describe it.
+	if w.Metrics != nil {
+		w.Metrics.Counters.Inc(observability.CounterAuditAppends)
 	}
 	return hash, nil
 }

@@ -114,7 +114,7 @@ func run() error {
 	}
 
 	registry := observability.NewRegistry()
-	writer := &audit.Writer{Pool: pool}
+	writer := &audit.Writer{Pool: pool, Metrics: registry}
 
 	store, err := evidence.New(evidence.Options{Root: cfg.EvidenceRoot})
 	if err != nil {
@@ -138,7 +138,7 @@ func run() error {
 
 	correlatorSvc := &correlator.Correlator{Pool: pool}
 	incidentsSvc := &incidents.Service{Pool: pool, Audit: writer}
-	bundlesSvc := &bundles.Service{Pool: pool, Compiler: rules.NewCompiler(), Audit: writer}
+	bundlesSvc := &bundles.Service{Pool: pool, Compiler: rules.NewCompiler(), Audit: writer, Metrics: registry}
 	inboxSvc := inbox.NewWriter(pool)
 	jobWorker := &jobs.Worker{Enqueuer: jobs.Enqueuer{Pool: pool}, Name: jobs.QueueVLM}
 
@@ -150,7 +150,8 @@ func run() error {
 		&observations.Writer{Pool: pool}, store, registry, log)
 
 	relay := &outbox.Relay{
-		Pool: pool,
+		Pool:    pool,
+		Metrics: registry,
 		Handler: func(_ context.Context, d outbox.Delivery) error {
 			// M1 dispatches no side effects. Acknowledging and logging is the honest
 			// behaviour; a topic with no consumer that silently disappears is a
@@ -235,6 +236,10 @@ func run() error {
 		Graph: &graph.Service{Pool: pool}, Correlat: correlatorSvc,
 		Incidents: incidentsSvc, Bundles: bundlesSvc, Enqueuer: jobs.New(pool),
 		Tenant: cfg.Tenant, SiteID: cfg.SiteID, IntegrationID: cfg.IntegrationID,
+		// The evidence volume, so `evidence_disk_free_percent` measures the
+		// filesystem the evidence store actually writes to rather than whatever the
+		// process's working directory happens to be on.
+		EvidenceRoot:  cfg.EvidenceRoot,
 		PollInterval:  cfg.PollInterval,
 		ClaimBatch:    cfg.ClaimBatchSize,
 		LeaseDuration: cfg.LeaseDuration,

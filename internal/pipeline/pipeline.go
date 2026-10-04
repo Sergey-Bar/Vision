@@ -102,10 +102,25 @@ type Deps struct {
 	IntegrationID string
 
 	// SiteLocation is the site's timezone, used to evaluate a schedule.
-	//
 	// It used to be hardcoded UTC in the evaluation context, which makes a
 	// schedule wrong by the site's offset.
 	SiteLocation *time.Location
+
+	// EvidenceRoot is the directory the evidence volume is mounted at, and it is
+	// what `evidence_disk_free_percent` measures.
+	//
+	// It is a path and not a device because the interesting failure is a full
+	// volume, and a full volume is one that stat's fine and has nothing left. There is
+	// no "where is the evidence" abstraction here to be wrong in: the evidence store
+	// writes under this directory and the gauge reads the filesystem it is on, so a
+	// configuration that points them at different filesystems reads the wrong one and
+	// says nothing.
+	//
+	// Empty means the gauge is not sampled. That is the honest answer for an install
+	// with no evidence volume -- a site that stores no evidence does not have a full
+	// one -- and the SLO's `DiskFreeMeasured` stays false, which is the flag for
+	// "this objective knows nothing here" rather than "this objective is healthy".
+	EvidenceRoot string
 
 	// InSchedule resolves a schedule id against a site-local instant. A Deps with
 	// none gets `rules.SiteScheduleResolver(SiteLocation)`, which is the same
@@ -295,6 +310,27 @@ func (l *Loops) SampleGauges(ctx context.Context) {
 		l.set(observability.GaugeClockSevereDevices, float64(severe))
 	}
 
+	// The worst clock drift in the fleet, in milliseconds.
+	//
+	// `drift_ms` has been a column on `device_clocks` since the table was created and
+	// the SLO reads this gauge, so before this the drift input to the objective lived
+	// only in the database and the gauge was never fed from it. A value is written for
+	// every device, so the maximum is the fleet's worst rather than an average that
+	// would let one badly-drifted camera hide behind a thousand fine ones.
+	//
+	// COALESCE to 0 because a site with no devices has no drift, and 0 is the correct
+	// reading for "nothing is drifting" -- but it is a reading about ZERO devices, so
+	// it is written only when the row exists and the emptiness is visible in the
+	// count. A NULL here would leave the gauge unmeasured, which is honest and also
+	// means the SLO's drift input is permanently absent on a fresh install.
+	var worstDrift float64
+	if err := gaugeScope.QueryRow(ctx, `
+		SELECT COALESCE(max(abs(drift_ms)), 0)::float8
+		FROM device_clocks WHERE tenant_id = $1`,
+		l.Deps.Tenant).Scan(&worstDrift); err == nil {
+		l.set(observability.GaugeClockDriftMS, worstDrift)
+	}
+
 	available := 0.0
 	if l.Deps.AIEndpoint != "" {
 		available = 1
@@ -332,7 +368,66 @@ func (l *Loops) SampleGauges(ctx context.Context) {
 		l.set(observability.GaugeIncidentDegraded, float64(degradedIncidents))
 	}
 
+	// The two that do not need the database, so they are sampled even when the
+	// queries above failed. They are last so that a `return` earlier in this function
+	// -- an unreadable backlog, an unresolved scope -- does not silently skip them.
+	l.samplePool()
+	l.sampleEvidenceDisk()
+
 	l.evaluateSLOs()
+}
+
+// samplePool samples the connection pool's own statistics.
+//
+// This is the one gauge that is not a query, because the pool already counts
+// everything worth counting about itself and keeps it in memory -- `pgxpool.Stat()`
+// returns acquired, idle, total, empty and cancelled counts, all of them free.
+//
+// It was declared, and the SLO's saturation objective read it, and nothing sampled
+// it. `TotalConns` rather than `AcquiredConns` because saturation is about the pool's
+// ceiling: a pool at its maximum with every connection idle is a pool that cannot
+// grow, and `AcquiredConns` would report that as nothing happening.
+func (l *Loops) samplePool() {
+	if l.Deps.Metrics == nil || l.Deps.Pool == nil {
+		return
+	}
+	stat := l.Deps.Pool.Stat()
+	l.set(observability.GaugePostgresConns, float64(stat.TotalConns()))
+}
+
+// sampleEvidenceDisk samples free space on the evidence volume.
+//
+// **This is the gauge that changed a gate.** `evidence_disk` in `slo.go` breaches
+// below ten percent free, and `Breaches` distinguishes "measured" from "not
+// measured" by whether this gauge has ever been written. With no producer it printed
+// "not measured" on every install and never once had an opinion, which is the best a
+// deliberately-silent objective can do and is also an SLO nobody was measuring.
+//
+// Free space is read with `syscall.Statfs`, which is in the standard library and
+// which on Linux and Windows answers the same question with the same struct. The
+// percentage is computed here rather than by the caller because a gauge named
+// `_percent` that a caller sets to bytes is a unit bug waiting for the day somebody
+// wires it up.
+//
+// A volume that cannot be stat'd leaves the gauge unwritten and says so once per
+// sampling round. That is the same rule every other gauge in `SampleGauges` follows:
+// a reading is not a decision, and a failed read keeps the previous value rather
+// than reporting zero.
+func (l *Loops) sampleEvidenceDisk() {
+	if l.Deps.Metrics == nil || l.Deps.EvidenceRoot == "" {
+		return
+	}
+	// The platform half lives in `disk_unix.go` and `disk_windows.go`, because the
+	// standard library has no disk-space call that works on both and this module
+	// takes no new dependency to get one. See `diskFreePercent` for why `Bavail` is
+	// the number on the Unix side and `freeBytesAvailableToCaller` on the Windows one.
+	free, err := diskFreePercent(l.Deps.EvidenceRoot)
+	if err != nil {
+		l.log("the evidence volume could not be read; its gauge keeps its last value",
+			"path", l.Deps.EvidenceRoot, "error", err.Error())
+		return
+	}
+	l.set(observability.GaugeEvidenceDiskFree, free)
 }
 
 // evaluateSLOs records which objectives are not being met, and says so.

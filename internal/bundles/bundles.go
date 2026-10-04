@@ -22,6 +22,7 @@ import (
 
 	"github.com/Sergey-Bar/Ai-Captain/internal/audit"
 	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
+	"github.com/Sergey-Bar/Ai-Captain/internal/observability"
 	"github.com/Sergey-Bar/Ai-Captain/internal/rules"
 	"github.com/Sergey-Bar/Ai-Captain/internal/simulate"
 )
@@ -37,6 +38,13 @@ type Service struct {
 	// optional in a running system: activating a rule set changes what will alarm
 	// a site, and nobody should be able to do that without a ledger row.
 	Audit *audit.Writer
+	// Metrics is optional and nil-tolerant. It exists because
+	// `rule_bundle_activated_total` was declared, an operator dashboard was built
+	// against it, and no path in the tree wrote it -- so a site could change its rule
+	// set a hundred times and the metric that exists to show exactly that reads
+	// zero. Nil-tolerant because this service is constructed in a unit test with no
+	// registry, and a dashboard is not a reason for one to acquire a dependency.
+	Metrics *observability.Registry
 }
 
 // Meta is a stored bundle's index entry.
@@ -345,7 +353,10 @@ func (s *Service) Activate(ctx context.Context, tenant, version string, report s
 		return prevErr
 	}
 
-	return s.Pool.InTenant(ctx, dbx.TenantContext{TenantID: tenant, ActorID: actor},
+	// The activation transaction. Its result is assigned rather than returned
+	// directly, because the counter below has to run only if it committed -- which is
+	// the whole reason the counter is outside.
+	err = s.Pool.InTenant(ctx, dbx.TenantContext{TenantID: tenant, ActorID: actor},
 		func(tx pgx.Tx) error {
 			// The pointer moves in one transaction: the previously active version
 			// is deactivated and the new one activated, so there is no instant at
@@ -377,6 +388,25 @@ func (s *Service) Activate(ctx context.Context, tenant, version string, report s
 			})
 			return err
 		})
+	if err != nil {
+		return err
+	}
+	// Counted once per activation, outside the transaction.
+	//
+	// `rule_bundle_activated_total` was declared and never written, while activation
+	// is a single event on an append-only path -- so the number was free and a
+	// dashboard built against the name could never have shown a bundle changing,
+	// which is the one thing an operator watches this metric for.
+	//
+	// Outside the transaction deliberately. A counter that incremented inside would
+	// read one high for a transaction that later rolled back, and activation is
+	// exactly the event where "the bundle is live" must mean it: the pipeline reads
+	// the ACTIVE row on the next poll, so a counted-but-rolled-back activation would
+	// report a rule change that the site is not running.
+	if s.Metrics != nil {
+		s.Metrics.Counters.Inc(observability.CounterRuleBundleActivated)
+	}
+	return nil
 }
 
 // Rollback returns to the previously active version.

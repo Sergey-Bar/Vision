@@ -43,7 +43,6 @@ const (
 	// The name has to say what is measured; the roadmap's metric table records
 	// what a future real dispatch will be called, and it will be a new name.
 	CounterOutboxDelivered     = "outbox_messages_delivered_total"
-	CounterDeadLettersVisible  = "dead_letter_visible_total"
 	CounterRuleBundleActivated = "rule_bundle_activated_total"
 	CounterCheckpointsSealed   = "checkpoints_sealed_total"
 	CounterAuditAppends        = "audit_appends_total"
@@ -80,7 +79,7 @@ var counterMetrics = map[string]bool{
 	CounterContradicted: true, CounterUnverified: true,
 	CounterVLMInvocations: true, CounterVLMErrors: true,
 	CounterEvidenceFetched: true, CounterEvidenceFailed: true,
-	CounterOutboxDelivered: true, CounterDeadLettersVisible: true,
+	CounterOutboxDelivered:     true,
 	CounterRuleBundleActivated: true, CounterCheckpointsSealed: true,
 	CounterAuditAppends: true,
 }

@@ -367,6 +367,115 @@ appears nowhere in its transcript document`. A control in the table with no reco
 of being watched fail is a control that is a comment, and the gate says so without
 being asked which is the only way anyone finds out.
 
+### `dead-export` was reporting three dead exports as live, and its own looseness was why
+
+Wiring `GaugeEvidenceDiskFree` put `runtime.KeepAlive` into `internal/pipeline`, and
+`dead-export` immediately reported its own allow-list as stale:
+
+```
+the allow-list excuses internal/rtsp.KeepAlive and nothing matches it any more.
+Delete the entry rather than leaving it to look like a decision that was made
+```
+
+`internal/rtsp.KeepAlive` had a reader. The reader was `runtime.KeepAlive`.
+
+`addSelectors` records every selector name in the tree **unqualified**, because a
+method is only ever reached through a receiver and a per-package rule would report
+every interface method as dead. The one qualification it applied was "the qualifier
+names one of **this repository's** packages" — so a qualifier naming an **imported**
+package still counted, and:
+
+| Masking reader | Dead export it was hiding |
+|---|---|
+| `filepath.Walk` in `internal/deadexport`, `internal/predicatecov` and `cmd/securityctl/pack.go` | `internal/graph.(*Service).Walk` |
+| `ed25519.PrivateKey(key)` in three `cmd` files — a **type conversion**, whose selector read counted | `internal/checkpoint.(*Signer).PrivateKey` |
+| `embed.FS` / `fs.Sub` in `internal/contracts/schemasync` | `internal/contracts/schemasync.FS` |
+
+The direction is the one `deadexport`'s own package comment calls the bad one:
+**reporting a dead export as live**. Its words are *"Missing a dead symbol is the safe
+direction; reporting a live one is the direction that gets the gate switched off."*
+Three exports had been switched off without anybody noticing.
+
+Import names are now collected per file and excluded exactly as local package names
+are, because for this purpose they are the same thing — an identifier that cannot be
+a receiver. Blank and dot imports are excluded, or recording `_` as a package name
+would suppress every selector written after it in that file.
+
+Red-checked, with a mutation that still compiles — the first attempt left `imports`
+unused and the package failed to **build**, which is not evidence that a test caught
+anything:
+
+```
+--- with the import exclusion removed:
+    --- FAIL: TestAnImportedPackageQualifiedSelectorIsNotAMethodCall
+        deadexport_test.go:633: filepath.Walk excused an uncalled method of the same
+        name; findings were [walker.Visiting]
+--- restored ---
+    ok
+```
+
+The three are now in the allow-list with what closing each one actually takes, and the
+two that are genuinely dead product code are named as such: `checkpoint.PrivateKey`
+should probably be **deleted** rather than wired, because key material should flow one
+way into a `Signer`, and `schemasync.FS` needs a validator that takes a whole
+directory rather than a single file, which is a real requirement for rule-bundle
+schemas that `$ref` each other and not a one-line wire-up.
+
+### Nine unwritten metrics: eight closed, and one reason was wrong
+
+`internal/observability/metric_producers_test.go` is a ledger of every declared metric
+nothing writes, with a required reason per entry, and a gate that fails on a new one
+and fails on an entry that has gone stale. **All eight entries are now closed and the
+ledger is deleted**, along with the floor test that said to delete it in the same
+commit.
+
+Wired, because the number was already computed somewhere nobody looked:
+
+| Metric | Where the number already was |
+|---|---|
+| `CounterAuditAppends` | `audit.Writer.Append` returns the row's hash on the only path a row reaches the ledger |
+| `CounterOutboxDelivered` | `outbox.Relay.DrainOnce` returns the delivered count as its result |
+| `CounterRuleBundleActivated` | `bundles.Service.Activate`, one event on an append-only path |
+| `GaugePostgresConns` | `pgxpool.Stat()` has counted this in memory since pgxpool existed |
+| `GaugeEvidenceDiskFree` | **the one that changed a gate** — see below |
+| `GaugeClockDriftMS` | `drift_ms` has been a column on `device_clocks` since the table was created |
+
+**`GaugeEvidenceDiskFree` is the one that mattered.** `evidence_disk` in `slo.go`
+breaches below ten percent free, and `DiskFreeMeasured` is false while nothing writes
+the gauge — so the objective printed *"not measured"* on every install and never once
+had an opinion. It needed a platform split, because **the standard library has no
+disk-space call that works on both platforms**: `syscall.Statfs` does not exist on
+Windows, and Windows' `syscall` exports no `GetDiskFreeSpaceEx` wrapper at all.
+`disk_unix.go` and `disk_windows.go` split it, the Windows half through the loader the
+standard library already provides rather than adding `golang.org/x/sys` for one
+function. `Bavail` on Unix and `freeBytesAvailableToCaller` on Windows, because
+`Bfree` counts space reserved for root — a gauge counting it reports room right up to
+the point where every write fails with ENOSPC.
+
+**Two entries had reasons that were wrong**, which is the more interesting half:
+
+```
+CounterEvidenceFetched: "evidence retrieval is M2's blocker. There is no fetch worker
+                        to increment it; inventing one now would be inventing the thing
+                        that calls it."
+```
+
+Retrieval has no *worker*, and `GET /v1/evidence/{id}/content` is a perfectly good
+fetch event: it opens the object, verifies its SHA-256, and writes an
+`ActionEvidenceFetched` row to the **hash-chained audit ledger**, which is a more
+authoritative record of a fetch than a counter is. Both counters are now wired there.
+The excuse read like a decision, which is exactly why it survived — and it is the
+second time in this session that a plausible reason has been the thing hiding a
+defect.
+
+**One entry was a duplicate asking to be guessed at.** `CounterDeadLettersVisible` sat
+beside `CounterInboxDeadLettered` with no stated difference and is **deleted**. It
+would have had to be incremented by whoever renders the dead-letter list, so it counts
+operator attention rather than a system state — and every value such a series can take
+is a function of how often somebody looked. The operator-attention number this
+repository cares about is `GaugeIncidentOpen`, and it is defined as states an operator
+watches rather than events they accumulate.
+
 ### Eight controls had no transcript at all, and the gate said so
 
 The new `tree-state` gate asserts that every red-check entry's name appears in this

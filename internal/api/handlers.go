@@ -614,10 +614,39 @@ func (s *Server) handleEvidenceContent(w http.ResponseWriter, r *http.Request, p
 			// response from whoever is watching.
 			status = http.StatusConflict
 		}
+		// A fetch that could not produce the bytes. Counted here and nowhere else,
+		// because this is the only place in the tree that fetches evidence.
+		//
+		// The metric ledger in `internal/observability/metric_producers_test.go`
+		// excused `evidence_fetched_total` and `evidence_failed_total` with "evidence
+		// retrieval is M2's blocker. There is no fetch worker to increment it;
+		// inventing one now would be inventing the thing that calls it." That was
+		// wrong in a way worth recording: retrieval has no *worker*, and this route
+		// is a perfectly good fetch event -- it opens the object, verifies its
+		// SHA-256, and writes an `ActionEvidenceFetched` row to the hash-chained
+		// ledger, which is a more authoritative record of a fetch than a counter.
+		// The excuse was plausible enough to survive, which is the failure mode of
+		// every ledger entry whose reason reads like a decision.
+		if d.Metrics != nil {
+			d.Metrics.Counters.Inc(observability.CounterEvidenceFailed)
+		}
 		WriteError(w, status, "evidence_unavailable", err.Error(), requestID(r))
 		return
 	}
 	defer func() { _ = rc.Close() }()
+
+	// Counted after `Open` succeeded and the hash verified, and before the bytes are
+	// streamed: this is "evidence was released to a caller", which is the fact an
+	// operator needs when asking why a clip was viewed, and counting it before the
+	// stream completes would report a fetch for a response that failed midway.
+	//
+	// It is counted before the audit row rather than after, because the audit failure
+	// path below returns a 500 and releases no bytes -- so counting after would
+	// under-report a fetch that this route refused to make, and the metric would be
+	// the one place that thinks the bytes went out when they did not.
+	if d.Metrics != nil {
+		d.Metrics.Counters.Inc(observability.CounterEvidenceFetched)
+	}
 
 	if err := s.auditEvidenceFetched(r, p, id, siteID, obj); err != nil {
 		// The evidence is not released. A response already committed at this

@@ -1,4 +1,4 @@
-// Package deadexport is the gate for the "exported symbol with no reader" class.
+﻿// Package deadexport is the gate for the "exported symbol with no reader" class.
 //
 // # Why this exists
 //
@@ -644,23 +644,81 @@ func (r *Repo) Check(exempt map[string]Exemption) ([]Finding, []error) {
 // version of this rule would report every method of every interface as dead,
 // which is the interface-conformance noise that made method gating unusable.
 //
-// One thing is excluded, and finding the exclusion was the gate's own false
-// negative: `covercheck.Baseline` is a *type* referenced across a package
-// boundary, and it shares a spelling with `detector.(*FrameDiff).Baseline`, a
-// method whose only callers are tests. A package-qualified selector is never a
-// method call, so a selector whose qualifier names a package is not recorded.
+// # Package-qualified selectors are excluded, local packages and imports alike
+//
+// The rationale is that a package-qualified selector is never a method call, and the
+// exclusion used to recognise only the repository's OWN package names. `runtime` is
+// not one of those, so `runtime.KeepAlive` in `internal/pipeline/disk_windows.go`
+// was recorded as a read of the bare name `KeepAlive` — and that silently gave
+// `internal/rtsp.(*Client).KeepAlive` a reader it has never had, so the gate reported
+// a correct allow-list entry as stale.
+//
+// The direction is the bad one. The package comment calls out that a bare-name
+// collision is "the one looseness in the gate", and this is that looseness firing:
+// it turns a dead export live, which is the direction that makes a gate get switched
+// off rather than the direction that makes it cry wolf. The file's import names are
+// therefore collected and treated exactly like local package names, because for this
+// purpose they are the same thing — an identifier that cannot be a receiver.
 func (r *Repo) addSelectors(f *ast.File, into map[string]bool) {
+	imports := importedPackageNames(f)
 	ast.Inspect(f, func(n ast.Node) bool {
 		sel, ok := n.(*ast.SelectorExpr)
 		if !ok || sel.Sel == nil {
 			return true
 		}
-		if _, isPackage := r.qualifierName(sel.X); isPackage {
+		// Only an IDENTIFIER that names a package is excluded. A qualifier that is
+		// itself a selector -- `c.metrics.Set` -- is a field chain on a value, and
+		// that is exactly the shape of a method call the gate has to record.
+		//
+		// Returning early for a non-identifier qualifier, which an earlier version of
+		// this did, silently stopped recording every method reached through a field,
+		// and the gate reported fifty methods as dead. That is the same bad direction
+		// as the bug this function was fixed for, reached by the fix.
+		if id, isIdent := sel.X.(*ast.Ident); isIdent &&
+			(r.packageNames[id.Name] || imports[id.Name]) {
 			return true
 		}
 		into[sel.Sel.Name] = true
 		return true
 	})
+}
+
+// importedPackageNames is the set of identifiers in a file that name a package it
+// imported, including any alias.
+//
+// The last path element is the name Go binds by default, and an explicit alias
+// replaces it. A dotted import (`a/b/c`) binds the local name `c`, so the last
+// element is still right. A blank or dot import (`_`/`.`) binds nothing usable and is
+// excluded, because recording `_` as a package name would suppress every selector
+// written after it in that file.
+func importedPackageNames(f *ast.File) map[string]bool {
+	out := make(map[string]bool, len(f.Imports))
+	for _, imp := range f.Imports {
+		if imp.Path == nil {
+			continue
+		}
+		p := strings.Trim(imp.Path.Value, `"`)
+		if imp.Name != nil {
+			switch imp.Name.Name {
+			case "_", ".":
+				continue
+			case "C":
+				// A cgo import binds `C`, which is a pseudo-package. Its selectors
+				// are not methods of anything in this repository.
+				out["C"] = true
+				continue
+			default:
+				out[imp.Name.Name] = true
+				continue
+			}
+		}
+		if i := strings.LastIndexByte(p, '/'); i >= 0 && i+1 < len(p) {
+			out[p[i+1:]] = true
+		} else if p != "" {
+			out[p] = true
+		}
+	}
+	return out
 }
 
 // HasReader reports whether the symbol is reachable at all: for a top-level
@@ -746,3 +804,5 @@ func plural(n int) string {
 	}
 	return "ies"
 }
+
+
