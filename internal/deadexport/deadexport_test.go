@@ -270,7 +270,6 @@ var (
 		"internal/observations.Stats":             {Symbol: "internal/observations.Stats", Why: "TEST-ONLY. The observation statistics. P3's evaluation harness scores a report against them and the copilot quotes them; neither reads them, so the numbers exist and nothing consumes them"},
 
 		"internal/rtsp.KeepAlive": {Symbol: "internal/rtsp.KeepAlive", Why: "TEST-ONLY. The RTSP keep-alive. The recorder should send one; nothing does, so a camera that times out a stream stops and the gap looks like a quiet scene rather than a lost camera"},
-		"internal/rtsp.Play":      {Symbol: "internal/rtsp.Play", Why: "TEST-ONLY. The RTSP PLAY verb. The client describes and reads, so the product can only capture from a camera that pushes on its own; a camera that waits for PLAY is a camera this product cannot record"},
 
 		// Three that the gate was NOT reporting, and the reason is in the gate's own
 		// code. `addSelectors` records every selector name in the tree UNQUALIFIED,
