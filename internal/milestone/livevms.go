@@ -157,7 +157,7 @@ func StartLiveServer(ctx context.Context, opts LiveOptions) (*LiveServer, error)
 	// already there. ReadTimeout is bounded generously because a bookmark write may
 	// legitimately carry a video reference.
 	s.srv = &http.Server{Handler: s.withLog(mux), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second}
-	go func() {
+	go func() { //nolint:gosec // G118: reported at the goroutine, not at the statement. The Background() below is deliberate -- see there.
 		<-ctx.Done()
 		// A fresh context, not a child of the one that just ended.
 		//
