@@ -24,6 +24,10 @@
                        run's own JSON stream kept for skip-audit
       skip-audit       no suite skipped anything it was supposed to run; every
                        skip is declared with a reason in a committed file
+      no-silent-skips    the run was ABLE to test what it reported. A
+                       database-backed suite that declined to start is a
+                       red gate, not a green line -- this is the difference
+                       between "green" and "green and empty"
       cover-floor      no package's committed coverage floor moved, in either
                        direction. Upwards asks for the floor to be raised
       dead-export      no exported function, var, const or method exists that
@@ -80,7 +84,19 @@ param(
     # checks that a scan record exists and postdates the corpus, because a
     # measured scan of 25 skills takes 6-10 minutes and this script has sixteen
     # other gates. Use this when the corpus changed, or on a release check.
-    [switch]$ScanSkills
+    [switch]$ScanSkills,
+    # Record that this machine has no Postgres and the run is therefore not evidence
+    # about the database-backed suites.
+    #
+    # It exists because the alternative is a gate that can never pass here, and a gate
+    # that can never pass is a gate that gets deleted. This one prints, in full, which
+    # assertions did not execute -- so the run that says "I did not check the database"
+    # says exactly what it did not check, and cannot be quoted as a green verification.
+    #
+    # It does NOT skip the gate silently and it does NOT suppress the count. If you
+    # pass this, you are asserting that the absence is known and acceptable for this
+    # run, and the output says so in those words.
+    [switch]$SkipNoDatabase
 )
 
 $repo = Split-Path -Parent $PSScriptRoot
@@ -140,6 +156,11 @@ $failures = [System.Collections.Generic.List[string]]::new()
 # rather than printed, because Invoke-Gate reads one exit code and this gate needs
 # to say which control failed, not only that one did.
 $script:redCheckFailures = [System.Collections.Generic.List[string]]::new()
+# Controls that could not be exercised at all, as opposed to controls proven absent.
+# The two are counted separately and reported separately, because "this control is not
+# guarded" sends somebody to write a test while "this control was never run" sends them
+# to start a database.
+$script:redCheckUnproven = [System.Collections.Generic.List[string]]::new()
 
 # What each gate did, in order. The console output is a transcript; this is the
 # record, and it is written to disk at the end of the run whether the run passed or
@@ -344,6 +365,107 @@ Invoke-Gate 'test' {
 Invoke-Gate 'skip-audit' {
     & $go run ./tools/skipaudit -input $testStream
     $global:LASTEXITCODE = $LASTEXITCODE
+}
+
+# Did anything actually RUN?
+#
+# `skip-audit` above answers a different question: is every skip DECLARED? This one
+# asks whether the run was capable of testing the thing it reported. Both are needed,
+# because the two can both pass over a run that tested nothing: a skip can be declared
+# with a perfectly good reason and still be forty-two database-backed suites declining
+# to start because nothing set SP_TEST_DATABASE_URL.
+#
+# `AGENTS.md` says the database-backed tests skip rather than fail, so a green run can
+# be a run that tested nothing, and it says the way to tell is to confirm they ran. This
+# gate is that confirmation, made mechanical, because a rule that has to be remembered
+# is a rule that is not followed.
+#
+# Two conditions, and the second is the one that has actually bitten:
+#
+#   1. SP_TEST_DATABASE_URL unset and something skipped. The contributor has no
+#      database; every database-backed suite declined, which is CORRECT behaviour and
+#      which means this run is not evidence.
+#   2. Something skipped with "unavailable" in the reason. The variable is set but
+#      nothing connected -- wrong password, container stopped, port moved. This is the
+#      dangerous one, because the configuration LOOKS right, `docker ps` shows a
+#      healthy container, and the run is still green and empty. It is what happened
+#      here when Docker Desktop stopped mid-session.
+#
+# -SkipNoDatabase exists for the contributor in (1) who genuinely has no Postgres and
+# is not claiming a verified run. It prints what it skipped, in full, so the run that
+# says so says exactly which assertions did not execute.
+Invoke-Gate 'no-silent-skips' {
+    if ($SkipNoDatabase) {
+        Write-Host "    SKIPPED by -SkipNoDatabase. This run is NOT evidence about the" -NoNewline
+        Write-Host " database-backed suites; they did not execute."
+        $global:LASTEXITCODE = 0
+        return
+    }
+
+    $events = Get-Content -LiteralPath $testStream -ErrorAction SilentlyContinue |
+        Where-Object { $_ -like '{*' } |
+        ForEach-Object {
+            try { $_ | ConvertFrom-Json } catch { $null }
+        } |
+        Where-Object { $_ -and $_.Action }
+
+    $skipped = @($events | Where-Object { $_.Action -eq 'skip' })
+
+    # The "unavailable" wording is printed by internal/testutil's own two skip paths,
+    # so this matches the harness's words rather than guessing at a set of test names
+    # that would need maintaining alongside it.
+    $offline = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($e in $events) {
+        if ($e.Action -eq 'output' -and
+            $e.Output -match 'test database unavailable|is not set; skipping database-backed') {
+            if ($e.Test) { [void]$offline.Add($e.Test) }
+        }
+    }
+
+    $unset = [string]::IsNullOrWhiteSpace($env:SP_TEST_DATABASE_URL)
+
+    if ($unset) {
+        # First, because it is the broader condition and the honest headline. An
+        # empty string counts: `go test` sees an unset variable, so the harness skips,
+        # and a gate that only tested for `$null` would report "a database URL is
+        # configured" on a machine where the operator set it to "".
+        if ($skipped.Count -gt 0) {
+            Write-Host "    $($skipped.Count) test(s) skipped and SP_TEST_DATABASE_URL is not set, so"
+            Write-Host "    none of them can be assumed to be the declared platform skips."
+            Write-Host ""
+            $skipped | Select-Object -ExpandProperty Test -Unique | Sort-Object |
+                Select-Object -First 12 | ForEach-Object { Write-Host "      $_" }
+            if (($skipped | Select-Object -ExpandProperty Test -Unique).Count -gt 12) {
+                Write-Host "      ... and more"
+            }
+            Write-Host ""
+            Write-Host "    Start a database and re-run, or pass -SkipNoDatabase to record that this run"
+            Write-Host "    is not evidence about the database-backed suites."
+            $global:LASTEXITCODE = 1
+            return
+        }
+        Write-Host "    nothing skipped and SP_TEST_DATABASE_URL is not set, so nothing needed it"
+        $global:LASTEXITCODE = 0
+        return
+    }
+
+    if ($offline.Count -gt 0) {
+        Write-Host "    $($offline.Count) database-backed test(s) declined to run even though a database URL IS"
+        Write-Host "    configured. The configuration looks right and nothing connected, which is the"
+        Write-Host "    case a check for 'is the variable set' cannot see."
+        Write-Host "    Most likely, in order: SP_TEST_DATABASE_PASSWORD is not set; the container is"
+        Write-Host "    not running; the port is not the one the URL names."
+        Write-Host ""
+        $offline | Sort-Object | Select-Object -First 12 | ForEach-Object { Write-Host "      $_" }
+        if ($offline.Count -gt 12) { Write-Host "      ... and $($offline.Count - 12) more" }
+        Write-Host ""
+        Write-Host "    This run is GREEN and EMPTY. That is the failure mode this gate exists for."
+        $global:LASTEXITCODE = 1
+        return
+    }
+
+    Write-Host "    $($skipped.Count) declared/legitimate skip(s); the database-backed suites reached a database"
+    $global:LASTEXITCODE = 0
 }
 
 # Per-package coverage floors, in both directions.
@@ -611,10 +733,39 @@ Invoke-Gate 'red-check' {
             # whole gate mid-table. A compile error is a legitimate red result - the
             # control really is gone - so it is read as one rather than as a crash.
             $ErrorActionPreference = 'Continue'
-            & $go test -p 1 -count=1 -run $c.test $c.pkg *> $null
+            $output = & $go test -p 1 -count=1 -v -run $c.test $c.pkg 2>&1
             $exit = $LASTEXITCODE
             $ErrorActionPreference = 'Stop'
-            if ($exit -eq 0) {
+
+            # "Green" and "did not run" are different failures and the reader needs
+            # to be told which.
+            #
+            # A control whose package is database-backed SKIPS on a machine with no
+            # database, and a skipped `go test` exits 0. So removing the control
+            # "passes" and the gate reports a test that cannot fail -- when the truth
+            # is that the test never ran at all. The first version of this printed the
+            # wrong one, and it did so in the same run that introduced
+            # `no-silent-skips`: eleven controls reported proved and one reported a
+            # broken test, when in fact all twelve were unverified and the tree said
+            # so nowhere.
+            $ranAsSkip = @($output | ForEach-Object { "$_" } |
+                Where-Object { $_ -match '^(--- )?SKIP' -or $_ -match '\s+--- SKIP:' }).Count -gt 0
+            $ranAny = @($output | ForEach-Object { "$_" } |
+                Where-Object { $_ -match '^(=== RUN|--- (PASS|FAIL|SKIP))' }).Count -gt 0
+
+            if ($exit -eq 0 -and -not $ranAny) {
+                Write-Host "    NOT PROVED: $($c.name) - the named test did not RUN, so nothing about the"
+                Write-Host "      control was established either way. An empty result is not a green one."
+                Write-Host "      Named test: $($c.test) in $($c.pkg)"
+                $script:skips.Add([ordered]@{ name = 'red-check'; reason = "$($c.name): $($c.test) did not run, so the control was not exercised" })
+                $script:redCheckUnproven.Add($c.name)
+            } elseif ($exit -eq 0 -and $ranAsSkip) {
+                Write-Host "    NOT PROVED: $($c.name) - the named test SKIPPED with the control removed, so the"
+                Write-Host "      control was removed and nothing noticed. A skipped test asserts nothing."
+                Write-Host "      Named test: $($c.test) in $($c.pkg)"
+                $script:skips.Add([ordered]@{ name = 'red-check'; reason = "$($c.name): $($c.test) skipped, so the control was removed and nothing noticed" })
+                $script:redCheckUnproven.Add($c.name)
+            } elseif ($exit -eq 0) {
                 Write-Host "    FAILED: $($c.name) - the suite stayed green with the control removed. $($c.why)"
                 Write-Host "      A test that cannot fail when its subject is gone is not a test."
                 $script:redCheckFailures.Add($c.name)
@@ -653,6 +804,13 @@ Invoke-Gate 'red-check' {
     }
 
     Write-Host "    $proved of $($controls.Count) control(s) proved; the count is derived from the table, never written into the gate's name"
+    if ($script:redCheckUnproven.Count -gt 0) {
+        # A SKIP, not a failure, and deliberately so: the control is probably fine and
+        # the environment is not. Declaring it as a declared skip means `skip-audit`
+        # requires a reason for it and prints it on every run, so "unproved because
+        # there is no database" stays visible instead of becoming the new normal.
+        Write-Host "    NOTE: $($script:redCheckUnproven.Count) control(s) were not exercised: $($script:redCheckUnproven -join '; ')"
+    }
     if ($script:redCheckFailures.Count -gt 0) {
         Fail-Gate "$($script:redCheckFailures.Count) control(s) could not be proven guarded: $($script:redCheckFailures -join '; ')"
     }

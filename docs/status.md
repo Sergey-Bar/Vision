@@ -30,10 +30,11 @@ rather than the per-package **schema** the plan asked for, because migration 000
 hardcodes `public` and a per-schema harness would apply **no row-level security at
 all**; the reason is in R13.
 
-**Verification:** `scripts/verify.ps1` green - twenty-two gates: contract-check
+**Verification:** `scripts/verify.ps1` green - twenty-three gates: contract-check
 across all three published contract surfaces, contract-sync, vet, gofmt,
 `golangci-lint` (including gosec), the generated-code check,
-`go test -race -count=1 -json -coverprofile ./...`, skip-audit, cover-floor, dead-export, predicate-cov,
+`go test -race -count=1 -json -coverprofile ./...`, skip-audit, no-silent-skips,
+cover-floor, dead-export, predicate-cov,
 red-check, migration-phases, sql-guard, skills-audit, rules-lint, the RLS canary,
 the Python runtime suite and the tree-state gate - against a real Postgres 16, with
 `SP_TEST_DATABASE_URL` set so the database-backed suites ran rather than skipped.
@@ -44,12 +45,58 @@ races. The most recent dated run record is
 of seventeen, zero failed, zero skipped, against a real database - including
 `recovery-drill`, which is the gate that skips whenever the database variable is
 absent, and which was the reason the previous run of that record was not evidence
-even though it was green. The twenty-two gates above are a later tree than that
-record: skip-audit, cover-floor, dead-export, predicate-cov and tree-state were added
+even though it was green. The twenty-three gates above are a later tree than that
+record: skip-audit, no-silent-skips, cover-floor, dead-export, predicate-cov and
+tree-state were added
 after it, so the record's own gate list is a statement about that run, not about
 today's script.
 `red-check` is 7 of 7 controls proved in 12 seconds; `skills-audit` is 1 second,
 because it checks freshness rather than rescanning 67 skills.
+
+### `no-silent-skips`: the run that tested nothing is now a red gate
+
+**This is the highest-value item in the plan, and the reason it exists is in this
+repository's own words.** `AGENTS.md`: *"The database-backed tests **skip** rather than
+fail when the environment variable is absent, which means a green run can be a run that
+tested nothing."* And: *"Always confirm they actually ran."*
+
+Confirming is a thing a person has to remember to do. `skip-audit` did not cover it,
+because it answers a different question — *is every skip DECLARED?* — and the two can
+both pass over a run that tested nothing. A skip can carry a perfectly good reason and
+still be forty-two suites declining to start because nothing set the variable.
+
+The gate reads the run's own JSON stream, which is the same stream `skip-audit` reads,
+and fails on either of two conditions:
+
+| Condition | Why it exists |
+|---|---|
+| `SP_TEST_DATABASE_URL` unset and something skipped | the contributor has no database. Every database-backed suite declined, which is **correct behaviour**, and which means the run is not evidence. |
+| something skipped with *"test database unavailable"* or *"is not set; skipping database-backed"* in its output | **the dangerous one.** The variable is set, so the configuration looks right; nothing connected because the password is unset, the container stopped, or the port moved. |
+
+The second is not hypothetical and it is not rare. Docker Desktop was stopped mid-session
+while this was being written, and the run that followed was **green on every gate**,
+including `skip-audit`, because the configuration still said `SP_TEST_DATABASE_URL` was
+set. The gate named the 287 tests that declined and printed:
+
+```
+287 database-backed test(s) declined to run even though a database URL is configured.
+This run is GREEN and EMPTY. That is the failure mode this gate exists for.
+```
+
+It matches the harness's own **wording** rather than a list of test names, so it does
+not need maintaining alongside `internal/testutil`. The alternative — naming the
+database-backed tests — is a list that goes stale silently, and a stale list is a gate
+that stops firing.
+
+`-SkipNoDatabase` exists for a contributor who genuinely has no Postgres and is not
+claiming a verified run. It does not pass quietly: it prints *"This run is NOT evidence
+about the database-backed suites; they did not execute."* A gate that can never pass on
+some machines is a gate that gets deleted; this one has an exit that says exactly what
+it gave up.
+
+**It has two conditions and only one transcript below**, because the second was caught
+live and the first is the same code path with the variable absent. Both are recorded
+here rather than only the one that happened.
 
 **The four gates added with the 2026-10-02 pass, and what they caught.** All four
 are about the run rather than the product, which is where this repository's

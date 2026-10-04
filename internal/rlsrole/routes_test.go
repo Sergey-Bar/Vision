@@ -67,6 +67,16 @@ func TestEveryRouteDeclaresACapability(t *testing.T) {
 		// would leave an unauthenticated operator looking at an unstyled page.
 		"GET /static/{file}": "the console stylesheet: identical for every operator and " +
 			"carrying no tenant data",
+		// The console's sign-out. There is no capability that fits it: signing out is
+		// not something an operator may lack the right to do, and a CapSessionRead
+		// held by nobody would be a capability table entry that grants nothing while
+		// looking like a control. It requires a principal -- so it authorises rather
+		// than merely existing -- and the CSRF check does apply to it.
+		//
+		// Listed here for the reason this list exists: so that "this route needs no
+		// capability" is a sentence somebody wrote rather than a gap in a switch.
+		"POST /logout": "signing out is not gated on a capability because there is no " +
+			"capability to gate it on; it requires a principal and a CSRF token",
 	}
 
 	var problems []string
