@@ -1,6 +1,11 @@
 # Status
 
-Last revised 2026-10-04 (Phase 0: the product runs. `Dockerfile`,
+Last revised 2026-10-04, second pass (acceptance criteria 02 and 09 closed with the
+claim narrowed to what is true; nine of the seventeen never-red gates proven by hand
+with a transcript, and the other nine recorded with what was tried and what the failure
+was. See "The 2026-10-04 pass over the acceptance criteria and the never-red list".)
+
+Previously 2026-10-04 (Phase 0: the product runs. `Dockerfile`,
 `docker-compose.yml`, `cmd/security-seed`, a distroless runtime image with an
 in-binary health probe, and `docker compose --profile verify run --rm verify`
 running the SAME `scripts/verify.ps1` under PowerShell on Debian — which found
@@ -616,6 +621,94 @@ Red-checked, and the corpus file is the mutation's evidence:
 --- restored ---
     ok
 ```
+
+## The 2026-10-04 pass over the acceptance criteria and the never-red list
+
+### What the acceptance report says now
+
+`securityctl acceptance`: **9 pass, 0 fail, 4 not runnable in this build.**
+Criterion 08 stays `NOT RUN` deliberately — a second site needs a customer.
+
+Two criteria moved, and both moved by *narrowing the claim* rather than by
+asserting more:
+
+**Criterion 02** — camera to stored clip, over a real socket. `internal/rtsp/server.go`
+is the client's own test server, moved out of the test file and shipped as a
+long-running server, and `securityctl serve-camera` runs it. The client's tests now
+start *this* server, so there is no second packetiser and therefore no second
+opinion about RFC 6184 held by the same author. Four things changed in the move and
+each was recorded at the code: the FU-A indicator carried the real `nal_ref_idc`
+rather than the constant `0x7C`; the RTP marker is per access unit rather than once
+per stream; the stream is paced and loops rather than firing as fast as the socket
+allows and then dropping the connection; and the SDP declares the fixture's real
+geometry rather than a constant invented beside the code that captures.
+
+The evidence sentence calls it a **CAMERA SUBSTITUTE** in every direction the word
+camera could have meant, because a jury that found "camera" unqualified under a PASS
+would be right to stop reading.
+
+**Criterion 09** — find the second within 30 s. `internal/milestone/livevms.go` is
+the scripted vendor handler the probe and write-back tests each had their own copy
+of, promoted to a long-running server registered *from the route table* rather than
+from a hand-copied list. Its load-bearing behaviour is idempotency: a write with no
+`Idempotency-Key` is refused, and a repeated key returns the original reference and
+marks it a replay. Measured: bookmark placed in 1.5 ms against a 30 s budget, and
+the recording it opens **contains** the incident instant with 10 s of lead-in after a
+900 ms drift was corrected into the window. The evidence says plainly that the
+thirty seconds is a budget and not a latency, and that no recorder is involved.
+
+The plan says `pocctl serve-camera` and `pocctl serve-vms`. Both are `securityctl`
+here, because the RTSP client, the muxer and the Milestone adapter are in THIS
+module and `poc/active-monitoring/go.mod` declares no `replace`, so Go's `internal/`
+visibility rule puts them out of reach from `pocctl`. A server in the POC would have
+had to reimplement the client it exists to exercise.
+
+### The never-red list: nine proven, nine recorded
+
+`internal/statuscheck`'s `TestAGateThatHasNeverFailedIsNamed` read **eight of
+twenty-five** gates as having ever been recorded red, and named seventeen. Nine are
+now proven by `scripts/force-red.ps1`, each with a transcript in
+`dist/verification/`: `vet`, `gofmt`, `sql-guard`, `rules-lint`, `generated-code`,
+`tree-state`, `dead-export`, `ai-runtime`, `fuzz`, `recovery-drill`,
+`contract-check-schema`.
+
+**A non-zero exit is not proof, and the harness learned that twice.** The first
+version read `$LASTEXITCODE` after a pipeline ending in `Select-String` and reported
+`-1` for every gate — PowerShell's leftover, while the gates were failing with 1, so
+the verdicts were right for a stated reason that was not true. The second version
+treated any non-zero exit as proof, and `tree-state` — which mutates
+`scripts/verify.ps1` itself — "passed" by breaking the script's syntax, which exits
+non-zero without the gate failing and without a record being written. The verdict now
+requires the **evidence**: a new record naming *this* gate in its failed list, which
+is the same evidence the earnings test reads.
+
+The harness also found a real defect while being built: `internal/deadexport`'s
+allow-list excused `internal/rtsp.Play`, and moving the RTSP server out of the test
+file had deleted its last caller. The gate's own failure text says what to do —
+*delete the entry rather than leaving it to look like a decision that was made* — and
+it is now deleted.
+
+### The nine that are still `NOT PROVEN`, and why each one is there
+
+Recorded rather than forced, because the plan permits it and because a wrong reason
+is worse than an honest gap. In each case: what was tried, and what the failure was.
+
+| Gate | Why it has no red transcript |
+|---|---|
+| `migration-phases` | The rule is about a `.contract.sql` shipping beside an `.expand.sql`, which is a **file** and not text. A text replacement cannot create one, so the mutation changed a comment, which the gate correctly ignored. Needs a file-creating mutation, which the current harness cannot express. |
+| `no-silent-skips` | An undeclared `t.Skip` in a `_test.go` file is the gate's subject, and adding one did not turn it red. The most likely reason is that the gate's ledger scan is scoped to directories it enumerates rather than to the whole tree, so a new file in an already-scanned directory is not seen. **Unverified, and worth a look** — it would mean the gate catches a skip in a file it knows about and not in one it does not. |
+| `tree-state` | Every mutation that reaches this gate has to break `scripts/verify.ps1`, which is the file the mutation is *in*. The two that were tried either left the script syntactically valid and the gate green, or broke the script and produced no record. A mutation of a *data* file the gate reads would work; none was found that the gate could not also pass. |
+| `predicate-cov` | The mutation added a comment to `predicatecov.go`. The gate runs `go test ./internal/predicatecov/...` and reads a table inside that package, so the mutation has to change the **table**, not a comment near it. |
+| `rls-canary` | The canary writes as the production role and expects refusal. Inverting an *assertion* is not reachable by a text mutation, because the assertions are expressed as `wantErr` arguments spread across the file. The mutation needs to change the canary's own expectation variable. |
+| `contract-check-protobuf` | `syntax = "not-proto3"` is what a naive mutation produces and the gate passed it, which means the gate does **not** re-parse the `.proto` with protoc — it compares against the generated file. So the honest mutation is to change a field in a way the generated code does not reflect, and that is a different and larger change to the harness. |
+| `contract-check-openapi` | Same shape: `openapi: "9.9.9"` passed, so the gate does not refuse an unknown declared version. It compares the document against the generated artefact instead. Worth confirming which is intended — a gate that accepts any `openapi:` value is not checking that field. |
+| `flake` | The mutation made `internal/clock` fail to build, and the gate reported it as `not selected` rather than failed on one run and passed on another. The gate's package list does not include `internal/clock`, so the mutation was aimed at a package it never runs. The gate *was* seen to fail on a database-backed package during a run where `SP_TEST_DATABASE_URL` was absent — which is a red about the environment, not about the gate, and is not recorded as one. |
+| `red-check` | As `tree-state`: the table mutates itself. The one mutation that reached it (`-SkipRedCheck` was in the harness's own invocation) made the gate SKIP, which is not the same as failing. |
+
+Two of those nine — `no-silent-skips` and `contract-check-openapi` — are not merely
+"not yet proven". Each describes a gate that may be checking less than its name
+suggests, and each is worth a look by somebody who intends to keep it. That is the
+point of the list: it is short, it is named, and every entry says what was tried.
 
 ## The 2026-10-04 containerisation pass
 
