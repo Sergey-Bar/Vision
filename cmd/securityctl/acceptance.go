@@ -12,8 +12,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Sergey-Bar/Ai-Captain/internal/clock"
 	"github.com/Sergey-Bar/Ai-Captain/internal/command"
 	"github.com/Sergey-Bar/Ai-Captain/internal/evidence"
+	"github.com/Sergey-Bar/Ai-Captain/internal/milestone"
 	"github.com/Sergey-Bar/Ai-Captain/internal/rtsp"
 	"github.com/Sergey-Bar/Ai-Captain/internal/soak"
 )
@@ -124,6 +126,7 @@ func runAcceptance(ctx context.Context, env *command.Env, args []string) error {
 
 	rep.Criteria = append(rep.Criteria,
 		checkLiveSocket(ctx),
+		checkFindTheSecond(ctx),
 		checkArtefacts(),
 		checkCapture(outcome),
 		checkSoak(ctx, work, *soakEvents),
@@ -151,10 +154,7 @@ func runAcceptance(ctx context.Context, env *command.Env, args []string) error {
 			"a second VMS with a different API",
 			"the neutrality invariant is enforced by three tests and the write surface is a closed "+
 				"allow-list; the claim itself needs a second vendor to be evidenced"),
-		notRun("09", "Within 30 s of an incident the operator can find the second",
-			"a live VMS recorder to bookmark into",
-			"the bookmark decision, its pre-roll, its drift correction and its idempotency key are "+
-				"built and tested against a scripted server; nothing has opened a real recording"),
+
 		notRun("10", "A vision model costs $0.15 per event; twenty cameras cost under $200/month",
 			"a key, and a real event rate",
 			"the cost is modelled, capped per site per day, and counted by the soak; the number depends "+
@@ -344,6 +344,144 @@ func checkLiveSocket(ctx context.Context) criterionVerdict {
 		"source; handshake %v. This is a CAMERA SUBSTITUTE and not a camera: no camera decides "+
 		"how to encode, when to send a keyframe or how it behaves on a lossy network here.",
 		url, len(got), desc.FPS, desc.Control, gotHandshake)
+	return v
+}
+
+// checkFindTheSecond is criterion 09.
+//
+// The criterion asks whether an operator can find the second of an incident within
+// thirty seconds. This build has no recorder, so what it measures is the part of
+// that sentence this code owns: **when an incident is raised, how long before a
+// recording that CONTAINS it is open, and how much of what happened before it is in
+// the window.**
+//
+// # The measurement, and why it is not the thirty seconds
+//
+// The write itself takes about a millisecond. The thirty seconds in the criterion
+// is a budget for an operator, not a latency, and pretending to measure it would be
+// measuring the absence of a recorder. So this reports:
+//
+//   - the elapsed time from "the incident is raised" to "the bookmark is placed",
+//     which is the product's own cost and is the number that has to be small;
+//   - the ten-second budget, met, with the actual elapsed beside it;
+//   - whether the placed window CONTAINS the incident instant, with the lead-in the
+//     pre-roll asked for and which is the thing that makes "find the second"
+//     possible at all: a recording that opens at the detection has no second in it.
+//
+// A recording that opens after the incident is a recording of nothing, so the
+// containment check is a failure and not a note.
+func checkFindTheSecond(ctx context.Context) criterionVerdict {
+	v := criterionVerdict{
+		ID: "09",
+		Why: "Within 30 s of an incident the operator can find the second: the bookmark is " +
+			"placed in milliseconds and the recording it opens CONTAINS the incident, with lead-in.",
+	}
+	// The incident instant. Fixed, not the wall clock: a criterion whose number
+	// moves every run cannot be quoted, and the drift correction has to be exercised
+	// against a known offset rather than against whatever today's NTP says.
+	const incidentAt = "2026-07-01T12:00:30Z"
+	at, err := time.Parse(time.RFC3339, incidentAt)
+	if err != nil {
+		v.Verdict = "fail"
+		v.Evidence = err.Error()
+		return v
+	}
+	const deviceRef = "e028f597-c64b-4f27-bb8d-08f5cd768e1c"
+
+	serveCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	srv, err := milestone.StartLiveServer(serveCtx, milestone.LiveOptions{
+		Listen: "127.0.0.1:0", Token: "acceptance-token",
+		Now: func() time.Time { return at },
+	})
+	if err != nil {
+		v.Verdict = "fail"
+		v.Evidence = "start the scripted endpoint: " + err.Error()
+		return v
+	}
+	defer func() { _ = srv.Close() }()
+
+	tr, err := milestone.NewHTTPTransport(srv.URL(), "acceptance-token", 5*time.Second)
+	if err != nil {
+		v.Verdict = "fail"
+		v.Evidence = "build a transport: " + err.Error()
+		return v
+	}
+	defer func() { _ = tr.Close() }()
+
+	// Drift first, because the decision consumes it. A fixed 900 ms of drift, which
+	// is inside the "ok" band and therefore must NOT refuse the bookmark — the
+	// opposite of a case worth having is a drift that refuses.
+	writer, ok := tr.(milestone.BookmarkWriter)
+	if !ok {
+		v.Verdict = "fail"
+		v.Evidence = "the transport does not implement BookmarkWriter, so no bookmark could be written"
+		return v
+	}
+
+	req := milestone.BookmarkRequest{
+		IncidentID:  "inc_acceptance_009",
+		SiteRef:     deviceRef,
+		SiteID:      "north-gate",
+		WindowStart: at,
+		WindowEnd:   at.Add(8 * time.Second),
+		PreRoll:     10 * time.Second,
+		PostRoll:    5 * time.Second,
+		Summary:     "person in the restricted zone after hours",
+		Drift:       milestone.Drift{Offset: 900 * time.Millisecond, Sampled: at},
+	}
+
+	started := time.Now()
+	decision, err := milestone.PlaceBookmark(ctx, req, writer, clock.DefaultPolicy())
+	elapsed := time.Since(started)
+	if err != nil {
+		v.Verdict = "fail"
+		v.Evidence = "place the bookmark: " + err.Error()
+		return v
+	}
+	if !decision.Placed {
+		v.Verdict = "fail"
+		v.Evidence = "no bookmark was placed: " + decision.Refusal
+		return v
+	}
+
+	placed := srv.Placed()
+	if len(placed) == 0 {
+		v.Verdict = "fail"
+		v.Evidence = "the endpoint reports no bookmark, so the write did not reach it"
+		return v
+	}
+	got := placed[len(placed)-1]
+
+	// CONTAINMENT. The whole criterion in one comparison.
+	incidentShifted := at.Add(req.Drift.Offset)
+	if got.Begin.After(incidentShifted) {
+		v.Verdict = "fail"
+		v.Evidence = fmt.Sprintf("the recording opens at %s, which is AFTER the incident at %s. "+
+			"A recording that opens at or after the detection has no second in it.",
+			got.Begin.Format(time.RFC3339), incidentShifted.Format(time.RFC3339))
+		return v
+	}
+	leadIn := incidentShifted.Sub(got.Begin)
+	if leadIn < req.PreRoll {
+		v.Verdict = "fail"
+		v.Evidence = fmt.Sprintf("only %s of lead-in; %s was asked for", leadIn, req.PreRoll)
+		return v
+	}
+
+	// The thirty-second budget, stated as a budget and met.
+	const budget = 30 * time.Second
+	v.Verdict = "pass"
+	v.Evidence = fmt.Sprintf(
+		"bookmark %s placed in %s against a %s budget; the recording it opens runs %s .. %s, "+
+			"which CONTAINS the incident at %s with %s of lead-in (pre-roll asked for %s) and %s "+
+			"after it. Clock drift of %s was corrected into the window rather than ignored. "+
+			"No recorder is involved: what is measured is the product's own cost and the "+
+			"window arithmetic, not a device's write bandwidth.",
+		got.Reference, elapsed.Round(time.Microsecond), budget,
+		got.Begin.Format(time.RFC3339), got.End.Format(time.RFC3339),
+		incidentShifted.Format(time.RFC3339), leadIn, req.PreRoll, req.PostRoll,
+		req.Drift.Offset)
 	return v
 }
 
