@@ -218,7 +218,8 @@ Two consequences that are easy to get wrong:
 ## Verification
 
 **`scripts/verify.ps1` is the gate. It runs locally, and it is the thing to
-trust.**
+trust.** It now also runs in a container, which is not a second gate and not a
+Linux fork of one:
 
 ```powershell
 .\scripts\verify.ps1            # contract-check (three surfaces), contract-sync,
@@ -231,7 +232,24 @@ trust.**
                                 # skillspector is on PATH on a default shell
 .\scripts\scan-skills.ps1       # the skill-supply-chain scan, which is slow
                                 # (6-10 min) and so is not in the loop above
+docker compose --profile verify run --rm verify
+                                # THE SAME SCRIPT under PowerShell on Debian,
+                                # against the working tree bind-mounted at /src
 ```
+
+The container exists because the gate had never run on Linux, and running it there
+found four defects that were invisible here: a Linux-only test in `internal/lifecycle`
+whose mode mask had been wrong since it was written, a coverage baseline measured on
+Windows compared against a Linux run, `internal/skipaudit` failing on two
+Linux-only skips that had never been declared, and the Windows protoc carrying its
+own well-known `.proto` files so `protoc` had never once been asked to find them.
+Treat a surprising gate failure on a new platform as a finding about the check first
+and about the code second, which is the rule this repository keeps re-learning.
+
+The fix in every case was to make the PowerShell and the data portable — never to
+fork the script. Coverage floors are the one place a second artefact appeared
+(`internal/covercheck/floors.json` and `floors-linux.json`) and it is stated there
+rather than left to be discovered.
 
 It exits non-zero naming whatever failed, and it resolves `go`, `gofmt`, `gcc`,
 `golangci-lint` and `protoc` itself, because none of them is on `PATH` on a

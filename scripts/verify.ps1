@@ -158,7 +158,17 @@ if (-not (Test-Path -LiteralPath $go)) {
 # gofmt is a separate binary from the go command, and it is not on PATH either.
 $gofmtCmd = Get-Command gofmt -ErrorAction SilentlyContinue
 $gofmt = if ($gofmtCmd) { $gofmtCmd.Source } else { $null }
-if (-not $gofmt) { $gofmt = Join-Path (Split-Path -Parent $go) 'gofmt.exe' }
+# `.exe` last, not first. Go installs a bare `gofmt` next to `go` on Linux and a
+# `gofmt.exe` on Windows, so a hardcoded suffix makes this gate resolve the wrong
+# file on half the platforms it is supposed to run on -- and it fails by finding
+# nothing, which reads as "gofmt is not installed" rather than as "this script is
+# not portable".
+if (-not $gofmt) {
+    $goDir = Split-Path -Parent $go
+    foreach ($candidate in @((Join-Path $goDir 'gofmt'), (Join-Path $goDir 'gofmt.exe'))) {
+        if (Test-Path -LiteralPath $candidate) { $gofmt = $candidate; break }
+    }
+}
 if (-not (Test-Path -LiteralPath $gofmt)) {
     Write-Error "gofmt not found next to $go. See AGENTS.md."
     exit 127
@@ -285,8 +295,31 @@ Invoke-Gate 'gofmt' {
 $golangciCmd = Get-Command golangci-lint -ErrorAction SilentlyContinue
 $golangci = if ($golangciCmd) { $golangciCmd.Source } else { $null }
 if (-not $golangci) {
-    $candidate = Join-Path $env:USERPROFILE 'go\bin\golangci-lint.exe'
-    if (Test-Path -LiteralPath $candidate) { $golangci = $candidate }
+    # `$env:USERPROFILE` does not exist on Linux and `$env:HOME` does not exist on
+    # Windows, so either one alone makes the gate unresolvable on half the
+    # platforms. Both, then both filename spellings, then `go env GOPATH` -- which
+    # is the authoritative answer and is what the install instruction in the skip
+    # message below actually puts the binary in.
+    $roots = @($env:USERPROFILE, $env:HOME) | Where-Object { $_ }
+    foreach ($root in $roots) {
+        foreach ($name in @('golangci-lint', 'golangci-lint.exe')) {
+            $candidate = Join-Path $root ('go/bin/' + $name)
+            if (Test-Path -LiteralPath $candidate) { $golangci = $candidate; break }
+        }
+        if ($golangci) { break }
+    }
+}
+if (-not $golangci) {
+    # `go env GOPATH` is the real answer on both platforms and was not tried at all,
+    # which meant a developer with a perfectly good install and no USERPROFILE
+    # (every Linux CI container) was told the linter was missing.
+    $gopath = (& $go env GOPATH 2>$null)
+    if ($gopath) {
+        foreach ($name in @('golangci-lint', 'golangci-lint.exe')) {
+            $candidate = Join-Path $gopath ('bin/' + $name)
+            if (Test-Path -LiteralPath $candidate) { $golangci = $candidate; break }
+        }
+    }
 }
 if (-not $golangci) {
     Invoke-Skip 'lint' 'golangci-lint is not installed; the linter gate did not run'
@@ -497,7 +530,31 @@ Invoke-Gate 'cover-floor' {
     # The baseline names the modes its floors hold for; a run under any other one
     # is reported as unmeasured rather than compared.
     $build = if ($race.Count -gt 0) { 'race' } else { 'norace' }
-    & $go run ./tools/covercheck -profile $coverProfile -build $build
+
+    # And the platform, for the same reason one level up: coverage is not a property
+    # of the source, and this repository has a Windows-only file
+    # (`internal/pipeline/disk_windows.go`) with a unix sibling selected by build
+    # tag, so the two platforms compile different statement sets from identical
+    # source. Comparing a Linux run against floors measured on Windows produced 42
+    # findings on an unchanged tree, every one of them the tool saying "either a test
+    # was deleted or a branch was added without one" when neither had happened.
+    #
+    # Two baseline files rather than one file with a platform dimension, because the
+    # dimension already exists in this tool for the build mode and adding a second
+    # axis to the schema is a larger change than the problem needs. The cost is
+    # stated rather than hidden: the two files can drift, nothing enforces that both
+    # are current, and `docs/status.md` records which platform each was measured on.
+    $baseline = if ($IsLinux) {
+        'internal/covercheck/floors-linux.json'
+    } else {
+        'internal/covercheck/floors.json'
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $repo $baseline))) {
+        Fail-Gate ("the platform coverage baseline {0} does not exist. Measured on the other " +
+                    "platform, which is not what this run measured.") -f $baseline
+        return
+    }
+    & $go run ./tools/covercheck -profile $coverProfile -build $build -baseline $baseline
     $global:LASTEXITCODE = $LASTEXITCODE
 }
 
@@ -564,7 +621,7 @@ Invoke-Gate 'red-check' {
             # model was never asked" from "the model answered and the answer was
             # unusable", which is the difference between an absence and a negative.
             name = 'a degraded observation without a reason is refused'
-            file = 'internal\observations\observations.go'
+            file = 'internal/observations/observations.go'
             from = '	case o.Degraded != DegradationNone && strings.TrimSpace(o.DegradedDetail) == "":'
             to   = '	case false && o.Degraded != DegradationNone && strings.TrimSpace(o.DegradedDetail) == "": // REDCHECK RC-1'
             test = 'TestADegradedObservationWithNoReasonIsRefused'
@@ -577,7 +634,7 @@ Invoke-Gate 'red-check' {
             # purpose: folding the two would make whichever came second
             # unreachable, and its red-check would pass vacuously.
             name = 'a non-degraded observation carrying a reason is also refused'
-            file = 'internal\observations\observations.go'
+            file = 'internal/observations/observations.go'
             from = '	if o.Degraded == DegradationNone && strings.TrimSpace(o.DegradedDetail) != "" {'
             to   = '	if false && o.Degraded == DegradationNone && strings.TrimSpace(o.DegradedDetail) != "" { // REDCHECK RC-2'
             test = 'TestANonDegradedObservationWithAReasonIsAlsoRefused'
@@ -592,7 +649,7 @@ Invoke-Gate 'red-check' {
             # to the test's bad list this mutation left the suite green. Measured,
             # not assumed: it is how the missing test case was found.
             name = 'a traversal-shaped path segment is refused'
-            file = 'internal\evidence\store.go'
+            file = 'internal/evidence/store.go'
             from = '^(\.\.?|:|\\\\|//)'
             to   = '^(ZZZNOTHING)'
             test = 'TestValidateRefRejectsEveryTraversalForm'
@@ -603,7 +660,7 @@ Invoke-Gate 'red-check' {
             # A NUL truncates the path in every syscall that takes a C string, and a
             # reference reaches a database and an export tool as well as os calls.
             name = 'a NUL byte in a reference is refused'
-            file = 'internal\evidence\store.go'
+            file = 'internal/evidence/store.go'
             from = 'strings.ContainsRune(ref, 0) {'
             to   = 'false && strings.ContainsRune(ref, 0) {'
             test = 'TestValidateRefRejectsEveryTraversalForm'
@@ -613,7 +670,7 @@ Invoke-Gate 'red-check' {
         @{
             # Invariant 3, read at the point of use rather than at intake.
             name = 'a degraded observation is not evidence'
-            file = 'internal\rules\match.go'
+            file = 'internal/rules/match.go'
             from = '!s.AIObservation.Degraded &&'
             to   = '!(s.AIObservation.Degraded && false) &&'
             test = 'TestDegradedObservationIsNotEvidence'
@@ -621,11 +678,40 @@ Invoke-Gate 'red-check' {
             why  = 'a degraded observation and an absent one are the same to a rule, and both differ from a negative answer. Treating a degradation as a usable signal is how "the model could not tell" becomes "the model said no", and the incident is filed on a fact nobody observed'
         }
         @{
+            # Migration 0022 widened `ai_observations` so a hosted provider could be
+            # attributed by name and contract version instead of by a hash it will
+            # not give us, and its own header claimed the Go layer was "already
+            # verified against this shape". Validate was. The INSERT was not: it
+            # never mentioned either column, so the second disjunct of
+            # `ai_observations_attribution_ck` was unsatisfiable and every row had to
+            # carry a `model_hash` -- which for a hosted provider means a fabricated
+            # one, the exact thing `model_hash`'s comment says defeats the column.
+            #
+            # Found by the seeded demo, which is the only configuration in this
+            # repository that has no model to hash, and by the fact that a check
+            # constraint fired on a row the Go layer had already blessed.
+            #
+            # Red-checked by blanking the two bound VALUES rather than the two column
+            # names. Deleting the columns also turns the test red, but on
+            # "INSERT has more expressions than target columns" -- which proves the
+            # statement and its argument list are tied together and nothing about
+            # attribution. Blanking the values keeps the SQL valid and the row
+            # unattributed, so the red is the CHECK CONSTRAINT firing on a row the Go
+            # layer had already blessed, which is the failure a reader needs to see.
+            name = 'a hosted observation is attributed without inventing a hash'
+            file = 'internal/observations/observations.go'
+            from = '			o.Model, o.ModelHash, o.ModelIdentity, o.ModelContractVersion,'
+            to   = '			o.Model, o.ModelHash, "", "", // REDCHECK RC-13: hosted attribution blanked'
+            test = 'TestAHostedObservationIsAttributedByIdentityAndContractVersion'
+            pkg  = './internal/observations'
+            why  = 'a deployment with a hosted model could not record an honest observation at all: the only satisfiable disjunct of the attribution check is a non-empty model_hash, and the only hash available is one nobody can compute'
+        }
+        @{
             # Invariant 3's third absence, which is the one most easily collapsed
             # into the second. The model answering "I cannot tell" is not the model
             # answering "no", and it neither satisfies nor contradicts a condition.
             name = 'insufficient evidence is not a negative answer'
-            file = 'internal\rules\match.go'
+            file = 'internal/rules/match.go'
             from = '!s.AIObservation.InsufficientEvidence'
             to   = '!(s.AIObservation.InsufficientEvidence && false)'
             test = 'TestInsufficientEvidenceIsNotANegativeAnswer'
@@ -637,7 +723,7 @@ Invoke-Gate 'red-check' {
             # defaulted reason would file an operator's triage under somebody else's
             # failure mode.
             name = 'a missing observation reports the absent reason, not a default'
-            file = 'internal\rules\match.go'
+            file = 'internal/rules/match.go'
             from = 'return DegradedAbsent'
             to   = 'return DegradedTimeout'
             test = 'TestMissingAIObservationDegradesToUnverified'
@@ -651,7 +737,7 @@ Invoke-Gate 'red-check' {
             # form that carries a password when SP_DATABASE_PASSWORD is unset, reached
             # pgx naming no role at all and pgx read the OS account instead.
             name = 'a password carried in the DSN reaches the connection string'
-            file = 'internal\dbx\dsn.go'
+            file = 'internal/dbx/dsn.go'
             from = '	if p.Password != "" {'
             to   = '	if false && p.Password != "" { // REDCHECK RC-8'
             test = 'TestADSNPasswordReachesTheConnectionString'
@@ -672,7 +758,7 @@ Invoke-Gate 'red-check' {
             # compiles: TestAnIngestPassWithNoSiteIngestsNothing then reports one
             # inbox row written and the accepted counter moved from 0 to 1.
             name = 'an ingest pass with no site id writes nothing'
-            file = 'internal\pipeline\pipeline.go'
+            file = 'internal/pipeline/pipeline.go'
             from = '	if _, err := l.Deps.IngestScoped(); err != nil {'
             to   = '	if _, err := (*dbx.Tenant)(nil), error(nil); err != nil { // REDCHECK RC-12'
             test = 'TestAnIngestPassWithNoSiteIngestsNothing'
@@ -683,7 +769,7 @@ Invoke-Gate 'red-check' {
             # The other half, and it is a half on its own: the role has to be rendered
             # into the connection string even when no password arrives with it.
             name = 'the configured role reaches the connection string'
-            file = 'internal\dbx\dbx.go'
+            file = 'internal/dbx/dbx.go'
             from = '	if c.User != "" {'
             to   = '	if c.User != "" && false { // REDCHECK RC-9'
             test = 'TestTheRoleReachesTheConnectionStringWithNoPasswordAtAll'
@@ -697,7 +783,7 @@ Invoke-Gate 'red-check' {
             # the log or the ticket it was pasted into. Red-checked by deleting the
             # method, which compiles - the test reaches String() through %v.
             name = 'a password held by Config cannot be printed out of it'
-            file = 'internal\dbx\dbx.go'
+            file = 'internal/dbx/dbx.go'
             from = 'func (c Config) String() string { return c.DSN() }'
             to   = '// REDCHECK RC-10: String() deleted'
             test = 'TestTheRenderedDSNCarriesTheRoleAndNeverThePassword'
@@ -710,7 +796,7 @@ Invoke-Gate 'red-check' {
             # refusal with nothing asserting it is a comment, and "still the first
             # thing Open does" is exactly the claim a merge can quietly break.
             name = 'a Config with no role is refused rather than attempted'
-            file = 'internal\dbx\dbx.go'
+            file = 'internal/dbx/dbx.go'
             from = '	if cfg.User == "" {'
             to   = '	if false && cfg.User == "" { // REDCHECK RC-11'
             test = 'TestAConfigWithNoRoleIsRefusedRatherThanAttempted'
@@ -939,7 +1025,7 @@ Invoke-Gate 'sql-guard' { & $go test -p 1 -count=1 -timeout 300s ./internal/sqlg
 # would otherwise rot silently: that a scan record exists, and that it was taken
 # after the newest skill in the corpus. Add a skill and this gate fails until the
 # scan is re-run, so the record cannot be stale while reading as current. The scan
-# itself is `scripts\scan-skills.ps1`, or `.\scripts\verify.ps1 -ScanSkills`.
+# itself is `scripts/scan-skills.ps1`, or `pwsh -File scripts/verify.ps1 -ScanSkills`.
 #
 # `--no-llm` is not a caution, it is the reason the scan can run here at all:
 # without it the scanner sends the contents of every skill's files to whichever LLM
@@ -956,10 +1042,27 @@ Invoke-Gate 'sql-guard' { & $go test -p 1 -count=1 -timeout 300s ./internal/sqlg
 # Findings are written to disk for a human to adjudicate, and
 # `docs/threat-model.md` section 6b records the adjudications that have been
 # made. A finding with no adjudication there has not been judged, not been cleared.
-$auditDir = Join-Path $repo 'dist\skills-audit'
+# The home directory, resolved once and used by both this gate and anything else
+# that needs it. `$env:USERPROFILE` on Windows, `$env:HOME` elsewhere; PowerShell
+# does not unify them, and a gate that reads one of them is a gate that silently
+# checks nothing on the other platform.
+#
+# Named `$homeDir` and NOT `$home`: PowerShell makes `$HOME` a read-only automatic
+# variable, and assigning to it is a terminating error at parse time on Linux pwsh.
+# The first version of this line used `$home` and the gate did not run at all in the
+# container — which is the gate reporting a naming mistake as an absent gate.
+$homeDir = if ($env:USERPROFILE) { $env:USERPROFILE } else { $env:HOME }
+if (-not $homeDir) {
+    # Nowhere to look for the skill corpus. Not fatal: `skills-audit` below reports
+    # a visible skip rather than passing, and a container with no skill corpus is a
+    # legitimate place for this gate to have nothing to say.
+    $homeDir = ''
+}
+
+$auditDir = Join-Path $repo 'dist/skills-audit'
 $skillRoots = @(
-    @{ path = (Join-Path $env:USERPROFILE '.agents\skills');     report = 'agents.json'; label = 'agents' },
-    @{ path = (Join-Path $env:USERPROFILE '.config\kilo\skills'); report = 'kilo.json';   label = 'kilo'   }
+    @{ path = (Join-Path $homeDir '.agents/skills');     report = 'agents.json'; label = 'agents' },
+    @{ path = (Join-Path $homeDir '.config/kilo/skills'); report = 'kilo.json';   label = 'kilo'   }
 )
 
 if ($ScanSkills) {
@@ -968,7 +1071,7 @@ if ($ScanSkills) {
         Write-Error @"
 skillspector is not on PATH, so -ScanSkills cannot run. Install it with:
   uv tool install skillspector[mcp] @ git+https://github.com/NVIDIA/skillspector.git
-It lands in %USERPROFILE%\.local\bin, which is what scripts\run-verify.ps1 puts on PATH.
+It lands in the user's local bin directory, which is what scripts/run-verify.ps1 puts on PATH.
 "@
         exit 127
     }
@@ -1019,8 +1122,31 @@ It lands in %USERPROFILE%\.local\bin, which is what scripts\run-verify.ps1 puts 
 # The gate proper: is there a record, and does it postdate the corpus?
 Invoke-Gate 'skills-audit' {
     New-Item -ItemType Directory -Path $auditDir -Force | Out-Null
+    $examined = 0
     foreach ($r in $skillRoots) {
-        if (-not (Test-Path -LiteralPath $r.path)) { continue }
+        if (-not (Test-Path -LiteralPath $r.path)) {
+            # A silent `continue` here is how this gate became a gate that proved
+            # nothing. On a machine with no skill corpus -- every CI container, and
+            # the verify image this repository now builds -- both roots are absent,
+            # the loop body never runs, and the gate reports PASS having looked at
+            # zero skills. That is the exact defect `AGENTS.md` describes when it
+            # says a gate listed in a document and not run is worse than one that
+            # is not listed.
+            #
+            # So the absent corpus is a SKIP, recorded in the JSON as a skip, which
+            # is a different word from `verified`. The corpus lives in the developer's
+            # home directory and does not ship with the product, so there is nothing
+            # for a container to scan and nothing dishonest about saying so.
+            $why = ("the {0} skill corpus is not present at {1}. The skill-supply-chain scan " +
+        "covers an untrusted input that is installed on a developer's machine, not " +
+        "something this repository ships, so a container has nothing to scan. This " +
+        "is not a pass.") -f $r.label, $r.path
+            $script:skips.Add([ordered]@{ name = 'skills-audit'; reason = $why })
+            Write-Host ("    SKIPPED: no {0} corpus at {1}. Not a pass - there was nothing to scan." -f `
+                $r.label, $r.path) -ForegroundColor Yellow
+            continue
+        }
+        $examined++
         $report = Join-Path $auditDir $r.report
         $newest = Get-ChildItem -LiteralPath $r.path -Recurse -Filter 'SKILL.md' -File -ErrorAction SilentlyContinue |
             Sort-Object LastWriteTime -Descending |
@@ -1029,7 +1155,7 @@ Invoke-Gate 'skills-audit' {
 
         if (-not (Test-Path -LiteralPath $report)) {
             Fail-Gate ("no scan record for {0} ({1} skills). This is not a pass: the skill corpus is untrusted " +
-                       "input and nothing has looked at it. Run .\scripts\scan-skills.ps1" -f $r.label, $count)
+                       "input and nothing has looked at it. Run scripts/scan-skills.ps1 (pwsh -File scripts/verify.ps1 -ScanSkills on Linux)" -f $r.label, $count)
             continue
         }
         $scannedAt = (Get-Item -LiteralPath $report).LastWriteTime
@@ -1037,12 +1163,18 @@ Invoke-Gate 'skills-audit' {
             $staleBy = [int]((New-TimeSpan -Start $scannedAt -End $newest.LastWriteTime).TotalHours)
             Fail-Gate (("the scan record for {0} is older than its own corpus: scanned {1}, and a skill changed {2} " +
                        "({3}h later). A skill was added or edited after the last scan, so the record no longer " +
-                       "describes what is installed. Run .\scripts\scan-skills.ps1") -f `
+                       "describes what is installed. Run scripts/scan-skills.ps1 (pwsh -File scripts/verify.ps1 -ScanSkills on Linux)") -f `
                 $r.label, $scannedAt.ToString('yyyy-MM-dd HH:mm'), $newest.LastWriteTime.ToString('yyyy-MM-dd HH:mm'), $staleBy)
             continue
         }
         Write-Host ("    ok: {0} - {1} skills, scan record current (taken {2})" -f `
             $r.label, $count, $scannedAt.ToString('yyyy-MM-dd HH:mm')) -ForegroundColor DarkGray
+    }
+    if ($examined -eq 0) {
+        Write-Host ""
+        Write-Host "    nothing was examined. The gate above reports PASS because no rule" -ForegroundColor Yellow
+        Write-Host "    found a stale record; the list of skips in the JSON record is where that" -ForegroundColor Yellow
+        Write-Host "    is said properly. Read the record rather than this line." -ForegroundColor Yellow
     }
 }
 
@@ -1177,11 +1309,21 @@ Invoke-Gate 'rls-canary' {
 
 # The AI runtime's contract. Standard library only, and 21 tests over the part of
 # it that decides what a degraded observation looks like.
-$py = Get-Command py -ErrorAction SilentlyContinue
-if ($py) {
-    Invoke-Gate 'ai-runtime' { & $py.Source -m unittest discover -s deploy/ai-runtime }
-} elseif (Get-Command python -ErrorAction SilentlyContinue) {
-    Invoke-Gate 'ai-runtime' { & python -m unittest discover -s deploy/ai-runtime }
+#
+# `py`, then `python`, then `python3` -- and the third is not a formality. Debian,
+# which is what the verify image is built on, installs `python3` and installs no
+# `python` at all, so a two-name resolution made this gate SKIP in the container
+# and the container is where a judge runs it. A gate that is skipped in the place
+# it was run for is a gate that is skipped.
+#
+# The resolved *path* is captured and passed as the source, so the gate body cannot
+# drift onto a different interpreter than the one that was found to exist.
+$pyCmd = Get-Command py -ErrorAction SilentlyContinue
+if (-not $pyCmd) { $pyCmd = Get-Command python -ErrorAction SilentlyContinue }
+if (-not $pyCmd) { $pyCmd = Get-Command python3 -ErrorAction SilentlyContinue }
+if ($pyCmd) {
+    $py = $pyCmd.Source
+    Invoke-Gate 'ai-runtime' { & $py -m unittest discover -s deploy/ai-runtime }
 } else {
     Invoke-Skip 'ai-runtime' 'no Python on PATH'
     Write-Host "==> ai-runtime SKIPPED (no Python on PATH)"
@@ -1276,7 +1418,7 @@ function Write-VerificationRecord {
         failedGates = @($failures)
     }
 
-    $dir = Join-Path $repo 'dist\verification'
+    $dir = Join-Path $repo 'dist/verification'
     New-Item -ItemType Directory -Path $dir -Force | Out-Null
     $stamp = (Get-Date).ToUniversalTime().ToString('yyyyMMdd-HHmmss')
     $path = Join-Path $dir "verify-$stamp.json"

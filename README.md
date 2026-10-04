@@ -76,6 +76,45 @@ cd poc/active-monitoring; .\scripts\verify.ps1
 Nothing merges between them. The POC does not import the platform's contracts, and
 the platform does not read the POC's.
 
+## Run
+
+```sh
+docker compose up
+```
+
+That is the whole demo. It brings up Postgres, applies the migrations, seeds a
+populated site from the committed fixtures, and starts two cores — one doing the
+pipeline work, one serving the console on **<https://localhost:8443/>**.
+
+The certificate is self-signed, because an install has to mint one and this one did
+it in the seed; the seed prints its SHA-256 fingerprint so you can check what the
+browser warned you about. Sign in as `admin`, with the passphrase and the current
+TOTP code the seed printed.
+
+The seed's report is the thing to read first. It lists the incident ids it raised,
+the SHA-256 of every clip it stored, which AI observations are degraded and why, and
+which reviewer disagreed with which observation. `docs/status.md` is the source of
+truth for what is built; the seed report is the source of truth for what is *in that
+particular database*.
+
+Three facts about that site, stated up front because a demo that hides them is not a
+demo:
+
+- **There is no camera, no VMS and no model behind it.** Every AI observation is
+  either explicitly degraded with a named reason or labelled `seeded/absent`. An
+  all-healthy site would look better and prove nothing, because a degraded
+  observation not being a negative one is the invariant worth showing.
+- **The console is published to loopback only.** A published `8443:8443` binds every
+  interface, which on conference-hotel wifi puts the console in the DHCP range.
+- **`docker compose down -v` is the rebuild.** The seed will not reset a site it has
+  already reviewed, because `dispositions` is append-only and a reviewer's answer is
+  not the seed's to delete. A second `docker compose up` finds the site populated,
+  writes nothing, prints the same report and exits 0.
+
+There is no seed flag that bypasses either. `securityctl acceptance` reports which
+of the thirteen criteria this leaves unevidenced, and it reports `not-run` as a
+distinct verdict from `pass`.
+
 ## Build
 
 The toolchain is installed but **not on `PATH`** in a default Windows shell.
@@ -93,11 +132,27 @@ make build
 make lint
 ```
 
+The product image builds with `CGO_ENABLED=0` and runs on
+`gcr.io/distroless/static-debian12`, which has no shell — so its healthcheck is
+`securityctl healthcheck`, a binary that is already in the image. There is no
+`--insecure` on it; `--ca` names the certificate to trust and keeps verification on.
+
 ## Verify
 
 ```powershell
 .\scripts\verify.ps1    # the gate: contract, vet, gofmt, test -race, migrations, rules
 ```
+
+```sh
+docker compose --profile verify run --rm verify     # the same gate, in a container
+```
+
+Both run `scripts/verify.ps1`. The container is not a second gate and not a Linux
+fork of one: it is the same PowerShell under Debian, with the toolchain the image
+carries and the working tree bind-mounted so it checks the tree you have rather than
+a snapshot of it. That matters, because this gate has now found four defects that
+only exist on Linux or only exist because nobody ran it — see
+`docs/status.md`.
 
 `make verify` is the same list of checks, but **`make` is not installed on this
 machine** — not on `PATH`, not in Git Bash, not in WSL — so the PowerShell script
@@ -109,6 +164,12 @@ Windows uses `make` through Git Bash, or the equivalent `go` invocations in
 `Makefile` directly from PowerShell. The database-backed tests **skip** rather
 than fail when `SP_TEST_DATABASE_URL` is unset, so a green run can be a run that
 tested nothing — `AGENTS.md` has the setup.
+
+Coverage floors are per-platform. `internal/covercheck/floors.json` holds the
+Windows numbers and `floors-linux.json` the Linux ones, because this repository has
+a Windows-only source file with a unix sibling selected by build tag and so the two
+platforms compile different statement sets out of identical source. Comparing a
+Linux run against Windows floors produced 42 findings on an unchanged tree.
 
 ## Status
 

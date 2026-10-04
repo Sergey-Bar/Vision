@@ -120,9 +120,19 @@ func importsOf(t *testing.T, dir string) map[string]bool {
 // knowing - the capture path, the muxer, the detector, the AI clients, the rules,
 // the evidence store. So the exemption is named rather than implied, and adding a
 // fourth caller is a deliberate edit to a list in a test.
+//
+// `cmd/security-seed` is the fourth caller and it is a caller for the same reason
+// `cmd/security-core` is: it is a composition root. The seed builds an adapter
+// over `milestone.ReplayTransport` and hands it to `pipeline.New`, which is the
+// identical act the core performs against a live VMS. What differs is where the
+// transport's bytes come from — the committed fixtures rather than a network — and
+// that is a property of the transport, not a reason for the seed to reach past the
+// adapter. If the seed stopped constructing the adapter it could not drive the
+// product's own pipeline, and the seeded site would stop being the product's.
 var compositionRoot = map[string]bool{
 	"cmd/security-core":  true,
 	"cmd/securityctl":    true,
+	"cmd/security-seed":  true,
 	"internal/pipeline":  true,
 	"internal/milestone": true,
 }

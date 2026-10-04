@@ -1,0 +1,354 @@
+# One command is the demo.
+#
+#   docker compose up
+#
+# brings up Postgres, applies the migrations, seeds a populated site from the
+# committed fixtures, and starts two cores — one doing the pipeline work, one
+# serving the console. Nothing here needs a camera, a VMS, or a model, and
+# nothing reaches a network the host cannot reach.
+#
+# # Why there are two `security-core` containers
+#
+# They are the same binary on different ports, which is the plan's shape and is
+# also the honest description of the product: ingest, correlate and evaluate are
+# the same process as the console, and the split is a deployment choice, not an
+# architectural one. Two of them is also a small honest demonstration of
+# invariant 1 — both claim from the same `inbox_events` table with
+# `FOR UPDATE SKIP LOCKED`, so an event is processed once and the second worker
+# does nothing rather than processing it twice.
+#
+# # The things this file refuses to do
+#
+# It does not set `SP_BEHIND_PROXY=true`. That would make the product believe a
+# TLS-terminating proxy is in front of it, and there is none — the seed mints the
+# console's certificate instead and the console really is TLS. It does not seed a
+# green padlock: the certificate is self-signed and the report says so. It does
+# not mount the host clock into anything. And it does not publish anything on an
+# address a judge's laptop is not the only thing on.
+#
+# # Why the ports are on 127.0.0.1
+#
+# A published `8443:8443` binds every interface, which on a conference-hotel
+# wifi means the console — which is behind a login, but still — is reachable from
+# the hotel's DHCP range. The console is published to loopback only. A judge
+# driving this from a phone or a second machine needs a real TLS certificate and
+# a deliberate bind, and both of those are a decision somebody has to make.
+
+name: physical-security-intelligence
+
+# Both images are built from the repository root. `runtime` is the product;
+# `verify` is the gate and is only built when the `verify` profile asks for it,
+# because it carries a compiler and PowerShell and nobody should download it to
+# run a demo.
+x-product: &product
+  build:
+    context: .
+    target: runtime
+  image: security-platform:local
+
+x-db-url: &db-url "postgres://postgres:postgres@db:5432/security?sslmode=disable"
+
+# The tenant and the site, named ONCE and reused by every service.
+#
+# They have to be named twice — the seed creates them and the core serves them —
+# and a demo where those two disagree is a demo where the console shows an empty
+# site while the seed's report claims it is populated. Anchors rather than
+# literals, so the disagreement is impossible rather than merely unlikely.
+x-tenant-id: &tenant-id "northwind"
+x-site-id: &site-id "north-gate"
+x-integration-id: &integration-id "xprotect-north-gate"
+
+services:
+  # --- the database -----------------------------------------------------------
+  db:
+    image: postgres:16.10-bookworm
+    # max_connections=300 because `internal/testutil` gives each package its own
+    # database and the `verify` profile runs `go test -p 8`, which is eight pools
+    # plus a second pool in the packages that test a different role. The Postgres
+    # default of 100 is exceeded and the failure is `sorry, too many clients
+    # already` on whichever connection arrives last, which reads as a product
+    # defect rather than as a connection limit.
+    #
+    # Passed to `postgres` itself rather than through `docker -c`, because `docker
+    # -c` is `--cpu-shares` and silently wants an integer.
+    command: ["postgres", "-c", "max_connections=300"]
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: security
+    # A named volume, so `docker compose down` does not throw away the seeded site
+    # and `docker compose up` does not need the seed to run again. `down -v` does
+    # throw it away, which is what you want when you are proving the seed works.
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # `pg_isready` against the DATABASE, not the server: the server accepts
+      # connections before the init scripts finish, and a migrate that runs then
+      # fails on a database that does not exist yet.
+      test: ["CMD-SHELL", "pg_isready -U postgres -d security"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    # Not published. Nothing outside this compose network has any business
+    # connecting to the demo database, and a published 5432 on a laptop is an
+    # invitation.
+    expose:
+      - "5432"
+
+  # --- the migrator -----------------------------------------------------------
+  # A separate one-shot service, not an init container and not something the core
+  # does at startup. `cmd/security-migrate`'s own header says why: the migrator is
+  # the one component that owns the schema, and giving the long-running core the
+  # ability to change the shape of its own tables under it is a standing
+  # invitation to an in-place upgrade that cannot be rolled back.
+  migrate:
+    <<: *product
+    entrypoint: ["/usr/local/bin/security-migrate"]
+    command: ["up"]
+    environment:
+      SP_DATABASE_URL: *db-url
+      SP_DATABASE_PASSWORD: postgres
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  # --- the seed ---------------------------------------------------------------
+  # The demo's substance: a site with incidents, evidence with hashes, a named
+  # reviewer's note that disagrees with the model, and an AI plane that is
+  # degraded on most rows and healthy on one.
+  #
+  # It writes to a named volume shared with `core`/`console`, so the console can
+  # serve the evidence the seed stored and read the certificate the seed minted.
+  seed:
+    <<: *product
+    entrypoint: ["/usr/local/bin/security-seed"]
+    # No --reset. The seed is idempotent: a second `docker compose up` finds the
+    # site already populated, writes nothing, prints the same report and exits 0.
+    # It CANNOT be told to reset a site it has already reviewed, because
+    # `dispositions` is append-only and a reviewer's answer is not the seed's to
+    # delete. `docker compose down -v && docker compose up` is the rebuild, and it
+    # starts from an empty database rather than by deleting a ledger.
+    command: []
+    environment:
+      SP_DATABASE_URL: *db-url
+      SP_DATABASE_PASSWORD: postgres
+      SP_EVIDENCE_ROOT: /var/lib/security-platform/evidence
+      SP_TENANT_ID: *tenant-id
+      SP_SITE_ID: *site-id
+      SP_SEED_SECRET_KEY: /run/security-platform/secret.key
+      SP_SEED_CONSOLE_TLS: /run/security-platform/console
+    volumes:
+      - evidence:/var/lib/security-platform/evidence
+      - secrets:/run/security-platform
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: "no"
+
+  # --- the pipeline worker ----------------------------------------------------
+  core:
+    <<: *product
+    entrypoint: ["/usr/local/bin/security-core"]
+    environment:
+      SP_DATABASE_URL: *db-url
+      SP_DATABASE_PASSWORD: postgres
+      SP_EVIDENCE_ROOT: /var/lib/security-platform/evidence
+      SP_TENANT_ID: *tenant-id
+      SP_SITE_ID: *site-id
+      SP_INTEGRATION_ID: *integration-id
+      SP_SECRET_KEY_PATH: /run/security-platform/secret.key
+      SP_TLS_CERT: /run/security-platform/console/console.crt
+      SP_TLS_KEY: /run/security-platform/console/console.key
+      SP_LISTEN_ADDR: 0.0.0.0:8443
+      # There is no VMS behind this. The poll therefore fails, and it fails
+      # HONESTLY: `integrations.last_success_at` stays null, the health endpoint
+      # says so, and the console's absence panel has a real row to render. The
+      # alternative — pointing it at something that answers — would be a demo of a
+      # camera that does not exist.
+      #
+      # 90s rather than the 5s default, because the honest failure is a log line
+      # every five seconds and a log line every five seconds is how a real signal
+      # gets ignored.
+      SP_POLL_INTERVAL: 90s
+    volumes:
+      - evidence:/var/lib/security-platform/evidence
+      - secrets:/run/security-platform
+    expose:
+      - "8443"
+    healthcheck:
+      # The image's own HEALTHCHECK, restated with the ports this service uses.
+      # `--ca` names the certificate the seed minted rather than turning
+      # verification off; the command has no `--insecure` and never will.
+      test:
+        - CMD
+        - /usr/local/bin/securityctl
+        - healthcheck
+        - --url
+        - https://127.0.0.1:8443
+        - --ca
+        - /run/security-platform/console/console.crt
+        - --timeout
+        - 4s
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+
+  # --- the console ------------------------------------------------------------
+  console:
+    <<: *product
+    entrypoint: ["/usr/local/bin/security-core"]
+    environment:
+      SP_DATABASE_URL: *db-url
+      SP_DATABASE_PASSWORD: postgres
+      SP_EVIDENCE_ROOT: /var/lib/security-platform/evidence
+      SP_TENANT_ID: *tenant-id
+      SP_SITE_ID: *site-id
+      SP_INTEGRATION_ID: *integration-id
+      SP_SECRET_KEY_PATH: /run/security-platform/secret.key
+      SP_TLS_CERT: /run/security-platform/console/console.crt
+      SP_TLS_KEY: /run/security-platform/console/console.key
+      SP_LISTEN_ADDR: 0.0.0.0:8443
+      SP_POLL_INTERVAL: 90s
+    volumes:
+      - evidence:/var/lib/security-platform/evidence
+      - secrets:/run/security-platform
+    ports:
+      # Loopback only, and the reason is in the header of this file.
+      - "127.0.0.1:8443:8443"
+    healthcheck:
+      test:
+        - CMD
+        - /usr/local/bin/securityctl
+        - healthcheck
+        - --url
+        - https://127.0.0.1:8443
+        - --ca
+        - /run/security-platform/console/console.crt
+        - --timeout
+        - 4s
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+
+  # --- the gate ---------------------------------------------------------------
+  # Not part of `docker compose up`. It is the other half of §0.1: the gate a
+  # judge runs is the gate this repository develops against, and it is the SAME
+  # `scripts/verify.ps1`, run under PowerShell on Debian rather than forked into
+  # a Linux script that would agree with it until somebody edited only one.
+  #
+  #   docker compose --profile verify run --rm verify
+  #
+  # Exits 0 when all 25 gates pass. `--profile` and not a plain service, because a
+  # gate that runs on every `up` is a gate that gets skipped.
+  verify:
+    build:
+      context: .
+      target: verify
+    image: security-platform-verify:local
+    profiles: ["verify"]
+    environment:
+      # The gate mints its OWN databases on the maintenance database, derived per
+      # package, exactly as `scripts/verify.ps1` does on a workstation. Both
+      # variables are required: the DSN names where to create them and the
+      # password is what lets `internal/testutil` create the four production
+      # roles, which are cluster-wide and so cannot be created inside a
+      # per-package database.
+      SP_TEST_DATABASE_URL: "postgres://postgres@db:5432/security_test?sslmode=disable"
+      SP_TEST_DATABASE_PASSWORD: postgres
+      SP_DATABASE_URL: *db-url
+      SP_DATABASE_PASSWORD: postgres
+      SP_EVIDENCE_ROOT: /var/lib/security-platform/verify-evidence
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      # The working tree, bind-mounted, NOT copied into the image.
+      #
+      # The image carries the TOOLCHAIN and the image carries no source. That is the
+      # whole reason this service is not `build: . && run`: with the source baked in,
+      # every edit to a `.go` file needed a `docker compose build` before the gate
+      # could see it, and the first version of this file did exactly that — so a lint
+      # exclusion added a minute earlier was reported as still firing, by a gate
+      # reading a tree that no longer existed.
+      #
+      # It also makes the gate check the tree the developer has, rather than a
+      # snapshot of it taken at image-build time, which is what every gate in this
+      # repository has always meant by "this tree".
+      - .:/src
+      # Go's module and build caches, so a re-run does not re-download. Named volumes
+      # rather than bind mounts: a bind mount here would put Linux-owned files under
+      # `C:\Users` and break the next `go test` on the host.
+      - gomod:/go/pkg/mod
+      - gobuild:/root/.cache/go-build
+    working_dir: /src
+    # Not `pwsh scripts/verify.ps1` directly, because one database has to exist
+    # before the gate runs and `internal/testutil` cannot be the thing that makes it.
+    #
+    # `internal/dbx`'s tenant-clear tests live in package `dbx` because they
+    # exercise an unexported release decision, and `internal/testutil` imports
+    # `dbx` — so they cannot use the harness and read `SP_TEST_DATABASE_URL`
+    # themselves. The per-package databases the other thirty packages get are
+    # derived and created by that harness; this one is not. On a workstation the
+    # database exists because somebody ran the migrator against it by hand at some
+    # point, and in a container nothing has.
+    #
+    # So it is created here, in the environment, rather than by a test creating its
+    # own database — and rather than by the gate skipping, because a gate that skips
+    # because its environment was incomplete is the exact green-and-empty failure
+    # `no-silent-skips` exists to catch.
+    # `bash -c`, NOT `bash -lc`. A login shell sources /etc/profile, which resets
+    # PATH to the base image's and silently drops /usr/local/go/bin — so `go` is
+    # not found and the step below fails with two words that name neither the login
+    # shell nor the PATH.
+    # `createdb` before anything, for the same reason.
+    #
+    # `internal/testutil` derives and CREATES a database per package from the
+    # maintenance database named in `SP_TEST_DATABASE_URL` — but that database has
+    # to exist first, and nothing in the gate creates it. On a workstation somebody
+    # made it months ago; in a container nothing has. `createdb || true` because the
+    # gate is re-run in the same volume and "already exists" is the second run's
+    # normal state, not an error.
+    #
+    # `$$PATH` and `"$$@"`, not `${PATH}` and `"$@"`.
+    #
+    # Compose interpolates `${...}` in this file against the HOST environment before
+    # the container is ever created. So `export PATH="...:${PATH}"` shipped this
+    # container a PATH made of `C:\Program Files\...`, `gcc` was not on it, and the
+    # gate died with `cgo: C compiler "gcc" not found: exec: "gcc": executable file
+    # not found in $PATH` — which names neither compose nor interpolation and reads
+    # as a missing build dependency.
+    #
+    # `$$` is compose's escape for a literal `$`. This is the only place in the
+    # repository where that matters, and it is a trap worth the comment: a PATH is
+    # usually taken for the container's.
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -euo pipefail
+        export PATH="/usr/local/go/bin:/usr/local/bin:$$PATH"
+        echo "==> creating the maintenance database internal/testutil derives from"
+        PGPASSWORD="$$SP_DATABASE_PASSWORD" createdb \
+          --host=db --username=postgres --maintenance-db=postgres \
+          security_test || echo "   (it already exists, which is the second run)"
+        echo "==> migrating it"
+        SP_DATABASE_URL="$$SP_TEST_DATABASE_URL" go run ./cmd/security-migrate up
+        echo "==> running the gate"
+        exec pwsh -NoProfile -File /src/scripts/verify.ps1 "$$@"
+      - --
+
+volumes:
+  pgdata:
+  evidence:
+  secrets:
+  gomod:
+  gobuild:

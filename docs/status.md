@@ -1,6 +1,13 @@
 # Status
 
-Last revised 2026-10-02 (a capture-path pass over `internal/rtsp`,
+Last revised 2026-10-04 (Phase 0: the product runs. `Dockerfile`,
+`docker-compose.yml`, `cmd/security-seed`, a distroless runtime image with an
+in-binary health probe, and `docker compose --profile verify run --rm verify`
+running the SAME `scripts/verify.ps1` under PowerShell on Debian — which found
+five defects that had never been found because the gate had never run on Linux.
+See "The 2026-10-04 containerisation pass" below.)
+
+Previously 2026-10-02 (a capture-path pass over `internal/rtsp`,
 `internal/mp4`, `internal/detector` and `securityctl poc`: two defects with
 red-checked tests, the per-frame copies on the hot path removed, and the dead
 code in the poc command taken out — see "The 2026-10-02 capture-path pass"
@@ -610,6 +617,136 @@ Red-checked, and the corpus file is the mutation's evidence:
     ok
 ```
 
+## The 2026-10-04 containerisation pass
+
+Until this pass the product could be started and could pass its gate, and neither of
+those said anything about it. There was no `Dockerfile`, no compose file and no seed
+path, so the strongest available evidence that the thing worked was a sentence in
+`README.md`. This is that pass, and the defects are listed first because they are the
+part of it that matters.
+
+### What was built
+
+| Thing | What it is |
+|---|---|
+| `Dockerfile`, target `runtime` | `CGO_ENABLED=0`, `gcr.io/distroless/static-debian12`, four binaries: `security-core`, `securityctl`, `security-migrate`, `security-seed` |
+| `Dockerfile`, target `verify` | PowerShell 7, Go, gcc, `protoc` 36.0 and `protoc-gen-go` v1.36.12, `golangci-lint` v2.14.0, `ffmpeg`, `postgresql-client` — the gate's toolchain and **no source**, so the tree is bind-mounted |
+| `docker-compose.yml` | `db`, `migrate`, `seed`, `core`, `console`, and `verify` behind a profile |
+| `cmd/security-seed` | The deterministic seed. Drives the **real** adapter, inbox, normalizer, graph, correlator, rule engine and incident service; only the Milestone transport is stubbed, with the fixtures the adapter's own tests use |
+| `securityctl healthcheck` | The in-binary probe a shell-less image needs. `--ca`, and deliberately no `--insecure` |
+| `securityctl auth code` | RFC 6238 over a base32 secret, checked against the Appendix B vectors, so a judge can sign in without installing an authenticator |
+
+The product image is 4 binaries on a base with no shell, no package manager and no
+`/etc/passwd` entry. Its healthcheck is a binary, because a container healthcheck is
+a command run *inside* the container and this base has no shell to run `curl` from —
+verified rather than assumed, by running `/busybox/sh` in the image and getting
+`no such file or directory`.
+
+### Five defects the Linux gate found
+
+None of these were visible from Windows. All five are recorded here with what
+triggered them, because a gate finding a defect in the check before the code is the
+rule this repository keeps re-learning, and the first four are that rule being
+applied to itself.
+
+**1. A Linux-only test whose assertion had been wrong since it was written.**
+`internal/lifecycle`'s `TestTheEnvironmentFileIsNotWorldReadable` asserted
+`Perm() & 0o060 == 0o060` on a file `WriteUnits` writes at `0o640`. `0o640 & 0o060`
+is `0o040`, so it failed on a file that was exactly the mode it wanted — and the
+error said `is mode 640, want 0640`. `requirePOSIXModes` skips it on Windows, so the
+only platform the product installs on is the only platform where it had never run.
+Fixed to assert the mode exactly, with the mask arithmetic written down so the next
+reader does not re-derive it.
+
+**2. The coverage floors were measured on one platform and compared against another.**
+`internal/covercheck/floors.json` held Windows numbers; a Linux run produced **42
+findings on an unchanged tree**, each of them the tool reporting a deleted test or an
+untested branch when neither had happened. The cause is real:
+`internal/pipeline/disk_windows.go` has a unix sibling selected by build tag, so the
+two platforms compile different statement sets out of identical source. Fixed with
+`floors-linux.json`, measured by `covercheck -write-baseline` from a real Linux run
+of the whole tree, selected by `$IsLinux` in `scripts/verify.ps1`. The two files can
+drift and nothing enforces that both are current; that cost is stated in the file
+rather than hidden.
+
+**3. Two skips that had never been declared, because they only exist on Linux.**
+`internal/evidence`'s two junction tests skip on Linux for the correct reason —
+there is no junction to plant — and were undeclared, so `internal/skipaudit` failed.
+Both declared with `"when": "linux"`, which the file's own rules require: a
+platform-gated skip is conditional in **both** directions.
+
+**4. `protoc` had never been asked to find a well-known type.**
+`contracts/protobuf/security/v1/action.proto` imports
+`google/protobuf/timestamp.proto`. The Windows protoc carries its own copy inside
+its distribution directory. Debian's `protobuf-compiler` does not — those live in
+`libprotobuf-dev` — so `generated-code` failed with `File not found` and reported a
+missing dependency as a tree that did not match its generated output. The image now
+installs the upstream release zip, pinned by SHA-256, which carries its own
+`include/` and is the same `protoc` the workstation uses. Pinning the *version* also
+matters: `protoc` writes its version into the generated header, so Debian's 3.21.12
+would have reported a clean tree as stale.
+
+**5. A red-check control with no test behind it.** Not a Linux defect: the seeded
+demo found it. See the thirteenth row in the red-check table above — migration
+`0022` widened `ai_observations` for a hosted provider, `Validate` accepted that
+branch, and `insertSQL` never mentioned either column, so the second disjunct of the
+attribution check was unsatisfiable and a deployment with a hosted model could not
+record an honest observation without fabricating a `model_hash`.
+
+### Three portability defects in the gate itself
+
+`$home` is a read-only automatic variable in PowerShell and assigning to it is a
+terminating error — the first version of the skills-audit home lookup used it, and
+the gate did not run at all in the container. `Join-Path $repo 'dist\verification'`
+produces `/repo/dist\verification` on Linux, a *filename* containing a backslash, so
+every red-check control whose file was written `internal\observations\observations.go`
+would have silently reported SKIPPED rather than run. And compose interpolates
+`${PATH}` against the **host** before the container exists, so
+`export PATH="...:${PATH}"` shipped a Linux container a PATH made of
+`C:\Program Files\...`; the gate died with `cgo: C compiler "gcc" not found`, which
+names neither compose nor interpolation. All three are fixed in the script rather
+than worked around in a Linux fork.
+
+### What the seed does and does not claim
+
+It raises **8 incidents** through the product's own pipeline from the committed
+fixtures replayed onto `2026-03-01T22:30:00Z` — the same instant
+`securityctl rules simulate` uses, so the activation digest a human acknowledged
+describes the run the seed then reproduces. Incident ids are stable because
+`incidents.Service` has an injectable `IDGenerator` and the default is
+`time.Now().UnixNano()`.
+
+One observation is healthy and attributed to `seeded/absent`. Seven are **explicitly
+degraded**, rotating through `no_runtime`, `timeout` and `model_unavailable`. That
+asymmetry is the point: a missing AI observation is never a negative observation, and
+a site where every observation is healthy would prove nothing about the invariant
+while looking better. One reviewer's disposition says `agreement: disagreed` with the
+observation, which is what makes `search_documents.unindexed_vector` non-empty for a
+row and what gives text search something to find in a column that is matched and not
+indexed.
+
+`docker compose up` is idempotent. The seed will not reset a site it has already
+reviewed, because `dispositions` is append-only and a reviewer's answer is not the
+seed's to delete; a second `up` prints the same report and writes nothing, and
+`docker compose down -v` is the rebuild.
+
+### Not fixed, recorded instead
+
+`ai_observations.temperature` was added by migration `0022`,
+`internal/airuntime` fills `Observation.Temperature`, and `insertSQL` drops it — the
+same defect as the fifth item above, in the third column of the same migration. It is
+not a one-liner: `Observation.Temperature` is a `float64`, a provider asked for
+greedy decoding legitimately reports `0`, and the column cannot distinguish
+"temperature zero" from "the provider did not say". Writing `0` for the second case
+is a false claim, so the fix needs a nullable representation in the Go struct, which
+is a change to a published shape and therefore a human decision under `AGENTS.md`.
+
+`incidents.first_event_at` is written as `now()` rather than the earliest supporting
+event's time, so a seeded site shows all eight incidents at one instant. The column
+has no `COMMENT ON` and `created_at` exists beside it, so the two statements are
+close to indistinguishable. Not changed: the incident write path is invariant-2
+territory and the console sorts by `created_at`, so the feed order is right.
+
 ## Two of the three were false positives, and both were in the ASSERTION
 
 The first counterexample was `rtsp://:0@0`:
@@ -947,6 +1084,41 @@ suite red, before being put in the table:
 | a password carried in the DSN reaches the connection string | `if p.Password != ""` becomes `if false && p.Password != ""` in `ApplyDSN` | `TestADSNPasswordReachesTheConnectionString` FAIL: `the connection string carries password "" (present: false), want the one the DSN carried` |
 | the configured role reaches the connection string | `if c.User != ""` becomes `if c.User != "" && false` in `renderDSN` | `TestTheRoleReachesTheConnectionStringWithNoPasswordAtAll` FAIL, and the failure printed the whole pre-fix connection string with no role in it |
 | a password held by Config cannot be printed out of it | delete `func (c Config) String() string` | `TestTheRenderedDSNCarriesTheRoleAndNeverThePassword` FAIL: `%+v printed the database password` and `%v printed the database password` |
+| a hosted observation is attributed without inventing a hash | `o.ModelIdentity, o.ModelContractVersion` in the `Record` argument list becomes `"", ""` | `TestAHostedObservationIsAttributedByIdentityAndContractVersion` FAIL: `new row for relation "ai_observations" violates check constraint "ai_observations_attribution_ck" (SQLSTATE 23514)` |
+
+The fourth row is the thirteenth control, and it is the only one in the table that
+was found by the seeded demo rather than by reading the code. Migration `0022`
+widened `ai_observations` for a hosted provider — no weights to hash, so attribution
+by provider name plus this build's contract version — and its own header states the
+Go layer "is already verified against this shape". `Validate` was: the field
+comments describe the branch in detail and the check was written for it. `Record`
+was not: `insertSQL` never mentioned either column, so the second disjunct of
+`ai_observations_attribution_ck` was unsatisfiable and every row had to carry a
+`model_hash`. For a hosted provider the only available hash is one nobody can
+compute, so the configuration the column was added for could not record a single
+honest observation.
+
+The mutation is the two bound **values**, not the two column names. Deleting the
+columns from the statement also turns the test red, but on `INSERT has more
+expressions than target columns` — which proves the statement and its argument list
+are tied together and says nothing about attribution. Blanking the values keeps the
+SQL valid and the row unattributed, so the red is the check constraint firing on a
+row the Go layer had already blessed. The first attempt used the column-deletion
+mutation and was replaced for exactly that reason; a red that does not name the
+defect teaches the reader nothing about the defect.
+
+One defect in the same area is **not** fixed and **not** red-checked, and is recorded
+here rather than left for somebody to find:
+`ai_observations.temperature` was added by migration `0022` as well,
+`internal/airuntime` fills `Observation.Temperature`, and `insertSQL` drops it. So
+every observation in every deployment has a NULL temperature and the column's own
+comment — "a replay that does not record it cannot reproduce which one it is
+comparing against" — is not true of this build. Fixing it is not a one-liner:
+`Observation.Temperature` is a `float64`, and a provider asked for greedy decoding
+legitimately reports `0`, so the column cannot distinguish "temperature zero" from
+"the provider did not say", and writing `0` for the second case is a false claim.
+It needs a nullable representation in the Go struct, which is a change to a
+published shape and therefore a human decision under `AGENTS.md`'s rules.
 
 ### The caller side: three more, in the POC module's own table
 

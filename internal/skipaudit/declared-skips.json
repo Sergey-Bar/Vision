@@ -41,6 +41,16 @@
       "test": "internal/lifecycle.TestAPreservedEnvironmentFileIsTightenedOnReinstall",
       "when": "windows",
       "why": "The same POSIX-modes condition as TestTheEnvironmentFileIsNotWorldReadable, on the re-install path: a preserved env file left world-readable by an older installer must be tightened, and the assertion is a permission bit. Windows cannot express one, so the control runs on Linux only."
+    },
+    {
+      "test": "internal/evidence.TestAWindowsJunctionEscapeIsRefused",
+      "when": "linux",
+      "why": "Declared in BOTH directions and this is the entry that only appeared when the gate was run on Linux for the first time. A junction is a Windows reparse point, so on Linux there is no junction to plant and the test declines rather than asserting something about a filesystem that has none. Its counterpart below is the case that matters most: on WINDOWS, where the junction can be created."
+    },
+    {
+      "test": "internal/evidence.TestAJunctionCannotBeUsedAsATenantName",
+      "when": "linux",
+      "why": "The same Windows-only subject as TestAWindowsJunctionEscapeIsRefused: the assertion is that a junction name is refused as a tenant name, and there is no such thing to name on Linux. Declared for linux rather than leaving it undeclared, because an undeclared skip is a failing gate and this one is a real platform difference rather than a missing tool."
     }
   ]
 }

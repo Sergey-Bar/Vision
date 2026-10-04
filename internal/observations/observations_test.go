@@ -87,6 +87,88 @@ func TestAttributionIsMandatory(t *testing.T) {
 	}
 }
 
+// A hosted provider names itself and this build names the contract; it does not
+// hand over its weights, so there is no hash to record.
+//
+// This test is the one that was missing, and its absence is the defect. Migration
+// 0022 widened `ai_observations` for exactly this case and its header claims "the
+// Go layer is already verified against this shape" — which was true of `Validate`
+// and false of the write path, because `insertSQL` never mentioned
+// `model_identity` or `model_contract_version`. Every row therefore had to carry a
+// `model_hash`, which for this configuration means a fabricated one.
+//
+// Red-checkable by removing one line: delete either column from `insertSQL`, and
+// this test goes red on the check constraint rather than passing a row that says
+// nothing about which model answered. That entry is in the table in
+// `scripts/verify.ps1` under "observation-attribution".
+func TestAHostedObservationIsAttributedByIdentityAndContractVersion(t *testing.T) {
+	w, tenant, site := writer(t)
+
+	o := base(tenant, site)
+	o.Model = "hafnia-8b"
+	o.ModelHash = "" // a provider that will not give us weights has none to give
+	o.ModelIdentity = "hafnia-8b"
+	o.ModelContractVersion = strings.Repeat("d", 64)
+	o.ModelBundleSignature = ""
+
+	if err := o.Validate(); err != nil {
+		t.Fatalf("a hosted observation with a provider name and a contract version was "+
+			"refused by Validate, which is the branch migration 0022 opened: %v", err)
+	}
+	recorded, err := w.Record(context.Background(), o)
+	if err != nil {
+		t.Fatalf("record the hosted observation: %v", err)
+	}
+
+	var identity, contract, hash string
+	if err := testutil.Pool(t).QueryRow(context.Background(), `
+		SELECT model_identity, model_contract_version, COALESCE(model_hash, '')
+		  FROM ai_observations WHERE tenant_id = $1 AND observation_id = $2`,
+		tenant, recorded.ObservationID).Scan(&identity, &contract, &hash); err != nil {
+		t.Fatalf("read the observation back: %v", err)
+	}
+	if identity != "hafnia-8b" {
+		t.Errorf("model_identity is %q. The row was accepted, so the constraint was "+
+			"satisfied by something other than the two honest fields", identity)
+	}
+	if contract != o.ModelContractVersion {
+		t.Errorf("model_contract_version is %q, want %q", contract, o.ModelContractVersion)
+	}
+	if hash != "" {
+		t.Errorf("model_hash is %q; a hosted provider gave no weights, so a hash here "+
+			"would be a fabricated one and the whole point of the branch", hash)
+	}
+}
+
+// The local branch must still work, and must still refuse to lose its hash. If the
+// two branches can be told apart by the row, then a reader can tell which claim an
+// observation is making — which is the entire difference between them.
+func TestALocalObservationStillRecordsItsHashAndNotTheHostedFields(t *testing.T) {
+	w, tenant, site := writer(t)
+
+	o := base(tenant, site)
+	recorded, err := w.Record(context.Background(), o)
+	if err != nil {
+		t.Fatalf("record the local observation: %v", err)
+	}
+	var identity, contract, hash string
+	if err := testutil.Pool(t).QueryRow(context.Background(), `
+		SELECT model_identity, model_contract_version, COALESCE(model_hash, '')
+		  FROM ai_observations WHERE tenant_id = $1 AND observation_id = $2`,
+		tenant, recorded.ObservationID).Scan(&identity, &contract, &hash); err != nil {
+		t.Fatalf("read the observation back: %v", err)
+	}
+	if hash != o.ModelHash {
+		t.Errorf("model_hash is %q, want %q", hash, o.ModelHash)
+	}
+	if identity != "" || contract != "" {
+		t.Errorf("a local observation recorded hosted fields (%q, %q). It has a signed "+
+			"bundle, so its attribution is the signature and a hash; naming a provider "+
+			"it did not use is a second, weaker claim sitting beside the real one",
+			identity, contract)
+	}
+}
+
 func TestUnknownProfileAndFieldAreRefused(t *testing.T) {
 	w, tenant, site := writer(t)
 

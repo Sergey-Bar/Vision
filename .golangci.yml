@@ -32,6 +32,19 @@ linters:
       - path: cmd/securityctl/
         linters: [errcheck]
         text: "Error return value of `fmt\\.Fprint"
+      # The same argument, for the seed, which is the other program in this
+      # repository whose job is to print. `security-seed` writes one report and its
+      # value is that a human read it; a write error on a closed pipe is not a
+      # condition it can act on, and the alternative is a `//nolint` on every one
+      # of thirty format calls or an `out` wrapper whose error is discarded anyway.
+      #
+      # It writes to `os.Stdout` by default, and `--json` writes to it through an
+      # `json.Encoder`, which DOES return its error and which `print` checks. So the
+      # unchecked path is the human-readable one and the checked path is the one a
+      # script reads.
+      - path: cmd/security-seed/
+        linters: [errcheck]
+        text: "Error return value of `fmt\\.Fprint"
       # The same, in the suites: a helper whose failure the test itself asserts.
       # `ExpectError` is not in this list and cannot be — it returns nothing, and
       # a caller that wants the reason calls `Refusal` instead. The list exists so

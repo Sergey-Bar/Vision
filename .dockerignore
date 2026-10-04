@@ -1,0 +1,52 @@
+# The build context for the product image and for the verify image.
+#
+# This is a correctness file, not a size optimisation. Two entries in it decide
+# whether the gate inside the container is checking the same tree a developer has,
+# and one decides whether the image can be built at all on a machine with no
+# Docker daemon credentials.
+
+# `dist/` is gate OUTPUT. Shipping it into the verify image would let the gate
+# read its own previous run's records and pass on them — `TestAGateThatHasNever
+# FailedIsNamed` reads `dist/verification/*.json` and asserts every gate has been
+# recorded red, so copying the records in would make that assertion vacuous.
+#
+# This exact defect class is why `scripts/verify.ps1` refuses to overwrite a
+# verdict that says PASS without `--force`: a gate that can be satisfied by a file
+# somebody copied into it is not a gate.
+dist/
+
+# Coverage output, `__pycache__`, and the local artefacts a Windows run leaves.
+coverage
+coverage.*
+*.out
+__pycache__/
+*.pyc
+*.test
+*.exe
+
+# Editor and OS noise.
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# `.git` is deliberately KEPT.
+#
+# The obvious move is to exclude it, and `-buildvcs=false` in the Dockerfile is
+# what stops it embedding a revision stamp. Excluding it anyway would be a
+# second, quieter reason the binary differs by build context — and it would cost
+# the `tree-state` gate its input, so inside the container that gate would report
+# "no git" instead of a dirty-file list. A gate that reports nothing because its
+# input was stripped from the image is a gate nobody reads.
+#
+# `.git` reaches the BUILD stage and the VERIFY stage only. The runtime image
+# copies `/out` and the data directories, never `/src`, so no `.git` ships to a
+# site.
+
+# Local secrets. A `.env` in the build context is a secret in the image, and this
+# repository has a `dist/` that a developer may have populated with real
+# credentials during the live Pentest. There are no committed `.pem`, `.key` or
+# `.env` files — checked, not assumed — so excluding them by glob costs the gate
+# nothing.
+.env
+.env.*

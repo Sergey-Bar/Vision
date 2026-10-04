@@ -269,10 +269,27 @@ func TestTheEnvironmentFileIsNotWorldReadable(t *testing.T) {
 				t.Errorf("%s is mode %o. It carries the database URL and the secret key, and "+
 					"every local account on the host can read them", w.Path, info.Mode().Perm())
 			}
-			if info.Mode().Perm()&0o060 != 0o060 {
+			// The mask was `Perm() & 0o060 != 0o060`, which is not this test.
+			//
+			// `0o060` is OWNER read+write. On a file at 0640 the owner bits are 6 and
+			// the group bits are 4, so `0o640 & 0o060` is `0o040` — the test failed on
+			// a file that was exactly the mode it says it wants, and the error message
+			// printed `is mode 640, want 0640`, which is the mode it had.
+			//
+			// It passed on a workstation for the whole life of this file because
+			// `requirePOSIXModes` skips it on Windows, so the only platform the product
+			// installs on is the only platform where it had never run. That is not a
+			// Windows problem and not a Linux problem; it is a gate that had only ever
+			// been executed on the one platform where its assertion is skipped.
+			//
+			// The requirement is group-readable and nothing else: `WriteUnits` writes
+			// 0640 and the verifying operator runs as a different account in the same
+			// group. Asserting the exact mode is clearer than a mask here, because the
+			// mask version of this assertion is the thing that was wrong.
+			if got := info.Mode().Perm(); got != 0o640 {
 				t.Errorf("%s is mode %o, want 0640: the verifying operator runs as a "+
-					"different account in the same group and has to be able to read it",
-					w.Path, info.Mode().Perm())
+					"different account in the same group and has to be able to read it, "+
+					"and nobody else may", w.Path, got)
 			}
 		default:
 			// A systemd unit is read by systemd as a different account and has to

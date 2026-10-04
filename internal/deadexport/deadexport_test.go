@@ -136,7 +136,6 @@ var (
 		"internal/milestone.RouteByKind":          {Symbol: "internal/milestone.RouteByKind", Why: "published lookup into the route table. The table is a list of assumptions about an API nobody has reached, and this is its published index"},
 		"internal/milestone.NormalizedEventTypes": {Symbol: "internal/milestone.NormalizedEventTypes", Why: "UNWIRED. The vendor-name to canonical-type mapping nothing reads. It is blocked on evidence no test can produce — the names must be a real site's — and the sequence is in the route audit §5. Ratification item R9"},
 		"internal/milestone.BookmarkKey":          {Symbol: "internal/milestone.BookmarkKey", Why: "published key derivation for a write-back bookmark, part of the replayable write-back record format an operator's tooling reads"},
-		"internal/milestone.WithSiteID":           {Symbol: "internal/milestone.WithSiteID", Why: "UNWIRED. A transport option nothing sets. Close it by having the adapter set the site id on the transport it builds, or delete it — this entry is not a claim that it works"},
 		"internal/milestone.ExposedScenarioNames": {Symbol: "internal/milestone.ExposedScenarioNames", Why: "UNWIRED. The scenario-name accessor nothing calls. Close it by having the console or the demo print the scenario names a replay transport exposes, or delete it"},
 
 		// MP4. The NAL constants are the H.264 unit-type codes from the standard,
@@ -213,7 +212,6 @@ var (
 
 		"internal/identity.ConstantTimeEqual": {Symbol: "internal/identity.ConstantTimeEqual", Why: "published comparator for secrets, used in-package by every secret comparison and exported so a caller outside the identity package compares a secret the same way. Its absence as an external reader is why this entry exists: the function is correct and the discipline is not yet applied outside the package that owns the secrets"},
 		"internal/identity.NewToken":          {Symbol: "internal/identity.NewToken", Why: "published token constructor. The session layer uses it in-package for sessions and CSRF tokens; it is exported because the raw token never reaches storage, so every producer of one needs the same raw-plus-hash shape rather than a hash of something it chose itself"},
-		"internal/identity.GenerateSecretKey": {Symbol: "internal/identity.GenerateSecretKey", Why: "published key generator for the MFA secret key. It is run by `securityctl install` and by the key-rotation runbook, both of which are operator actions rather than in-process callers"},
 		"internal/identity.PurgeExpired":      {Symbol: "internal/identity.PurgeExpired", Why: "UNWIRED. The collection of dead sessions, challenges and proofs nothing runs. Close it by scheduling it from the janitor job the migrations already have a queue for, or delete it"},
 		"internal/identity.InSiteScope":       {Symbol: "internal/identity.InSiteScope", Why: "UNWIRED. The site-scope predicate nothing calls. Close it by having the console's per-site routes check it, which is migration 21's RESTRICTIVE site_isolation made mechanical at the application edge, or delete it"},
 
@@ -255,7 +253,6 @@ var (
 		"internal/hafnia.SweepAssets":       {Symbol: "internal/hafnia.SweepAssets", Why: "TEST-ONLY. Deleting the hosted copy of an asset whose retention has passed. Nothing calls it, so a deletion meant to happen never does, and the honest statement about residency is the one that cannot be made"},
 
 		"internal/identity.CheckCSRF":   {Symbol: "internal/identity.CheckCSRF", Why: "TEST-ONLY. The CSRF check. The handler calls it and the service method does not -- two entry points to one control, and the one a future handler reaches for is the one with no caller"},
-		"internal/identity.EnsureUser":  {Symbol: "internal/identity.EnsureUser", Why: "TEST-ONLY. Creating or finding the local user row for a principal. Nothing in the product provisions a user, so every principal beyond the bootstrap administrator has no row to hold a role"},
 		"internal/identity.SetPassword": {Symbol: "internal/identity.SetPassword", Why: "TEST-ONLY. Setting a password. The login flow sets one by a different path, so this is a second entry point to the password path with no caller"},
 
 		"internal/inbox.Renew":        {Symbol: "internal/inbox.Renew", Why: "TEST-ONLY. Extending an event lease. A normalizer that finishes fast never renews and one that needs more must re-claim; that is the right design, so this is the wrong use of it"},

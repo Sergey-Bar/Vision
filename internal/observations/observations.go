@@ -151,10 +151,15 @@ type Observation struct {
 	// loosening: see [Observation.ModelIdentity]. A provider whose bundle this
 	// product ships hashes, and its hash is the better answer. A hosted provider
 	// that will not give us weights has no hash to record, and the alternatives
-	// are both worse - leaving it empty and calling it required is a lie about
-	// the schema, and writing a synthetic 64-character string is a lie about the
+	// are both worse - leaving it empty and calling it required is a lie about the
+	// schema, and writing a synthetic 64-character string is a lie about the
 	// model. So the field is allowed to be empty when, and only when, the two
 	// honest fields below are present.
+	//
+	// All three are WRITTEN, not merely validated. That distinction was the defect:
+	// `Validate` accepted the hosted branch from the start and `insertSQL` never
+	// mentioned the columns, so no row could actually take that branch without a
+	// fabricated hash. See the comment on `insertSQL`.
 	ModelHash            string
 	ModelBundleSignature string
 
@@ -370,12 +375,32 @@ func (w *Writer) profiles() map[string]Profile {
 const insertSQL = `
 INSERT INTO ai_observations (
 	observation_id, tenant_id, site_id, incident_id, event_id, profile_id, production_profile,
-	model, model_hash, runtime_version, prompt_template_id, prompt_version, model_bundle_signature,
+	model, model_hash, model_identity, model_contract_version,
+	runtime_version, prompt_template_id, prompt_version, model_bundle_signature,
 	input_evidence_ids, input_evidence_hashes, output_schema_version, structured_output,
 	insufficient_evidence, degraded_reason, degraded_detail, latency_ms, hardware,
 	output_hash, created_at, supersedes_observation_id
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)
 RETURNING observation_id`
+
+// The two columns `model_identity` and `model_contract_version` were absent from
+// this statement until the seeded demo hit `ai_observations_attribution_ck`.
+//
+// That is the whole hosted-provider branch migration 0022 exists to open, and its
+// own header says the Go layer "is already verified against this shape". It was —
+// `Validate` accepts it, and the field comments describe it in detail — but the
+// INSERT never mentioned the columns, so the second disjunct of the constraint was
+// unsatisfiable in practice and every row had to carry a `model_hash`.
+//
+// Which is not a stylistic problem. It means a deployment with a hosted model, the
+// one configuration the column was added for, could not record a single
+// observation without writing the synthetic 64-character hash that
+// `model_hash`'s own comment says would "defeat the one thing the column exists
+// for, which is proving which weights answered". The alternative was to accept a
+// database that would not take an honest row.
+//
+// The order of $10 and $11 matters only in that it has to match the statement; the
+// values are passed in the same order in `Record`.
 
 // Record persists one observation.
 //
@@ -430,7 +455,8 @@ func (w *Writer) Record(ctx context.Context, o Observation) (Observation, error)
 		if err := tx.QueryRow(ctx, insertSQL,
 			o.ObservationID, o.TenantID, o.SiteID, o.IncidentID, o.EventID, o.ProfileID,
 			!profile.Shadow,
-			o.Model, o.ModelHash, o.RuntimeVersion, o.PromptTemplateID, o.PromptVersion,
+			o.Model, o.ModelHash, o.ModelIdentity, o.ModelContractVersion,
+			o.RuntimeVersion, o.PromptTemplateID, o.PromptVersion,
 			o.ModelBundleSignature, ids, hashes,
 			o.OutputSchemaVersion, output,
 			o.InsufficientEvidence, string(o.Degraded), o.DegradedDetail,
