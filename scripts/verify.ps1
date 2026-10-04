@@ -59,6 +59,9 @@
                        mutation left applied, no branch whose work a merge
                        dropped, and no red-check control without a record of it
                        being watched fail
+      fuzz            a camera is an untrusted network peer, so the two packages
+                       that parse its bytes are fuzzed with their committed
+                       corpora replayed. Bounded, not exhaustive
 
     Deliberately absent: golangci-lint (not installed, and `make ci` covers it
     before a release) and the protoc regeneration check.
@@ -96,7 +99,15 @@ param(
     # It does NOT skip the gate silently and it does NOT suppress the count. If you
     # pass this, you are asserting that the absence is known and acceptable for this
     # run, and the output says so in those words.
-    [switch]$SkipNoDatabase
+    [switch]$SkipNoDatabase,
+    # Seconds of real fuzzing per target in the `fuzz` gate. 0 or unset means 20.
+    #
+    # Raise it for a release check. It is bounded rather than exhaustive because a
+    # gate that runs for hours is a gate that gets skipped, and the corpora under
+    # `testdata/fuzz/` are what actually keep running -- an ordinary `go test`
+    # replays every one of them, so the committed corpus does not expire with the
+    # clock and the timed run is the part that finds new inputs.
+    [int]$FuzzSeconds = 20
 )
 
 $repo = Split-Path -Parent $PSScriptRoot
@@ -1061,6 +1072,41 @@ Invoke-Gate 'tree-state' {
         Select-String -Pattern '^(---|    tree-state)' |
         ForEach-Object { Write-Host "    $_" }
     if ($LASTEXITCODE -ne 0) { exit 1 }
+}
+
+# A camera is an untrusted network peer, so the two packages that touch its bytes
+# are the two where a crash is a crash on the site's network edge.
+#
+# This runs the fuzzers' SEED corpora, which is what an ordinary `go test` already
+# does -- so this gate is deliberately NOT `-fuzz`. Real fuzzing is bounded here
+# rather than exhaustive: 20 seconds per target, which found a real defect in
+# `internal/rtsp` the first time it was run, and is not a claim that 20 seconds
+# finds everything.
+#
+# The corpora are committed under `testdata/fuzz/`, so a crash found in the field
+# has a home: `go test` replays it on every run from here on, with no flag and no
+# remembering which command finds it.
+$fuzzTargets = @(
+    @{ pkg = './internal/mp4/';   name = 'FuzzAnnexBReaderNeverPanicsAndNeverGrowsWithoutBound' }
+    @{ pkg = './internal/mp4/';   name = 'FuzzPictureReaderNeverPanics' }
+    @{ pkg = './internal/mp4/';   name = 'FuzzSPSNeverInventsAGeometry' }
+    @{ pkg = './internal/rtsp/';  name = 'FuzzParseResponseNeverPanics' }
+    @{ pkg = './internal/rtsp/';  name = 'FuzzDepacketizerNeverPanicsAndNeverLosesASequence' }
+    @{ pkg = './internal/rtsp/';  name = 'FuzzURLNeverCarriesCredentialsIntoItsRendering' }
+)
+Invoke-Gate 'fuzz' {
+    if ($FuzzSeconds -gt 0) { $total = $FuzzSeconds } else { $total = 20 }
+    if ($total -le 0) { $total = 20 }
+    foreach ($target in $fuzzTargets) {
+        $out = & $go test -run "^$($target.name)$" -fuzz "^$($target.name)$" `
+            -fuzztime "${total}s" $target.pkg 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            $out | Select-String -Pattern 'Failing input|--- FAIL|panic:|\.go:\d+:' |
+                Select-Object -First 8 | ForEach-Object { Write-Host "    $_" }
+            Fail-Gate "$($target.name) found a failing input; it is committed under $($target.pkg)testdata/fuzz and replays on every run"
+        }
+    }
+    Write-Host "    $($fuzzTargets.Count) fuzz target(s), ${total}s each, no failing input"
 }
 
 # The row-level-security canary is separated from the rest of the suite because

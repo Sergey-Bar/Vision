@@ -101,6 +101,32 @@ func ParseURL(raw string) (*URL, error) {
 	if u.Hostname() == "" {
 		return nil, fmt.Errorf("%w: no host in %q", ErrNotRTSP, redact(raw))
 	}
+	// `Hostname()` being non-empty is NOT the same as being a hostname, and the
+	// difference is reachable from a URL a camera vendor ships.
+	//
+	// Go's url.Parse on `rtsp://:0@::` reports `Hostname() == ":"` -- a single
+	// colon, which is not a host and is not empty either, so the guard above does not
+	// fire and the URL is accepted. `u.Port()` is then "" (Go cannot read `::` as a
+	// port), so the port falls back to 554 and `Address()` joins a colon-bearing host
+	// with it, which `net.JoinHostPort` brackets:
+	//
+	//	net.JoinHostPort(":", "554")  ->  "[::554]"
+	//	(&url.URL{Host: "[::554]"}).String()  ->  "rtsp://[:]:554/"
+	//
+	// and `url.Parse("rtsp://[:]:554/")` is an ERROR: `invalid host: ParseAddr(":"):
+	// each colon-separated field must have at least one digit`.
+	//
+	// So the accepted URL rendered to something the standard library cannot read
+	// back. That is found by `FuzzURLNeverCarriesCredentialsIntoItsRendering`, whose
+	// assertion is that the rendering parses and carries no userinfo -- and it found
+	// this one in three seconds.
+	//
+	// The check is a colon, because that is what Go's parser leaves behind when it
+	// cannot make sense of a host. An IPv6 literal in a URL is written in brackets
+	// and `Hostname()` strips them, so a real one arrives here without a colon.
+	if strings.Contains(u.Hostname(), ":") {
+		return nil, fmt.Errorf("%w: host %q is not a host", ErrNotRTSP, redact(u.Hostname()))
+	}
 	port := DefaultPort
 	if p := u.Port(); p != "" {
 		n, err := strconv.Atoi(p)

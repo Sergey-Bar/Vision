@@ -3,7 +3,9 @@ package rtsp_test
 import (
 	"context"
 	"encoding/binary"
+	"net/url"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -135,22 +137,47 @@ func FuzzURLNeverCarriesCredentialsIntoItsRendering(f *testing.F) {
 		if err != nil {
 			return
 		}
+		if u.Password == "" {
+			return
+		}
+		// The property is: the rendering carries no CREDENTIALS. Asked by parsing the
+		// rendering back and looking for a userinfo section, which is exact.
+		//
+		// This assertion has been two wrong shapes before it was this one, and both
+		// were found by the fuzzer inside a minute, which is the argument for running
+		// it at all:
+		//
+		//	contains(rendering, u.Password)
+		//	  failed on `rtsp://:0@0`: the password is the string `0` and so is the
+		//	  host, so the correct rendering `rtsp://0:554/` contains it -- as a HOST.
+		//	  A password that is a substring of its own host, port or path reports, so
+		//	  the budget goes on coincidences and a real leak is one more failure in a
+		//	  wall of them.
+		//
+		//	contains(rendering, u.Password+"@")
+		//	  failed on `rtsp://:0@0/0@`: the password is `0` and the PATH is `/0@`, so
+		//	  the string `0@` appears with the `@` at the end of the path rather than
+		//	  introducing a host. A path segment may legitimately contain `@`.
+		//
+		// Asking `net/url` is the only version of this that distinguishes userinfo-`@`
+		// from every other `@` in the string, and it is the question the property
+		// actually is.
 		for _, s := range []string{u.String(), u.Request()} {
-			if u.Password != "" && contains(s, u.Password) {
-				t.Fatalf("the rendering %q carries the password", s)
+			back, err := url.Parse(s)
+			if err != nil {
+				t.Fatalf("the rendering %q does not parse back: %v", s, err)
+			}
+			if back.User != nil {
+				t.Fatalf("the rendering %q carries userinfo %q", s, back.User.String())
+			}
+			if u.Password != "" && strings.Contains(back.Host, u.Password) &&
+				strings.Contains(u.Host, u.Password) {
+				// Not a leak: the host is not a secret and the password happens to
+				// equal it. Recorded so the coincidence is not rediscovered as a
+				// finding, and not asserted, because it is not one.
+				t.Logf("note: the password %q equals this URL's host; the rendering carries "+
+					"it as a host, which is not a credential", u.Password)
 			}
 		}
 	})
-}
-
-func contains(haystack, needle string) bool {
-	if needle == "" {
-		return false
-	}
-	for i := 0; i+len(needle) <= len(haystack); i++ {
-		if haystack[i:i+len(needle)] == needle {
-			return true
-		}
-	}
-	return false
 }

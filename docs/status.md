@@ -30,14 +30,15 @@ rather than the per-package **schema** the plan asked for, because migration 000
 hardcodes `public` and a per-schema harness would apply **no row-level security at
 all**; the reason is in R13.
 
-**Verification:** `scripts/verify.ps1` green - twenty-three gates: contract-check
+**Verification:** `scripts/verify.ps1` green - twenty-four gates: contract-check
 across all three published contract surfaces, contract-sync, vet, gofmt,
 `golangci-lint` (including gosec), the generated-code check,
 `go test -race -count=1 -json -coverprofile ./...`, skip-audit, no-silent-skips,
 cover-floor, dead-export, predicate-cov,
 red-check, migration-phases, sql-guard, skills-audit, rules-lint, the RLS canary,
-the Python runtime suite and the tree-state gate - against a real Postgres 16, with
-`SP_TEST_DATABASE_URL` set so the database-backed suites ran rather than skipped.
+the Python runtime suite, the tree-state gate and the fuzz gate - against a real
+Postgres 16, with `SP_TEST_DATABASE_URL` set so the database-backed suites ran
+rather than skipped.
 `contractcheck` reports 20 messages and 22 enums compatible with the baseline, plus
 7 JSON Schemas (248 properties) and the OpenAPI document's 20 paths. No data
 races. The most recent dated run record is
@@ -45,9 +46,9 @@ races. The most recent dated run record is
 of seventeen, zero failed, zero skipped, against a real database - including
 `recovery-drill`, which is the gate that skips whenever the database variable is
 absent, and which was the reason the previous run of that record was not evidence
-even though it was green. The twenty-three gates above are a later tree than that
-record: skip-audit, no-silent-skips, cover-floor, dead-export, predicate-cov and
-tree-state were added
+even though it was green. The twenty-four gates above are a later tree than that
+record: skip-audit, no-silent-skips, cover-floor, dead-export, predicate-cov,
+tree-state and fuzz were added
 after it, so the record's own gate list is a statement about that run, not about
 today's script.
 `red-check` is 7 of 7 controls proved in 12 seconds; `skills-audit` is 1 second,
@@ -565,6 +566,90 @@ A sample is a choice somebody made rather than a property anybody checked, so th
 number is in the log rather than in a comment. `evidence` is the one that matters most
 and is **not** covered yet: it is the only site-scoped table whose rows are raw video
 bytes.
+
+### The fuzzer found a real defect in the RTSP URL parser in three seconds
+
+Six `Fuzz*` targets already existed and their seeds already ran in an ordinary
+`go test`. Nothing had ever **fuzzed** them, and there was no `testdata/fuzz/`
+corpus anywhere -- so a crash found in the field would have had nowhere to be
+committed and nothing would have replayed it. Both halves of Q2 were missing: not
+the targets, the *time*.
+
+Run for 20 seconds each, all six targets. `internal/mp4`'s three found nothing.
+`FuzzURLNeverCarriesCredentialsIntoItsRendering` failed in seven seconds, and then
+found a second and third thing, and one of the three is a **real defect**:
+
+```
+string("rtsp://:0@::")
+    the rendering "rtsp://[:]:554/" does not parse back:
+    parse "rtsp://[:]:554/": invalid host: ParseAddr(":"): each colon-separated
+    field must have at least one digit (at ":")
+```
+
+`url.Parse("rtsp://:0@::")` reports `Hostname() == ":"` — a single colon, which is
+neither empty nor a host. `ParseURL`'s guard was `if u.Hostname() == ""`, so the URL
+was **accepted**. `u.Port()` is then `""` (Go cannot read `::` as a port), so the port
+fell back to 554, and `net.JoinHostPort(":", "554")` brackets a colon-bearing host:
+
+```
+net.JoinHostPort(":", "554")            ->  "[::554]"
+(&url.URL{Host: "[::554]"}).String()   ->  "rtsp://[:]:554/"
+```
+
+So the product accepted an RTSP URL that it then rendered into something
+`net/url` **cannot read back**. `ParseURL` now refuses a hostname containing a colon,
+with the reasoning written at the check.
+
+Red-checked, and the corpus file is the mutation's evidence:
+
+```
+--- with the host check removed:
+    --- FAIL: FuzzURLNeverCarriesCredentialsIntoItsRendering
+        the rendering "rtsp://[:]:554/" does not parse back: ...
+--- restored ---
+    ok
+```
+
+## Two of the three were false positives, and both were in the ASSERTION
+
+The first counterexample was `rtsp://:0@0`:
+
+```
+the rendering "rtsp://0:554/" carries the password
+```
+
+Not a defect, and the parser was right. `URL.String()` builds a fresh `url.URL`
+with **no `User` field at all**, so a password cannot reach the output structurally.
+The password here is the string `0` and so is the host, so the correct rendering
+contains it — **as a host**. The assertion was `contains(rendering, u.Password)`, and
+a password that happens to be a substring of its own host, port or path reports.
+That fails in the direction that matters: every coincidence reports, the fuzzer spends
+its budget on them, and a real leak among them is one more failure in a wall.
+
+The second was `rtsp://:0@0/0@`, which failed the replacement
+`contains(rendering, password+"@")` because the **path** is `/0@` — a path segment
+may legitimately contain `@`.
+
+The version that is right asks the question the property actually is: parse the
+rendering back and assert it carries **no userinfo**. `net/url` distinguishes
+userinfo-`@` from every other `@`, and no substring search does.
+
+Both counterexamples are deleted from the corpus rather than left in it, because
+`testdata/fuzz/` reads as "these inputs crash" and two of the three never did. The
+one that stays is the regression test for the real fix, and it replays on every
+`go test` in this repository with no flag.
+
+## The `fuzz` gate, and why it is bounded
+
+Twenty-four gates now. `fuzz` runs all six targets for `-FuzzSeconds` each — 20 by
+default, raise it for a release check — and a failing input is committed under
+`testdata/fuzz/` where it replays forever after.
+
+Bounded on purpose. A gate that runs for hours is a gate that gets skipped, and this
+repository has already paid for that twice in the tools it named and did not run. The
+**committed corpus** is the part that does not expire with the clock; the timed run
+is the part that finds new inputs. Both halves are recorded in the gate's comment
+rather than left as a guess about which one matters.
 
 ### Eight controls had no transcript at all, and the gate said so
 
