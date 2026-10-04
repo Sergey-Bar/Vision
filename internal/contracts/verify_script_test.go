@@ -65,11 +65,30 @@ func assertPackageExists(t *testing.T, root, pkg string) {
 		return
 	}
 	info, err := os.Stat(filepath.Join(root, filepath.FromSlash(trimmed)))
-	if err != nil || !info.IsDir() {
-		t.Errorf("the gate names %q, which is not a directory in this repository. "+
-			"A gate that names a package that does not exist is a gate that fails for a "+
-			"reason unrelated to the code", pkg)
+	if err == nil && info.IsDir() {
+		return
 	}
+
+	// A package in the POC MODULE. That module has its own go.mod, so
+	// `poc/active-monitoring/internal/store` is not addressable from this module's
+	// root, and the `flake` gate reaches it with `go test -C poc/active-monitoring
+	// ./internal/store/`. The path in the script is therefore relative to the
+	// MODULE, not to the repository.
+	//
+	// Without this the check reports it as a package that does not exist, which is
+	// false -- and it reported it about a package that exists, which is the failure
+	// direction this check exists to catch. The fallback is deliberately ONE
+	// specific module rather than a search: a suffix match anywhere in the tree would
+	// make the check pass for a path that is genuinely wrong, which is the whole
+	// defect it was written for.
+	poc := filepath.Join(root, "poc", "active-monitoring", filepath.FromSlash(trimmed))
+	if info, err := os.Stat(poc); err == nil && info.IsDir() {
+		return
+	}
+
+	t.Errorf("the gate names %q, which is not a directory in this repository or in "+
+		"poc/active-monitoring. A gate that names a package that does not exist is a gate "+
+		"that fails for a reason unrelated to the code", pkg)
 }
 
 // The AGENTS.md and Makefile claim is that `make verify` and verify.ps1 are the

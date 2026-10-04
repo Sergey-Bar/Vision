@@ -30,15 +30,15 @@ rather than the per-package **schema** the plan asked for, because migration 000
 hardcodes `public` and a per-schema harness would apply **no row-level security at
 all**; the reason is in R13.
 
-**Verification:** `scripts/verify.ps1` green - twenty-four gates: contract-check
+**Verification:** `scripts/verify.ps1` green - twenty-five gates: contract-check
 across all three published contract surfaces, contract-sync, vet, gofmt,
 `golangci-lint` (including gosec), the generated-code check,
 `go test -race -count=1 -json -coverprofile ./...`, skip-audit, no-silent-skips,
 cover-floor, dead-export, predicate-cov,
 red-check, migration-phases, sql-guard, skills-audit, rules-lint, the RLS canary,
-the Python runtime suite, the tree-state gate and the fuzz gate - against a real
-Postgres 16, with `SP_TEST_DATABASE_URL` set so the database-backed suites ran
-rather than skipped.
+the Python runtime suite, and three more named `tree-state`, `fuzz` and `flake` -
+against a real Postgres 16, with `SP_TEST_DATABASE_URL` set so the database-backed
+suites ran rather than skipped.
 `contractcheck` reports 20 messages and 22 enums compatible with the baseline, plus
 7 JSON Schemas (248 properties) and the OpenAPI document's 20 paths. No data
 races. The most recent dated run record is
@@ -46,9 +46,9 @@ races. The most recent dated run record is
 of seventeen, zero failed, zero skipped, against a real database - including
 `recovery-drill`, which is the gate that skips whenever the database variable is
 absent, and which was the reason the previous run of that record was not evidence
-even though it was green. The twenty-four gates above are a later tree than that
+even though it was green. The twenty-five gates above are a later tree than that
 record: skip-audit, no-silent-skips, cover-floor, dead-export, predicate-cov,
-tree-state and fuzz were added
+tree-state, fuzz and flake were added
 after it, so the record's own gate list is a statement about that run, not about
 today's script.
 `red-check` is 7 of 7 controls proved in 12 seconds; `skills-audit` is 1 second,
@@ -641,7 +641,7 @@ one that stays is the regression test for the real fix, and it replays on every
 
 ## The `fuzz` gate, and why it is bounded
 
-Twenty-four gates now. `fuzz` runs all six targets for `-FuzzSeconds` each — 20 by
+Twenty-five gates now. `fuzz` runs all six targets for `-FuzzSeconds` each — 20 by
 default, raise it for a release check — and a failing input is committed under
 `testdata/fuzz/` where it replays forever after.
 
@@ -651,15 +651,15 @@ repository has already paid for that twice in the tools it named and did not run
 is the part that finds new inputs. Both halves are recorded in the gate's comment
 rather than left as a guess about which one matters.
 
-### Seven of twenty-four gates have ever been recorded red
+### Seven of twenty-five gates have ever been recorded red
 
-`scripts/verify.ps1` runs twenty-four gates. Every run leaves a record in
+`scripts/verify.ps1` runs twenty-five gates. Every run leaves a record in
 `dist/verification/` saying, per gate, whether it passed or failed. There are **40**
 records. `TestAGateThatHasNeverFailedIsNamed` reads all of them and answers the
 question the count of gates cannot:
 
 ```
-7 of 24 declared gates have been recorded red across 40 run record(s)
+7 of 25 declared gates have been recorded red across 40 run record(s)
 NEVER RED: ai-runtime, contract-check-openapi, contract-check-protobuf,
   contract-check-schema, contract-sync, fuzz, generated-code, migration-phases,
   no-silent-skips, predicate-cov, recovery-drill, red-check, rls-canary,
@@ -716,6 +716,73 @@ strips a BOM, and the writer no longer emits one:
 $json = $record | ConvertTo-Json -Depth 6
 [System.IO.File]::WriteAllText($path, $json, (New-Object System.Text.UTF8Encoding $false))
 ```
+
+### Four packages, three runs, shuffled order
+
+A test that passes once is a sample. The `flake` gate re-runs the four packages with
+concurrency, leases and timers in them **three times in one process, with the test
+order shuffled every repetition**:
+
+```
+./internal/jobs      ok x3 (shuffled) -- lease-and-claim: two workers racing for one job
+./internal/outbox    ok x3 (shuffled) -- lease-and-claim on the outbox relay, with a visibility timeout
+./internal/pipeline  ok x3 (shuffled) -- loops against an injected clock, plus the gauge sampler
+./internal/store     ok x3 (shuffled) -- the POC reference store: the same lease-and-claim shape, in a different module
+```
+
+`-count=3` re-runs each test in the **same** process, so state a package forgets
+between runs is caught too. `-shuffle=on` varies the order each repetition, so a test
+that depends on another having run first fails rather than passing on the repetition
+where the order happened to suit it. The shuffle seed is printed on success, which is
+what makes a re-run reproduce rather than re-roll.
+
+`-race` is already on the main `test` gate. This is deliberately **not** `+2` runs of
+everything: four packages, three counts, and a written reason per package is a gate
+somebody runs. Twenty-five gates that take an hour are twenty-four gates.
+
+#### The cross-module package, and the gate that caught me naming it wrongly
+
+The POC is a **separate module** with its own `go.mod`, so
+`poc/active-monitoring/internal/store` is not addressable from this module's root.
+`TestEveryPackageTheGateNamesExists` — which exists to catch "a gate that names a
+package that does not exist is a gate that fails for a reason unrelated to the code" —
+caught exactly that:
+
+```
+the gate names "./internal/store/", which is not a directory in this repository
+```
+
+**The flake gate's own comment had named the hazard one paragraph earlier**: *"a
+cross-module package in a single-module gate is a gate that silently tests less than
+it says, and the failure is a green line."* The comment was right, the gate then did
+the thing, and the check caught it. That is the system working, and it is also the
+fourth time in this work that a comment stating a rule did not stop the code doing the
+thing.
+
+Each entry now carries its own `dir` and runs with `go test -C`, and the check
+understands the qualification: a path that is not in this module is looked for under
+`poc/active-monitoring/` **and only there**. One named module rather than a suffix
+search anywhere, because a suffix match would make the check pass for a genuinely
+wrong path — the exact defect it was written for.
+
+#### What this did NOT do, and the run proved it
+
+The `red-check` gate's restore failed on `internal/rules/match.go` during one run:
+
+```
+Exception calling "WriteAllText": The requested operation cannot be performed on a
+file with a user-mapped section open.
+```
+
+That is the Windows mapping race the retry loop in `red-check` exists for, and after
+twelve attempts the gate **stopped and said so** rather than running eleven more
+controls against a mutated tree. The mutation was visible in `git status` as
+`!(s.AIObservation.Degraded && false)`, restored by hand, and the next run exited 0
+with the tree unmodified.
+
+That is the designed behaviour working, and it is worth stating plainly because the
+alternative — a gate that carries on after failing to restore — is the defect that
+produced two un-restored controls sitting in this repository for weeks.
 
 ### Eight controls had no transcript at all, and the gate said so
 

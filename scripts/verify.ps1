@@ -54,6 +54,9 @@
                        owner, because a superuser suite cannot see a missing
                        tenant context
       ai-runtime       the AI runtime's contract in Python
+      flake            the four packages with concurrency, leases and timers, three
+                       runs each with the test order shuffled -- a test that
+                       passes once is a sample
       tree-state       the tree's own state, which no compiler and no test asks
                        about: no worktree frozen mid-merge, no red-check
                        mutation left applied, no branch whose work a merge
@@ -1072,6 +1075,56 @@ Invoke-Gate 'tree-state' {
         Select-String -Pattern '^(---|    tree-state)' |
         ForEach-Object { Write-Host "    $_" }
     if ($LASTEXITCODE -ne 0) { exit 1 }
+}
+
+# A test that passes once is a sample. A test that passes three times in a row, in a
+# fresh process, with the test order shuffled each time, is a different claim -- and
+# the difference is the whole of what a race or a leaked timer looks like.
+#
+# These four packages are the ones with concurrency, leases and timers in them:
+# `jobs` and `outbox` are lease-and-claim, `pipeline` runs loops against a clock, and
+# the POC's `store` is the reference implementation the product's store is tested
+# against. A defect in any of them is intermittent by nature, which is exactly the
+# kind an ordinary run reports as green forty times in a row.
+#
+# `-count=3` re-runs each test in the SAME process, so state a package forgets between
+# runs is caught too, and `-shuffle=on` varies the order every repetition so a test
+# that depends on another having run first fails rather than passing on the run where
+# the order happened to suit it.
+#
+# `-race` is already on the main `test` gate. This is deliberately NOT `+2` runs of
+# everything: four packages, three counts, and a reason per package is a gate somebody
+# runs. Twenty-four gates that take an hour are twenty-three gates.
+# The POC's store is in a SEPARATE MODULE (`ai-captain-poc`, its own go.mod), so it
+# cannot be named by a package path from here -- `go test ./internal/store/` from the
+# product's root module looks in the product's module and finds nothing, and the
+# pattern that reaches it is an empty string, which Go reads as "this directory and
+# below", so the command appears to succeed having tested nothing.
+#
+# That is why each entry carries its own `dir`. A cross-module package in a
+# single-module gate is a gate that silently tests less than it says, and the failure
+# is a green line.
+$flakePackages = @(
+    @{ dir = ''; path = './internal/jobs/';                        why = 'lease-and-claim: two workers racing for one job' }
+    @{ dir = ''; path = './internal/outbox/';                      why = 'lease-and-claim on the outbox relay, with a visibility timeout' }
+    @{ dir = ''; path = './internal/pipeline/';                    why = 'loops against an injected clock, plus the gauge sampler' }
+    @{ dir = 'poc/active-monitoring'; path = './internal/store/';  why = 'the POC reference store: the same lease-and-claim shape, in a different module' }
+)
+Invoke-Gate 'flake' {
+    foreach ($p in $flakePackages) {
+        $where = if ($p.dir) { Join-Path $repo $p.dir } else { $repo }
+        $out = & $go test -C $where -count=3 -shuffle=on $p.path 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            $out | Select-String -Pattern '^--- FAIL|^\s+--- FAIL|^FAIL|panic:|\.go:\d+:' |
+                Select-Object -First 10 | ForEach-Object { Write-Host "    $_" }
+            Fail-Gate "$($p.path) is FLAKY: three runs with shuffled order, and $($p.why)"
+        }
+        # The shuffle seed is printed even on success, and it is what makes a repeat
+        # run reproduce rather than re-roll.
+        Write-Host "    $($p.path.TrimEnd('/')) ok x3 (shuffled) -- $($p.why)"
+        $out | Select-String -Pattern '^-test.shuffle' | Select-Object -First 1 |
+            ForEach-Object { Write-Host "      $($_.ToString().Trim())" }
+    }
 }
 
 # A camera is an untrusted network peer, so the two packages that touch its bytes
