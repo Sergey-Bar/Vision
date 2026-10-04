@@ -375,7 +375,7 @@ func (r *Recorder) PushNAL(nal []byte, decodeTime uint64, wall time.Time) error 
 				return fmt.Errorf("%w: SPS changed at media time %d", ErrProfileChange, decodeTime)
 			default:
 				r.params.SPS = append([]byte(nil), nal...)
-				if sp, err := parseSPS(nal); err == nil {
+				if sp, err := ParseSequenceParameters(nal); err == nil {
 					r.sp, r.spOK = sp, true
 				}
 			}

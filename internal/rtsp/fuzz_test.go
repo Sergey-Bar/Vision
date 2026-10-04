@@ -33,7 +33,7 @@ func fuzzSeedPacket() []byte {
 	if err != nil {
 		return nil
 	}
-	return buildRTP(1, true, 3600, nal)
+	return rtsp.BuildRTP(1, true, 3600, nal)
 }
 
 // FuzzParseResponseNeverPanics drives the response parser, which is the only
@@ -60,10 +60,9 @@ func FuzzParseResponseNeverPanics(f *testing.F) {
 	f.Add([]byte{})
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		srv := newServer(t, nil)
-		srv.rawResponse = data
+		srv := newServer(t, nil, withFaults(rtsp.ServerFaults{RawResponse: data}))
 		ctx := context.Background()
-		c, err := rtsp.Dial(ctx, srv.url(), rtsp.Options{Timeout: 2 * time.Second})
+		c, err := rtsp.Dial(ctx, srvURL(t, srv), rtsp.Options{Timeout: 2 * time.Second})
 		if err != nil {
 			return
 		}
@@ -79,9 +78,9 @@ func FuzzDepacketizerNeverPanicsAndNeverLosesASequence(f *testing.F) {
 	if pkt := fuzzSeedPacket(); pkt != nil {
 		f.Add(pkt)
 	}
-	f.Add(buildRTP(1, true, 0, []byte{0x65, 0x88, 0x84}))
-	f.Add(buildRTP(1, true, 0, []byte{0x78, 0x00, 0x02, 0x67, 0x42}))
-	f.Add(buildRTP(1, true, 0, []byte{0x7C, 0x85, 0xAA, 0xBB}))
+	f.Add(rtsp.BuildRTP(1, true, 0, []byte{0x65, 0x88, 0x84}))
+	f.Add(rtsp.BuildRTP(1, true, 0, []byte{0x78, 0x00, 0x02, 0x67, 0x42}))
+	f.Add(rtsp.BuildRTP(1, true, 0, []byte{0x7C, 0x85, 0xAA, 0xBB}))
 	f.Add([]byte{})
 	f.Add([]byte{0x80})
 

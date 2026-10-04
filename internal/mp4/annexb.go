@@ -318,7 +318,13 @@ const MaxFrameSide = 16384
 // ErrGeometryTooLarge is returned for an SPS whose frame no decoder will size.
 var ErrGeometryTooLarge = errors.New("mp4: the stream declares a frame larger than any decoder will size")
 
-func parseSPS(sps []byte) (SequenceParameters, error) {
+// ParseSequenceParameters reads the frame geometry out of an SPS.
+//
+// Exported for `internal/rtsp`'s server, which needs the fixture's REAL width and
+// height for the description it serves. It was unexported until then, and the
+// constant it replaces is the thing worth avoiding: an SDP that says `640-360`
+// about a stream that is not 640-360 is a description a client believes.
+func ParseSequenceParameters(sps []byte) (SequenceParameters, error) {
 	var sp SequenceParameters
 	if len(sps) < 4 {
 		return sp, errors.New("mp4: SPS is shorter than its own header")
@@ -708,7 +714,7 @@ func (p *ParameterSets) decoderConfig() (rec []byte, sp SequenceParameters, err 
 		return nil, sp, fmt.Errorf("%w: a %d-byte SPS or a %d-byte PPS, and the format's length field holds %d",
 			ErrParameterSetTooLong, len(p.SPS), len(p.PPS), MaxParameterSetBytes)
 	}
-	sp, err = parseSPS(p.SPS)
+	sp, err = ParseSequenceParameters(p.SPS)
 	if err != nil {
 		return nil, sp, err
 	}

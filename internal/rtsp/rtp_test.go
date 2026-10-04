@@ -164,13 +164,14 @@ func TestAStreamThatIsNotInterleavedIsRefused(t *testing.T) {
 	// else, so a byte that is not the magic means the stream is not what the
 	// handshake said. Resynchronising a byte stream by guessing is how a client
 	// ends up muxing somebody else's video.
-	srv := newServer(t, loadNALs(t))
-	srv.afterPlay = func(conn net.Conn) {
-		_, _ = conn.Write([]byte("HTTP/1.1 200 OK\r\n"))
-		time.Sleep(2 * time.Second)
-	}
+	srv := newServer(t, loadNALs(t), withFaults(rtsp.ServerFaults{
+		AfterPlay: func(conn net.Conn) {
+			_, _ = conn.Write([]byte("HTTP/1.1 200 OK\r\n"))
+			time.Sleep(2 * time.Second)
+		},
+	}))
 	ctx := context.Background()
-	c, err := rtsp.Dial(ctx, srv.url(), rtsp.Options{Timeout: 2 * time.Second})
+	c, err := rtsp.Dial(ctx, srvURL(t, srv), rtsp.Options{Timeout: 2 * time.Second})
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
