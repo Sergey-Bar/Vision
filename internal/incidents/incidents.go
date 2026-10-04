@@ -713,6 +713,20 @@ var DispositionOutcomes = map[string]bool{
 // stepUpRequired outcomes need a fresh factor, not just a live session.
 var stepUpRequired = map[string]bool{"escalated": true, "dismissed": true}
 
+// OutcomeNeedsStepUp reports whether an outcome requires a fresh second factor.
+//
+// Exported so a form can ask for the factor BEFORE the operator submits, rather than
+// refusing afterwards. The rule is one map and two entries, and before this existed
+// the only way to know it was to submit and read a 403 -- which is the answer an
+// operator gets after they have already typed a six-digit code.
+//
+// The map is the same one `Record` checks, so the form and the service cannot
+// disagree about which outcomes are sensitive. That matters: a form that asks for a
+// factor the service does not require teaches operators to type their second factor
+// on every disposition, and a form that does not ask for one the service requires
+// refuses them at the worst moment.
+func OutcomeNeedsStepUp(outcome string) bool { return stepUpRequired[outcome] }
+
 // Record stores a disposition and moves the incident accordingly.
 func (s *Service) Record(ctx context.Context, d Disposition) (string, error) {
 	if !DispositionOutcomes[d.Outcome] {

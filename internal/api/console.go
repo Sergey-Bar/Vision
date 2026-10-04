@@ -5,6 +5,7 @@ import (
 	"embed"
 	"html/template"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -227,6 +228,155 @@ func (s *Server) renderConsoleLoginError(w http.ResponseWriter, r *http.Request,
 // exists, the layout renders the token into the form, and a sign-out a third-party
 // page can trigger is a nuisance at best -- an operator's console is cleared
 // mid-incident.
+// handleConsoleDisposition records an operator disposition from the console.
+//
+// # Why this route exists at all
+//
+// The console could SHOW a disposition — the incident page renders the table — and
+// there was no way to record one. An operator with the page open had to leave the
+// console and call `POST /v1/incidents/{id}/dispositions` with a JSON body and a
+// step-up proof, which means the product's own review surface had no review on it.
+// A read-only view of a decision record is a screenshot of a workflow.
+//
+// # The step-up, and why the form asks for a code rather than a proof
+//
+// `escalated` and `dismissed` require a step-up: `incidents.Record` refuses them
+// without `StepUpVerified`, and this route obtains that by calling
+// `identity.StepUp` with the operator's second factor and then spending the proof.
+//
+// The form asks for the FACTOR, not for a proof, because a proof is a bearer token
+// and putting one in an HTML form means putting it in a page, a DOM, and possibly a
+// browser history. Asking for the code and spending a freshly minted proof keeps the
+// token out of everything except the transaction that uses it.
+//
+// An operator with no enrolled factor cannot escalate or dismiss. That is stated on
+// the page rather than discovered at submit time, because "your second factor is not
+// enrolled" is a configuration fact the operator can fix and a 403 they cannot.
+//
+// # Why a successful sensitive disposition rotates the CSRF token
+//
+// `identity.RotateCSRF` existed, unwired, with the reason written on it: a token
+// minted before an escalation is not usable after one. An escalation IS the
+// privilege-relevant moment — the incident stops being a review queue item and
+// becomes somebody else's problem — and the operator's console is still open with
+// the pre-escalation token in every form on the page. Rotating here means the next
+// state-changing request from this console has to carry the new one.
+func (s *Server) handleConsoleDisposition(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
+	data := s.consoleData(r, p, "Incident")
+	id := r.PathValue("id")
+
+	detail, err := d.Incidents.Get(r.Context(), p.TenantID, id)
+	if err != nil || !p.CanSeeSite(detail.SiteID) {
+		data.Incident = nil
+		data.Error = "No such incident, or you are not assigned to its site."
+		s.render(w, http.StatusNotFound, "incident.html", data)
+		return
+	}
+	data.Incident = &detail
+
+	if err := r.ParseForm(); err != nil {
+		data.Error = "The form could not be read."
+		s.render(w, http.StatusBadRequest, "incident.html", data)
+		return
+	}
+	outcome := strings.TrimSpace(r.PostFormValue("outcome"))
+	agreement := strings.TrimSpace(r.PostFormValue("agreement"))
+	reasonCode := strings.TrimSpace(r.PostFormValue("reasonCode"))
+	notes := strings.TrimSpace(r.PostFormValue("notes"))
+
+	// Refused BEFORE a factor is asked for, so a form that cannot succeed does not
+	// collect a second factor first. `DispositionOutcomes` is the closed set and the
+	// database CHECKs it; asking the database to be the only validator means the error
+	// is a constraint violation rather than a sentence.
+	if !incidents.DispositionOutcomes[outcome] {
+		data.Error = "Choose one of the listed outcomes."
+		s.render(w, http.StatusBadRequest, "incident.html", data)
+		return
+	}
+	if agreement == "" {
+		agreement = "unsure"
+	}
+
+	stepUpVerified := false
+	if incidents.OutcomeNeedsStepUp(outcome) {
+		code := strings.TrimSpace(r.PostFormValue("factor"))
+		if code == "" {
+			data.Error = "Escalating or dismissing needs a second factor. " +
+				"This account has none enrolled, so an operator cannot do either from here."
+			s.render(w, http.StatusForbidden, "incident.html", data)
+			return
+		}
+		proof, err := d.Identity.StepUp(r.Context(), p.TenantID, p.UserID, "", code,
+			"disposition:"+outcome, id)
+		if err != nil {
+			data.Error = "The second factor was not accepted: " + err.Error()
+			s.render(w, http.StatusForbidden, "incident.html", data)
+			return
+		}
+		// Spent before the disposition is recorded, not after. A proof that is spent
+		// last and a record that fails leaves a live proof behind, and a live proof is
+		// exactly the thing `ConsumeStepUp` exists to prevent: it is spent FIRST, and
+		// a failure to record then costs the operator a re-authentication rather than
+		// leaving a usable escalation token on the table.
+		if err := d.Incidents.ConsumeStepUp(r.Context(), d.Identity, p.TenantID, p.UserID, proof); err != nil {
+			data.Error = err.Error()
+			s.render(w, http.StatusForbidden, "incident.html", data)
+			return
+		}
+		stepUpVerified = true
+	}
+
+	if _, err := d.Incidents.Record(r.Context(), incidents.Disposition{
+		TenantID: p.TenantID, IncidentID: id, Outcome: outcome,
+		ReasonCode: reasonCode, Notes: notes, Agreement: agreement,
+		ActorID: p.UserID, ActorRoles: roleStrings(p), SiteScope: p.SiteScope,
+		SessionID: p.SessionID, StepUpVerified: stepUpVerified,
+	}); err != nil {
+		data.Error = "The disposition was not recorded: " + err.Error()
+		s.render(w, http.StatusBadRequest, "incident.html", data)
+		return
+	}
+
+	if stepUpVerified {
+		// The escalation boundary. The cookie carries the session, which survives; the
+		// CSRF token does not, and a page rendered before this point still holds the
+		// old one in every form. A failure to rotate is logged and NOT swallowed: the
+		// disposition already committed, so the only honest thing left is to say that
+		// the rotation did not happen and let the operator know their console is now
+		// carrying a token that may or may not be current.
+		if fresh, err := s.rotateConsoleCSRF(r, p, d); err != nil {
+			if s.Log != nil {
+				s.Log.Error("the CSRF token was not rotated after a sensitive disposition",
+					"tenant_id", p.TenantID, "incident_id", id, "error", err.Error())
+			}
+		} else if fresh != "" {
+			http.SetCookie(w, &http.Cookie{
+				Name:     s.CookieName + "_csrf",
+				Value:    fresh,
+				Path:     "/",
+				HttpOnly: true,
+				Secure:   s.Secure,
+				SameSite: http.SameSiteStrictMode,
+			})
+		}
+	}
+
+	http.Redirect(w, r, "/incidents/"+url.PathEscape(id), http.StatusFound)
+}
+
+// rotateConsoleCSRF issues a fresh token for the live session.
+//
+// Separate from the caller because rotating is the part that can fail and the
+// disposition is not: the record is already committed by the time this is called, so
+// "fail the whole thing" is no longer available and the choice is between reporting
+// and pretending.
+func (s *Server) rotateConsoleCSRF(r *http.Request, p identity.Principal, d Deps) (string, error) {
+	if d.Identity == nil || strings.TrimSpace(p.SessionID) == "" {
+		return "", nil
+	}
+	return d.Identity.RotateCSRF(r.Context(), p.TenantID, p.SessionID)
+}
+
 func (s *Server) handleConsoleLogout(w http.ResponseWriter, r *http.Request, p identity.Principal) {
 	if err := s.Identity.Logout(r.Context(), s.Tenant, p.SessionID, p.Username, "console logout"); err != nil {
 		data := s.consoleData(r, p, "Sign in")

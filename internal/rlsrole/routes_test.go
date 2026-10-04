@@ -59,6 +59,51 @@ func TestEveryRouteDeclaresACapability(t *testing.T) {
 		return ok && ident.Name == "nil"
 	}
 
+	// unwrapGates peels `requireCSRF(...)` and any other http.Handler-shaped wrapper off
+	// the front of a registration, returning the call that actually decides whether the
+	// caller is allowed in.
+	//
+	// It exists because `POST /incidents/{id}/disposition` has to be registered as
+	// `requireCSRF(requireCapabilityAtSite(...))` and not the other way round:
+	// `identity.Resolve` rotates the session token on every principal resolution, so a
+	// gate that resolves before the CSRF check validates the token has just invalidated.
+	// The gate then reported `1 of 19 routes have no capability gate` for a route that
+	// is gated twice over, because it read the OUTERMOST call.
+	//
+	// Reading the outermost call is the wrong rule in general, not just for this
+	// route: a request that is refused by a middleware before any capability is
+	// consulted has still been capability-gated, and reporting it as ungated sends
+	// somebody to add a second gate rather than to nothing.
+	//
+	// Bounded, because the recursion follows the source: a cycle would hang the gate,
+	// and a gate that can hang is the thing this repository has already paid for once.
+	// Declared and then assigned, not declared-and-initialised: the scope of a
+	// `:=` binding starts AFTER the statement, so `x := func() { x() }` cannot
+	// refer to itself. That is a compile error rather than a logic error, which is
+	// the good kind to hit.
+	var unwrapGates func(call *ast.CallExpr, depth int) *ast.CallExpr
+	unwrapGates = func(call *ast.CallExpr, depth int) *ast.CallExpr {
+		if depth > 6 {
+			return call
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || sel.Sel.Name == "requireCapability" ||
+			sel.Sel.Name == "requireCapabilityAtSite" || sel.Sel.Name == "requirePrincipal" {
+			return call
+		}
+		if len(call.Args) != 1 {
+			// `requireCSRF` takes one handler. A differently-shaped wrapper is not one
+			// this understands, and unwrapping it by argument position would be a
+			// guess -- so it is reported as whatever it is, which is the safe direction.
+			return call
+		}
+		inner, ok := call.Args[0].(*ast.CallExpr)
+		if !ok {
+			return call
+		}
+		return unwrapGates(inner, depth+1)
+	}
+
 	exempt := map[string]string{
 		"POST /v1/auth/login":      "a caller has no session yet, so there is nothing to authorise",
 		"POST /v1/auth/mfa/verify": "the challenge is itself the credential: single-use and short-lived",
@@ -115,6 +160,7 @@ func TestEveryRouteDeclaresACapability(t *testing.T) {
 			registered++
 			return true
 		}
+		gate = unwrapGates(gate, 0)
 		gateSel, ok := gate.Fun.(*ast.SelectorExpr)
 		if !ok {
 			return true

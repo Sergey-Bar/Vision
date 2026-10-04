@@ -116,8 +116,7 @@ var (
 		"internal/jobs.ErrNotClaimed":    {Symbol: "internal/jobs.ErrNotClaimed", Why: "sentinel: the claim returns it when a lease lapsed, which is the zero-accepted-event-loss path, and the reason is recorded on the job row"},
 		"internal/jobs.VLMLeaseDuration": {Symbol: "internal/jobs.VLMLeaseDuration", Why: "published bound: how long a VLM job may hold its lease before another worker may take it. It is a recovery-timeout an operator tunes by name"},
 
-		"internal/incidents.StateDispositioned":  {Symbol: "internal/incidents.StateDispositioned", Why: "the incident lifecycle vocabulary. States are stored as text and read by the console, by the replay and by the North Star denominator"},
-		"internal/incidents.DispositionOutcomes": {Symbol: "internal/incidents.DispositionOutcomes", Why: "published set: the disposition outcomes the operator form offers, the validation accepts and the evaluation harness scores against. It is the shared vocabulary of three surfaces, so no one of them is its only reader"},
+		"internal/incidents.StateDispositioned": {Symbol: "internal/incidents.StateDispositioned", Why: "the incident lifecycle vocabulary. States are stored as text and read by the console, by the replay and by the North Star denominator"},
 
 		"internal/lifecycle.ErrUnsafePath": {Symbol: "internal/lifecycle.ErrUnsafePath", Why: "sentinel: the installer refuses an install path that is not safe, and the refusal text is the operator-facing message, so the error value is published as prose"},
 
@@ -217,8 +216,6 @@ var (
 		"internal/identity.GenerateSecretKey": {Symbol: "internal/identity.GenerateSecretKey", Why: "published key generator for the MFA secret key. It is run by `securityctl install` and by the key-rotation runbook, both of which are operator actions rather than in-process callers"},
 		"internal/identity.WrapFor":           {Symbol: "internal/identity.WrapFor", Why: "UNWIRED. The row-bound secret wrapper nothing outside the package calls, and its sibling SecretStore was one of the nine dead exports that started this gate. Close it by having the MFA enrolment and verification paths seal through it, which is what makes a ciphertext copied to another row fail to decrypt, or delete it"},
 		"internal/identity.UnwrapFor":         {Symbol: "internal/identity.UnwrapFor", Why: "UNWIRED. The row-bound secret unwrapper, and the inverse of WrapFor in the same cluster. Wire both in the same commit or delete both"},
-		"internal/identity.StepUp":            {Symbol: "internal/identity.StepUp", Why: "UNWIRED. The step-up proof nothing spends. P5's disposition form is where it is wired: escalating a sensitive incident has to present a fresh factor, and a session that was fine fifteen minutes ago is not evidence about intent now"},
-		"internal/identity.RotateCSRF":        {Symbol: "internal/identity.RotateCSRF", Why: "UNWIRED. The CSRF rotation nothing calls. P5's disposition form is where it is wired, on authentication and on privilege change, so a token minted before an escalation is not usable after one"},
 		"internal/identity.PurgeExpired":      {Symbol: "internal/identity.PurgeExpired", Why: "UNWIRED. The collection of dead sessions, challenges and proofs nothing runs. Close it by scheduling it from the janitor job the migrations already have a queue for, or delete it"},
 		"internal/identity.InSiteScope":       {Symbol: "internal/identity.InSiteScope", Why: "UNWIRED. The site-scope predicate nothing calls. Close it by having the console's per-site routes check it, which is migration 21's RESTRICTIVE site_isolation made mechanical at the application edge, or delete it"},
 

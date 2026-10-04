@@ -8,9 +8,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
+	"github.com/Sergey-Bar/Ai-Captain/internal/incidents"
 	"github.com/Sergey-Bar/Ai-Captain/internal/rules"
 	"github.com/Sergey-Bar/Ai-Captain/internal/testutil"
 )
@@ -63,6 +65,210 @@ func templateFiles(t *testing.T) []string {
 		t.Fatal("no templates found, so this test is asserting nothing")
 	}
 	return out
+}
+
+// TestTheDispositionFormCarriesEveryOutcome is the content assertion for the form.
+//
+// Spelled as a set rather than as a search for one outcome, because the failure this
+// guards against is a form that is MISSING one: `Record` refuses an outcome the
+// database does not admit, so a form with five of the six radios is a form where one
+// legitimate disposition is simply not available and nothing reports it.
+//
+// The expected set is read from `incidents.DispositionOutcomes` rather than written
+// out here, so the form cannot be tested against a stale copy of the rule it is meant
+// to match. If somebody adds an outcome to the map and not to the template, the
+// comparison fails and names which one is missing.
+func TestTheDispositionFormCarriesEveryOutcome(t *testing.T) {
+	s, tenant, site := server(t)
+	id := seedIncident(t, tenant, site)
+
+	rec := call(t, s, http.MethodGet, "/incidents/"+id, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("the incident page returned %d: %s", rec.Code, rec.Body)
+	}
+	body := rec.Body.String()
+
+	found := map[string]bool{}
+	for _, m := range regexp.MustCompile(`name="outcome" value="([a-z_]+)"`).FindAllStringSubmatch(body, -1) {
+		found[m[1]] = true
+	}
+	var missing []string
+	for outcome := range incidents.DispositionOutcomes {
+		if !found[outcome] {
+			missing = append(missing, outcome)
+		}
+	}
+	sort.Strings(missing)
+	if len(missing) > 0 {
+		t.Errorf("the disposition form has no radio for %v. An operator cannot record that "+
+			"outcome from the console at all, and `Record` refuses it, so the gap is invisible "+
+			"from the UI", missing)
+	}
+	if len(found) != len(incidents.DispositionOutcomes) {
+		t.Errorf("the form offers %d outcome radio(s) and the service accepts %d; the sets "+
+			"must be identical in both directions", len(found), len(incidents.DispositionOutcomes))
+	}
+
+	// The agreement values are a separate CHECK with its own four values, and a form
+	// that omits one forces an operator who disagrees with the AI into picking
+	// "unsure", which is a data-quality loss rather than a refusal.
+	agreed := map[string]bool{}
+	for _, m := range regexp.MustCompile(`name="agreement" value="([a-z_]+)"`).FindAllStringSubmatch(body, -1) {
+		agreed[m[1]] = true
+	}
+	for _, want := range []string{"agreed", "disagreed", "unsure", "no_ai_observation"} {
+		if !agreed[want] {
+			t.Errorf("the disposition form has no agreement radio for %q", want)
+		}
+	}
+
+	// The step-up field is on the page, because the two sensitive outcomes need one
+	// and an operator choosing `escalated` should not have to reload to find it.
+	if !strings.Contains(body, `name="factor"`) {
+		t.Error("the disposition form has no second-factor field. `escalated` and `dismissed` " +
+			"require one, so an operator would discover the requirement by being refused")
+	}
+}
+
+// TestRecordingADispositionFromTheConsole drives the form end to end, and it is the
+// first test that has ever made this product's review surface perform a review.
+//
+// The console rendered the disposition table for the whole of its life and there was no
+// route that added a row to it: an operator with the page open had to leave the console
+// and call `POST /v1/incidents/{id}/dispositions` with a JSON body. A read-only view of
+// a decision record is a screenshot of a workflow.
+func TestRecordingADispositionFromTheConsole(t *testing.T) {
+	s, tenant, site := server(t)
+	id := seedIncident(t, tenant, site)
+
+	// A second site in the same tenant that this principal is NOT assigned to, so the
+	// cross-site case below is a real row and not a fabricated id -- the incident's
+	// site is a foreign key and a made-up one would fail the seed rather than the
+	// assertion.
+	const otherSite = "site-not-mine"
+	if _, err := testutil.Pool(t).Exec(ctx(),
+		`INSERT INTO sites (site_id, tenant_id, name, timezone) VALUES ($1, $2, 'Other', 'UTC')`,
+		otherSite, tenant); err != nil {
+		t.Fatalf("seed the second site: %v", err)
+	}
+
+	post := func(t *testing.T, incidentID string, form url.Values) *httptest.ResponseRecorder {
+		t.Helper()
+		cookie, csrf, err := signIn(t, s)
+		if err != nil {
+			t.Fatalf("sign in: %v", err)
+		}
+		form.Set("csrf_token", csrf)
+		req := httptest.NewRequest(http.MethodPost, "/incidents/"+incidentID+"/disposition",
+			strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.AddCookie(cookie)
+		req.AddCookie(&http.Cookie{Name: cookieNameOf(s) + "_csrf", Value: csrf})
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, req)
+		return rec
+	}
+	countDispositions := func(t *testing.T, incidentID, outcome string) int {
+		t.Helper()
+		var n int
+		q := `SELECT count(*) FROM dispositions WHERE tenant_id = $1 AND incident_id = $2`
+		args := []any{tenant, incidentID}
+		if outcome != "" {
+			q += ` AND outcome = $3`
+			args = append(args, outcome)
+		}
+		if err := adminPool(t).QueryRow(ctx(), q, args...).Scan(&n); err != nil {
+			t.Fatalf("count dispositions: %v", err)
+		}
+		return n
+	}
+
+	t.Run("an acknowledged outcome needs no second factor", func(t *testing.T) {
+		rec := post(t, id, url.Values{
+			"outcome":    {"acknowledged"},
+			"agreement":  {"unsure"},
+			"reasonCode": {"reviewed"},
+			"notes":      {"seen it, nothing yet"},
+		})
+		if rec.Code != http.StatusFound {
+			t.Fatalf("recording a disposition answered %d, want 302 back to the incident: %s",
+				rec.Code, rec.Body)
+		}
+		if n := countDispositions(t, id, ""); n != 1 {
+			t.Errorf("the disposition table has %d row(s) after a recorded disposition, want 1", n)
+		}
+	})
+
+	t.Run("an escalation with no second factor is refused before anything is written", func(t *testing.T) {
+		rec := post(t, id, url.Values{"outcome": {"escalated"}, "reasonCode": {"eyes please"}})
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("an escalation with no factor answered %d, want 403: %s", rec.Code, rec.Body)
+		}
+		if n := countDispositions(t, id, "escalated"); n != 0 {
+			t.Errorf("an escalation was recorded with no second factor")
+		}
+	})
+
+	t.Run("a dismissal with no second factor is refused", func(t *testing.T) {
+		// The other sensitive outcome. Both are in `stepUpRequired` and a form that
+		// guards one of them is half a control.
+		rec := post(t, id, url.Values{"outcome": {"dismissed"}, "reasonCode": {"noise"}})
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("a dismissal with no factor answered %d, want 403", rec.Code)
+		}
+		if n := countDispositions(t, id, "dismissed"); n != 0 {
+			t.Errorf("a dismissal was recorded with no second factor")
+		}
+	})
+
+	t.Run("an outcome the service does not admit is refused", func(t *testing.T) {
+		rec := post(t, id, url.Values{"outcome": {"not_a_real_outcome"}})
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("an invented outcome answered %d, want 400", rec.Code)
+		}
+		if n := countDispositions(t, id, ""); n != 1 {
+			t.Errorf("the invented outcome wrote a row; the table has %d rows, want the 1 from "+
+				"the acknowledged disposition above", n)
+		}
+	})
+
+	t.Run("a disposition is refused without a CSRF token", func(t *testing.T) {
+		// The negative case, because a form that works and a route with no CSRF check
+		// are indistinguishable from the outside. A disposition is the most
+		// consequential thing an operator can do here and it is addressed by id, so a
+		// third-party page that can make an operator's browser escalate an incident is
+		// the whole reason this check exists.
+		cookie, _, err := signIn(t, s)
+		if err != nil {
+			t.Fatalf("sign in: %v", err)
+		}
+		form := url.Values{"outcome": {"dismissed"}, "reasonCode": {"forged"}}
+		req := httptest.NewRequest(http.MethodPost, "/incidents/"+id+"/disposition",
+			strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.AddCookie(cookie)
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("a disposition with no CSRF token answered %d, want 403", rec.Code)
+		}
+		if n := countDispositions(t, id, "dismissed"); n != 0 {
+			t.Error("a disposition was recorded from a request with no CSRF token")
+		}
+	})
+
+	t.Run("an operator not assigned to the incident's site cannot record against it", func(t *testing.T) {
+		theirs := seedIncident(t, tenant, otherSite)
+		rec := post(t, theirs, url.Values{"outcome": {"acknowledged"}})
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("a disposition against another site's incident answered %d, want 404",
+				rec.Code)
+		}
+		if n := countDispositions(t, theirs, ""); n != 0 {
+			t.Error("a disposition was recorded against an incident at an unassigned site")
+		}
+	})
 }
 
 // TestEveryConsoleFormSubmitsToARouteThatAcceptsItsMethod is the test that would

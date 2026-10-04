@@ -132,6 +132,79 @@
   {{end}}
 
   <section>
+    <h2>Record a disposition</h2>
+    <p class="hint">
+      A disposition never overwrites an observation. "The AI said X" and "the
+      operator said Y" are both stored and both replay.
+    </p>
+    {{/*
+        Every outcome in `incidents.DispositionOutcomes` is a radio, and every value in
+        the database's agreement CHECK is a radio. Spelled out rather than ranged over
+        a map because the set is six entries that will change by an ADR, and a form
+        built from a map goes quiet the day the map and the table disagree -- which is
+        how an operator discovers a new outcome by being refused it.
+
+        The radio group NAME is `outcome` and the values are the database's, so the
+        form and `dispositions_outcome_check` cannot drift: a value here that the
+        constraint does not admit is a 400 the operator can act on, not a row that
+        silently disappears.
+      */}}
+    <form method="post" action="/incidents/{{.IncidentID}}/disposition" class="stack">
+      <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+
+      <fieldset>
+        <legend>Outcome</legend>
+        <label><input type="radio" name="outcome" value="true_positive" required>
+               True positive — something happened</label>
+        <label><input type="radio" name="outcome" value="false_positive">
+               False positive — nothing happened</label>
+        <label><input type="radio" name="outcome" value="benign">
+               Benign — expected activity</label>
+        <label><input type="radio" name="outcome" value="acknowledged">
+               Acknowledged — seen, no action yet</label>
+        <label><input type="radio" name="outcome" value="escalated">
+               Escalated — <strong>needs a second factor</strong></label>
+        <label><input type="radio" name="outcome" value="dismissed">
+               Dismissed — <strong>needs a second factor</strong></label>
+      </fieldset>
+
+      <label>Reason code
+        <input type="text" name="reasonCode" value=""
+               placeholder="reviewed the clip; camera was genuinely obstructed">
+      </label>
+
+      <fieldset>
+        <legend>Did you agree with the AI?</legend>
+        <label><input type="radio" name="agreement" value="agreed" checked> Yes</label>
+        <label><input type="radio" name="agreement" value="disagreed"> No</label>
+        <label><input type="radio" name="agreement" value="unsure"> Not sure</label>
+        <label><input type="radio" name="agreement" value="no_ai_observation">
+               The AI never saw this</label>
+      </fieldset>
+
+      {{/*
+          The factor field is always rendered and always optional. It is not hidden for
+          the four outcomes that do not need it, because an operator choosing
+          `escalated` on this page should not have to reload to find the field -- and a
+          field that appears on submit is a field that was not there when they decided.
+
+          The server refuses an escalation with no factor, so leaving it blank is safe.
+      */}}
+      <label>Second factor code
+        <input type="text" name="factor" value="" autocomplete="one-time-code"
+               inputmode="numeric" placeholder="only for escalate or dismiss">
+      </label>
+
+      <label>Notes
+        <textarea name="notes" rows="3"
+                  placeholder="what you saw, and what you did about it"></textarea>
+      </label>
+
+      <button type="submit">Record disposition</button>
+    </form>
+  </section>
+
+  <section>
     <h2>Operator dispositions</h2>
     {{if .Dispositions}}
     <table>

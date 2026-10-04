@@ -226,6 +226,36 @@ func (s *Server) RegisterRoutes(d Deps) func(*http.ServeMux) {
 		// CapSessionRead held by nobody would be a capability table that grants
 		// nothing. The CSRF check DOES apply -- see handleConsoleLogout.
 		mux.Handle("POST /logout", s.requirePrincipal(s.handleConsoleLogout))
+		// The console's disposition form. The route the incident page's form posts to,
+		// which is the write the console previously had no way to perform: it rendered
+		// the disposition table and nothing could add a row to it.
+		//
+		// `requireCapabilityAtSite` rather than `requireCapability`, like every other
+		// incident-addressed route: a disposition is the most consequential thing an
+		// operator can do here, and it is addressed by incident id.
+		mux.Handle("POST /incidents/{id}/disposition",
+			// `requireCSRF` is OUTSIDE `requireCapabilityAtSite`, and that order is load
+			// bearing rather than incidental.
+			//
+			// `identity.Resolve` rotates the session token on every use, so the moment a
+			// handler has resolved a principal the token in the incoming cookie is one
+			// rotation stale. `requireCSRF` then looks the session up BY THE COOKIE'S
+			// TOKEN, finds nothing, and answers `csrf_mismatch: identity: no such
+			// session` -- for a request that carried a perfectly good token.
+			//
+			// With the wrappers the other way round, two of this route's five subtests
+			// passed for the wrong reason: the escalation and dismissal refusals were
+			// coming from the CSRF check, not from the step-up check, because the
+			// request never got past the middleware. A test that asserts "403" cannot
+			// tell those two 403s apart, which is the same reason this route's negative
+			// case asserts the DATABASE afterwards rather than the status code.
+			//
+			// So CSRF is validated against the untouched cookie, and only then is the
+			// principal resolved.
+			s.requireCSRF(s.requireCapabilityAtSite(identity.CapIncidentDisposition, siteOfIncident(d),
+				func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+					s.handleConsoleDisposition(w, r, p, d)
+				})))
 		mux.HandleFunc("GET /login", func(w http.ResponseWriter, r *http.Request) {
 			s.handleConsoleLogin(w, r)
 		})
