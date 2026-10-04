@@ -476,6 +476,96 @@ is a function of how often somebody looked. The operator-attention number this
 repository cares about is `GaugeIncidentOpen`, and it is defined as states an operator
 watches rather than events they accumulate.
 
+### The write canary: every canary in this repository was a read
+
+`internal/rlsrole` had five canaries and every one of them asserted that a statement
+issued without a tenant context returns **no rows**. That is the shape of a SELECT
+under a PERMISSIVE policy with no matching context, and it is a real and valuable
+thing to prove. It is also, entirely, the shape of a READ.
+
+**A read that crosses a boundary returns nothing, so the defect is invisible.** A read
+that *should* return rows and correctly does is indistinguishable from a read that is
+not filtered at all. Nothing in the suite tried a write, and a write is where the cost
+is: a cross-tenant write puts a row in somebody else's ledger and the audit trail then
+records an action attributed to an actor who could not have performed it.
+
+Five tests, all as `security_core` — the production role, RLS in force, not
+superuser:
+
+| Test | What it attempts |
+|---|---|
+| `TestAWriteWithNoTenantContextIsRefused` | INSERT with no tenant context |
+| `TestAWriteWithTheWrongSiteIsRefused` | INSERT with the right tenant and a site the principal is **not** assigned to |
+| `TestAWriteWithTheRightScopeIsAccepted` | the same INSERT with the right tenant **and** the right site |
+| `TestAnUpdateAndADeleteAreScopedToo` | UPDATE and DELETE at an unassigned site |
+| `TestTheUnprotectedLedgerIsConsulted` | keeps the ledger below honest in both directions |
+
+**Case 3 is what gives the other two their meaning.** A canary that only asserts
+refusals passes on a table that is simply unwritable, and an unwritable table is what a
+migration with a missing GRANT produces — which fails closed, loudly, in production, on
+the first write. So the control asserts both directions, and asserts the ROW afterwards
+rather than the absence of an error, because a policy that silently drops a write is
+worse than one that refuses it: the caller is told it succeeded.
+
+`isPolicyRefusal` distinguishes `42501` from a syntax error, because a canary that
+passes for the wrong reason is worse than no canary — it is reported on the same line of
+output as one that is working. The first version of this file failed on
+`INSERT has more target columns than expressions` and reported it as "not a policy
+refusal", which is the check working: it is what caught the wrong column list.
+
+#### It found a live defect on its first run
+
+```
+CROSS-SITE WRITE REACHED jobs, and the ledger says so: NO site_isolation policy at all.
+CROSS-SITE WRITE REACHED outbox_events, and the ledger says so: NO site_isolation
+    policy at all -- the same shape as jobs
+```
+
+`pg_policy` confirms it: `incidents` carries `tenant_isolation` **and**
+`site_isolation`; `jobs` and `outbox_events` carry only `tenant_isolation`.
+
+The cause is in migration 0008, which applied the site policy by enumerating the
+tenant-bearing relations that existed at the time. `jobs` and `outbox_events` are
+site-bearing and were not in that list, so they were never given one — and migration 21
+made policies RESTRICTIVE *where they existed*, which did nothing for a table that has
+none.
+
+**Two writes the pipeline makes on every event cross a site boundary with no check at
+all.**
+
+**The migration is NOT written here.** `AGENTS.md`: *"Migrations, `contracts/`,
+anything touching an invariant, dependencies, auth, crypto and the rule language all
+require a human to read the diff before it lands."* A cross-tenant RLS policy is
+exactly that, and the reason it matters is on both tables: `site_id` is **NULLABLE** on
+each, so the policy has to allow NULL — the worker that enqueues a site-less job is
+legitimate, and a check that refused NULL would break it in a way that only shows up
+under load.
+
+So the finding is in `unprotectedTables` with the migration it needs, and the shape is
+the third instance of a pattern this repository already uses twice — `deadexport`'s
+allow-list and the unproduced-metric ledger. A **known** gap is a line somebody wrote
+down and is reported on every run; an **unknown** one is a failure. Closing an entry
+requires both the migration and deleting the entry, because
+`TestTheUnprotectedLedgerIsConsulted` fails the moment a table in the ledger grows a
+`site_isolation` policy — which is the failure direction that tells somebody to go and
+delete a stale exemption rather than leave it looking like work that remains.
+
+#### What this file does NOT claim
+
+`writeCanaries` covers **3 of 15** site-scoped tables, and
+`TestTheSiteScopedTablesAreAllCovered` logs the uncovered twelve on every run:
+
+```
+write canaries cover 3 of 15 site-scoped tables: [device_clocks evidence
+user_site_assignments zones cameras inbox_events devices integrations source_events
+canonical_events entities sites ai_observations]
+```
+
+A sample is a choice somebody made rather than a property anybody checked, so the
+number is in the log rather than in a comment. `evidence` is the one that matters most
+and is **not** covered yet: it is the only site-scoped table whose rows are raw video
+bytes.
+
 ### Eight controls had no transcript at all, and the gate said so
 
 The new `tree-state` gate asserts that every red-check entry's name appears in this
