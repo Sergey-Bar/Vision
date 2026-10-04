@@ -1,9 +1,7 @@
 package rtsp_test
 
 import (
-	"encoding/base64"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/Sergey-Bar/Ai-Captain/internal/rtsp"
@@ -89,31 +87,6 @@ func srvURL(t *testing.T, srv *rtsp.Server) string {
 		t.Fatalf("server URL: %v", err)
 	}
 	return u
-}
-
-// sdpFor is the fixture-independent description builder the two parser tests use
-// for their baseline, kept here rather than exported because it is a test's own
-// scaffolding and the server has its own.
-func sdpFor(sps, pps []byte) string {
-	return strings.Join([]string{
-		"v=0",
-		"o=- 0 0 IN IP4 127.0.0.1",
-		"s=Camera",
-		"c=IN IP4 0.0.0.0",
-		"t=0 0",
-		"a=control:*",
-		"m=audio 0 RTP/AVP 97",
-		"a=rtpmap:97 mpeg4-generic/44100/2",
-		"a=control:trackID=1",
-		"m=video 0 RTP/AVP 96",
-		"a=rtpmap:96 H264/90000",
-		"a=fmtp:96 packetization-mode=1; sprop-parameter-sets=" +
-			base64.StdEncoding.EncodeToString(sps) + "," + base64.StdEncoding.EncodeToString(pps),
-		"a=framerate:25",
-		"a=framesize:96 640-360",
-		"a=control:trackID=2",
-		"",
-	}, "\r\n")
 }
 
 // parameterSets pulls the SPS and PPS out of the fixture, for the tests that

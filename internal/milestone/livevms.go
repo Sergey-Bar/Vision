@@ -119,7 +119,10 @@ func StartLiveServer(ctx context.Context, opts LiveOptions) (*LiveServer, error)
 	if opts.Now == nil {
 		opts.Now = func() time.Time { return time.Now().UTC() }
 	}
-	ln, err := net.Listen("tcp", opts.Listen)
+	// `ListenConfig.Listen` rather than `net.Listen`, so a cancellation can stop the
+	// listener instead of the server outliving the context that asked for it.
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", opts.Listen)
 	if err != nil {
 		return nil, fmt.Errorf("milestone: listen on %s: %w", opts.Listen, err)
 	}
@@ -148,10 +151,23 @@ func StartLiveServer(ctx context.Context, opts LiveOptions) (*LiveServer, error)
 	}
 	mux.HandleFunc(APIPrefix+"/bookmarks", s.handleBookmarks)
 	mux.HandleFunc("/", s.handleUnknown)
-	s.srv = &http.Server{Handler: s.withLog(mux)}
+	// ReadHeaderTimeout is set because a server without one is a Slowloris target, and
+	// the fact that this one listens on loopback for a demo does not make the rule
+	// conditional: the day somebody points it at a routable address the hole is
+	// already there. ReadTimeout is bounded generously because a bookmark write may
+	// legitimately carry a video reference.
+	s.srv = &http.Server{Handler: s.withLog(mux), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second}
 	go func() {
 		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		// A fresh context, not a child of the one that just ended.
+		//
+		// `Shutdown` needs a deadline, and a deadline needs a live context. Deriving
+		// it from `ctx` would be deriving it from a context that is already
+		// cancelled, which turns a graceful two-second drain into an immediate
+		// refusal -- so an in-flight bookmark write would be cut off by the very
+		// shutdown meant to let it finish. G118 is right that a `Background()` inside
+		// a goroutine is usually a mistake and wrong here for exactly that reason.
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second) //nolint:gosec // G118: the ctx above is already cancelled; deriving from it would refuse the drain
 		defer cancel()
 		_ = s.srv.Shutdown(shutdownCtx)
 	}()
@@ -219,7 +235,13 @@ func (s *LiveServer) withLog(next http.Handler) http.Handler {
 // instead of learning that something is wrong.
 func (s *LiveServer) handleUnknown(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotFound)
-	_, _ = fmt.Fprintf(w, `{"error":"no such route: %s %s"}`, r.Method, r.URL.Path)
+	// `json.NewEncoder` rather than `Fprintf` with a `%s` inside a literal, because
+	// the two values here come from the request and gosec's taint analysis is right
+	// to ask: a path containing a quote would otherwise produce a body that is not
+	// JSON, and a body that is not JSON is a body a browser may render.
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"error": fmt.Sprintf("no such route: %s %s", r.Method, r.URL.Path),
+	})
 }
 
 // handleRead serves one GET route.
@@ -263,7 +285,10 @@ func (s *LiveServer) writeEvents(w http.ResponseWriter, r *http.Request) {
 		cutoff, err := time.Parse(time.RFC3339, since)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
-			_, _ = fmt.Fprintf(w, `{"error":"time=%q is not RFC3339"}`, since)
+			// Encoded rather than interpolated: `since` came off the query string.
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"error": fmt.Sprintf("time=%q is not RFC3339", since),
+			})
 			return
 		}
 		kept := page[:0:0]

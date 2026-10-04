@@ -379,7 +379,15 @@ func (s *Server) authorised(headers map[string]string) bool {
 //     header has to match the source byte for byte.
 func (s *Server) stream(ctx context.Context, conn net.Conn) {
 	nals := s.opts.NALs
-	ticksPerFrame := rtpClockRate / s.opts.FPS
+	// `rtpClockRate` is a positive constant and `FPS` was defaulted to 25 in
+	// `StartServer`, so this division cannot be zero or negative. The conversion is
+	// guarded anyway, because a tick count that wrapped would put the stream's
+	// timestamps in the wrong century and a client that trusts them would file the
+	// video under 2106.
+	ticksPerFrame, err := clockTicks(s.opts.FPS)
+	if err != nil {
+		return
+	}
 	interval := time.Second / time.Duration(s.opts.FPS)
 	var seq uint16
 	var ts uint32
@@ -396,7 +404,7 @@ func (s *Server) stream(ctx context.Context, conn net.Conn) {
 			if ctx.Err() != nil {
 				return
 			}
-			ts += uint32(ticksPerFrame)
+			ts += ticksPerFrame
 			lastInUnit := true // one NAL per access unit, which this fixture is
 			if len(nal) <= maxPayload {
 				_, _ = conn.Write(interleaved(BuildRTP(seq, true, ts, nal)))
@@ -450,9 +458,22 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 	}
 }
 
+// clockTicks is the RTP tick advance per frame, and it refuses rather than wraps.
+//
+// The refusal is not theoretical: `rtpClockRate / fps` at a frame rate above 90000
+// is zero, and a stream whose timestamps never advance is a stream a client cannot
+// derive a frame interval from — which is the one thing this server exists to be
+// plausible about.
+func clockTicks(fps int) (uint32, error) {
+	if fps <= 0 || fps > rtpClockRate {
+		return 0, fmt.Errorf("rtsp: a frame rate of %d cannot be expressed on the %d Hz RTP clock", fps, rtpClockRate)
+	}
+	return uint32(rtpClockRate / fps), nil
+}
+
 // interleaved wraps an RTP packet in the four-byte RFC 2326 §10.12 frame.
 func interleaved(payload []byte) []byte {
-	hdr := []byte{interleavedMagic, 0, byte(len(payload) >> 8), byte(len(payload))}
+	hdr := []byte{interleavedMagic, 0, byte(len(payload) >> 8), byte(len(payload))} //nolint:gosec // G115: the 16-bit length field is the RFC 2326 shape and a payload over 65535 is already refused upstream by maxPayload
 	return append(hdr, payload...)
 }
 
