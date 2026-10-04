@@ -1,6 +1,10 @@
 # Status
 
-Last revised 2026-10-04, second pass (acceptance criteria 02 and 09 closed with the
+Last revised 2026-10-04, third pass (the demo, the documents a judge reads, the coverage
+panel, and the POC's Linux build. Found and recorded: the console login form has an empty
+CSRF token and the POST never checks one. See "The 2026-10-04 pass, second half".)
+
+Previously 2026-10-04, second pass (acceptance criteria 02 and 09 closed with the
 claim narrowed to what is true; nine of the seventeen never-red gates proven by hand
 with a transcript, and the other nine recorded with what was tried and what the failure
 was. See "The 2026-10-04 pass over the acceptance criteria and the never-red list".)
@@ -625,6 +629,113 @@ Red-checked, and the corpus file is the mutation's evidence:
 --- restored ---
     ok
 ```
+
+## The 2026-10-04 pass, second half: the demo, the documents, and the coverage panel
+
+### A security finding the demo surfaced: the login form has no CSRF token
+
+`internal/api`'s `login.html` carries `<input type="hidden" name="csrf_token"
+value="{{.CSRF}}">`. Fetched from the running console, the rendered value is **empty**,
+and `handleConsoleLoginSubmit` never reads the field — it goes straight to
+`passwordStep`. So the login POST is not CSRF-protected.
+
+**Severity: low, and the reason is worth stating so it is not over-read.** The
+practical attack is login CSRF — forcing a victim's browser into an
+attacker-controlled session so the attacker can watch what the victim does. This
+product's login is mandatory-MFA, so an attacker who forces a login still has to get
+past a TOTP factor the victim controls. What is left is a wrong-looking form.
+
+**What makes it worth fixing anyway** is that the field EXISTS and renders empty. A
+reader auditing this code sees a CSRF token in the markup and concludes the form is
+protected. It is not, and the appearance is worse than the absence: an absent field
+is visibly absent, and an empty one is a claim.
+
+**Not fixed here.** The fix is not a one-liner in the way it looks. A pre-session CSRF
+token has to be minted without a session to hold it — a signed, short-lived value in
+a cookie the POST compares against, or a double-submit cookie — and that is a choice
+between two mechanisms with different failure modes under the same site policy that
+mandates `Secure` cookies. That is an authentication-path decision, which `AGENTS.md`
+reserves to a human. It is recorded here rather than left to be discovered.
+
+**How it was found:** trying to sign in from `curl` to render the new coverage page,
+which is the only way to see a console page that requires a session. The empty field
+was visible in the response before any of it was read as a defect.
+
+### What the demo produced
+
+`make demo` — nine steps, end to end, writing `dist/demo/transcript.md`. Every number
+in the transcript came out of one of the product's own binaries, because
+`scripts/demo.sh` runs each command and captures its output and its exit code. It has
+no facility for adding a number.
+
+It shipped four ways of producing a document that reads well and is quietly false,
+and all four are recorded at the code:
+
+1. `note` was called with double quotes, so the backticks around
+   `securityctl acceptance` were **command substitution** — the script ran the
+   acceptance report and pasted its whole output into the middle of the transcript as
+   prose. True, twice, in the wrong place.
+2. `serve-camera` and `serve-vms` were invoked as bare binaries. They are subcommands
+   of `securityctl`, and `sh -c` inside a pipeline exits zero anyway, so the
+   transcript faithfully recorded `serve-camera: not found` with **exit 0**.
+3. `adapter-probe --endpoint`; the flag is `--base-url`.
+4. dash's `printf` reads a format string beginning with `-` as an option, and the
+   header died on it with `printf: Illegal option -`, which names a shell status
+   rather than the line.
+
+Step 1 runs FIVE of the twenty-five gates and says so in the transcript and in its
+footer. The grep names the five rather than matching `==>`, which also matches the
+twenty "not selected" lines — a reader handed twenty of those above five `ok` lines
+has been given the opposite of the point.
+
+### The POC now builds for Linux, and two things fell out of it
+
+`internal/supervisor` had `job_windows.go` and no `job_unix.go` while `supervisor.go`
+held a `*job` unconditionally, so the package compiled on Windows and had never
+compiled anywhere else — and therefore neither had the whole POC module.
+
+Wiring it up found a second thing: **`newJob` and `attach` were defined and never
+called, from any package, on any platform.** `s.job` was always nil, so `Stop`'s
+"closing the job kills anything still inside it" was a comment describing a belt that
+was not on the trousers. Both call sites are in the start path now, and on a child
+that cannot be attached the supervisor stops the one it started rather than reporting
+a half-supervised sidecar as ready.
+
+`internal/soak/rss.go` had a `switch runtime.GOOS` naming `windowsRSS` and
+`linuxRSS`, which compiles on **neither** — a switch on `GOOS` is still a compiled
+reference, and the other platform's symbol is behind a build tag. Each platform's file
+now installs its own reader from its own `init`, and `HasRSSReader` is derived from
+whether one was installed. It was `GOOS == windows || linux` beside an `init` that
+wired only the Windows one, so on Linux it answered **yes** while every read returned
+the not-implemented sentinel: a report claiming the RSS clause was measured, with
+nothing behind the number.
+
+`poc/Dockerfile` builds and runs: `bookworm-slim` has no `curl`, which the ONNX
+Runtime fetch needs, and the build failed at exit 127 — a shell status that names
+neither a missing package nor itself. `LD_LIBRARY_PATH` finds the library rather than
+`ldconfig`, which would have meant adding `libc-bin` for a cache line.
+
+### The coverage panel
+
+`GET /coverage`: four rows, each a `COUNT`, a `MIN` and a `MODE` over a table the
+site owns — the vendor feed not being read, the AI plane degraded, work at a terminal
+failure, and a device clock out of band. Gated on `CapIncidentRead` rather than a
+capability of its own, and the reasoning is the opposite of the dead-letter reader's:
+dead letters are **replayable work**, coverage is counts and reasons, and withholding
+coverage from an operator who cannot replay would leave them unable to tell whether
+there was anything to replay.
+
+No health score, deliberately. Four rows with their own counts and reasons, and the
+operator decides what they add up to; "9/10 healthy" is a claim this product cannot
+derive from these facts, and a claim at the top of a page is the one a reader
+remembers.
+
+Seven tests pin the assembly and none of them need Postgres: the four kinds and their
+fixed order, zero rows still rendering, every kind **read** even on a clean site — so
+"measured and found nothing" cannot be confused with "not measured" — a failed read
+being an error rather than four zeroes, and, at the presentation layer, that a
+degraded model renders as a count and a reason and never as a sentence about the
+world.
 
 ## The 2026-10-04 pass over the acceptance criteria and the never-red list
 
