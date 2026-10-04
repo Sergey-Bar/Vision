@@ -153,8 +153,8 @@ func TestRedcheckUndeclaredSkip(t *testing.T) { t.Skip("REDCHECK") }'
     [ordered]@{
         gate = 'dead-export'
         file = 'internal/deadexport/deadexport_test.go'
-        find = '"internal/milestone.WithEpoch"'
-        replace = '"internal/milestone.REDCHECKThisExportDoesNotExist"'
+        find = '"internal/graph.ErrNoProvenance"'
+        replace = '"internal/graph.REDCHECKThisExportDoesNotExist"'
         why = 'The gate fails on an allow-list entry that matches nothing. A mutated entry is the smallest change that produces that, and the failure names the dead symbol.'
     }
     [ordered]@{
@@ -293,19 +293,31 @@ foreach ($m in $targets) {
     }
     [System.IO.File]::WriteAllText($path, $original.Replace($m.find, $m.replace), (New-Object System.Text.UTF8Encoding $false))
 
+    # The child's output goes to a file and the exit code is read straight after the
+    # call, because `$LASTEXITCODE` read AFTER a pipeline that ends in `Select-String`
+    # is the wrong number: the first version of this script reported `exit -1` for
+    # every gate, which is what PowerShell leaves behind, while the gates were in
+    # fact failing with 1 and the verdicts were right for the wrong stated reason.
+    # A transcript whose exit code is wrong is worse than none, because it is read.
+    $log = Join-Path ([System.IO.Path]::GetTempPath()) ("force-red-" + $m.gate + ".log")
+
     Write-Host ""
     Write-Host "--- mutated run (expecting FAIL) ---" -ForegroundColor Yellow
-    & $gateShell -NoProfile -File (Join-Path $repo 'scripts/verify.ps1') -Only $m.gate -NoRace -SkipRedCheck 2>&1 |
-        Select-String -Pattern "==> $($m.gate)|FAILED \(|ok$|ALL MUTATED CONTROLS|unproven|not selected" |
-        Select-Object -First 8 | ForEach-Object { "    $($_.Line.Trim())" }
+    & $gateShell -NoProfile -File (Join-Path $repo 'scripts/verify.ps1') -Only $m.gate -NoRace -SkipRedCheck *>&1 |
+        Out-File -FilePath $log -Encoding utf8
     $redExit = $LASTEXITCODE
+    Get-Content -LiteralPath $log |
+        Select-String -Pattern "==> $($m.gate)|FAILED \(|^\s+ok$|unproven" |
+        Select-Object -First 8 | ForEach-Object { "    $($_.Line.Trim())" }
 
     [System.IO.File]::WriteAllText($path, $original, (New-Object System.Text.UTF8Encoding $false))
     Write-Host "--- restored run (expecting PASS) ---" -ForegroundColor Green
-    & $gateShell -NoProfile -File (Join-Path $repo 'scripts/verify.ps1') -Only $m.gate -NoRace -SkipRedCheck 2>&1 |
-        Select-String -Pattern "==> $($m.gate)|FAILED \(|ok$" |
-        Select-Object -First 4 | ForEach-Object { "    $($_.Line.Trim())" }
+    & $gateShell -NoProfile -File (Join-Path $repo 'scripts/verify.ps1') -Only $m.gate -NoRace -SkipRedCheck *>&1 |
+        Out-File -FilePath $log -Encoding utf8
     $greenExit = $LASTEXITCODE
+    Get-Content -LiteralPath $log |
+        Select-String -Pattern "==> $($m.gate)|FAILED \(|^\s+ok$" |
+        Select-Object -First 4 | ForEach-Object { "    $($_.Line.Trim())" }
 
     $verdict = if ($redExit -ne 0 -and $greenExit -eq 0) { 'proven' } else { 'NOT PROVEN' }
     $colour = if ($verdict -eq 'proven') { 'Green' } else { 'Red' }
