@@ -339,11 +339,20 @@ func TestTheIncidentPageRendersTheIncident(t *testing.T) {
 func TestTheIncidentPageSaysWhenTheAIPlaneWasDown(t *testing.T) {
 	s, tenant, site := server(t)
 
+	// `Degraded` and `DegradedReason` are TWO fields on `rules.Decision`, and the
+	// first version of this set only the second, so `degraded` came back false and
+	// the whole notice block was skipped by its own `{{if .Degraded}}`.
+	//
+	// Worth stating because the two being separate is the kind of thing a test
+	// fixture gets wrong silently: `DegradedReason: rules.DegradedTimeout` reads
+	// like it says the incident was degraded, and it says which reason a
+	// DEGRADED incident had.
 	degraded := seedIncidentDecision(t, tenant, site, rules.Decision{
 		State: rules.StateCorroborated, RuleID: "core.camera-offline",
 		Severity: "low", Reason: "corroborated",
 		Action:           rules.Action{CreateIncident: true, Severity: "low"},
 		SupportingEvents: []string{"evt-1"},
+		Degraded:         true,
 		DegradedReason:   rules.DegradedTimeout,
 	})
 
@@ -382,11 +391,29 @@ func TestTheIncidentPageSaysWhenTheAIPlaneWasDown(t *testing.T) {
 //
 // The count is on `<tr>` inside the evidence section, which is the only thing a
 // silent drop of `{{range}}` would change.
+// linkEvidence attaches a stored evidence row to an incident.
+//
+// It is not part of `seedEvidence` because the link is a separate fact. An evidence
+// row exists because something was captured; `incident_evidence` exists because a
+// DECISION cited it, and `scanEvidence` reads the join. Seeding only the row -- which
+// is what this test did first -- produces an incident with no evidence section at all,
+// and the failure reads as "the console does not render evidence" rather than as "the
+// fixture never linked any".
+func linkEvidence(t *testing.T, tenant, incidentID, evidenceID string) {
+	t.Helper()
+	if _, err := testutil.Pool(t).Exec(ctx(),
+		`INSERT INTO incident_evidence (tenant_id, incident_id, evidence_id)
+		 VALUES ($1, $2, $3)`,
+		tenant, incidentID, evidenceID); err != nil {
+		t.Fatalf("link %s to %s: %v", evidenceID, incidentID, err)
+	}
+}
+
 func TestTheEvidenceTableHasOneRowPerItem(t *testing.T) {
 	s, tenant, site := server(t)
 	id := seedIncident(t, tenant, site)
-	seedEvidence(t, tenant, site, "a")
-	seedEvidence(t, tenant, site, "b")
+	linkEvidence(t, tenant, id, seedEvidence(t, tenant, site, "a"))
+	linkEvidence(t, tenant, id, seedEvidence(t, tenant, site, "b"))
 
 	rec := call(t, s, http.MethodGet, "/incidents/"+id, nil)
 	if rec.Code != http.StatusOK {

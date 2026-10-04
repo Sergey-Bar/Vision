@@ -1,4 +1,4 @@
-﻿# Runs scripts/verify.ps1 with the toolchain on PATH.
+# Runs scripts/verify.ps1 with the toolchain on PATH.
 #
 # It exists because none of go, gofmt, gcc, golangci-lint, protoc or skillspector
 # is on PATH on a default Windows shell - AGENTS.md says so, and it has cost every

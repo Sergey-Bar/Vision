@@ -1,4 +1,4 @@
-﻿Milestone XProtect Events API Reference
+Milestone XProtect Events API Reference
 -
 -
 -

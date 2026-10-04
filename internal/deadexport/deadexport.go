@@ -1,4 +1,4 @@
-﻿// Package deadexport is the gate for the "exported symbol with no reader" class.
+// Package deadexport is the gate for the "exported symbol with no reader" class.
 //
 // # Why this exists
 //
@@ -804,5 +804,3 @@ func plural(n int) string {
 	}
 	return "ies"
 }
-
-
