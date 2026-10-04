@@ -651,6 +651,72 @@ repository has already paid for that twice in the tools it named and did not run
 is the part that finds new inputs. Both halves are recorded in the gate's comment
 rather than left as a guess about which one matters.
 
+### Seven of twenty-four gates have ever been recorded red
+
+`scripts/verify.ps1` runs twenty-four gates. Every run leaves a record in
+`dist/verification/` saying, per gate, whether it passed or failed. There are **40**
+records. `TestAGateThatHasNeverFailedIsNamed` reads all of them and answers the
+question the count of gates cannot:
+
+```
+7 of 24 declared gates have been recorded red across 40 run record(s)
+NEVER RED: ai-runtime, contract-check-openapi, contract-check-protobuf,
+  contract-check-schema, contract-sync, fuzz, generated-code, migration-phases,
+  no-silent-skips, predicate-cov, recovery-drill, red-check, rls-canary,
+  rules-lint, sql-guard, tree-state, vet
+```
+
+**Proven red: `cover-floor`, `dead-export`, `gofmt`, `lint`, `skills-audit`,
+`skip-audit`, `test`.**
+
+A gate that has never gone red is either working or is not checking anything, and the
+two are indistinguishable from its output. `golangci-lint` named eleven linters for
+this repository's whole life without running once, and the first run found **526
+findings** — nothing about it was visible, because it printed a line and exited 0. So
+"twenty-four gates, all passed" claims much less than it appears to, and this makes
+the seventeen visible **by name**.
+
+The assertion is not the log line. It is:
+
+```
+a gate that has been recorded red and is no longer declared
+```
+
+which is the direction that matters. A gate that is renamed or replaced is fine and
+the record is history. A gate that is **removed because it was failing** is the
+`golangci-lint` failure, and "which gates has this suite ever seen fail" is the only
+place it would show up.
+
+#### What this does not claim
+
+That a gate on the list is broken, or that one off it is sound. This is a statement
+about the **record**, and the record only covers runs somebody kept.
+`red-check`'s twelve controls are each individually proved in this document, which is
+a stronger claim than "the gate has gone red once" — it goes red whenever any control
+stops being guarded, which is the property the gate exists for.
+
+#### The records were partly unreadable, and that was the same defect
+
+The reader refused eight of the forty records:
+
+```
+verify-20261002-065752.json does not parse: invalid character '\ufeff'
+```
+
+`Set-Content -Encoding UTF8` in Windows PowerShell 5.1 emits a BOM, and
+`encoding/json` refuses a document that starts with one. **Eight records — including
+four that caught `lint`, `test` and `dead-export` failures — were unreadable to any
+strict parser**, and a reader that treated them as absent would have reported every
+gate those runs saw fail as *never* having failed.
+
+The wrong answer, in the direction that makes the check useless. The reader now
+strips a BOM, and the writer no longer emits one:
+
+```powershell
+$json = $record | ConvertTo-Json -Depth 6
+[System.IO.File]::WriteAllText($path, $json, (New-Object System.Text.UTF8Encoding $false))
+```
+
 ### Eight controls had no transcript at all, and the gate said so
 
 The new `tree-state` gate asserts that every red-check entry's name appears in this

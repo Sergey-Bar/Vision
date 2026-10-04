@@ -1228,7 +1228,21 @@ function Write-VerificationRecord {
     $stamp = (Get-Date).ToUniversalTime().ToString('yyyyMMdd-HHmmss')
     $path = Join-Path $dir "verify-$stamp.json"
     try {
-        ($record | ConvertTo-Json -Depth 6) | Set-Content -LiteralPath $path -Encoding UTF8
+        # Written with [System.IO.File]::WriteAllText and a UTF8Encoding with no BOM,
+        # rather than `Set-Content -Encoding UTF8`.
+        #
+        # In Windows PowerShell 5.1 that flag emits a UTF-8 BOM, and a JSON document
+        # starting with one is refused by `encoding/json`:
+        # `invalid character '\ufeff' looking for beginning of value`. Eight of the
+        # records already in this directory have it.
+        #
+        # It matters because this file is the EVIDENCE for `TestAGateThatHasNeverFailedIsNamed`,
+        # which reads every record here to decide which gates have ever been recorded
+        # red. A reader that treats a BOM'd record as unreadable would report every gate
+        # those eight runs saw fail as never having failed -- the wrong answer, in the
+        # direction that makes the check useless.
+        $json = $record | ConvertTo-Json -Depth 6
+        [System.IO.File]::WriteAllText($path, $json, (New-Object System.Text.UTF8Encoding $false))
         Write-Host ""
         Write-Host "verification record: $path"
         if (-not $record.verified) {
