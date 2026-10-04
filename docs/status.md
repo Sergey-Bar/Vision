@@ -1105,6 +1105,15 @@ predicted — a hand-maintained list of commands cannot catch a wrong command na
 `scripts/verify.ps1`: exit 0, **seventeen gates**, nothing skipped, `verified: true`,
 `dist/verification/verify-20261002-152932.json`, `database.urlSet: true`.
 
+> **This and every other count above is a dated record, not a claim about today.** The
+> paragraphs from here to the end of the run log describe the 2026-10-02 round and are
+> accurate about it. The gate count has moved a long way since — it is **twenty-three**
+> now, and the Verification block at the top of this file is the one that tracks it,
+> because `internal/statuscheck` derives it from `scripts/verify.ps1` and fails when
+> the two disagree. Rewriting the historical numbers would make the log lie about the
+> runs it records, which is the same defect as the nine documents that said
+> `adapter probe` does not exist.
+
 **And one thing about that count that belongs here rather than in a commit message.**
 The gate list was fifteen when this work started and is seventeen now. The two that
 appeared in between — `red-check` and `skills-audit` — were added to

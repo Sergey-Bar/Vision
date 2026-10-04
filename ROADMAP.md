@@ -117,9 +117,14 @@ wrong". The two worth fixing first:
   **Fixed**: the table is now derived from the normalizer's own output and
   `TestEveryTypeTheAdapterProducesIsKnown` asserts both directions.
 
-Also open, and unchanged by the runnable core work: `slo.go`'s `Breaches` still
-has no caller. The metrics are emitted and the SLO thresholds are not yet
-evaluated in-process, so gate 3 is closer but not closed.
+Also open, and unchanged by the runnable core work: nothing in this section is
+open any more. `slo.go`'s `Breaches` had no caller when this was written; it is now
+called from `internal/pipeline`'s `evaluateSLOs` on every gauge sample, which logs
+each breached objective by name with its remedy. The metrics are emitted and the SLO
+thresholds are evaluated in-process, so **gate 3 is closed** — but the remediation is a
+log line, not an endpoint, and a gate that can only be seen in the daemon's own output
+is not finished. That is the remaining part, and it is a surface decision rather than a
+correctness one.
 
 The other two items this section used to list are now done. The known-event-type
 table is derived from the normalizer's own output and both directions are
