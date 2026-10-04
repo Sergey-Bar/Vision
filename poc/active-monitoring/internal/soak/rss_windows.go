@@ -62,3 +62,7 @@ func windowsRSS() (int64, error) {
 	}
 	return int64(binary.LittleEndian.Uint64(buf[workingSetOffset:])), nil
 }
+
+// init installs this platform's reader. See rss.go for why the selection is here
+// rather than in a switch runtime.GOOS in that file.
+func init() { currentRSS = windowsRSS }

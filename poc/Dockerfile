@@ -64,12 +64,20 @@ FROM ${RUNTIME_IMAGE} AS runtime
 # cgo, linked against libonnxruntime, and cannot be made static the way the
 # product's are.
 #
-# `ca-certificates` is here because an air-gapped site that will never reach the
-# internet should not carry a trust store that implies it might.
+# `ca-certificates` and `curl` are here because the ONNX Runtime is fetched from a
+# GitHub release and verified by SHA-256. `ca-certificates` is in the image
+# afterwards rather than only at build time because an air-gapped site that will
+# never reach the internet should not carry a trust store that implies it might.
+#
+# `curl` in this list is not for the fetch alone: `bookworm-slim` does not ship it,
+# and the first version of this file assumed it did. The build failed at the
+# download step with exit 127, which names a shell status and not a missing
+# package.
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
       ca-certificates \
+      curl \
       ffmpeg \
       python3 \
       libgomp1; \
@@ -100,7 +108,10 @@ RUN set -eux; \
     # The unversioned name is what `ort.SetSharedLibraryPath` is given, and the
     # SONAME inside the library is the versioned one, so the loader needs both.
     ln -s "libonnxruntime.so.${ONNXRUNTIME_VERSION}" /opt/onnxruntime/lib/libonnxruntime.so; \
-    ldconfig /opt/onnxruntime/lib; \
+    # No `ldconfig` here: it is not in bookworm-slim, and adding libc-bin to run it
+    # would be a build dependency for a cache line. The library is found by
+    # LD_LIBRARY_PATH below, which is also the honest mechanism -- it names the
+    # directory rather than asking a system cache to guess.
     rm -rf /tmp/ort.tgz "/tmp/onnxruntime-linux-${ortarch}-${ONNXRUNTIME_VERSION}"; \
     # Prove the library loads, rather than discovering a link error in the first
     # detector call three stages later.
@@ -117,6 +128,7 @@ COPY poc/active-monitoring/pyworker/ /opt/poc/pyworker/
 
 ENV SP_POC_ORT_LIB=/opt/onnxruntime/lib/libonnxruntime.so \
     SP_POC_RUNTIME_ROOT=/opt/poc \
+    LD_LIBRARY_PATH=/opt/onnxruntime/lib \
     PATH="/usr/local/bin:/opt/onnxruntime/lib:${PATH}"
 
 WORKDIR /opt/poc

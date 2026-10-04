@@ -1980,7 +1980,16 @@ func (r *Runner) heartbeat(ctx context.Context) error {
 	}
 
 	p50, p95, p99, _, _ := r.lat.Percentiles()
-	rss, rssErr := currentRSS()
+	// Guarded, because `currentRSS` is nil on a platform that ships no reader and a
+	// nil call is a panic in a goroutine that samples every few seconds. Previously
+	// it was always the sentinel error function, so the guard was not needed; now
+	// that nil IS the signal, the caller has to honour it.
+	rss, rssErr := int64(0), error(nil)
+	if HasRSSReader() {
+		rss, rssErr = currentRSS()
+	} else {
+		rssErr = errNoRSSReader
+	}
 	if rssErr != nil {
 		// A platform with no reader is NOT RUN, not zero. The sample records the
 		// peak as nothing and the report says why, rather than scoring a memory

@@ -35,3 +35,11 @@ func linuxRSS() (int64, error) {
 	}
 	return pages * pageSize, nil
 }
+
+// init installs this platform's reader. See rss.go for why the selection is here
+// rather than in a switch runtime.GOOS in that file.
+//
+// The Linux reader existed before it was installed, which is why HasRSSReader used
+// to answer true here while every read failed. A reader nobody wired in is not a
+// reader.
+func init() { currentRSS = linuxRSS }

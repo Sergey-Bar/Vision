@@ -166,10 +166,27 @@ func StartSidecar(ctx context.Context, cfg SidecarConfig, client *ai.Client, log
 	}
 	cmd := exec.Command(cfg.Python, cfg.Args()...)
 	cmd.Stderr = os.Stderr
+	// The belt, fitted. `newJob` is called BEFORE the child starts on Windows
+	// because `attach` there has to run while the process is suspended, and doing
+	// it the same way on every platform means the two differ only in what the belt
+	// IS rather than in when it is put on.
+	processTree, err := newJob()
+	if err != nil {
+		return nil, err
+	}
 	if err := cmd.Start(); err != nil {
+		processTree.close()
 		return nil, fmt.Errorf("supervisor: cannot start the sidecar: %w", err)
 	}
-	s := &Sidecar{cfg: cfg, cmd: cmd, logf: logf, exited: make(chan struct{})}
+	if err := processTree.attach(cmd.Process.Pid); err != nil {
+		// A child with no belt is a child whose launcher can outlive it, so this
+		// stops the one that started rather than reporting a half-supervised
+		// sidecar as ready.
+		_ = terminate(cmd)
+		processTree.close()
+		return nil, err
+	}
+	s := &Sidecar{cfg: cfg, cmd: cmd, job: processTree, logf: logf, exited: make(chan struct{})}
 	go func() {
 		err := cmd.Wait()
 		s.mu.Lock()
