@@ -2180,8 +2180,31 @@ literal was touched.
 
 ### Migrations
 
-Schema version is now 23 — the compatibility window in `migrations/compat.json`.
-The newest migration is `0023_site_isolation_for_every_site_bearing_table.expand.sql`,
+Schema version is now 24 — the compatibility window in `migrations/compat.json`.
+
+The newest migration is `0024_search_documents.expand.sql`: a
+`GENERATED ALWAYS AS ... STORED` `tsvector` over `verification_results.explanation`,
+a GIN index over it, and a `search_documents` view unioning the deterministic
+explanation with a reviewer's note and the model's output. **It indexes the
+deterministic half only**, and that is structural rather than a shortcut: a generated
+column is computed from the row it is on, so a vector over `verification_results`
+cannot see a `dispositions` row. The other two are matched and not indexed — a
+**partial index**, stated rather than hidden — and denormalising them is a contract
+step because it adds a table somebody has to keep correct.
+
+The deterministic half is the right one to index first anyway: it is the text an
+operator can reproduce from stored facts, so a hit on it is citable.
+
+Indexing over the `english` configuration is a decision with a named cost: it stems
+and drops stop words, and it assumes English at sites whose operators do not all read
+it. `simple` would be language-neutral and would stem nothing, so a plural query would
+not find its singular, which an operator describes as the search being broken. **That
+decision is not taken here**; it belongs beside D-01 in `docs/decisions.md`.
+
+### The migration before it
+
+Schema version was 23 — the compatibility window in `migrations/compat.json`,
+and `0023_site_isolation_for_every_site_bearing_table.expand.sql`,
 which creates a `site_isolation` policy on **every** site-bearing relation that
 lacks one, DERIVED from the catalogue rather than enumerated: migration 0008 listed
 nine table names, and every site-bearing table created afterwards had no policy at
