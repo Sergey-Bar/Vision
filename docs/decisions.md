@@ -15,6 +15,95 @@ for you to ratify or reverse.
 
 ---
 
+# PROPOSED — D-01 and D-11, written to be signed
+
+These two are now written as **signable proposals**: the decision, the alternatives
+that were rejected and why, the blast radius, and the signature block. Everything
+else in this file is still a recommendation attached to a question.
+
+Nothing here is in force. `AGENTS.md` reserves an invariant change, a published
+contract, an activated capability, an outbound contact and a date to a human, and
+D-11 is a change to a row-level security policy — which is the first thing on that
+list. An agent can write the proposal and cannot sign it.
+
+## PROPOSAL D-01 — a model request goes to one host, named in a committed manifest
+
+**Decision.** The natural-language search gateway sends its model request to exactly
+one host. That host, the prompt, and the prompt's SHA-256 are committed in
+`contracts/nlsearch/host.json`, and the prompt's hash is checked at startup against
+the prompt in the binary. A host that is not in the manifest is refused before a
+request is built.
+
+**Rejected, and why:**
+
+| Alternative | Why not |
+|---|---|
+| the host is configuration (`SP_NLSEARCH_HOST`) | the first deployment decides where evidence went, by editing an env file nobody reviews. This product's whole posture is that a destination should not be a deployment-time choice. |
+| the host is derived from the incident's site | the destination would vary per tenant, which means an operator's credential leaves toward a different host per customer and the audit ledger records a request with no fixed destination. |
+| the host is pinned but the prompt is not | a pinned endpoint with an unpinned prompt is a pinned room with an open window. The prompt decides what the model is asked, so it is the same decision. |
+
+**Blast radius.** `internal/nlsearch` does not exist yet, so this is greenfield and
+costs nothing to get right now. It becomes expensive the moment the first client
+lands, which is why it is written down before the code rather than after.
+
+**What signing it commits the build to.** A change to `contracts/nlsearch/host.json`
+becomes a contract change under `contractcheck`, with the same review that a schema
+change gets. That is the cost, and it is the point.
+
+```
+PROPOSED D-01 — pinned host, prompt in the repository, host change is a contract change
+
+  decision      ACCEPT / DECLINE / AMEND
+  signed by     ______________________________
+  date          ______________________________
+  amendments    ________________________________
+                ________________________________
+```
+
+## PROPOSAL D-11 — a site-less row is the system worker's, and nothing else's
+
+**The fact the code already establishes.** Migration `0023` gives `jobs` and
+`outbox_events` a `site_isolation` policy. `app_site_visible(x)` returns **true**
+when `x IS NULL`, `site_id` is nullable on both, so a site-less row on those two
+tables is **TENANT-scoped today**. That is the existing helper's semantics and the
+migration did not change it, because a check refusing NULL would break the worker
+that enqueues a site-less job — and that failure appears under load, not at
+migration time.
+
+**Decision.** A site-less row is permitted **only for the system worker**. The policy
+becomes `app_is_system_worker() OR app_site_visible(site_id)`, with `NULL` not
+passing through. Every enqueue path carries a site, or is a worker.
+
+**Rejected, and why:**
+
+| Alternative | Why not |
+|---|---|
+| leave it as tenant-scoped (current behaviour) | every principal in the tenant can see and enqueue a row that belongs to no site. That is defensible until the day someone writes a query that treats "visible" as "yours". |
+| refuse any NULL `site_id` | breaks the worker that enqueues before the site is known. It would fail under load rather than at migration time, which is the worst possible time to find out. |
+| add a `system_owned` boolean | a second source of truth for "who does this belong to", beside the one already in `user_roles`. Two sources of truth for tenancy is how invariant 5 gets broken. |
+
+**Blast radius.** This is a **contract step, not an expand**, and it ships in its own
+migration after the expand that makes it safe. It cannot be bundled with the expand,
+because until the expand lands, the stricter check would refuse rows the running
+system legitimately enqueues.
+
+**What it costs if declined.** The behaviour stays as the first row of the table above,
+and the audit ledger records a NULL site for any job enqueued without one. That is a
+defensible place to be. It is a place to be **by accident**, which is the part worth
+naming.
+
+```
+PROPOSAL D-11 — a site-less row is the system worker's, enforced by policy
+
+  decision      ACCEPT / DECLINE / AMEND
+  signed by     ______________________________
+  date          ______________________________
+  amendments    ________________________________
+                ________________________________
+```
+
+---
+
 ## D-01 — Where does an AI request actually go?
 
 **The tree does not know.** `internal/nlsearch` does not exist, so there is no code

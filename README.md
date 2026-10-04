@@ -183,8 +183,59 @@ other gate passes in the container.
 
 ## Status
 
-Milestone 1 is in progress. `docs/status.md` is the source of truth for what is
-built and what is not — not this file.
+**9 of 13 acceptance criteria pass in this build. 4 are `NOT RUN`** — criteria 06,
+07, 08 and 10, which need a live camera, a second site, or a model key.
+`NOT RUN` is a distinct verdict from `pass`, everywhere in this repository, and it
+is the verdict this build reports for them.
+
+`docs/status.md` is the source of truth for what is built and what is not — not this
+file, and not the acceptance report either, which is a measurement and a document
+can go stale.
+
+```sh
+securityctl acceptance          # the thirteen criteria, with evidence
+make demo                      # nine steps, end to end, and the transcript
+```
+
+## What this is
+
+A physical-security intelligence layer. One vendor-agnostic pipeline that turns a
+camera's bytes into a durable, hash-chained, replayable finding, and refuses to
+guess when the evidence is not there.
+
+Three claims, and what backs each:
+
+- **The explanation is recomputed, never stored.** A replayed fixture produces the
+  same incident and asks nothing of anyone.
+- **A missing AI observation is never a negative one.** `degraded`, `absent` and
+  `insufficient_evidence` stay three different facts, and every degradation carries a
+  reason.
+- **Losing the vendor does not lose the evidence.** No package outside
+  `internal/milestone` may name a vendor, and every vendor route carries an
+  `Unverified` flag that no code path can clear except a probe against a real
+  device.
+
+[`COMPETE.md`](COMPETE.md) is the version written for a judge.
+[`docs/one-pager.md`](docs/one-pager.md) is one screen.
+
+## The gate
+
+25 checks, one script, run identically on Windows and inside a Linux container:
+
+```sh
+make verify                     # on the host
+make verify-container           # in a container, against your working tree
+```
+
+Every control has been watched being removed. `scripts/force-red.ps1` applies one
+mutation per gate, requires it to fail, restores the file, and requires it to pass
+again — and a non-zero exit is not accepted as proof; it has to produce a record
+naming that gate. Nine of the twenty-five are recorded red by hand and the other
+sixteen carry a sentence in `docs/status.md` saying what was tried.
+
+Running the gate on Linux for the first time found five defects nobody had seen,
+including a Linux-only test that had been failing since it was written because it
+was skipped on the only platform the product installs on.
 
 ## Plan
 
@@ -204,3 +255,16 @@ normalisation never emits — are worth fixing before anything ships.
 Market claims, benchmark numbers and vendor comparisons in the source material
 were never verified. Until they are, they are marked as unverified with a
 source and a date, and are not asserted in the product, the docs or the code.
+
+The same rule applies to this repository's own numbers, and it is the reason
+`docs/status.md` is derived from the tree rather than written by hand. A number in
+a document that a test can check is a number that goes stale visibly; a number in a
+document that nothing checks is a number that is wrong within a month and reads
+exactly like a number that is right.
+
+It is also why the demo writes its own transcript. `scripts/demo.sh` runs each
+command and captures its output and its exit code, and it has **no facility for
+adding a number by hand**. Its first version shipped four separate ways of
+producing a document that read well and was quietly false — the worst of which ran
+the acceptance report twice because a Markdown backtick inside a shell string is
+command substitution. All four are recorded at the code.

@@ -459,3 +459,49 @@ Named so the next person does not mistake silence for a decision.
   backpressure metrics will show it; no mitigation is claimed here.
 - Insider collusion across two accounts. The ledger records both, and the chain
   holds, but collusion is only detectable by a human reading it.
+
+### 7a. A camera substitute, and why it is a threat-model entry at all
+
+`securityctl serve-camera` streams a committed clip over RTSP and
+`securityctl serve-vms` serves the vendor route table. Both exist so the acceptance
+report can measure two criteria without hardware, and both print on startup that
+they are substitutes.
+
+The reason they belong in a threat model rather than in a README is the opposite of
+the reason one would expect. **They are not attack surface — they are a claim about
+what has been tested, and a substitute that reads like a device is a way to
+overstate that.** Three specific risks, and what is done about each:
+
+| Risk | What is done |
+|---|---|
+| A reader believes criterion 02 involved a camera | The acceptance evidence names a CAMERA SUBSTITUTE in every direction the word camera could have meant, and the demo transcript repeats it in its own footer |
+| A reader believes the fixture is a stored recording of a real place | The evidence names the committed fixture by path and byte count, and says what a camera decides that this server does not |
+| The substitute is mistaken for the real thing at runtime | Neither is reachable by default. Both bind `127.0.0.1`, neither is in the product image, and `serve-vms` prints that all nine routes remain `Unverified` and that nothing it does can promote one |
+
+What is **not** claimed: that the RTSP client behaves against a camera's own
+misbehaviour. It is tested against four ways a device lies — a port that is open
+and is not RTSP, headers that never end, a raw non-RTSP response, and a server that
+answers the handshake correctly and then sends something that is not video — because
+those four are what `ServerFaults` injects. It is not tested against a device that
+transcodes on the fly, renegotiates mid-session, or has a firmware bug nobody has
+reproduced yet.
+
+### 7b. The demo, and what running it costs
+
+`make demo` writes `dist/demo/transcript.md` into the working tree and binds the
+repository into a container. Three things a reader should know before running it in
+a place that matters:
+
+- **It publishes nothing.** Every port is loopback. The console is bound to
+  `127.0.0.1:8443` and the database is not published at all.
+- **It writes real material.** A generated MFA wrapping key and a self-signed
+  console certificate, both on a named volume that `docker compose down -v` throws
+  away. Neither is a credential for anything that existed before this run.
+- **It is not the gate.** Five of twenty-five checks, and the transcript says so in
+  its own footer. `make verify-container` is the full run.
+
+And the one that is easy to get wrong: **a transcript is evidence only if it was not
+written by hand.** `scripts/demo.sh` runs each command and captures its output and
+its exit code. It has no facility for adding a number, which is the point — the four
+bugs it shipped in its first run were all ways of producing a document that read
+well and was quietly false.
