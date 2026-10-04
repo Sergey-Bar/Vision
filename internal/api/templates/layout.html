@@ -17,7 +17,18 @@
     {{if .Principal.BreakGlass}}<strong class="breakglass">BREAK GLASS</strong>{{end}}
     {{if not .Principal.MFAVerified}}<strong class="warn">NO SECOND FACTOR</strong>{{end}}
   </span>
-  <form method="post" action="/v1/auth/session" class="inline">
+  {{/*
+    `action="/logout" method="post"` reaches `POST /logout`, which exists.
+
+    It pointed at `/v1/auth/session`, which is registered `DELETE` only, so this
+    button was a 405. An HTML form cannot send DELETE; the API's DELETE is right for
+    a JSON client and unreachable from here.
+
+    This one is NOT exempt from the CSRF check -- there is a session, `{{.CSRF}}` is
+    rendered into the form, and a sign-out a third-party page can trigger clears an
+    operator's console mid-incident.
+  */}}
+  <form method="post" action="/logout" class="inline">
     <input type="hidden" name="csrf_token" value="{{.CSRF}}">
     <button type="submit" class="link">Sign out</button>
   </form>

@@ -3,7 +3,7 @@
 // Two surfaces, one binary, because they enforce the same things. The JSON API
 // has no content negotiation: it is JSON or it is a 406. The console is HTML with
 // no inline script, which is what makes a strict Content-Security-Policy
-// achievable at all â€” an inline <script> anywhere would mean a CSP with 'unsafe-
+// achievable at all — an inline <script> anywhere would mean a CSP with 'unsafe-
 // inline' and no benefit.
 //
 // Every state-changing method requires a CSRF token, every session cookie is
@@ -74,7 +74,7 @@ type Server struct {
 	// Metrics is the observability registry, read for the SLO verdicts.
 	//
 	// Nil means this install has not wired one and the endpoint says so rather
-	// than reporting every objective as met â€” "zero breached" from a process that
+	// than reporting every objective as met — "zero breached" from a process that
 	// never evaluated anything is the one answer here that would be a lie.
 	Metrics *observability.Registry
 
@@ -492,10 +492,18 @@ func siteOfIncident(d Deps) func(*http.Request, identity.Principal) string {
 // the tree, and the only thing bounding guessing was the six digits in a TOTP
 // code.
 //
-// Everything that acts on an existing session is covered, logout included.
+// Everything that acts on an existing session is covered, logout included --
+// `POST /logout` included, which is the console's form-encoded sign-out.
 var csrfExempt = map[string]bool{
 	"POST /v1/auth/login":      true,
 	"POST /v1/auth/mfa/verify": true,
+	// The console's sign-in page, for the same reason as `POST /v1/auth/login` and
+	// not as a concession to having a form: there is no session yet, so there is no
+	// token to present, and requiring one would make authentication impossible. What
+	// bounds guessing is the per-account exponential lockout in internal/identity,
+	// which both front doors go through -- which is why `passwordStep` is shared
+	// rather than written twice.
+	"POST /login": true,
 }
 
 // requireCSRF rejects a state-changing method without a matching token.
@@ -733,7 +741,7 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 
 // sloNotEvaluated is the one status this endpoint must not get wrong. "met" from
 // a process that has measured nothing is the only response here that would be a
-// lie, and it is the one an operator reads most often â€” on a site that has just
+// lie, and it is the one an operator reads most often — on a site that has just
 // been installed, and every few seconds after that.
 const sloNotEvaluated = "not evaluated"
 

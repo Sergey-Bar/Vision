@@ -21,7 +21,7 @@ import (
 //
 // The fixtures come first and the live tree comes last, on purpose. A gate that has
 // only ever run against a clean tree has never been shown to fail, so the first run
-// of this gate in anger would be its first run at all ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â which is how
+// of this gate in anger would be its first run at all — which is how
 // `scripts/verify.ps1` came to describe golangci-lint and `-race` as gates while
 // neither had ever executed.
 
@@ -462,7 +462,7 @@ func TestACleanReportIsEmpty(t *testing.T) {
 //
 // Two of the POC table's mutations span three lines, because they replace a
 // multi-line Go `if` block. A line-oriented regex read 76 of 77 entries and
-// reported the TABLE as malformed ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â which pointed at the table instead of at the
+// reported the TABLE as malformed — which pointed at the table instead of at the
 // gate, and would have had somebody editing a correct table to satisfy a broken
 // parser. The fixture is that exact shape.
 func TestAMultiLineMutationIsParsed(t *testing.T) {
@@ -505,7 +505,7 @@ func TestAMultiLineMutationIsParsed(t *testing.T) {
 }
 
 // TestAnEscapedQuoteInAMutationIsReadAsData: PowerShell doubles a quote inside a
-// single-quoted string, so `ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â` is an apostrophe rather than the end of the value.
+// single-quoted string, so `”` is an apostrophe rather than the end of the value.
 // Reading it as a terminator truncates the mutation and the assertion then searches
 // for a string that cannot occur.
 func TestAnEscapedQuoteInAMutationIsReadAsData(t *testing.T) {

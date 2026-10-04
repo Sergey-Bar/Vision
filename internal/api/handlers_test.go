@@ -175,16 +175,27 @@ func itoa(n int) string {
 // seedIncident raises one incident so the read routes have something to read.
 func seedIncident(t *testing.T, tenant, site string) string {
 	t.Helper()
+	return seedIncidentDecision(t, tenant, site, rules.Decision{
+		State: rules.StateCorroborated, RuleID: "core.camera-offline",
+		Severity: "low", Reason: "corroborated",
+		Action:           rules.Action{CreateIncident: true, Severity: "low"},
+		SupportingEvents: []string{"evt-1"},
+		DegradedReason:   rules.DegradedNone,
+	})
+}
+
+// seedIncidentDecision raises one incident from a caller-supplied decision, so a
+// test can state the shape it needs -- a degraded observation, say -- rather than
+// only the corroborated-and-clean case `seedIncident` hardcodes.
+//
+// It is not a second seeder. `seedIncident` is this with one decision literal, and
+// two seeders for one shape is how they drift.
+func seedIncidentDecision(t *testing.T, tenant, site string, decision rules.Decision) string {
+	t.Helper()
 	id, err := (&incidents.Service{Pool: adminPool(t)}).CreateIncident(ctx(),
 		incidents.Create{
 			TenantID: tenant, SiteID: site,
-			Decision: rules.Decision{
-				State: rules.StateCorroborated, RuleID: "core.camera-offline",
-				Severity: "low", Reason: "corroborated",
-				Action:           rules.Action{CreateIncident: true, Severity: "low"},
-				SupportingEvents: []string{"evt-1"},
-				DegradedReason:   rules.DegradedNone,
-			},
+			Decision:          decision,
 			RuleBundleVersion: "0.1.0",
 			BundleContentHash: strings.Repeat("d", 64),
 			PolicyVersion:     "p1", Title: "Camera offline",
@@ -604,7 +615,7 @@ func adminUserID(t *testing.T, tenant string) string {
 //
 // `Resolve` rotates the session token on every call, and `handleConsoleRoot`
 // discarded the new value. The browser kept the old one, which no longer matched
-// the row, so the next request bounced to /login. `s.principal` â€” and therefore
+// the row, so the next request bounced to /login. `s.principal` — and therefore
 // every other handler - sends the rotated cookie back; this one was the
 // exception, and it is the first page an operator sees.
 func TestVisitingTheConsoleRootDoesNotLogTheOperatorOut(t *testing.T) {

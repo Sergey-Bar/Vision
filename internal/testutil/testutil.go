@@ -129,6 +129,21 @@ var (
 	sharedErr error
 	// harnessErr is the harness being wrong, which must fail the run rather than
 	// shrink it. See FailHarness.
+	//
+	// It has its OWN mutex, and that is not tidiness. `Pool` holds `poolMu` across
+	// the whole body via `defer Unlock`, and it calls `failHarness` from inside —
+	// both when it finds a recorded error and when `ensureDatabase` returns one. With
+	// `harnessErr` guarded by `poolMu`, that second call re-locks a non-reentrant
+	// mutex the caller already holds and the run HANGS instead of failing.
+	//
+	// Which is the opposite of what the function promises. `failHarness` exists
+	// precisely so that "the DDL has a syntax error" is loud rather than looking
+	// like "there is no database", and a self-deadlock is quieter than a skip:
+	// it burns the whole `go test` timeout and reports nothing about the harness at
+	// all. It was found by stopping Docker Desktop mid-session, which is the same
+	// class of event as a contributor's Postgres going away — the exact case the
+	// shared/unavailable split exists to handle.
+	harnessMu  sync.Mutex
 	harnessErr error
 )
 
@@ -258,7 +273,46 @@ func moduleRoot(dir string) (string, error) {
 // rows exist. Isolation *between packages* is what the per-package database buys,
 // and it is unconditional.
 func Pool(t *testing.T) *pgxpool.Pool {
+	return pool(t)
+}
+
+// fatalTarget is what `pool` needs from the test it is serving.
+//
+// It is an interface rather than `*testing.T` for exactly one reason: `t.Fatalf`
+// cannot be given a timeout, and proving that the harness's failure path FAILS rather
+// than deadlocks requires putting a deadline around the call. A recording
+// implementation in this package's own test supplies one; `*testing.T` supplies the
+// other.
+//
+// Two methods, not fewer: `Skipf` is on the "no database" path this same function
+// takes, so a target that cannot skip cannot stand in for the real test. A wider
+// interface than these three is a wider thing to keep satisfying, and none of
+// `Cleanup`, `Name` or `Log` is on either path.
+type fatalTarget interface {
+	Helper()
+	Fatalf(format string, args ...any)
+	Skipf(format string, args ...any)
+}
+
+func pool(t fatalTarget) *pgxpool.Pool {
 	t.Helper()
+
+	// A recorded harness failure is checked BEFORE the "no database" skip, and the
+	// order is the point.
+	//
+	// Once something in this binary has established that the harness itself is wrong,
+	// every later database-backed test in it should fail rather than skip. Skipping
+	// would report the broken state as an absent database -- which is the specific
+	// confusion `failHarness` exists to prevent, reappearing one level up. A
+	// contributor whose Postgres is not running has no recorded harness error, so
+	// they still get the skip; the two situations only overlap when both are true,
+	// and then the harness being wrong is the more urgent of the two.
+	harnessMu.Lock()
+	recorded := harnessErr
+	harnessMu.Unlock()
+	if recorded != nil {
+		failHarness(t, "%v", recorded)
+	}
 
 	dsn := os.Getenv(DatabaseURLEnv)
 	if dsn == "" {
@@ -274,9 +328,6 @@ func Pool(t *testing.T) *pgxpool.Pool {
 
 	if p, ok := poolFor[name]; ok && p != nil {
 		return p
-	}
-	if harnessErr != nil {
-		failHarness(t, "%v", harnessErr)
 	}
 
 	cfg := dbx.DefaultConfig()
@@ -695,14 +746,16 @@ func AsRole(t *testing.T, pool *pgxpool.Pool, role, tenant string, sites []strin
 // The failure is recorded as well as reported, so a package with twenty
 // database-backed tests reports one cause rather than twenty identical skips that
 // read as twenty independent problems.
-func failHarness(t *testing.T, format string, args ...any) {
+func failHarness(t fatalTarget, format string, args ...any) {
 	t.Helper()
-	poolMu.Lock()
+	// `harnessMu`, never `poolMu`. See the declaration: `Pool` holds `poolMu` across
+	// its whole body and calls this from inside, so taking `poolMu` here deadlocks.
+	harnessMu.Lock()
 	if harnessErr == nil {
 		harnessErr = fmt.Errorf(format, args...)
 	}
 	recorded := harnessErr
-	poolMu.Unlock()
+	harnessMu.Unlock()
 	t.Fatalf("the test harness is broken, which is not the same as having no database: %v", recorded)
 }
 

@@ -40,12 +40,12 @@
 --
 -- The system worker is unaffected: `site_isolation` already ORs in
 -- `app_is_system_worker()`, and a RESTRICTIVE policy's own expression is
--- unchanged. A worker that must see every tenant's rows â€” a migration, a backup,
--- an operator running a cross-site query deliberately â€” still can.
+-- unchanged. A worker that must see every tenant's rows — a migration, a backup,
+-- an operator running a cross-site query deliberately — still can.
 
 -- PostgreSQL's `ALTER POLICY` only supports `RENAME TO`; permissiveness is fixed
 -- at creation. So each policy is recreated rather than altered, carrying its
--- original USING expression and its original role list over verbatim â€” this
+-- original USING expression and its original role list over verbatim — this
 -- migration changes *when* the predicate is combined, never *what* it says.
 --
 -- A policy whose role list is anything other than PUBLIC is refused rather than

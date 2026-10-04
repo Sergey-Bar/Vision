@@ -35,7 +35,7 @@ The event source is the item where the event originated. For example, a camera. 
 In the case of user defined events, the user defined event is used as both the type and the source when there is no related source.
 Authorization
 An API request with a service token can access all sources. In contrast, a request with a user token can only access the sources that the user is authorized for.
-ð¡ A service token is a token that is not associated to a user; service tokens have super administrator access to all the system. In contrast, a user token is a token that is associated to a specific user; user tokens are limited to the authorization grants of the specific user.
+💡 A service token is a token that is not associated to a user; service tokens have super administrator access to all the system. In contrast, a user token is a token that is associated to a specific user; user tokens are limited to the authorization grants of the specific user.
 Event types
 Motion detection, License plate recognition or Fall detection are examples of event types. You can list available event types or create new event types with the Configuration REST API: Event types.
 Authorization
@@ -53,7 +53,7 @@ Requirements
 To use the Events REST API, you must have:
 - A system running XProtect 2023 R2 or later. You are recommended to set up a small separate system for development. If you don't have one, install XProtect following the Get started guide.
 - A Basic user or Windows user with access to some devices. If you don't have one, go to Create basic users.
-â ï¸ User credentials, bearer tokens, and other sensitive data are transmitted in cleartext if you do not set up certificates and use HTTPS. Make sure that your XProtect system is set up with HTTPS in production.
+⚠️ User credentials, bearer tokens, and other sensitive data are transmitted in cleartext if you do not set up certificates and use HTTPS. Make sure that your XProtect system is set up with HTTPS in production.
 cURL
 Follow this quickstart guide to retrieve events with cURL.
 - Verify the requirements
@@ -72,7 +72,7 @@ Replace the hostname test-01.example.com and the sample token eyJhbGciOiJodHRwOi
 curl --insecure --request GET "https://test-01.example.com/api/rest/v1/events" \
 --header "Authorization: Bearer eyJhbGciOiJodHRwOi8vd3d3LnczLm9yZy8yMDAxLzA0L... ay0ferTwm-DZ4OxNXGTHk5t7R_YTWPjg"
 In Windows Command Prompt (CMD), replace the line continuation character \ with ^.
-âï¸ If you receive an empty array, make sure that the events you are triggering are being stored. In Management Client, select Tools > Options > Alarms and Events and set Retention time to at least 1 day.
+☑️ If you receive an empty array, make sure that the events you are triggering are being stored. In Management Client, select Tools > Options > Alarms and Events and set Retention time to at least 1 day.
 Python
 Follow this quickstart guide to retrieve events with Python.
 - Verify the requirements
@@ -115,7 +115,7 @@ events = response.json()
 print(f"GET /events response:\n{events}\n\n")
 if __name__ == '__main__':
 main()
-âï¸ If you receive an empty array, make sure that the events you are triggering are being stored. In Management Client, select Tools > Options > Alarms and Events and set Retention time to at least 1 day.
+☑️ If you receive an empty array, make sure that the events you are triggering are being stored. In Management Client, select Tools > Options > Alarms and Events and set Retention time to at least 1 day.
 Python (Windows User)
 Follow this quickstart guide to retrieve events with Python using a Windows users.
 - Verify the requirements
@@ -157,7 +157,7 @@ events = response.json()
 print(f"GET /events response:\n{events}\n\n")
 if __name__ == '__main__':
 main()
-âï¸ If you receive an empty array, make sure that the events you are triggering are being stored. In Management Client, select Tools > Options > Alarms and Events and set Retention time to at least 1 day.
+☑️ If you receive an empty array, make sure that the events you are triggering are being stored. In Management Client, select Tools > Options > Alarms and Events and set Retention time to at least 1 day.
 Node.js
 Follow this quickstart guide to retrieve events with Node.js.
 - Verify the requirements
@@ -195,7 +195,7 @@ headers:{
 .catch((err) => {
 console.log(err);
 });
-âï¸ If you receive an empty array, make sure that the events you are triggering are being stored. In Management Client, select Tools > Options > Alarms and Events and set Retention time to at least 1 day.
+☑️ If you receive an empty array, make sure that the events you are triggering are being stored. In Management Client, select Tools > Options > Alarms and Events and set Retention time to at least 1 day.
 Powershell
 Follow this quickstart guide to retrieve events with the PowerShell.
 - Verify the requirements
@@ -214,7 +214,7 @@ Replace the hostname test-01.example.com and the sample token eyJhbGciOiJodHRwOi
 $headers = @{ "Authorization" = "Bearer eyJhbGciOiJodHRwOi8vd3d3LnczLm9yZy8yMDAxLzA0L...ay0ferTwm-DZ4OxNXGTHk5t7R_YTWPjg" }
 $response = Invoke-RestMethod 'https://test-01.example.com/api/rest/v1/events' -Method 'GET' -Headers $headers
 $response | ConvertTo-Json
-âï¸ If you receive an empty array, make sure that the events you are triggering are being stored. In Management Client, select Tools > Options > Alarms and Events and set Retention time to at least 1 day.
+☑️ If you receive an empty array, make sure that the events you are triggering are being stored. In Management Client, select Tools > Options > Alarms and Events and set Retention time to at least 1 day.
 Filtering
 You can add match filters to a resource URI to limit the amount of data returned.
 GET /resource?property=operator:value
@@ -286,7 +286,7 @@ Response samples
 Content typeapplication/json
 Copy
 Expand all  Collapse all
-{- "data": {- "specversion": "1.0â",
+{- "data": {- "specversion": "1.0‎",
 - "type": "481d4d6c-9156-4698-af7e-74b32f9e4359",
 - "source": "cameras/e028f597-c64b-4f27-bb8d-08f5cd768e1c",
 - "time": "2023-02-28T18:10:12.4786334Z",
@@ -377,7 +377,7 @@ Expand all  Collapse all
 {- "_links": {- "prev": "string",
 - "next": "string"
 },
-- "array": [- {- "specversion": "1.0â",
+- "array": [- {- "specversion": "1.0‎",
 - "type": "481d4d6c-9156-4698-af7e-74b32f9e4359",
 - "source": "cameras/e028f597-c64b-4f27-bb8d-08f5cd768e1c",
 - "time": "2023-02-28T18:10:12.4786334Z",
@@ -445,7 +445,7 @@ Response samples
 Content typeapplication/json
 Copy
 Expand all  Collapse all
-{- "data": {- "specversion": "1.0â",
+{- "data": {- "specversion": "1.0‎",
 - "type": "481d4d6c-9156-4698-af7e-74b32f9e4359",
 - "source": "cameras/e028f597-c64b-4f27-bb8d-08f5cd768e1c",
 - "time": "2023-02-28T18:10:12.4786334Z",
@@ -510,7 +510,7 @@ Response samples
 Content typeapplication/json
 Copy
 Expand all  Collapse all
-{- "array": [- {- "data": {- "specversion": "1.0â",
+{- "array": [- {- "data": {- "specversion": "1.0‎",
 - "type": "481d4d6c-9156-4698-af7e-74b32f9e4359",
 - "source": "cameras/e028f597-c64b-4f27-bb8d-08f5cd768e1c",
 - "time": "2023-02-28T18:10:12.4786334Z",
@@ -555,7 +555,7 @@ Copy
 Expand all  Collapse all
 {- "data": {- "deletedFromSession": [- "string"
 ],
-- "addedToSession": [- {- "specversion": "1.0â",
+- "addedToSession": [- {- "specversion": "1.0‎",
 - "type": "481d4d6c-9156-4698-af7e-74b32f9e4359",
 - "source": "cameras/e028f597-c64b-4f27-bb8d-08f5cd768e1c",
 - "time": "2023-02-28T18:10:12.4786334Z",

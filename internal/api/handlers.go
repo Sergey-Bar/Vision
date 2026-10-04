@@ -220,8 +220,21 @@ func (s *Server) RegisterRoutes(d Deps) func(*http.ServeMux) {
 			func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
 				s.handleConsoleIncident(w, r, p, d)
 			}))
+		// The console's sign-out. Gated on a principal rather than on a capability,
+		// because the capability that would be right here does not exist: signing out
+		// is not something an operator may lack the right to do, and a
+		// CapSessionRead held by nobody would be a capability table that grants
+		// nothing. The CSRF check DOES apply -- see handleConsoleLogout.
+		mux.Handle("POST /logout", s.requirePrincipal(s.handleConsoleLogout))
 		mux.HandleFunc("GET /login", func(w http.ResponseWriter, r *http.Request) {
 			s.handleConsoleLogin(w, r)
+		})
+		// The console's own POST front door. `GET /login` above RENDERS the page; this
+		// one is what the page's form submits to, and it is a separate route because
+		// an HTML form cannot send a DELETE and the API's answer is JSON. See
+		// handleConsoleLoginSubmit.
+		mux.HandleFunc("POST /login", func(w http.ResponseWriter, r *http.Request) {
+			s.handleConsoleLoginSubmit(w, r)
 		})
 		mux.Handle("GET /static/{file}", s.Static())
 	}
@@ -243,24 +256,9 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, "bad_request", err.Error(), requestID(r))
 		return
 	}
-	if strings.TrimSpace(req.Username) == "" || req.Password == "" {
-		WriteError(w, http.StatusBadRequest, "bad_request",
-			"A username and password are required.", requestID(r))
-		return
-	}
-
-	res, err := s.Identity.PasswordStep(r.Context(), s.Tenant, req.Username, req.Password, s.clientIP(r))
-	if err != nil {
-		// errors.Is, not a substring match on the message. A locked account and a
-		// wrong password both read "invalid", and telling them apart is the whole
-		// point of the 423: an operator whose account is locked needs to be told
-		// to wait, not to keep typing. Matching on text would also break the
-		// moment identity wrapped the error, silently downgrading 423 to 401.
-		status := http.StatusUnauthorized
-		if errors.Is(err, identity.ErrLocked) {
-			status = http.StatusLocked
-		}
-		WriteError(w, status, "login_failed", err.Error(), requestID(r))
+	res, status, reason := s.passwordStep(r, req.Username, req.Password)
+	if status != http.StatusOK {
+		WriteError(w, status, "login_failed", reason, requestID(r))
 		return
 	}
 
@@ -282,6 +280,39 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		"expiresAt":   res.ExpiresAt,
 		"session":     s.sessionInfo(res.Principal),
 	})
+}
+
+// passwordStep is the password half of signing in, with no opinion about how the
+// answer is rendered.
+//
+// It exists because there are two front doors and the DECISION must not be written
+// twice. `POST /v1/auth/login` answers JSON for a client bundle and `POST /login`
+// answers a redirect for a server-rendered form, and before this was extracted each
+// would have called `Identity.PasswordStep` itself. A lockout check, an enabled
+// check and a break-glass annotation are three decisions that have to agree, and two
+// copies of them is how the second copy ends up missing one.
+//
+// The return shape is `(result, status, reason)`. A non-OK status carries the reason
+// to render; an OK status carries the result and an empty reason.
+func (s *Server) passwordStep(r *http.Request, username, password string) (identity.LoginResult, int, string) {
+	if strings.TrimSpace(username) == "" || password == "" {
+		return identity.LoginResult{}, http.StatusBadRequest,
+			"A username and password are required."
+	}
+	res, err := s.Identity.PasswordStep(r.Context(), s.Tenant, username, password, s.clientIP(r))
+	if err != nil {
+		// errors.Is, not a substring match on the message. A locked account and a
+		// wrong password both read "invalid", and telling them apart is the whole
+		// point of the 423: an operator whose account is locked needs to be told
+		// to wait, not to keep typing. Matching on text would also break the
+		// moment identity wrapped the error, silently downgrading 423 to 401.
+		status := http.StatusUnauthorized
+		if errors.Is(err, identity.ErrLocked) {
+			status = http.StatusLocked
+		}
+		return identity.LoginResult{}, status, err.Error()
+	}
+	return res, http.StatusOK, ""
 }
 
 type mfaRequest struct {

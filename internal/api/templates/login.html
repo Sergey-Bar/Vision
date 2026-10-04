@@ -5,6 +5,14 @@
   {{template "messages" .}}
   <p class="hint">A second factor is required. There is no path that signs in on a password alone.</p>
 
+  {{/*
+    `action="/login" method="post"` reaches `POST /login`, which exists.
+
+    It pointed at the same URL when the only route there was `GET`, so submitting
+    this form was a 405 from the mux: the console was a page an operator could look
+    at and not use. An HTML form can only send GET and POST, so this could never
+    have reached the API's JSON login; it needed a POST of its own.
+  */}}
   <form method="post" action="/login" class="stack" autocomplete="on">
     <input type="hidden" name="csrf_token" value="{{.CSRF}}">
 

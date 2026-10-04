@@ -166,6 +166,78 @@ func (s *Server) handleConsoleLogin(w http.ResponseWriter, r *http.Request) {
 	s.render(w, http.StatusOK, "login.html", data)
 }
 
+// handleConsoleLoginSubmit is the form-encoded password step.
+//
+// It exists because `login.html` has always pointed at a route that could not accept
+// it. The form said `method="post" action="/login"` and the only `/login` route was
+// `GET`, so submitting the sign-in form produced a 405 from the mux and the console
+// was a page an operator could look at and not use. An HTML form can only send GET
+// and POST, so no amount of editing that one line reaches `DELETE`; the console
+// needs a POST of its own, and the API keeps its JSON route unchanged.
+//
+// A failure re-renders the page with the reason rather than redirecting to it with a
+// query string, because a reason in a URL lands in the browser history, in a
+// bookmark, and in the `Referer` of whatever the operator clicks next. The lockout
+// 423 in particular is the one answer an operator needs to read twice.
+func (s *Server) handleConsoleLoginSubmit(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		s.renderConsoleLoginError(w, r, http.StatusBadRequest, "The form could not be read.")
+		return
+	}
+	res, status, reason := s.passwordStep(r,
+		r.PostFormValue("username"), r.PostFormValue("password"))
+	if status != http.StatusOK {
+		s.renderConsoleLoginError(w, r, status, reason)
+		return
+	}
+
+	if res.Session != nil {
+		s.setSessionCookie(w, res.Session.Token, res.Session.CSRFToken)
+		http.Redirect(w, r, "/incidents", http.StatusFound)
+		return
+	}
+	// MFA is required. There is no console page that collects a second factor, and
+	// inventing one here would be the wrong fix: the honest answer is the page that
+	// says so and names the route that does collect it, rather than a form that
+	// accepts a code and silently does nothing with it.
+	s.renderConsoleLoginError(w, r, http.StatusOK,
+		"This account needs a second factor, which the console does not collect yet. "+
+			"Sign in through the API at POST /v1/auth/login, then open the console.")
+}
+
+// renderConsoleLoginError re-renders the sign-in page with a reason.
+//
+// `status` is the status the PAGE is served with, not the status the password step
+// produced: a wrong password re-renders at 401, which is right, but a locked account
+// re-rendering at 423 would make the browser's own error page replace the page that
+// explains the lockout.
+func (s *Server) renderConsoleLoginError(w http.ResponseWriter, r *http.Request, pageStatus int, reason string) {
+	data := consoleData{Title: "Sign in", RequestID: requestID(r), Now: time.Now().UTC(), Error: reason}
+	s.render(w, pageStatus, "login.html", data)
+}
+
+// handleConsoleLogout is the form-encoded sign-out.
+//
+// `layout.html` posted to `/v1/auth/session`, which is registered `DELETE` only, so
+// the Sign out button was a 405. Same shape as the sign-in form: HTML cannot send
+// DELETE, and the API's DELETE is correct for a JSON client that has no form to fill
+// in.
+//
+// Unlike the sign-in form this one is NOT exempt from the CSRF check. A session
+// exists, the layout renders the token into the form, and a sign-out a third-party
+// page can trigger is a nuisance at best -- an operator's console is cleared
+// mid-incident.
+func (s *Server) handleConsoleLogout(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+	if err := s.Identity.Logout(r.Context(), s.Tenant, p.SessionID, p.Username, "console logout"); err != nil {
+		data := s.consoleData(r, p, "Sign in")
+		data.Error = "Sign out failed: " + err.Error()
+		s.render(w, http.StatusInternalServerError, "incidents.html", data)
+		return
+	}
+	s.clearSessionCookie(w)
+	http.Redirect(w, r, "/login", http.StatusFound)
+}
+
 func (s *Server) handleConsoleIncidents(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
 	data := s.consoleData(r, p, "Incidents")
 

@@ -95,21 +95,21 @@ type Track struct {
 	// The two flags answer different questions and conflating them is why the
 	// two-stage ghost association could not work at all:
 	//
-	//   - `allowed` is per FRAME Ã¢â‚¬â€ "can this track emit a crossing right now". It is
+	//   - `allowed` is per FRAME — "can this track emit a crossing right now". It is
 	//     cleared every frame and set only by an APPROVED box, because "an object we
 	//     used to see" is not "an object we can see now".
-	//   - `aged` is per TRACK Ã¢â‚¬â€ "has this object existed long enough to be real". It
+	//   - `aged` is per TRACK — "has this object existed long enough to be real". It
 	//     persists, because an object half-occluded by a pole is still the object we
 	//     have been watching, and the frame it dipped in is not the frame it was
 	//     invented.
 	//
 	// The ghost pass gates on `aged`. Gating it on `allowed` made it dead code: a
 	// frame containing nothing but ghosts has no approved box, so nothing sets
-	// `allowed`, so nothing can be resumed Ã¢â‚¬â€ which is precisely the frame the pass
+	// `allowed`, so nothing can be resumed — which is precisely the frame the pass
 	// exists for.
 	aged bool
 	// kalman is this track's position filter. It is EMBEDDED rather than a pointer so
-	// copying a Track Ã¢â‚¬â€ which the overlay does once per frame per track Ã¢â‚¬â€ cannot
+	// copying a Track — which the overlay does once per frame per track — cannot
 	// leave two objects sharing one filter, and a shared filter is a box that jumps
 	// between two objects.
 	kalman Kalman
@@ -157,7 +157,7 @@ type Track struct {
 // state at all.
 //
 // A track with no filter state yet returns its raw centre, so a one-frame track is
-// indistinguishable from an unfiltered one Ã¢â‚¬â€ which is the honest answer and what
+// indistinguishable from an unfiltered one — which is the honest answer and what
 // keeps the first frame of every track identical to what it was before the filter
 // existed.
 func (t *Track) FilteredCentre() (cx, cy float64, ok bool) {
@@ -178,7 +178,7 @@ func (t Track) family() string { return string(classify.FamilyOf(t.Class)) }
 
 // Stats are the per-frame counters. They are counters of what the ENGINE saw, not
 // of what happened in the world, and the four that matter across a whole run live
-// in Counters Ã¢â‚¬â€ see split.go, which is where the run-level arithmetic is.
+// in Counters — see split.go, which is where the run-level arithmetic is.
 //
 // `Rejected` is kept for compatibility with the per-frame print and is NOT the
 // run's rejection count: the run's is split by reason, because a single rejected
@@ -201,7 +201,7 @@ type Stats struct {
 	// "wait".
 	DroppedTooNew int
 	// Resumed is how many tracks were held alive this frame by a REFUSED box rather
-	// than by an approved one Ã¢â‚¬â€ a score dip that did not split an object in two.
+	// than by an approved one — a score dip that did not split an object in two.
 	//
 	// It is here because it is the number that tells an operator whether their score
 	// threshold suits the material. A scene full of occlusion with Resumed near zero
@@ -209,7 +209,7 @@ type Stats struct {
 	// and the fix is the threshold rather than the detector.
 	Resumed int
 	// GhostResumed is the same count by refusal reason, so a reader can see whether
-	// the dips are score dips or something the two-stage pass cannot help with Ã¢â‚¬â€
+	// the dips are score dips or something the two-stage pass cannot help with —
 	// an area refusal, say, which is a different problem with a different fix.
 	GhostResumed map[string]int
 }
@@ -233,8 +233,8 @@ type Config struct {
 	// an older measurement needs the older behaviour available by name rather than by
 	// reverting a commit and discovering which of several changes mattered.
 	//
-	// The zero value being ON is a Go wart rather than a choice Ã¢â‚¬â€ a bool that means
-	// "enabled" cannot default to true Ã¢â‚¬â€ so the field is named for DISABLING and
+	// The zero value being ON is a Go wart rather than a choice — a bool that means
+	// "enabled" cannot default to true — so the field is named for DISABLING and
 	// read as "not disabled". A caller cannot switch the filter off by omitting the
 	// field, and cannot switch it on by setting it, which is exactly the pair of
 	// mistakes this arrangement prevents.
@@ -245,7 +245,7 @@ type Config struct {
 	// The engine used to build its own map from Classes, which put the answer in two
 	// places that did not agree: `config.IsApproved` accepts a class whose FAMILY is
 	// approved, and the engine's private map did not. The shipped trigger's class is
-	// `motion` Ã¢â‚¬â€ not a COCO class, family `other` Ã¢â‚¬â€ so `watch` configured with
+	// `motion` — not a COCO class, family `other` — so `watch` configured with
 	// `SP_POC_CLASSES=other` approved it while the engine refused every candidate as
 	// `class not on the approved list`. A predicate and not a second copy of the
 	// list, because a list resolved in two places is a list that will be resolved in
@@ -452,7 +452,7 @@ func New(zone Zone, cfg Config) (*Engine, error) {
 //
 // It exists because a box and a frame's ANSWER are different facts and the
 // engine needs both. It used to be handed only the boxes, and set the state to
-// `asked_answered` itself Ã¢â‚¬â€ which is a hardcoded `answered` one layer below the
+// `asked_answered` itself — which is a hardcoded `answered` one layer below the
 // screen's hardcoded `answered`, and for the same reason: the engine had no
 // state to print, so it printed a word nobody had claimed.
 type Answer struct {
@@ -572,8 +572,8 @@ func (e *Engine) trackMinFor(t *Track) int {
 // associate is step 2: match approved boxes to live tracks, greedily by best IoU,
 // and return the boxes that are attached to a track plus how many tracks exist.
 //
-// It is a method rather than inline code in Feed so the ORDER Ã¢â‚¬â€ split, associate,
-// demote, cross Ã¢â‚¬â€ is visible as a list of five calls rather than as one block,
+// It is a method rather than inline code in Feed so the ORDER — split, associate,
+// demote, cross — is visible as a list of five calls rather than as one block,
 // and so a test can exercise association without the crossing machine.
 //
 // A greedy pass is the right size for this: the alternative is an assignment
@@ -614,8 +614,8 @@ func (e *Engine) associate(at time.Time, approved []Box, cut map[Box]bool) ([]Bo
 	// with no error.
 	//
 	// Touching is also the tightest rule that fixes it. It admits a box whose centre
-	// is within half the two boxes' combined width and height Ã¢â‚¬â€ exactly the case
-	// where two regions abut Ã¢â‚¬â€ and refuses everything with a gap between them. Two
+	// is within half the two boxes' combined width and height — exactly the case
+	// where two regions abut — and refuses everything with a gap between them. Two
 	// objects that are near each other therefore do not merge: association below is
 	// greedy and one-to-one, so each box joins its single nearest track and a
 	// second box gets a second track. The cost of a looser gate here is identity
@@ -669,7 +669,7 @@ func (e *Engine) associate(at time.Time, approved []Box, cut map[Box]bool) ([]Bo
 		}
 		t.kalman.Update(cx, cy, dt, e.kalmanParams())
 		t.lastKF = at
-		// `aged` is set here and NEVER cleared Ã¢â‚¬â€ see the field's comment. It is the
+		// `aged` is set here and NEVER cleared — see the field's comment. It is the
 		// track's own answer to "have I existed long enough", and it is the flag the
 		// ghost pass gates on.
 		if t.Seen >= e.trackMinFor(t) {
@@ -726,12 +726,12 @@ func absf(v float64) float64 {
 //
 // The ORDER below is load-bearing and it is the same order every time:
 //
-//  1. split by validity, class, score, area, zone  Ã¢â‚¬â€ what is a candidate at all
-//  2. track the APPROVED boxes only                Ã¢â‚¬â€ the tracker never sees a ghost
-//  3. demote tracks below SP_POC_TRACK_MIN_FRAMES Ã¢â‚¬â€ time is the only thing that
+//  1. split by validity, class, score, area, zone  — what is a candidate at all
+//  2. track the APPROVED boxes only                — the tracker never sees a ghost
+//  3. demote tracks below SP_POC_TRACK_MIN_FRAMES — time is the only thing that
 //     tells an object from a compression artefact
-//  4. run the line-cross machine on what survived  Ã¢â‚¬â€ only those can be events
-//  5. fold the run-level counters                  Ã¢â‚¬â€ on the SAME frame
+//  4. run the line-cross machine on what survived  — only those can be events
+//  5. fold the run-level counters                  — on the SAME frame
 //
 // The previous order fed the tracker everything over the score threshold, so
 // lowering the threshold to catch smaller vehicles also created tracks for lamp
@@ -753,7 +753,7 @@ func (e *Engine) Feed(at time.Time, boxes []Box) ([]Crossing, []Track, Stats) {
 // This is the only way a frame with no answer can reach the tracker at all, and
 // it has to exist: a `degraded` or `not_asked` frame arrives with an empty box
 // list, and if the pipeline skipped the engine for it the counters would see only
-// the frames that worked Ã¢â‚¬â€ which is exactly how a run with a dead sidecar ends up
+// the frames that worked — which is exactly how a run with a dead sidecar ends up
 // reporting a clean detection rate.
 func (e *Engine) FeedAnswered(at time.Time, in Answer) ([]Crossing, []Track, Stats) {
 	var st Stats
@@ -819,14 +819,14 @@ func (e *Engine) FeedAnswered(at time.Time, in Answer) ([]Crossing, []Track, Sta
 	// a vehicle half-occluded by a pole scores below the approval bar while the same
 	// vehicle unoccluded scores above it. Under a one-stage tracker that frame is
 	// simply refused, the approved boxes on either side have no track to join, and
-	// one object becomes two tracks each too young to cross Ã¢â‚¬â€ which reads on a
+	// one object becomes two tracks each too young to cross — which reads on a
 	// report as a detector that found nothing, and is the single most likely reason
 	// a real detector with a real model produces zero crossings on real footage.
 	//
 	// It runs HERE, after step 3 and not immediately after the approved association,
 	// and the position is load-bearing: it checks `t.allowed`, and that flag is set
 	// by step 3. Placed before it, the pass read a flag the same frame had not yet
-	// written and resumed nothing at all Ã¢â‚¬â€ which is the failure this ordering
+	// written and resumed nothing at all — which is the failure this ordering
 	// comment exists to prevent, and it looked exactly like the feature not working.
 	//
 	// It is still after the approved association, so an approved box has already
@@ -849,7 +849,7 @@ func (e *Engine) FeedAnswered(at time.Time, in Answer) ([]Crossing, []Track, Sta
 	// `step` both OBSERVES and EMITS, and a track that was approaching the line
 	// for three frames must be OBSERVED during those three frames. Gating the
 	// whole call on `allowed` would mean the first side reading a track ever got
-	// was taken after it aged in Ã¢â‚¬â€ so a vehicle that drove up to the line and
+	// was taken after it aged in — so a vehicle that drove up to the line and
 	// across it was recorded as having been on the far side all along, and its
 	// crossing was never detected. That is a real detector, crossing a real
 	// line, producing no event.
@@ -883,7 +883,7 @@ func (e *Engine) FeedAnswered(at time.Time, in Answer) ([]Crossing, []Track, Sta
 	return crossings, out, st
 }
 
-// splitIndex is not used for identity Ã¢â‚¬â€ it exists only so `Feed` can count a box
+// splitIndex is not used for identity — it exists only so `Feed` can count a box
 // that was refused below the ghost floor. It is kept as a method rather than an
 // inline loop so the "was this box drawn" question has one answer in the package.
 func (e *Engine) splitIndex(s Split, b Box) (int, bool) {
@@ -1012,7 +1012,7 @@ func (e *Engine) LastSplit() Split { return e.lastSplit }
 // stationary vehicle. Deciding on the filtered centre removes that, because the
 // filtered centre of an object that is not moving does not move.
 //
-// The size is NOT filtered Ã¢â‚¬â€ see [FilteredBox] Ã¢â‚¬â€ so the box that reaches the report
+// The size is NOT filtered — see [FilteredBox] — so the box that reaches the report
 // and the evidence store has the width the MODEL reported. A reader comparing a
 // crossing against the picture should find the same extent they can see.
 //

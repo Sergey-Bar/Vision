@@ -458,7 +458,7 @@ module does X" was untested in both directions. Opening one session found both.
 
 | was | is now |
 |---|---|
-| `docs/HOW-TO-RUN.md` | this file, §0ð—œ§1 |
+| `docs/HOW-TO-RUN.md` | this file, §0𗜧1 |
 | `docs/verify-live.md`, `docs/demo-live.md`, `docs/one-pager.md` | this file |
 | `docs/architecture.md` | `README.md` |
 | `docs/gap-ledger.md`, `docs/STATUS.md` | nothing. A hand-maintained status file goes stale the day somebody forgets it, and the honest substitute is generated: `CONTRACT.md` for the rules, `README.md` for the real-run findings, and the SKIPPED block the gate prints for what it could not measure |
