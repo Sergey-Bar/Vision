@@ -193,6 +193,18 @@ type Repo struct {
 	// this is the whole question for a method, and it is asked tree-wide rather
 	// than per package for the reason in the package comment.
 	methods map[string]bool
+	// conventionMethods records the methods that implement a standard-library
+	// convention by SHAPE: `Unwrap() error` on a type that also has
+	// `Error() string`, which `errors.Is` and `errors.As` call from inside the
+	// standard library and no selector in this tree ever will.
+	//
+	// It exists because the method rule is name-based and the convention is
+	// interface-based. Without it, `internal/command.UsageError.Unwrap` was reported
+	// dead -- correctly, by a rule with no way to know the difference -- and the only
+	// thing keeping it out of the report was an unrelated `s.SecretStore.Unwrap`
+	// call elsewhere in the tree. That is a reader that exists by coincidence, and
+	// when it went the convention implementation was reported as dead code.
+	conventionMethods map[string]bool
 	// files is the number of hand-written Go files parsed, reported by Summary so
 	// a reader can see the gate looked at the tree.
 	files int
@@ -273,11 +285,12 @@ func Load(root string) *Repo { return LoadDir(root, loadDirs) }
 // finding, and it is the defect this gate exists to catch.
 func LoadDir(root string, dirs []string) *Repo {
 	r := &Repo{
-		decls:        map[string]declSite{},
-		reads:        map[string]map[string]bool{},
-		qualified:    map[string]map[string]bool{},
-		packageNames: map[string]bool{},
-		methods:      map[string]bool{},
+		decls:             map[string]declSite{},
+		reads:             map[string]map[string]bool{},
+		qualified:         map[string]map[string]bool{},
+		packageNames:      map[string]bool{},
+		methods:           map[string]bool{},
+		conventionMethods: map[string]bool{},
 	}
 	dirOf := func(path string) string {
 		rel, err := filepath.Rel(root, path)
@@ -436,6 +449,7 @@ func (r *Repo) loadFile(root, path, dir string) {
 			kind := "func"
 			if decl.Recv != nil {
 				kind = "method"
+				r.recordConventionMethod(pkgKey, f, decl)
 			}
 			r.decls[pkgKey+"."+decl.Name.Name] = declSite{relPath, fset.Position(decl.Pos()).Line, kind}
 		case *ast.GenDecl:
@@ -721,6 +735,97 @@ func importedPackageNames(f *ast.File) map[string]bool {
 	return out
 }
 
+// recordConventionMethod notes an exported `Unwrap() error` method whose receiver
+// type also has `Error() string`.
+//
+// Those two together are the standard library's error-wrapping convention: an
+// `error` that carries another one. `errors.Is` and `errors.As` reach the inner
+// value through an `interface{ Unwrap() error }` assertion inside the `errors`
+// package, so the method has no reader in this tree and cannot acquire one.
+//
+// Judged by SHAPE, not by name alone. A `Unwrap() error` on a type with no
+// `Error() string` is an ordinary method with an unfortunate name and is still
+// gated; a `Cause() error` would need its own rule, and adding one is the point at
+// which the gate has to stop guessing.
+func (r *Repo) recordConventionMethod(pkgKey string, f *ast.File, decl *ast.FuncDecl) {
+	if r.conventionMethods == nil {
+		r.conventionMethods = map[string]bool{}
+	}
+	if decl.Name.Name != "Unwrap" || decl.Type == nil {
+		return
+	}
+	// The signature has to be exactly `Unwrap() error`.
+	results := decl.Type.Results
+	if results == nil || len(results.List) != 1 {
+		return
+	}
+	ident, ok := results.List[0].Type.(*ast.Ident)
+	if !ok || ident.Name != "error" {
+		return
+	}
+	// And the receiver type has to be an error too, somewhere in this file.
+	recv := receiverTypeName(decl)
+	if recv == "" {
+		return
+	}
+	if fileDeclaresErrorMethod(f, recv) {
+		r.conventionMethods[pkgKey+"|Unwrap"] = true
+	}
+}
+
+// receiverTypeName is the receiver's base type name, ignoring a pointer or a
+// generic instantiation: `func (e *UsageError) Unwrap() error` and
+// `func (e UsageError[K]) Unwrap() error` both yield the bare name.
+func receiverTypeName(decl *ast.FuncDecl) string {
+	if decl.Recv == nil || len(decl.Recv.List) == 0 {
+		return ""
+	}
+	expr := decl.Recv.List[0].Type
+	switch t := expr.(type) {
+	case *ast.StarExpr:
+		if id, ok := t.X.(*ast.Ident); ok {
+			return id.Name
+		}
+	case *ast.Ident:
+		return t.Name
+	case *ast.IndexExpr:
+		if id, ok := t.X.(*ast.Ident); ok {
+			return id.Name
+		}
+	case *ast.IndexListExpr:
+		if id, ok := t.X.(*ast.Ident); ok {
+			return id.Name
+		}
+	}
+	return ""
+}
+
+// fileDeclaresErrorMethod reports whether the file declares `Error() string` on the
+// named type.
+//
+// The search is file-local because a type and its method set are written together
+// in the overwhelming majority of cases; the alternative is a whole-file index and
+// the shape is narrow enough not to need one.
+func fileDeclaresErrorMethod(f *ast.File, typeName string) bool {
+	found := false
+	for _, d := range f.Decls {
+		decl, ok := d.(*ast.FuncDecl)
+		if !ok || decl.Recv == nil || len(decl.Recv.List) == 0 {
+			continue
+		}
+		if receiverTypeName(decl) != typeName || decl.Name.Name != "Error" {
+			continue
+		}
+		if decl.Type == nil || decl.Type.Results == nil || len(decl.Type.Results.List) != 1 {
+			continue
+		}
+		if ident, ok := decl.Type.Results.List[0].Type.(*ast.Ident); ok && ident.Name == "string" {
+			found = true
+		}
+	}
+	return found
+}
+
 // HasReader reports whether the symbol is reachable at all: for a top-level
 // function, var or const, whether a package other than the declaring one names it
 // by its qualified name (`otherpkg.Symbol`); for a method, whether its name is
@@ -732,9 +837,29 @@ func (r *Repo) HasReader(key string) bool {
 	pkgKey, name := key[:dot], key[dot+1:]
 
 	// A method is reached through a receiver, so a bare-name collision is
-	// indistinguishable from a call. This is the one looseness in the gate and it
-	// is documented in the package comment.
+	// indistinguishable from a call. This is the one looseness in the gate and it is
+	// documented in the package comment.
 	if r.methods[name] {
+		return true
+	}
+
+	// `Unwrap() error` on a type that also has `Error() string` is the standard
+	// library's error-wrapping CONVENTION, and `errors.Is` / `errors.As` call it
+	// from inside `errors` -- through an `interface{ Unwrap() error }` assertion,
+	// never through a selector written in this tree. So such a method has no
+	// in-tree reader by construction and never will.
+	//
+	// It was being kept alive by an accident. `internal/command.UsageError.Unwrap`
+	// read as live because `internal/identity`'s `unwrapTOTP` once called
+	// `s.SecretStore.Unwrap(...)`, and the bare selector name `Unwrap` anywhere
+	// satisfies any method of that name. Binding the TOTP secret to its row replaced
+	// that call with `UnwrapFor`, and the accidental reader went with it -- so a
+	// convention implementation was correctly reported as dead by a rule that has no
+	// way to know it is a convention.
+	//
+	// Recognised by SHAPE rather than by a name, so a future `Cause() error` or
+	// `Unwrap() []error` is judged on its own merits.
+	if name == "Unwrap" && r.conventionMethods[pkgKey+"|"+name] {
 		return true
 	}
 

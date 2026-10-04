@@ -166,14 +166,36 @@ func TestACodeUsedInOneTenantIsNotRefusedInAnother(t *testing.T) {
 	}
 	// Same shared secret in both tenants, so both factors produce the same code
 	// for the same instant. Only the tenant differs.
-	testutil.Exec(t, raw,
-		`UPDATE mfa_credentials SET wrapped_secret = $3
-		  WHERE tenant_id = $1 AND user_id = $2`,
-		tenantA, adminA, "T:"+secret)
-	testutil.Exec(t, raw,
-		`UPDATE mfa_credentials SET wrapped_secret = $3
-		  WHERE tenant_id = $1 AND user_id = $2`,
-		tenantB, adminB, "T:"+secret)
+	//
+	// Re-wrapped through `WrapFor` for each row rather than pasted in as a raw
+	// `T:`-prefixed value. The first version of this test pasted the unbound form,
+	// because that was the only form `EnrollTOTP` produced -- and with the row binding
+	// in place `UnwrapFor` refused it, and the failure read as
+	//
+	//	not wrapped by this store, or bound to a different row
+	//
+	// which is the new control working. A test that pokes a ciphertext into a table
+	// by hand has to seal it the way the product seals it, or it is asserting on a
+	// shape nothing produces.
+	store := testSecretStore{}
+	for _, tc := range []struct{ tenant, user string }{
+		{tenantA, adminA}, {tenantB, adminB},
+	} {
+		var id string
+		if err := raw.QueryRow(context.Background(),
+			`SELECT credential_id FROM mfa_credentials
+			  WHERE tenant_id = $1 AND user_id = $2 LIMIT 1`, tc.tenant, tc.user).Scan(&id); err != nil {
+			t.Fatalf("read the credential id for %s/%s: %v", tc.tenant, tc.user, err)
+		}
+		bound, err := store.WrapFor(tc.tenant, tc.user, id, []byte(secret))
+		if err != nil {
+			t.Fatalf("re-wrap for %s/%s: %v", tc.tenant, tc.user, err)
+		}
+		testutil.Exec(t, raw,
+			`UPDATE mfa_credentials SET wrapped_secret = $3
+			  WHERE tenant_id = $1 AND user_id = $2`,
+			tc.tenant, tc.user, bound)
+	}
 	if err := svc.VerifyTOTPEnrollment(ctx, tenantB, adminB,
 		rfc6238Code(t, secret, clock, sha256.New)); err != nil {
 		t.Fatalf("confirm the second tenant's enrolment: %v", err)

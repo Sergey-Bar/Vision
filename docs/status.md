@@ -784,6 +784,81 @@ That is the designed behaviour working, and it is worth stating plainly because 
 alternative — a gate that carries on after failing to restore — is the defect that
 produced two un-restored controls sitting in this repository for weeks.
 
+### The sixth unwired control: a second factor that could be moved between rows
+
+`identity.WrapFor` and `identity.UnwrapFor` were the last two of the six controls the
+dead-export ledger carried as `UNWIRED`, and the ledger said they must move **together**
+or not at all — because a seal with no row binding is a capability nobody should hold.
+
+Both are now wired, and the seal is **unbound-capable no more**.
+
+`EnrollTOTP` used `SecretStore.Wrap`, and `verifyFactor` used `Unwrap`. Neither binds
+anything, so a ciphertext copied from one `mfa_credentials` row to another opened
+cleanly there: **an attacker holding the tenant's database role hands one operator's
+second factor to another**, and the verification then fails in a way that looks like
+the wrong six digits rather than like a moved secret.
+
+The premise is not small. Row-level security exists so that a compromise elsewhere in
+the tenant does not reach the factor column; a secret that is not row-bound is the one
+column where that is true for reads and false for writes.
+
+`credentialID` is derived from the tenant, the user, the label and four bytes of the
+secret — **all of which are in hand before the row exists** — so `EnrollTOTP` can seal
+with `(tenant, user, credentialID)` bound as AEAD additional data, and
+`verifyFactor` opens with the same triple. A moved row now fails at the AEAD rather
+than at the code comparison.
+
+`TestASecondFactorMovedToAnotherRowDoesNotDecrypt` does the move with the **owner**
+pool, because that is the attacker: the production role cannot write a factor row for
+another site, which is what migration 0023 just closed.
+
+#### Red-checked both ways, and the failures are different
+
+```
+--- EnrollTOTP seals UNBOUND again:
+    --- FAIL: TestASecondFactorMovedToAnotherRowDoesNotDecrypt
+        confirm the enrolment: ... not wrapped by this store, or bound to a different row
+
+--- verifyFactor opens UNBOUND again:
+    --- FAIL: TestASecondFactorMovedToAnotherRowDoesNotDecrypt
+```
+
+The first fails at **enrolment**, because an unbound seal cannot be reopened by a
+bound reader at all. The second fails at **verification**, which is the actual attack.
+Two mutations, two different failure points, and only one of them is the threat — a
+test that only had the first would look like it covered the second.
+
+#### Two things the change broke, both the tests telling the truth
+
+`TestACodeUsedInOneTenantIsNotRefusedInAnother` pasted a raw `T:`-prefixed secret
+into both tenants' rows so both factors would produce the same code. With the binding
+in place that is refused, and the failure read `not wrapped by this store, or bound to
+a different row` — **the new control working on a fixture that bypassed it.** A test
+that pokes a ciphertext into a table by hand has to seal it the way the product seals
+it, or it is asserting on a shape nothing produces.
+
+`internal/command.UsageError.Unwrap` was reported dead by the same change, and it was
+**correct**: it implements the standard library's `Unwrap() error` convention, which
+`errors.Is` and `errors.As` call from *inside* the `errors` package, through an
+interface assertion and never through a selector in this tree. The only reason it read
+as live was the unrelated `s.SecretStore.Unwrap` call elsewhere in the tree — a bare
+selector name satisfying any method of that name.
+
+`dead-export` now recognises a convention method **by shape**: `Unwrap() error` on a
+type that also has `Error() string`. Judged on structure rather than on a name list,
+so a `Unwrap() error` on a type with no `Error()` is still gated.
+
+**`SecretStore` no longer has an unbound half at all**, and neither does
+`FileSecretStore`. An implementation that cannot bind cannot enrol a factor, which is
+the correct failure, and the compiler enforces it rather than a review.
+
+### The sixth of six, and what the ledger says now
+
+All six controls the ledger named as `UNWIRED` are wired: `IngestScoped`,
+`AuthorizeSite`, `StepUp`, `RotateCSRF`, `WrapFor`, `UnwrapFor`. Three ledgers have
+now emptied the same way — `dead-export`'s allow-list for these six, the
+unproduced-metric ledger's eight, and `write_canary_test.go`'s two.
+
 ### Eight controls had no transcript at all, and the gate said so
 
 The new `tree-state` gate asserts that every red-check entry's name appears in this

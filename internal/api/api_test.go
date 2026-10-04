@@ -37,12 +37,23 @@ var clock = time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC)
 
 type testSecretStore struct{}
 
-func (testSecretStore) Wrap(b []byte) ([]byte, error) { return append([]byte("T:"), b...), nil }
-func (testSecretStore) Unwrap(b []byte) ([]byte, error) {
-	if len(b) < 2 {
+// The bound pair, mirroring `internal/identity`'s own test store. The tag carries
+// the row so a moved ciphertext is refused rather than silently opening.
+//
+// Two copies of a test double is one too many, and the shared one is in
+// `internal/testutil` rather than here — but `internal/identity` cannot import it
+// without importing the whole harness, and a harness that an identity test cannot
+// reach is a harness that identity tests do not use.
+func (testSecretStore) WrapFor(tenant, userID, factorID string, b []byte) ([]byte, error) {
+	return append([]byte("B:"+tenant+"\x00"+userID+"\x00"+factorID+":"), b...), nil
+}
+
+func (testSecretStore) UnwrapFor(tenant, userID, factorID string, b []byte) ([]byte, error) {
+	tag := "B:" + tenant + "\x00" + userID + "\x00" + factorID + ":"
+	if len(b) < len(tag) || string(b[:len(tag)]) != tag {
 		return nil, ioEOF
 	}
-	return b[2:], nil
+	return b[len(tag):], nil
 }
 
 var ioEOF = errEOF{}

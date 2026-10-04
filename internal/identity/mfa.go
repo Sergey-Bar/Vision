@@ -94,7 +94,7 @@ func (s *Service) verifyFactor(ctx context.Context, tenant, userID, method, code
 		// it gets the whole window to present the same six digits a second time.
 		// RFC 6238 -5.2 forbids exactly that - the verifier must not accept the
 		// same code twice - and consumeTOTPStep below is where it is enforced.
-		secret, unwrapErr := s.unwrapTOTP(wrapped)
+		secret, unwrapErr := s.unwrapTOTP(tenant, userID, id, wrapped)
 		if unwrapErr != nil {
 			return "", "", false, unwrapErr
 		}
@@ -255,21 +255,32 @@ func (s *Service) EnrollTOTP(ctx context.Context, tenant, userID, label string) 
 		return "", "", fmt.Errorf("identity: read TOTP secret: %w", err)
 	}
 	encoded := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(raw)
-
-	wrapped, err := s.SecretStore.Wrap([]byte(encoded))
-	if err != nil {
-		return "", "", fmt.Errorf("identity: wrap TOTP secret: %w", err)
-	}
 	sum := sha256.Sum256([]byte(tenant + userID + label))
 	credentialID := "totp_" + hex.EncodeToString(sum[:4]) + "_" + hex.EncodeToString(raw[:4])
 
-	if err := s.Pool.InTx(ctx, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `
-			INSERT INTO mfa_credentials (credential_id, tenant_id, user_id, method, label, wrapped_secret)
-			VALUES ($1,$2,$3,'totp',$4,$5)`,
-			credentialID, tenant, userID, label, wrapped)
-		return err
-	}); err != nil {
+	// Sealed with the row bound in, and AFTER the id is derived -- which is
+	// possible precisely because the id comes from the tenant, the user, the label and
+	// four bytes of the secret, all of which are in hand before the row exists.
+	//
+	// `Wrap` sealed this with no binding, so a ciphertext copied from one
+	// `mfa_credentials` row to another decrypted cleanly there: an attacker who can
+	// write that table can hand one operator's second factor to another, and the
+	// verification then fails for a reason that looks like the wrong code. That is
+	// what `WrapFor` exists to prevent, and `UnwrapFor` is the half that enforces it.
+	wrapped, err := s.SecretStore.WrapFor(tenant, userID, credentialID, []byte(encoded))
+	if err != nil {
+		return "", "", fmt.Errorf("identity: wrap TOTP secret: %w", err)
+	}
+
+	if err := s.Pool.InTenant(ctx,
+		dbx.TenantContext{TenantID: tenant, ActorID: userID},
+		func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `
+				INSERT INTO mfa_credentials (credential_id, tenant_id, user_id, method, label, wrapped_secret)
+				VALUES ($1,$2,$3,'totp',$4,$5)`,
+				credentialID, tenant, userID, label, wrapped)
+			return err
+		}); err != nil {
 		return "", "", fmt.Errorf("identity: store TOTP credential: %w", err)
 	}
 	issuer := "security-platform"
@@ -367,18 +378,33 @@ func totpCode(secret []byte, h func() hash.Hash, at time.Time) string {
 // It is an interface because the key lives in a file with restricted permissions
 // that only the installer reads, and because a test needs a deterministic
 // implementation. There is no implementation here that holds a key.
+//
+// The `For` half is what the TOTP path uses, and the interface carries it so the
+// choice cannot be made by accident at the call site: a secret wrapped WITHOUT the
+// row binding is one that can be copied to another row and decrypted there, which is
+// the whole attack `mfa_factors`-write access buys. An implementation that only has
+// the unbound pair cannot enrol a factor at all, which is the correct failure.
 type SecretStore interface {
-	Wrap(plaintext []byte) ([]byte, error)
-	Unwrap(ciphertext []byte) ([]byte, error)
+	// WrapFor seals with the tenant, user and factor bound into the AEAD's additional
+	// data, so a ciphertext moved to another row does not decrypt.
+	WrapFor(tenant, userID, factorID string, plaintext []byte) ([]byte, error)
+	// UnwrapFor requires the binding to be present and to match, or it fails.
+	UnwrapFor(tenant, userID, factorID string, ciphertext []byte) ([]byte, error)
 }
 
-func (s *Service) unwrapTOTP(wrapped []byte) ([]byte, error) {
+// unwrapTOTP reads the secret for one factor, requiring it to be bound to that row.
+//
+// The binding is what makes this fail on a moved row. A ciphertext sealed for
+// `(tenant, user, factorA)` and pasted into `(tenant, user, factorB)` fails here with
+// an AEAD authentication error rather than yielding factorA's secret under factorB's
+// name, and `EnrollTOTP` seals with the same triple so the two halves cannot drift.
+func (s *Service) unwrapTOTP(tenant, userID, factorID string, wrapped []byte) ([]byte, error) {
 	if s.SecretStore == nil {
 		return nil, errors.New("identity: no secret store is configured; the wrapped secret cannot be read")
 	}
-	plain, err := s.SecretStore.Unwrap(wrapped)
+	plain, err := s.SecretStore.UnwrapFor(tenant, userID, factorID, wrapped)
 	if err != nil {
-		return nil, fmt.Errorf("identity: unwrap TOTP secret: %w", err)
+		return nil, fmt.Errorf("identity: unwrap TOTP secret for factor %q: %w", factorID, err)
 	}
 	return plain, nil
 }

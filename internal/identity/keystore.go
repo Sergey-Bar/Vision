@@ -89,31 +89,12 @@ func GenerateSecretKey(path string) error {
 	return nil
 }
 
-// Wrap encrypts a secret, binding it to the row it belongs to.
-func (s *FileSecretStore) Wrap(plaintext []byte) ([]byte, error) {
-	if s == nil || s.keyPath == "" {
-		return nil, errors.New("identity: no secret key path is configured")
-	}
-	aead, err := s.aead()
-	if err != nil {
-		return nil, err
-	}
-	nonce := make([]byte, aead.NonceSize())
-	if _, err := rand.Read(nonce); err != nil {
-		return nil, fmt.Errorf("identity: read randomness for the secret nonce: %w", err)
-	}
-	// The AAD is empty here and supplied at Unwrap time. Wrap has no row context
-	// - it is called before the row exists - so the binding is applied on the way
-	// out, where the caller always has the tenant, user and factor in hand.
-	sealed := aead.Seal(nonce, nonce, plaintext, nil)
-	return []byte(base64.StdEncoding.EncodeToString(sealed)), nil
-}
-
-// WrapFor is Wrap with the row context bound in.
+// WrapFor encrypts a secret with the row it belongs to bound in.
 //
-// Prefer this where the caller has the context: it is what makes a ciphertext
-// copied to another row fail to decrypt rather than decrypt to the wrong
-// operator's secret.
+// The binding is the point: it is what makes a ciphertext copied to another
+// `mfa_credentials` row fail to decrypt rather than decrypt to the wrong operator's
+// secret. **There is no unbound form of this** -- see `identity.SecretStore` for why
+// an unbound seal is a capability nobody should hold.
 func (s *FileSecretStore) WrapFor(tenant, userID, factorID string, plaintext []byte) ([]byte, error) {
 	if s == nil || s.keyPath == "" {
 		return nil, errors.New("identity: no secret key path is configured")
@@ -128,15 +109,6 @@ func (s *FileSecretStore) WrapFor(tenant, userID, factorID string, plaintext []b
 	}
 	sealed := aead.Seal(nonce, nonce, plaintext, secretAAD(tenant, userID, factorID))
 	return []byte(base64.StdEncoding.EncodeToString(sealed)), nil
-}
-
-// Unwrap decrypts a secret with no row binding.
-//
-// It is Wrap's inverse and is here for callers that hold no row context. A
-// secret wrapped this way is not bound to a row, so prefer WrapFor wherever the
-// context is available.
-func (s *FileSecretStore) Unwrap(ciphertext []byte) ([]byte, error) {
-	return s.open(ciphertext, nil)
 }
 
 // UnwrapFor decrypts a secret and requires it to have been bound to this row.

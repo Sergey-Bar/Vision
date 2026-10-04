@@ -28,12 +28,25 @@ import (
 // implementation of it in this repository that could be reached by a test.
 type testSecretStore struct{}
 
-func (testSecretStore) Wrap(b []byte) ([]byte, error) { return append([]byte("T:"), b...), nil }
-func (testSecretStore) Unwrap(b []byte) ([]byte, error) {
-	if len(b) < 2 || string(b[:2]) != "T:" {
-		return nil, errors.New("not wrapped by this store")
+// The bound pair. The tag carries the row so a test can assert on a moved
+// ciphertext rather than on an error message:
+//
+//	"B:<tenant>\x00<user>\x00<factor>:" + plaintext
+//
+// A real store seals this as AEAD additional data, so the binding is not readable
+// and not removable. Here it is readable, which is strictly better for a test: the
+// assertion can name the row the secret came from instead of only saying the open
+// failed.
+func (testSecretStore) WrapFor(tenant, userID, factorID string, b []byte) ([]byte, error) {
+	return append([]byte("B:"+tenant+"\x00"+userID+"\x00"+factorID+":"), b...), nil
+}
+
+func (testSecretStore) UnwrapFor(tenant, userID, factorID string, b []byte) ([]byte, error) {
+	tag := "B:" + tenant + "\x00" + userID + "\x00" + factorID + ":"
+	if len(b) < len(tag) || string(b[:len(tag)]) != tag {
+		return nil, errors.New("not wrapped by this store, or bound to a different row")
 	}
-	return b[2:], nil
+	return b[len(tag):], nil
 }
 
 var clock = time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC)
