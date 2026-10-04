@@ -215,7 +215,7 @@ func (s *Service) verifyFactor(ctx context.Context, tenant, userID, method, code
 func (s *Service) consumeTOTPStep(ctx context.Context, tenant, userID, factorID, code string, step int64) (bool, error) {
 	digest := sha256.Sum256([]byte(code))
 	var first bool
-	err := s.Pool.InTenant(ctx, dbx.TenantContext{TenantID: tenant, ActorID: "identity"},
+	err := s.Pool.InTenant(ctx, dbx.TenantContext{TenantID: tenant, ActorID: "identity", System: true},
 		func(tx pgx.Tx) error {
 			tag, execErr := tx.Exec(ctx, `
 				INSERT INTO mfa_used_codes (tenant_id, credential_id, user_id, step_counter, code_digest)
@@ -433,7 +433,7 @@ func (s *Service) BootstrapAdmin(ctx context.Context, tenant, username, passphra
 	// context returns zero rows rather than an error - and bootstrap would report
 	// "the tenant does not exist" for a tenant that plainly does.
 	var tenants, sites int
-	if err := s.Pool.InTenant(ctx, dbx.TenantContext{TenantID: tenant, ActorID: "identity"},
+	if err := s.Pool.InTenant(ctx, dbx.TenantContext{TenantID: tenant, ActorID: "identity", System: true},
 		func(tx pgx.Tx) error {
 			return tx.QueryRow(ctx,
 				`SELECT count(*) FROM tenants WHERE tenant_id = $1`, tenant).Scan(&tenants)
@@ -445,7 +445,7 @@ func (s *Service) BootstrapAdmin(ctx context.Context, tenant, username, passphra
 			"tenant and its sites; bootstrap-admin runs afterwards", tenant)
 	}
 	if siteID != "" {
-		if err := s.Pool.InTenant(ctx, dbx.TenantContext{TenantID: tenant, ActorID: "identity"},
+		if err := s.Pool.InTenant(ctx, dbx.TenantContext{TenantID: tenant, ActorID: "identity", System: true},
 			func(tx pgx.Tx) error {
 				return tx.QueryRow(ctx,
 					`SELECT count(*) FROM sites WHERE tenant_id = $1 AND site_id = $2`,

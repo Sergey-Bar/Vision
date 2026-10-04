@@ -259,6 +259,20 @@ type TenantContext struct {
 	SiteIDs  []string
 	ActorID  string
 	Session  string
+	// System marks the transaction as a SYSTEM WORKER, which every `site_isolation`
+	// policy exempts via `app_is_system_worker()`.
+	//
+	// It exists because "this specific tenant" and "exempt from site scoping" are
+	// independent: `InSystemTenant` binds the cross-tenant system tenant and gives no
+	// way to name a tenant, so a caller that needs one had to reach past this type and
+	// set the GUC by hand. `identity.BootstrapAdmin` is that caller.
+	//
+	// **It is an escalation and it belongs on this type so that it is visible.** Every
+	// policy ORs it in, so a transaction with it set is unconstrained by site on every
+	// site-scoped table at once. That is what a migration, a backup and a deliberate
+	// cross-site operator query need, and it is exactly what an ingest loop must never
+	// have, which is why nothing derives it from a request.
+	System bool
 }
 
 // clampConns keeps a connection count inside the range the pool's own field can
@@ -312,6 +326,25 @@ func (p *Pool) InTenant(ctx context.Context, tc TenantContext, fn func(pgx.Tx) e
 		if len(tc.SiteIDs) > 0 {
 			if _, err := tx.Exec(ctx, `SELECT set_config('app.site_ids', $1, true)`, encodeSiteIDs(tc.SiteIDs)); err != nil {
 				return fmt.Errorf("dbx: set app.site_ids: %w", err)
+			}
+		}
+		if tc.System {
+			// `app.system_worker` is what `app_is_system_worker()` reads, and every
+			// `site_isolation` policy ORs it in. It is set HERE rather than only by
+			// `InSystemTenant` because a caller often needs a SPECIFIC tenant and the
+			// worker exemption at the same time.
+			//
+			// `identity.BootstrapAdmin` is that caller, and migration 0023 is what made
+			// it one: `sites` had no `site_isolation` until then, so a bootstrap could
+			// read the site it was about to assign an administrator to. With the policy
+			// in place and no `app.site_ids` bound, that read returns zero rows and the
+			// bootstrap reports "site %q does not exist" for a site that plainly does.
+			//
+			// Setting the GUC directly would have worked too. It is a field because a
+			// caller reaching past this type to set a GUC by hand is a caller that does
+			// not know it needed to.
+			if _, err := tx.Exec(ctx, `SELECT set_config('app.system_worker', 'true', true)`); err != nil {
+				return fmt.Errorf("dbx: set app.system_worker: %w", err)
 			}
 		}
 		return fn(tx)

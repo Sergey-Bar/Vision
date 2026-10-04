@@ -2105,8 +2105,39 @@ literal was touched.
 
 ### Migrations
 
-Schema version is now 22 — the compatibility window in `migrations/compat.json`,
-and the newest migration in `migrations/` is
+Schema version is now 23 — the compatibility window in `migrations/compat.json`.
+The newest migration is `0023_site_isolation_for_every_site_bearing_table.expand.sql`,
+which creates a `site_isolation` policy on **every** site-bearing relation that
+lacks one, DERIVED from the catalogue rather than enumerated: migration 0008 listed
+nine table names, and every site-bearing table created afterwards had no policy at
+all. The write canary found the first two (`jobs` and `outbox_events`, both written
+on every event); the catalogue said eight, plus twenty-four monthly partitions whose
+direct access bypasses the parent's policy.
+
+`user_site_assignments` is the one deliberate exclusion, and it is the interesting
+one: **scoping the table that DEFINES the site scope by the site scope is
+circular.** Reading a principal's assignments needs `app.site_ids`; `app.site_ids`
+comes from reading the assignments. The policy is therefore useless as a control —
+it answers "can this principal see this assignment?", which is true for every row a
+login would ask about — while making the login itself unresolvable.
+`TestRolesAndScopeAreReadableUnderRLS` caught it, and it caught it the only way it
+could: the assignment read came back empty and the test said *"the site assignment
+was not read"* rather than "a policy refused".
+
+Adding the policy to `sites` did break one path, which is the "the Go side has to be
+right first" risk this migration's header names. `identity.BootstrapAdmin` bound a
+tenant context and read the site it was about to assign an administrator to; with
+`sites` site-scoped and no principal yet, that read returns zero rows and bootstrap
+reports *"site %q does not exist"* for a site that plainly does.
+`dbx.TenantContext` now carries an explicit `System` flag for a transaction that
+needs a named tenant AND the worker exemption, and bootstrap sets it. Setting the GUC
+by hand would also have worked; it is a field because a caller reaching past the type
+to set it is a caller that does not know it needed to.
+
+### The migration before it
+
+Schema version was 22 — the compatibility window in `migrations/compat.json`,
+and the newest migration in `migrations/` was
 `0022_observation_hosted_attribution.expand.sql`, which adds `model_identity`,
 `model_contract_version` and `temperature`, drops `model_hash`'s `NOT NULL`, and
 substitutes `ai_observations_attribution_ck` so that an observation must still say
