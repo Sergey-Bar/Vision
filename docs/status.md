@@ -1456,6 +1456,21 @@ suite red, before being put in the table:
 | the configured role reaches the connection string | `if c.User != ""` becomes `if c.User != "" && false` in `renderDSN` | `TestTheRoleReachesTheConnectionStringWithNoPasswordAtAll` FAIL, and the failure printed the whole pre-fix connection string with no role in it |
 | a password held by Config cannot be printed out of it | delete `func (c Config) String() string` | `TestTheRenderedDSNCarriesTheRoleAndNeverThePassword` FAIL: `%+v printed the database password` and `%v printed the database password` |
 | a hosted observation is attributed without inventing a hash | `o.ModelIdentity, o.ModelContractVersion` in the `Record` argument list becomes `"", ""` | `TestAHostedObservationIsAttributedByIdentityAndContractVersion` FAIL: `new row for relation "ai_observations" violates check constraint "ai_observations_attribution_ck" (SQLSTATE 23514)` |
+| a search about a site outside the scope is refused, not narrowed | `if allowed[s]` becomes `if true` | `TestAQuestionAboutASiteOutOfScopeIsRefusedAndNotNarrowed` FAIL: `a question naming a site the principal cannot see compiled` |
+| a compiled query always carries the tenant predicate | `!strings.Contains(q.SQL, tenantPredicate)` becomes `false` | `TestAQueryWithoutTheTenantPredicateIsRefusedByName` FAIL: `a statement without the tenant predicate passed Verify` |
+| a search reads only the relations it was given | `!ok` becomes `ok` | `TestAQueryNamingATableOutsideTheAllowListIsRefused` FAIL: `a query reading audit_ledger passed Verify` |
+| a search request goes only to the committed host | `got == want` becomes `true` | `TestAHostOtherThanTheCommittedOneIsRefused` FAIL: `a request to "https://elsewhere.example" was allowed` |
+
+The four search refusals are RC-14…RC-17, and the third of them carries the only
+mutation that needed replacing. `if !ok` → `if false` turns the allow-list check
+off and leaves `ok` **unused**, which is a compile error — and a build failure is not
+evidence that a control works, it is evidence that a build is broken. `if !ok` → `if ok`
+inverts the check, keeps `ok` used, and makes the suite go red on its own assertion.
+That is the whole difference between a red-check that proves something and one that
+proves that Go exists.
+
+The other three were proved by running the mutation and reading the test's own
+failure message, not by asserting that a mutation "should" work.
 
 The fourth row is the thirteenth control, and it is the only one in the table that
 was found by the seeded demo rather than by reading the code. Migration `0022`

@@ -764,6 +764,54 @@ Invoke-Gate 'red-check' {
             why  = 'a deployment with a hosted model could not record an honest observation at all: the only satisfiable disjunct of the attribution check is a non-empty model_hash, and the only hash available is one nobody can compute'
         }
         @{
+            # The search gateway's four refusals. Found by reading the plan rather
+            # than by an attack: a question can be about a site you cannot see, a
+            # statement can lose its tenant predicate, a query can name a table the
+            # corpus does not include, and a destination can be somewhere else --
+            # and three of the four are invisible in a passing test run, because a
+            # query that is correct except for one missing predicate returns a
+            # PLAUSIBLE WRONG ANSWER rather than an error.
+            #
+            # Each is one line, and each is red-checked by making that line not
+            # refuse. The transcript is the `does not compile`-free path: these are
+            # removals, not additions, so each suite goes red on the test's own
+            # assertion and not on a build failure.
+            name = 'a search about a site outside the scope is refused, not narrowed'
+            file = 'internal/nlsearch/compile.go'
+            from = '		if allowed[s] {'
+            to   = '		if true { // REDCHECK RC-14: the scope check removed'
+            test = 'TestAQuestionAboutASiteOutOfScopeIsRefusedAndNotNarrowed'
+            pkg  = './internal/nlsearch'
+            why  = 'narrowing to the sites in scope would answer a DIFFERENT question than the one asked, and the operator cannot tell from the answer'
+        }
+        @{
+            name = 'a compiled query always carries the tenant predicate'
+            file = 'internal/nlsearch/compile.go'
+            from = '	if !strings.Contains(q.SQL, tenantPredicate) {'
+            to   = '	if false { // REDCHECK RC-15: the predicate check removed'
+            test = 'TestAQueryWithoutTheTenantPredicateIsRefusedByName'
+            pkg  = './internal/nlsearch'
+            why  = 'a query without tenant_id = $1 is not a query that returns too much; it is a query that returns another tenant''s incidents'
+        }
+        @{
+            name = 'a search reads only the relations it was given'
+            file = 'internal/nlsearch/compile.go'
+            from = '		if !ok {'
+            to   = '		if ok { // REDCHECK RC-16: the allow-list check inverted -- ok stays used so this is a test failure and not a build failure'
+            test = 'TestAQueryNamingATableOutsideTheAllowListIsRefused'
+            pkg  = './internal/nlsearch'
+            why  = 'the searchable corpus is one view; a search that reaches audit_ledger or sessions is a search that was handed more than it was built for'
+        }
+        @{
+            name = 'a search request goes only to the committed host'
+            file = 'internal/nlsearch/host.go'
+            from = '	if got == want {'
+            to   = '	if true { // REDCHECK RC-17: the host pin removed'
+            test = 'TestAHostOtherThanTheCommittedOneIsRefused'
+            pkg  = './internal/nlsearch'
+            why  = 'a gateway whose destination is a parameter is a path from every operator''s question to wherever the parameter points, which is why the destination is committed rather than configured'
+        }
+        @{
             # Invariant 3's third absence, which is the one most easily collapsed
             # into the second. The model answering "I cannot tell" is not the model
             # answering "no", and it neither satisfies nor contradicts a condition.
