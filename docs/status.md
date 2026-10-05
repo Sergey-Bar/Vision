@@ -2627,11 +2627,12 @@ literal was touched.
 
 ### Migrations
 
-Schema version is now 24 — the compatibility window in `migrations/compat.json`.
+Schema version is now 25 — the compatibility window in `migrations/compat.json`.
 
-The newest migration is `0024_search_documents.expand.sql`: a
-`GENERATED ALWAYS AS ... STORED` `tsvector` over `verification_results.explanation`,
-a GIN index over it, and a `search_documents` view unioning the deterministic
+The newest migration is `0025_future_partitions.expand.sql`: monthly partitions for
+2028-2030 on `inbox_events` and `canonical_events`, with RLS policies applied to each.
+`0024_search_documents.expand.sql` added a `GENERATED ALWAYS AS ... STORED`
+`tsvector` over `verification_results.explanation`, a GIN index over it, and a
 explanation with a reviewer's note and the model's output. **It indexes the
 deterministic half only**, and that is structural rather than a shortcut: a generated
 column is computed from the row it is on, so a vector over `verification_results`

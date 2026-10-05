@@ -155,20 +155,6 @@ var refusals = []refusal{
 		why: "the route is implemented and undeclared, so nothing a client generates from " +
 			"the contract can reach it. The fix is a document change, not code"},
 
-	// --- PartitionHorizon.
-	//
-	// Two parents, and the failure is fourteen months out from the date this branch was
-	// written. The DEFAULT partitions added by 0015 are why nobody notices: ingest keeps
-	// succeeding, into one unpartitioned relation.
-	{table: "PartitionHorizon", item: "inbox_events",
-		why: "partitions reach 2028-01 and nothing in Go creates a partition, so from " +
-			"2028-01-01 every accepted event lands unpartitioned. Closing it is a " +
-			"migration for 2028-2030 plus code that adds partitions ahead of the boundary"},
-	{table: "PartitionHorizon", item: "canonical_events",
-		why: "partitions reach 2028-01 and nothing in Go creates a partition, so from " +
-			"2028-01-01 every canonical event lands unpartitioned. Same close as " +
-			"inbox_events: a migration plus EnsurePartitions"},
-
 	// --- SiteScopedWriteCanaries.
 	//
 	// Twelve uncovered tables out of fifteen derived. `incidents` is covered by

@@ -61,6 +61,7 @@ import (
 	"github.com/Sergey-Bar/Ai-Captain/internal/inbox"
 	"github.com/Sergey-Bar/Ai-Captain/internal/incidents"
 	"github.com/Sergey-Bar/Ai-Captain/internal/jobs"
+	"github.com/Sergey-Bar/Ai-Captain/internal/migrate"
 	"github.com/Sergey-Bar/Ai-Captain/internal/milestone"
 	"github.com/Sergey-Bar/Ai-Captain/internal/normalize"
 	"github.com/Sergey-Bar/Ai-Captain/internal/observability"
@@ -228,6 +229,13 @@ func run() error {
 			return nil
 		},
 		MaxAttempts: 5,
+	}
+
+	// Ensure future partitions exist (creates 3 years ahead by default).
+	// This is safe to run repeatedly - it only creates partitions that don't exist.
+	migrator := &migrate.Runner{Pool: pool.Pool}
+	if _, err := migrator.EnsurePartitions(ctx, 3); err != nil {
+		log.Warn("could not ensure future partitions", "error", err.Error())
 	}
 
 	// The startup refusal, and the only check here that can fail.
