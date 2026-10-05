@@ -47,6 +47,8 @@ func main() {
 		err = cmdRehearse(os.Args[2:])
 	case "report":
 		err = cmdReport(os.Args[2:])
+	case "adjudicate":
+		err = cmdAdjudicate(os.Args[2:])
 	case "audit":
 		err = cmdAudit(os.Args[2:])
 	case "prove":
@@ -96,6 +98,7 @@ func usage() {
   probe                    the contract confidence table; --live dials the instance and reports per route
   vlm-probe                ONE call against the pinned VMS host, raw body to contracts/hafnia/raw/
   mark <tag>               record a human verdict on one pushed event; this is what makes AC6 measurable
+  adjudicate               apply the committed MACHINE-DEFINABLE verdicts (testdata/groundtruth.synthetic.json)
   review                    a page of every pushed event, its clip and its mark command
   search <text>            search what the model SAID, with its clip ref and attribution
   brief                    one line per hour for a run: what happened, and what was never asked

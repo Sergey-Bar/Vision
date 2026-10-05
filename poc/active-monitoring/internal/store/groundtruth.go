@@ -103,6 +103,50 @@ func (s *Store) pushedSample(ctx context.Context, runID string) string {
 	return "; this run pushed " + strings.Join(tags, ", ")
 }
 
+// TagsForClip resolves a clip to the outbox tags a run PUSHED for detections that
+// came from it.
+//
+// This is the join `pocctl adjudicate` uses, and it is deliberately the SAME shape
+// as the join in `MarkGroundTruth`: outbox row → detection → this run. A clip that
+// produced detections this run never pushed resolves to nothing and therefore cannot
+// be marked, which is the property that makes a machine-derivable verdict as
+// trustworthy as a human one -- it lands on an event that actually left the process
+// or it does not land at all.
+//
+// `clip_ref` is matched on SUBSTRING rather than equality because it is a storage
+// reference whose exact spelling is the recorder's business (`<run>/<name>.mp4` today)
+// and pinning this query to today's spelling would make the adjudicator the second
+// thing that has to be updated when the recorder changes its layout. The clip name
+// is the stable part, so it is the part matched.
+//
+// An empty result is not an error. It is the ordinary answer for a run that did not
+// push that clip, and the caller reports it as unresolved rather than as a failure.
+func (s *Store) TagsForClip(ctx context.Context, runID, clip string) ([]string, error) {
+	clip = strings.TrimSpace(clip)
+	if clip == "" {
+		return nil, fmt.Errorf("store: a clip name is required; an empty one resolves to nothing and would mark nothing")
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT DISTINCT o.tag
+		  FROM outbox o JOIN detections d ON d.id = o.detection_id
+		 WHERE d.run_id = ? AND d.clip_ref IS NOT NULL AND d.clip_ref <> ''
+		   AND d.clip_ref LIKE '%' || ? || '%'
+		 ORDER BY o.tag`, runID, clip)
+	if err != nil {
+		return nil, fmt.Errorf("store: cannot resolve the clip %q against run %s: %w", clip, runID, err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var t string
+		if err := rows.Scan(&t); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
 // GroundTruthMark is one recorded verdict, for the report to print.
 type GroundTruthMark struct {
 	Tag     string
