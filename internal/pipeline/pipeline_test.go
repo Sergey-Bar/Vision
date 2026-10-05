@@ -434,6 +434,9 @@ func TestAnEventReachesATerminalState(t *testing.T) {
 	if !strings.Contains(jobPayload, incidentID) {
 		t.Errorf("the vlm job payload %q does not name the incident it is about", jobPayload)
 	}
+	if !strings.Contains(jobPayload, incidentID) {
+		t.Errorf("the vlm job payload %q does not name the incident it is about", jobPayload)
+	}
 }
 
 // A second poll of the same feed must produce no new rows. This is what makes

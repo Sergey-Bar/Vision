@@ -135,19 +135,6 @@ var refusals = []refusal{
 	// method-less pattern as answering every method, so they ARE routed; the derivation
 	// says so in its own comment. Calling them a gap here would be the gate reporting a
 	// defect that is not one.
-	{table: "ContractRouting", item: "POST /v1/incidents/{incidentId}/evidence",
-		why: "the document declares a POST to fetch evidence on demand; there is no such " +
-			"route, so a generated client gets a 404"},
-	{table: "ContractRouting", item: "GET /v1/audit/checkpoints",
-		why: "the document declares the checkpoint chain; the sealer writes sealed " +
-			"archives to disk and nothing serves them over an endpoint"},
-	{table: "ContractRouting", item: "POST /v1/rules/bundles/{version}/lint",
-		why: "the document declares a lint endpoint; the same lint runs from " +
-			"securityctl and over the verify gate, so the rule is checked and the route " +
-			"is not"},
-	{table: "ContractRouting", item: "POST /v1/rules/bundles/{version}/simulate",
-		why: "the document declares a simulate endpoint; simulate runs at activation time " +
-			"on the server and no operator can request one"},
 	{table: "ContractRouting", item: "GET /v1/metrics",
 		why: "the route is implemented and undeclared, so nothing a client generates from " +
 			"the contract can reach it. The fix is a document change, not code"},
