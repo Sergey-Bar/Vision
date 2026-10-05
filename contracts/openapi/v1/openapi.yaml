@@ -404,6 +404,46 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
 
+  /v1/ops/dead-letters/replay:
+    post:
+      tags: [ops]
+      summary: Replay a dead-lettered event or job
+      description: |
+        Re-queues a dead letter for retry. Operator-triggered, not automatic:
+        a dead letter usually means the dependency is broken, and retrying in a
+        loop turns a visible incident into invisible load.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, id]
+              properties:
+                kind:
+                  type: string
+                  enum: [inbox, job, outbox]
+                id:
+                  type: string
+                  description: |
+                    For inbox: "integration_id:source_event_id"
+                    For job: job_id
+                    For outbox: idempotency_key
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [replayed]
+                properties:
+                  replayed:
+                    type: boolean
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
   /v1/ops/clock-drift:
     get:
       tags: [ops]

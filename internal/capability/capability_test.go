@@ -127,9 +127,6 @@ var refusals = []refusal{
 			"tenant_admin and enforced by no route"},
 	{table: "CapabilityEnforcement", item: "CapSiteConfigure",
 		why: "site configuration has no surface yet and no route names this capability"},
-	{table: "CapabilityEnforcement", item: "CapDeadLetterReplay",
-		why: "the replay control gates on dead_letter.read, so a separate replay " +
-			"capability was declared and never used"},
 
 	// --- ContractRouting: declared-and-absent, then present-and-undeclared.
 	//

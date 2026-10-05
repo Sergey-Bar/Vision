@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Sergey-Bar/Ai-Captain/internal/clock"
@@ -81,13 +83,8 @@ func (d DeadLetters) Read(ctx context.Context, tenant, site, kind string, limit 
 			})
 		}
 		return out, nil
+
 	case "outbox":
-		// The third queue, which the read model claimed to cover and did not.
-		//
-		// "reads terminal failures from both queues" was true when there were two
-		// queues, and then the outbox was added and this switch was not. An
-		// operator whose message failed on the way out to the relay saw a
-		// dead-letter console that did not mention it.
 		if d.Relay == nil {
 			return nil, ErrNotWired
 		}
@@ -99,38 +96,78 @@ func (d DeadLetters) Read(ctx context.Context, tenant, site, kind string, limit 
 		for _, l := range letters {
 			out = append(out, DeadLetter{
 				Kind: "outbox",
-				// The outbox key is (tenant, idempotency_key) and its id is a
-				// surrogate key nothing outside the relay has a reason to know. The
-				// idempotency key is what an operator can act on, and it is what
-				// `Relay.Replay` takes.
-				ID: l.IdempotencyKey, Queue: l.Topic,
+				ID:   l.IdempotencyKey, Queue: l.Topic,
 				Integration: "", SourceEvent: l.IdempotencyKey,
 				Attempts: l.Attempts, Reason: l.Reason, UpdatedAt: l.DeadLetteredAt,
 				Replayable: true,
 			})
 		}
 		return out, nil
-	}
 
-	var out []DeadLetter
-	if d.Inbox != nil {
-		items, err := d.Read(ctx, tenant, site, "inbox", limit)
-		if err != nil {
-			return nil, err
+	default:
+		// Return both inbox and job dead letters (for kind="").
+		var out []DeadLetter
+		if d.Inbox != nil {
+			items, err := d.Read(ctx, tenant, site, "inbox", limit)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, items...)
 		}
-		out = append(out, items...)
-	}
-	if d.Jobs != nil {
-		items, err := d.Read(ctx, tenant, site, "jobs", limit)
-		if err != nil {
-			return nil, err
+		if d.Jobs != nil {
+			items, err := d.Read(ctx, tenant, site, "jobs", limit)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, items...)
 		}
-		out = append(out, items...)
+		if d.Inbox == nil && d.Jobs == nil {
+			return nil, ErrNotWired
+		}
+		return out, nil
 	}
-	if d.Inbox == nil && d.Jobs == nil {
-		return nil, ErrNotWired
+}
+
+// Replay re-queues a dead letter for retry.
+//
+// The kind must be "inbox", "job", or "outbox". The id is the identifier for
+// that kind: source_event_id for inbox, job_id for jobs, idempotency_key for outbox.
+// For inbox, the id must be in "integration_id:source_event_id" format.
+func (d DeadLetters) Replay(ctx context.Context, tenant, site, kind, id string) error {
+	switch kind {
+	case "inbox":
+		if d.Inbox == nil {
+			return ErrNotWired
+		}
+		// The inbox replay needs integration_id and source_event_id.
+		// The id passed must be in "integration_id:source_event_id" format.
+		parts := strings.SplitN(id, ":", 2)
+		if len(parts) != 2 {
+			return fmt.Errorf("inbox replay id must be integration_id:source_event_id")
+		}
+		key := inbox.Key{
+			TenantID:      tenant,
+			IntegrationID: parts[0],
+			SourceEventID: parts[1],
+			SiteID:        site,
+		}
+		return d.Inbox.Replay(ctx, key)
+
+	case "job":
+		if d.Jobs == nil {
+			return ErrNotWired
+		}
+		return d.Jobs.Replay(ctx, tenant, id)
+
+	case "outbox":
+		if d.Relay == nil {
+			return ErrNotWired
+		}
+		return d.Relay.ReplayByIdempotencyKey(ctx, tenant, id)
+
+	default:
+		return fmt.Errorf("unknown dead letter kind: %s", kind)
 	}
-	return out, nil
 }
 
 // ClockDrift reads the device clock view.

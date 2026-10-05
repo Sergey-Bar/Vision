@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -53,7 +55,8 @@ type Deps struct {
 // and an empty dead-letter list reads as "the site is healthy". The interface
 // carries the site so no implementation can quietly omit it.
 type DeadLetterReader interface {
-	Read(ctx contextContext, tenant, site, kind string, limit int) ([]DeadLetter, error)
+	Read(ctx context.Context, tenant, site, kind string, limit int) ([]DeadLetter, error)
+	Replay(ctx context.Context, tenant, site, kind, id string) error
 }
 
 // DeadLetter is one inbox or job dead letter.
@@ -191,6 +194,10 @@ func (s *Server) RegisterRoutes(d Deps) func(*http.ServeMux) {
 		mux.Handle("GET /v1/ops/dead-letters",
 			s.requireCapability(identity.CapDeadLetterRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
 				s.handleDeadLetters(w, r, p, d)
+			}))
+		mux.Handle("POST /v1/ops/dead-letters/replay",
+			s.requireCapability(identity.CapDeadLetterReplay, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleDeadLetterReplay(w, r, p, d)
 			}))
 		mux.Handle("GET /v1/ops/clock-drift",
 			s.requireCapability(identity.CapIncidentRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
@@ -813,6 +820,36 @@ func (s *Server) handleDeadLetters(w http.ResponseWriter, r *http.Request, p ide
 		return
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (s *Server) handleDeadLetterReplay(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
+	if d.DeadLetters == nil {
+		WriteError(w, http.StatusServiceUnavailable, "not_wired",
+			"The dead-letter reader is not configured.", requestID(r))
+		return
+	}
+	var req struct {
+		Kind string `json:"kind"`
+		ID   string `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, http.StatusBadRequest, "bad_request", err.Error(), requestID(r))
+		return
+	}
+	if req.Kind == "" || req.ID == "" {
+		WriteError(w, http.StatusBadRequest, "bad_request", "kind and id are required", requestID(r))
+		return
+	}
+	site := primarySiteOf(p)
+	if err := d.DeadLetters.Replay(r.Context(), p.TenantID, site, req.Kind, req.ID); err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, ErrNotWired) {
+			status = http.StatusServiceUnavailable
+		}
+		WriteError(w, status, "replay_failed", err.Error(), requestID(r))
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"replayed": true})
 }
 
 func (s *Server) handleClockDrift(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
