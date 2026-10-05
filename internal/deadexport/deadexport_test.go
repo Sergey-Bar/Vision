@@ -203,11 +203,10 @@ var (
 		"internal/api.RequestIDFromContext": {Symbol: "internal/api.RequestIDFromContext", Why: "UNWIRED. The request-id accessor nothing calls. Close it by having the handlers stamp the request id on every log line, which is the convention AGENTS.md already states and nothing currently enforces"},
 		"internal/api.ErrNotWired":          {Symbol: "internal/api.ErrNotWired", Why: "UNWIRED. The not-wired sentinel nothing returns. Close it by having each route that has a nil dependency return it rather than rendering an empty page, which is the distinction the console's own comments call out"},
 
-		"internal/checkpoint.Gap":      {Symbol: "internal/checkpoint.Gap", Why: "UNWIRED. The checkpoint gap predicate nothing calls. Close it by having the recovery drill assert on it, or delete it"},
 		"internal/checkpoint.SealOnce": {Symbol: "internal/checkpoint.SealOnce", Why: "UNWIRED. The single-interval seal entry point nothing calls. Its range sibling SealRange was one of the nine dead exports that started this gate; this is the same cluster. Close it by having the scheduler call it, or delete it"},
-		"internal/clock.AssessGap":     {Symbol: "internal/clock.AssessGap", Why: "UNWIRED. The gap assessor nothing calls from product code. Close it by having the corroboration path call it before excluding a window, which is the invariant-3 requirement that an exclusion carry a reason, or delete it"},
-		"internal/clock.Partial":       {Symbol: "internal/clock.Partial", Why: "UNWIRED. The partial-window predicate nothing calls. Close it with AssessGap, in the same commit"},
-		"internal/clock.Present":       {Symbol: "internal/clock.Present", Why: "UNWIRED. The clock-presence predicate nothing calls. Close it with AssessGap, in the same commit"},
+
+		"internal/clock.Present": {Symbol: "internal/clock.Present", Why: "TEST-ONLY. The gap presence predicate used in tests to assert window coverage. Not called from production code; the correlator uses AssessGap's Gap.Kind and Gap.Covered directly"},
+		"internal/clock.Partial": {Symbol: "internal/clock.Partial", Why: "TEST-ONLY. The partial-window predicate used in tests. Not called from production code"},
 
 		"internal/bundles.ErrNotStored": {Symbol: "internal/bundles.ErrNotStored", Why: "sentinel: the bundle store returns it for a version it does not hold, and the console's rules screen renders the reason so an operator at a site with no network can tell a missing version from a refused activation"},
 

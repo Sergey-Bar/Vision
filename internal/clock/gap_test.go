@@ -30,7 +30,7 @@ func aMeasuredDevice() *DeviceState {
 }
 
 func TestAFullWindowIsNotAGap(t *testing.T) {
-	g := AssessGap(gapState{EventCount: 6, Window: aWindow(), State: aMeasuredDevice(), EvidenceFetched: true, EvidenceNeeded: true})
+	g := AssessGap(GapState{EventCount: 6, Window: aWindow(), State: aMeasuredDevice(), EvidenceFetched: true, EvidenceNeeded: true})
 	if !g.Present() {
 		t.Errorf("a window with events, a measured clock and fetched evidence was reported as %q", g.Kind)
 	}
@@ -40,7 +40,7 @@ func TestAFullWindowIsNotAGap(t *testing.T) {
 }
 
 func TestAnEmptyWindowIsNamedRatherThanReadAsQuiet(t *testing.T) {
-	g := AssessGap(gapState{EventCount: 0, Window: aWindow(), State: aMeasuredDevice(), EvidenceFetched: true, EvidenceNeeded: true})
+	g := AssessGap(GapState{EventCount: 0, Window: aWindow(), State: aMeasuredDevice(), EvidenceFetched: true, EvidenceNeeded: true})
 	if g.Kind != GapNoEvents {
 		t.Fatalf("an empty window is %q, want %q", g.Kind, GapNoEvents)
 	}
@@ -69,15 +69,15 @@ func TestEachCauseIsNamedDistinctly(t *testing.T) {
 
 	cases := []struct {
 		name string
-		in   gapState
+		in   GapState
 		want GapKind
 	}{
-		{"no events", gapState{EventCount: 0, Window: aWindow(), State: measured}, GapNoEvents},
-		{"device offline", gapState{EventCount: 0, OfflineFor: 4 * time.Second, Window: aWindow(), State: measured}, GapDeviceOffline},
-		{"no clock state", gapState{EventCount: 6, Window: aWindow(), EvidenceFetched: true, EvidenceNeeded: true}, GapClockUnknown},
-		{"clock measured too long ago", gapState{EventCount: 6, Window: aWindow(), State: stale, EvidenceFetched: true, EvidenceNeeded: true}, GapClockUnknown},
-		{"excluded by drift", gapState{EventCount: 6, Window: aWindow(), State: severe, EvidenceFetched: true, EvidenceNeeded: true}, GapExcludedByDrift},
-		{"events but no recording", gapState{EventCount: 6, Window: aWindow(), State: measured, EvidenceNeeded: true}, GapEvidenceUnavailable},
+		{"no events", GapState{EventCount: 0, Window: aWindow(), State: measured}, GapNoEvents},
+		{"device offline", GapState{EventCount: 0, OfflineFor: 4 * time.Second, Window: aWindow(), State: measured}, GapDeviceOffline},
+		{"no clock state", GapState{EventCount: 6, Window: aWindow(), EvidenceFetched: true, EvidenceNeeded: true}, GapClockUnknown},
+		{"clock measured too long ago", GapState{EventCount: 6, Window: aWindow(), State: stale, EvidenceFetched: true, EvidenceNeeded: true}, GapClockUnknown},
+		{"excluded by drift", GapState{EventCount: 6, Window: aWindow(), State: severe, EvidenceFetched: true, EvidenceNeeded: true}, GapExcludedByDrift},
+		{"events but no recording", GapState{EventCount: 6, Window: aWindow(), State: measured, EvidenceNeeded: true}, GapEvidenceUnavailable},
 	}
 	seen := map[GapKind]string{}
 	for _, tc := range cases {
@@ -104,7 +104,7 @@ func TestTheMostSpecificCauseWins(t *testing.T) {
 	severe.Band = BandSevere
 	severe.DriftMs = 45000
 
-	g := AssessGap(gapState{
+	g := AssessGap(GapState{
 		EventCount: 0, OfflineFor: 4 * time.Second,
 		Window: aWindow(), State: severe,
 	})
@@ -118,7 +118,7 @@ func TestAPartialGapSaysHowMuchIsMissing(t *testing.T) {
 	// "Partly" is the case a boolean throws away, and it is the case an operator
 	// most needs: a four-minute window with ninety seconds missing is a
 	// different question from a window with none of it.
-	g := AssessGap(gapState{OfflineFor: 2 * time.Second, Window: aWindow(), State: aMeasuredDevice()})
+	g := AssessGap(GapState{OfflineFor: 2 * time.Second, Window: aWindow(), State: aMeasuredDevice()})
 	if !g.Partial() {
 		t.Errorf("a window with two of eight seconds missing is not reported as partial: %s", g)
 	}
@@ -138,7 +138,7 @@ func TestEventsWithoutARecordingAreNotAQuietScene(t *testing.T) {
 	// check gets exactly backwards. The events are real. What is missing is the
 	// thing an operator would look at to judge them, and that is a retrieval
 	// failure, not an absence of activity.
-	g := AssessGap(gapState{
+	g := AssessGap(GapState{
 		EventCount: 4, Window: aWindow(), State: aMeasuredDevice(),
 		EvidenceNeeded: true, EvidenceFetched: false,
 	})
@@ -153,7 +153,7 @@ func TestEventsWithoutARecordingAreNotAQuietScene(t *testing.T) {
 func TestAWindowThatNeedsNoEvidenceIsNotGappedByIt(t *testing.T) {
 	// A pure clock correlation does not need the recording, and marking its
 	// window as gapped would declare most of a healthy system broken.
-	g := AssessGap(gapState{
+	g := AssessGap(GapState{
 		EventCount: 4, Window: aWindow(), State: aMeasuredDevice(),
 		EvidenceNeeded: false, EvidenceFetched: false,
 	})

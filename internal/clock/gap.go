@@ -103,12 +103,12 @@ func (g Gap) String() string {
 		g.Kind, span, covered, detail)
 }
 
-// gapState is the evidence a caller supplies about one window.
+// GapState is the evidence a caller supplies about one window.
 //
 // It is a struct rather than a list of arguments because the fields are about
 // the same window and adding a fourth boolean is how a call site ends up passing
 // them in the wrong order.
-type gapState struct {
+type GapState struct {
 	// EventCount is how many events the device reported in the window.
 	EventCount int
 	// OfflineFor is how long the device reported itself offline inside the
@@ -141,7 +141,7 @@ type gapState struct {
 // checks `Present` is right. A caller that only checks `Kind == GapNone` is
 // *also* right, because a partial gap never returns GapNone - the two cannot
 // disagree, which is the property that makes this safe to use from a gate.
-func AssessGap(s gapState) Gap {
+func AssessGap(s GapState) Gap {
 	g := Gap{Covered: 1, From: s.Window.From, To: s.Window.To}
 
 	if s.OfflineFor > 0 {
