@@ -67,6 +67,18 @@ type Meta struct {
 // ErrNotStored is returned for a bundle version that is not in the store.
 var ErrNotStored = errors.New("bundles: no such version is stored")
 
+// ErrNoActiveBundle is "this tenant has activated nothing yet", as distinct from "the
+// bundle store is unreachable".
+//
+// The two are different failures and were previously the same `fmt.Errorf` with no
+// sentinel, so a caller could not tell "nothing to do" from "cannot tell". The pipeline
+// already needs the distinction - `internal/pipeline` carries its own copy of the message
+// as `errNoActiveBundle` because it had no other way - and so does the startup dispatch
+// check, where the two demand opposite responses: no active bundle means there is nothing
+// to refuse and the daemon starts, while an unreachable store means the check could not
+// run and must not report that everything is fine.
+var ErrNoActiveBundle = errors.New("bundles: no active bundle")
+
 // ErrGateNotSatisfied is returned when a bundle cannot be activated.
 //
 // Every reason is named, because an operator at a site with no network cannot go
@@ -201,7 +213,7 @@ func (s *Service) ActiveBundle(ctx context.Context, tenant string) (version, con
 		tenant).Scan(&version, &contentHash, &content)
 	if err != nil {
 		if isNoRows(err) {
-			return "", "", nil, fmt.Errorf("bundles: no active bundle for tenant %s", tenant)
+			return "", "", nil, fmt.Errorf("%w for tenant %s", ErrNoActiveBundle, tenant)
 		}
 		return "", "", nil, fmt.Errorf("bundles: active: %w", err)
 	}

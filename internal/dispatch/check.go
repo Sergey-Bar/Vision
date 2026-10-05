@@ -67,7 +67,7 @@ func (d *Dispatcher) CheckDestinations(b *rules.CompiledBundle) error {
 					entry.ruleID, entry.dispatchType, strings.Join(d.ExecutorTypes(), ", ")))
 			continue
 		}
-		topic, err := TopicFor(entry.dispatchType)
+		topic, err := topicFor(entry.dispatchType)
 		if err != nil {
 			unknownTypes = append(unknownTypes, fmt.Sprintf("%s: %s", entry.ruleID, err))
 			continue
@@ -75,7 +75,7 @@ func (d *Dispatcher) CheckDestinations(b *rules.CompiledBundle) error {
 		// Only a notify topic resolves a destination. A queued dispatch's target names
 		// what to fetch, not where to send it, so checking it against the destinations
 		// file would refuse every bundle that asks for evidence.
-		if topic != TopicNotifyOperator && topic != TopicNotifySupervisor {
+		if topic != topicNotifyOperator && topic != topicNotifySupervisor {
 			continue
 		}
 		name, err := NotificationPayload{Target: entry.target}.destinationName(topic)
@@ -115,7 +115,7 @@ func (d *Dispatcher) CheckDestinations(b *rules.CompiledBundle) error {
 func knownNames(d *Dispatcher) string {
 	if d.Dests.Empty() {
 		return " (this install has no destinations at all; " +
-			strings.TrimSpace(ErrNoDestinationsFile.Error()) + ")"
+			strings.TrimSpace(errNoDestinationsFile.Error()) + ")"
 	}
 	return " (configured: " + strings.Join(d.Dests.Names(), ", ") + ")"
 }

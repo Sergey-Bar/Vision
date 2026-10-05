@@ -114,36 +114,6 @@ func (r Report) Table(name string) (Table, bool) {
 	return Table{}, false
 }
 
-// Uncovered returns the items in one table that the tree gives no executor to.
-func (r Report) Uncovered(table string) []string {
-	t, ok := r.Table(table)
-	if !ok {
-		return nil
-	}
-	var out []string
-	for _, item := range t.Items {
-		if !item.Covered {
-			out = append(out, item.Name)
-		}
-	}
-	return out
-}
-
-// Covered returns the items in one table that the tree gives an executor to.
-func (r Report) Covered(table string) []string {
-	t, ok := r.Table(table)
-	if !ok {
-		return nil
-	}
-	var out []string
-	for _, item := range t.Items {
-		if item.Covered {
-			out = append(out, item.Name)
-		}
-	}
-	return out
-}
-
 // Ledger is the recorded refusals, by table then by item.
 //
 // A `map[string]map[string]string` rather than a flat map keyed by a joined string,

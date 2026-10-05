@@ -147,7 +147,7 @@ func (c *Corpus) Find(pattern string, excludePrefix ...string) (bool, string) {
 }
 
 // FilesContaining lists the scanned files that contain the pattern.
-func (c *Corpus) FilesContaining(pattern string, excludePrefix ...string) []string {
+func (c *Corpus) filesContaining(pattern string, excludePrefix ...string) []string {
 	return c.match(pattern, excludePrefix...)
 }
 
@@ -383,7 +383,14 @@ func DeriveQueueEndpoints(c *Corpus, queues []Queue) Table {
 			"or a worker that polls an empty table",
 	}
 	for _, q := range queues {
-		producers := c.LineHits(`Queue:\s*jobs\.` + q.Const + `\b`)
+		// A producer is a line that puts the constant WHERE A QUEUE GOES: into a
+		// `Queue:` field, or as a returned queue. Both shapes have existed in this tree -
+		// `pipeline.enqueueVLM` wrote the field form and `dispatch.JobPayload.Queue`
+		// returns it - and a gate that recognised only the field form reported the VLM
+		// queue as having no producer the moment the producer moved into
+		// `internal/dispatch`. That is a false red on a working chain, which is the
+		// direction that trains people to ignore the gate.
+		producers := c.LineHits(`Queue:\s*jobs\.` + q.Const + `\b|return\s+jobs\.` + q.Const + `\b`)
 		workers := c.LineHits(`Name:\s*jobs\.` + q.Const + `\b`)
 		item := Item{Name: q.Name}
 		switch {
@@ -531,7 +538,7 @@ func DeriveContractRouting(root string) (Table, error) {
 			"404 a generated client will hit; an implemented route no contract declares is a " +
 			"surface nobody can reach from the published description",
 	}
-	declared, err := DeclaredOperations(filepath.Join(root, "contracts", "openapi", "v1", "openapi.yaml"))
+	declared, err := declaredOperations(filepath.Join(root, "contracts", "openapi", "v1", "openapi.yaml"))
 	if err != nil {
 		return t, err
 	}
@@ -631,7 +638,7 @@ func canonicalOperation(op string) string {
 var pathParam = regexp.MustCompile(`\{[^}]*\}`)
 
 // DeclaredOperations reads the operations out of an OpenAPI document.
-func DeclaredOperations(path string) ([]string, error) {
+func declaredOperations(path string) ([]string, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read the OpenAPI document: %w", err)
@@ -894,7 +901,7 @@ func DeriveSiteScopedWriteCanaries(root string) (Table, error) {
 			"returns no rows either way - so the uncovered ones are exactly the ones nothing " +
 			"has ever tried to write across",
 	}
-	tables, err := SiteScopedTables(root)
+	tables, err := siteScopedTables(root)
 	if err != nil {
 		return t, err
 	}
@@ -930,7 +937,7 @@ var (
 )
 
 // SiteScopedTables derives every site-bearing table from the migrations.
-func SiteScopedTables(root string) ([]string, error) {
+func siteScopedTables(root string) ([]string, error) {
 	entries, err := os.ReadDir(filepath.Join(root, "migrations"))
 	if err != nil {
 		return nil, err
