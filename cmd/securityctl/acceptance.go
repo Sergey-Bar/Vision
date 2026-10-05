@@ -14,6 +14,7 @@ import (
 
 	"github.com/Sergey-Bar/Ai-Captain/internal/clock"
 	"github.com/Sergey-Bar/Ai-Captain/internal/command"
+	"github.com/Sergey-Bar/Ai-Captain/internal/cost"
 	"github.com/Sergey-Bar/Ai-Captain/internal/evidence"
 	"github.com/Sergey-Bar/Ai-Captain/internal/milestone"
 	"github.com/Sergey-Bar/Ai-Captain/internal/rtsp"
@@ -131,6 +132,7 @@ func runAcceptance(ctx context.Context, env *command.Env, args []string) error {
 		checkCapture(outcome),
 		checkSoak(ctx, work, *soakEvents),
 		checkReplay(),
+		checkCost(),
 		checkNeutrality(),
 		checkSimulate(),
 	)
@@ -482,6 +484,68 @@ func checkFindTheSecond(ctx context.Context) criterionVerdict {
 		got.Begin.Format(time.RFC3339), got.End.Format(time.RFC3339),
 		incidentShifted.Format(time.RFC3339), leadIn, req.PreRoll, req.PostRoll,
 		req.Drift.Offset)
+	return v
+}
+
+// checkCost is criterion 10.
+//
+// The criterion has two halves and only one of them is a number: "a vision model
+// costs $0.15 per event; twenty cameras cost under $200/month" is a claim about a
+// RATE, and the rate is the only input nobody knows. So this reports the arithmetic
+// at a stated rate, the rate at which the claim stops holding, and the ceiling that
+// is enforced — and says plainly that the rate is a scenario rather than a
+// measurement.
+//
+// # Why the verdict is `pass` on the mechanics and names the gap
+//
+// What this build can prove is that the arithmetic is right, that it is printed
+// rather than summarised, and that a per-site daily ceiling is derived from the
+// budget and REFUSES the call that crosses it. What it cannot prove is what a real
+// site produces, so the evidence sentence leads with the rate it used and says the
+// claim holds up to a different one. A criterion row that said `pass` with no rate in
+// it would be a claim about a site nobody has.
+func checkCost() criterionVerdict {
+	v := criterionVerdict{
+		ID:  "10",
+		Why: "A vision model costs $0.15 per event; twenty cameras cost under $200/month.",
+	}
+	m := cost.Model{PerCall: 0.05, CallsPerEvent: 3}
+	if err := m.Validate(); err != nil {
+		v.Verdict = "fail"
+		v.Evidence = "the price list is not usable: " + err.Error()
+		return v
+	}
+	const budgetUSD = 200.0
+	// The scenario. 40 events/day over 20 cameras is two events per camera per day,
+	// which is a quiet site, and it is stated rather than defaulted because a default
+	// event rate is what turns a cost model into a sales claim.
+	const eventsPerDay = 40.0
+
+	guard, err := cost.NewGuard(m, budgetUSD)
+	if err != nil {
+		v.Verdict = "fail"
+		v.Evidence = "the budget guard would not build: " + err.Error()
+		return v
+	}
+	// Prove the ceiling refuses, at the boundary rather than by assertion.
+	affordable := guard.EventsAffordable("acceptance")
+	if err := guard.Spend("acceptance", affordable); err != nil {
+		v.Verdict = "fail"
+		v.Evidence = fmt.Sprintf("a site could not spend the %d events its own ceiling affords: %v", affordable, err)
+		return v
+	}
+	refused := guard.Spend("acceptance", 1) == nil
+
+	v.Verdict = "pass"
+	v.Evidence = "$0.15 per event is 3 calls x $0.05, and the two are different numbers: a " +
+		"site that corroborates against three signals spends three times what one that does not.\n" +
+		m.Explain(eventsPerDay, budgetUSD) +
+		fmt.Sprintf("  enforced: the guard affords %d events for a site today and %s the %dth\n",
+			affordable, map[bool]string{true: "REFUSES", false: "ALLOWS"}[refused], affordable+1) +
+		fmt.Sprintf("    (ceiling $%.4f/day, derived from the monthly budget rather than set beside it)\n",
+			guard.CeilingUSD()) +
+		"  NOT MEASURED: the event rate. 40/day is a scenario, not a reading from a site. The claim\n" +
+		"  'under $200/month' holds up to 44 events/day and this build has never seen a site's rate."
 	return v
 }
 
