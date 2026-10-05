@@ -126,7 +126,7 @@ func DecideBookmark(req BookmarkRequest, policy clock.Policy) (BookmarkDecision,
 		from = from.Add(req.Drift.Offset)
 		to = to.Add(req.Drift.Offset)
 	}
-	return BookmarkDecision{OpenedAt: from}, from, to
+	return BookmarkDecision{Placed: true, OpenedAt: from}, from, to
 }
 
 // DriftMsFrom is the drift in the units the policy bands are expressed in.

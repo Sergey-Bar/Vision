@@ -70,11 +70,14 @@ var (
 
 		"internal/clocksub.ErrUnknownDevice": {Symbol: "internal/clocksub.ErrUnknownDevice", Why: "sentinel: the clock subscriber returns it and the drift row records the reason in prose, so the identity is published without an errors.Is caller"},
 
-		"internal/config.DefaultLookup":        {Symbol: "internal/config.DefaultLookup", Why: "published default: how often the DSN lookup cache re-reads. The value is a decision in the site configuration contract and a tuning knob an operator is told about by name"},
-		"internal/config.DefaultShutdownGrace": {Symbol: "internal/config.DefaultShutdownGrace", Why: "published default: the drain window on shutdown, stated in the operations runbook by its Go name so an operator can find it"},
-		"internal/config.MaxClaimBatch":        {Symbol: "internal/config.MaxClaimBatch", Why: "published bound: the ceiling on a lease claim batch. It is a safety limit whose value belongs to the configuration contract, and raising it is a product decision rather than a refactor"},
-		"internal/config.MaxLeaseDuration":     {Symbol: "internal/config.MaxLeaseDuration", Why: "published bound: the ceiling on a job lease. Same reasoning as MaxClaimBatch — a limit that exists to be lowered by a deployment, not to be referenced by a caller"},
-		"internal/config.MaxPollInterval":      {Symbol: "internal/config.MaxPollInterval", Why: "published bound: the ceiling on the poll backoff. Same reasoning as MaxClaimBatch"},
+		"internal/config.DefaultLookup":                 {Symbol: "internal/config.DefaultLookup", Why: "published default: how often the DSN lookup cache re-reads. The value is a decision in the site configuration contract and a tuning knob an operator is told about by name"},
+		"internal/config.DefaultShutdownGrace":          {Symbol: "internal/config.DefaultShutdownGrace", Why: "published default: the drain window on shutdown, stated in the operations runbook by its Go name so an operator can find it"},
+		"internal/config.MaxClaimBatch":                 {Symbol: "internal/config.MaxClaimBatch", Why: "published bound: the ceiling on a lease claim batch. It is a safety limit whose value belongs to the configuration contract, and raising it is a product decision rather than a refactor"},
+		"internal/config.MaxLeaseDuration":              {Symbol: "internal/config.MaxLeaseDuration", Why: "published bound: the ceiling on a job lease. Same reasoning as MaxClaimBatch — a limit that exists to be lowered by a deployment, not to be referenced by a caller"},
+		"internal/config.MaxPollInterval":               {Symbol: "internal/config.MaxPollInterval", Why: "published bound: the ceiling on the poll backoff. Same reasoning as MaxClaimBatch"},
+		"internal/config.DefaultEvidenceFetchPreRoll":   {Symbol: "internal/config.DefaultEvidenceFetchPreRoll", Why: "published default: the default pre-roll for evidence fetch bookmarks, stated in the site configuration documentation"},
+		"internal/config.DefaultEvidenceFetchPostRoll":  {Symbol: "internal/config.DefaultEvidenceFetchPostRoll", Why: "published default: the default post-roll for evidence fetch bookmarks, stated in the site configuration documentation"},
+		"internal/config.DefaultEvidenceFetchRetainFor": {Symbol: "internal/config.DefaultEvidenceFetchRetainFor", Why: "published default: the default retention period for evidence fetch receipts, stated in the site configuration documentation"},
 
 		"internal/correlator.DefaultTiers":  {Symbol: "internal/correlator.DefaultTiers", Why: "published default tier policy. The tiers are a product decision recorded in docs/ai-and-data.md, and the function is the seam a site configuration overrides"},
 		"internal/correlator.MaxCandidates": {Symbol: "internal/correlator.MaxCandidates", Why: "published bound: the ceiling on correlation candidates per trigger. It is a cost limit an operator can lower, so the number belongs to the configuration contract"},
@@ -124,7 +127,6 @@ var (
 		// vocabulary recorded in the route audit, and the route table is a list of
 		// assumptions about an API nobody has reached.
 		"internal/milestone.Capability":           {Prefix: "internal/milestone.Capability", Why: "the vendor capability vocabulary, carried on the route table and printed by `adapter-probe`. A capability with no adapter behind it is a route marked Unverified, which is the honest state of every one of them"},
-		"internal/milestone.Refusal":              {Prefix: "internal/milestone.Refusal", Why: "the write-back refusal vocabulary, written into a replay record an operator reads when a bookmark was refused"},
 		"internal/milestone.ClockDrift":           {Prefix: "internal/milestone.ClockDrift", Why: "the clock-drift band vocabulary, compared against the measured drift on every bookmark write-back and printed by the adapter probe"},
 		"internal/milestone.Err":                  {Prefix: "internal/milestone.Err", Why: "sentinel: the adapter returns it and the transport converts it to an HTTP status through AsStatus, in a path a future route will take"},
 		"internal/milestone.DefaultPageSize":      {Symbol: "internal/milestone.DefaultPageSize", Why: "published default: the page size the adapter requests when configuration omits one"},
@@ -275,6 +277,19 @@ var (
 		"internal/observations.Stats":             {Symbol: "internal/observations.Stats", Why: "TEST-ONLY. The observation statistics. P3's evaluation harness scores a report against them and the copilot quotes them; neither reads them, so the numbers exist and nothing consumes them"},
 
 		"internal/rtsp.KeepAlive": {Symbol: "internal/rtsp.KeepAlive", Why: "TEST-ONLY. The RTSP keep-alive. The recorder should send one; nothing does, so a camera that times out a stream stops and the gap looks like a quiet scene rather than a lost camera"},
+
+		// New packages from the stabilization branch (Tier 1.2-1.3). These are UNWIRED
+		// because the packages are newly created and their consumers (pipeline, relay,
+		// acceptance) are wired in subsequent commits. Each entry is a commitment to
+		// wire it, not a permanent exemption.
+		"internal/dispatch.DecodeNotification": {Symbol: "internal/dispatch.DecodeNotification", Why: "UNWIRED. The notification decoder. The relay will call it when handling notify_* outbox messages; currently only the internal test reads it"},
+		"internal/dispatch.DecodeJob":          {Symbol: "internal/dispatch.DecodeJob", Why: "UNWIRED. The job decoder. The relay will call it when handling fetch_evidence/request_vlm outbox messages; currently only the internal test reads it"},
+		// DecodeJobPayload and EncodeJobPayload are used by internal/evidencefetch, so they
+		// have external readers and are not dead. The allow-list entries were stale.
+		"internal/evidencefetch.ActionPlaced":   {Symbol: "internal/evidencefetch.ActionPlaced", Why: "UNWIRED. The audit action for a placed bookmark. The audit ledger will record it when the worker runs; currently only the worker writes it"},
+		"internal/evidencefetch.ActionRefused":  {Symbol: "internal/evidencefetch.ActionRefused", Why: "UNWIRED. The audit action for a refused bookmark. The audit ledger will record it when the worker refuses; currently only the worker writes it"},
+		"internal/evidencefetch.ReceiptVersion": {Symbol: "internal/evidencefetch.ReceiptVersion", Why: "UNWIRED. The receipt document's contract version. A future reader will check it; currently only the worker writes it"},
+		"internal/evidencefetch.VendorName":     {Symbol: "internal/evidencefetch.VendorName", Why: "UNWIRED. The vendor name constant. The receipt carries it; currently only the worker writes it"},
 
 		// Three that the gate was NOT reporting, and the reason is in the gate's own
 		// code. `addSelectors` records every selector name in the tree UNQUALIFIED,

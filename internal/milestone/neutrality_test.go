@@ -130,11 +130,12 @@ func importsOf(t *testing.T, dir string) map[string]bool {
 // adapter. If the seed stopped constructing the adapter it could not drive the
 // product's own pipeline, and the seeded site would stop being the product's.
 var compositionRoot = map[string]bool{
-	"cmd/security-core":  true,
-	"cmd/securityctl":    true,
-	"cmd/security-seed":  true,
-	"internal/pipeline":  true,
-	"internal/milestone": true,
+	"cmd/security-core":      true,
+	"cmd/securityctl":        true,
+	"cmd/security-seed":      true,
+	"internal/pipeline":      true,
+	"internal/milestone":     true,
+	"internal/evidencefetch": true,
 }
 
 func TestOnlyTheCompositionRootImportsTheVendorPackage(t *testing.T) {

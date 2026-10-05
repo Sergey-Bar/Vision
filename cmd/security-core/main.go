@@ -55,6 +55,7 @@ import (
 	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
 	"github.com/Sergey-Bar/Ai-Captain/internal/dispatch"
 	"github.com/Sergey-Bar/Ai-Captain/internal/evidence"
+	"github.com/Sergey-Bar/Ai-Captain/internal/evidencefetch"
 	"github.com/Sergey-Bar/Ai-Captain/internal/graph"
 	"github.com/Sergey-Bar/Ai-Captain/internal/identity"
 	"github.com/Sergey-Bar/Ai-Captain/internal/inbox"
@@ -149,6 +150,32 @@ func run() error {
 	}
 	vlm := airuntime.NewVLMWorker(jobWorker, aiClient,
 		&observations.Writer{Pool: pool}, store, registry, log)
+
+	// Evidence fetch worker: places Milestone bookmarks for incidents.
+	// It runs on the evidence_fetch queue and is wired with the same dependencies
+	// the pipeline uses, so a bookmark and its receipt are durable.
+	evidenceFetchWorker := &evidencefetch.Worker{
+		Facts:     evidencefetch.NewPoolFacts(pool),
+		Store:     store,
+		Bookmarks: adapter,
+		Policy:    clockPolicy(),
+		Audit:     writer,
+		Log:       log,
+		PreRoll:   cfg.EvidenceFetchPreRoll,
+		PostRoll:  cfg.EvidenceFetchPostRoll,
+		RetainFor: cfg.EvidenceFetchRetainFor,
+	}
+	evidenceFetchJobWorker := &jobs.Worker{
+		Enqueuer: jobs.Enqueuer{Pool: pool},
+		Name:     jobs.QueueEvidenceFetch,
+		Handler: func(ctx context.Context, j jobs.Job) error {
+			_, err := evidenceFetchWorker.Handle(ctx, j)
+			return err
+		},
+		Logf: func(format string, args ...any) {
+			log.Info("evidence_fetch", append([]any{"worker", "evidence_fetch", format}, args...)...)
+		},
+	}
 
 	// The dispatch destinations, and the refusal that a bundle naming an unconfigured
 	// destination is refused at STARTUP.
@@ -314,6 +341,8 @@ func run() error {
 	})
 
 	go runVLMWorker(ctx, jobWorker, vlm.Handle, cfg.Tenant, log)
+
+	go runEvidenceFetchWorker(ctx, evidenceFetchJobWorker, cfg.Tenant, log)
 
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.ListenAndServe(ctx, cfg.Listen, cfg.TLSCertFile, cfg.TLSKeyFile) }()
@@ -503,6 +532,19 @@ func runVLMWorker(ctx context.Context, w *jobs.Worker,
 		}
 		if _, err := w.Run(ctx, tenant, "vlm", 4); err != nil && ctx.Err() == nil {
 			log.Error("the vlm worker could not run", "error", err.Error())
+		}
+	}
+}
+
+func runEvidenceFetchWorker(ctx context.Context, w *jobs.Worker, tenant string, log *slog.Logger) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Second):
+		}
+		if _, err := w.Run(ctx, tenant, "evidence_fetch", 4); err != nil && ctx.Err() == nil {
+			log.Error("the evidence fetch worker could not run", "error", err.Error())
 		}
 	}
 }

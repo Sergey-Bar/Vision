@@ -251,7 +251,7 @@ type Executor func(ctx context.Context, d outbox.Delivery) error
 // rule mean something the operator did not write.
 func (d *Dispatcher) notify(topic string) Executor {
 	return func(ctx context.Context, delivery outbox.Delivery) error {
-		p, err := decodeNotification(delivery)
+		p, err := DecodeNotification(delivery)
 		if err != nil {
 			return err
 		}
@@ -372,7 +372,7 @@ func (d *Dispatcher) enqueueJob(topic string) Executor {
 		if d.Enqueuer == nil || d.Pool == nil {
 			return errNoEnqueuer
 		}
-		p, err := decodeJob(delivery)
+		p, err := DecodeJob(delivery)
 		if err != nil {
 			return err
 		}
@@ -706,8 +706,8 @@ type WebhookField struct {
 // Decoding
 // ---------------------------------------------------------------------------
 
-// decodeNotification decodes and checks a notify delivery's payload.
-func decodeNotification(d outbox.Delivery) (NotificationPayload, error) {
+// DecodeNotification decodes and checks a notify delivery's payload.
+func DecodeNotification(d outbox.Delivery) (NotificationPayload, error) {
 	var p NotificationPayload
 	if err := strictUnmarshal(d.Payload, &p); err != nil {
 		return p, fmt.Errorf("dispatch: %s: %w", d.Topic, err)
@@ -724,15 +724,39 @@ func decodeNotification(d outbox.Delivery) (NotificationPayload, error) {
 	return p, nil
 }
 
-// decodeJob decodes and checks a queue-shaped delivery's payload.
-func decodeJob(d outbox.Delivery) (JobPayload, error) {
-	var p JobPayload
-	if err := strictUnmarshal(d.Payload, &p); err != nil {
+// DecodeJob decodes and checks a queue-shaped delivery's payload.
+func DecodeJob(d outbox.Delivery) (JobPayload, error) {
+	p, err := DecodeJobPayload(d.Payload)
+	if err != nil {
 		return p, fmt.Errorf("dispatch: %s: %w", d.Topic, err)
 	}
 	if p.ContractVersion != ContractVersion {
 		return p, fmt.Errorf("dispatch: %s: payload contract is %q, this build speaks %q",
 			d.Topic, p.ContractVersion, ContractVersion)
+	}
+	return p, nil
+}
+
+// EncodeJobPayload renders a job payload. It is the inverse of `DecodeJobPayload` and
+// exists because the two ends are separate programs: `EnqueueOutbox` writes one, and a
+// consumer reads one, and a consumer that had to reach into this package for the encoder
+// would have no way to build a fixture for itself.
+func EncodeJobPayload(p JobPayload) ([]byte, error) { return json.Marshal(p) }
+
+// DecodeJobPayload decodes a job payload without a delivery around it.
+//
+// Separate because the two callers arrive from different directions. The relay has an
+// `outbox.Delivery`; `internal/evidencefetch` has a `jobs.Job`, which is the same facts in
+// a different struct, and making it construct a throwaway Delivery to satisfy this
+// signature would be a fiction that hides which caller is which.
+func DecodeJobPayload(raw []byte) (JobPayload, error) {
+	var p JobPayload
+	if err := strictUnmarshal(raw, &p); err != nil {
+		return p, err
+	}
+	if p.ContractVersion != ContractVersion {
+		return p, fmt.Errorf("the payload contract is %q and this build speaks %q",
+			p.ContractVersion, ContractVersion)
 	}
 	return p, nil
 }

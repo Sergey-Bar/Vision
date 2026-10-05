@@ -99,15 +99,11 @@ type refusal struct {
 //
 //   - Queues. Three of the four declared queues have no producer at all. These are scope
 //     decisions, not defects waiting to be fixed by the next person to look:
-//     `evidence_fetch` closes when the evidence worker lands, `rule_bulk` when bulk compile
-//     is scheduled, `checkpoint_seal` when sealing becomes incremental.
+//     `rule_bulk` when bulk compile is scheduled, `checkpoint_seal` when sealing becomes incremental.
 //   - Contract. Declared routes nothing implements, and one implemented route the contract
 //     does not declare.
 var refusals = []refusal{
 	// --- QueueEndpoints.
-	{table: "QueueEndpoints", item: "evidence_fetch",
-		why: "the evidence worker lands later in this branch; nothing enqueues evidence " +
-			"work today, so the evidence table is empty in production"},
 	{table: "QueueEndpoints", item: "rule_bulk",
 		why: "bulk compile is not an M1 capability and no milestone owns it; the constant " +
 			"is declared so the queue vocabulary is complete"},
