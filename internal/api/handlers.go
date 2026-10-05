@@ -436,12 +436,23 @@ func (s *Server) handleIncidentList(w http.ResponseWriter, r *http.Request, p id
 		return
 	}
 	limit := parseLimit(r.URL.Query().Get("limit"), 50, 200)
+	cursor := r.URL.Query().Get("cursor")
+	state := r.URL.Query().Get("state")
+	degradedStr := r.URL.Query().Get("degraded")
+	var degraded *bool
+	if degradedStr == "true" {
+		v := true
+		degraded = &v
+	} else if degradedStr == "false" {
+		v := false
+		degraded = &v
+	}
 	// A site the caller may see, or "every site they may see".
 	scope := site
 	if scope == "" {
 		scope = strings.Join(p.SiteScope, ",")
 	}
-	items, err := d.Incidents.ListScoped(r.Context(), p.TenantID, scope, limit)
+	items, nextCursor, err := d.Incidents.ListWithCursor(r.Context(), p.TenantID, scope, cursor, limit, state, degraded)
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, "list_failed", err.Error(), requestID(r))
 		return
@@ -460,7 +471,10 @@ func (s *Server) handleIncidentList(w http.ResponseWriter, r *http.Request, p id
 		}
 		items = visible
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"items": items})
+	WriteJSON(w, http.StatusOK, map[string]any{
+		"items":      items,
+		"nextCursor": nextCursor,
+	})
 }
 
 func (s *Server) handleIncidentGet(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
