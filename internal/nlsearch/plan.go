@@ -55,6 +55,10 @@ type Plan struct {
 	MatchedIndexed bool
 	// SQL is the statement, for a reader who wants it.
 	SQL string
+	// boundArgs are the arguments the statement binds. NOT rendered into the plan's
+	// JSON: a plan row stores the arguments separately and in order, because a
+	// reader who reads them out of a blob cannot tell which is `$1`.
+	boundArgs []any
 }
 
 // PlanFor renders a compiled query.
@@ -72,6 +76,24 @@ func PlanFor(q *Query, asked Question) Plan {
 	}
 	return p
 }
+
+// withBoundArgs attaches the compiled statement's arguments.
+//
+// Unexported and taking a copy, because a plan a caller can mutate after it was
+// compiled is a plan whose digest and whose statement disagree — and that
+// disagreement is exactly what [Replay] exists to catch, so creating it here would
+// be manufacturing the fault the control is for.
+func (p Plan) withBoundArgs(args []any) Plan {
+	p.boundArgs = append([]any(nil), args...)
+	return p
+}
+
+// BoundArgs are the arguments the statement binds, in placeholder order.
+//
+// Exported so a reader of a transcript can see what WOULD be sent without running
+// anything, which is the difference between approving a query and approving a
+// description of a query.
+func (p Plan) BoundArgs() []any { return append([]any(nil), p.boundArgs...) }
 
 // String is the whole plan, one thing per line.
 //

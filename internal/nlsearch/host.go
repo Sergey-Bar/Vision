@@ -218,7 +218,7 @@ func NewRequest(m *Manifest, q Question, inScope []string) (*Request, *Refusal) 
 	return &Request{
 		Manifest:    m,
 		Question:    q,
-		Plan:        PlanFor(compiled, q),
+		Plan:        PlanFor(compiled, q).withBoundArgs(compiled.Args),
 		SiteInScope: append([]string(nil), inScope...),
 	}, nil
 }
