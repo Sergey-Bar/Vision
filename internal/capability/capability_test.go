@@ -202,11 +202,6 @@ var refusals = []refusal{
 			"against a specific monthly partition"},
 	{table: "SiteScopedWriteCanaries", item: "integrations",
 		why: "no write canary covers integrations"},
-	{table: "SiteScopedWriteCanaries", item: "search_plans",
-		why: "migration 0024 added search_plans and nothing writes a canary for it. " +
-			"Closing it is one INSERT satisfying its NOT NULL columns; it is here because " +
-			"the table arrived with a site_id column and no test, which is the same omission " +
-			"the other twelve entries record"},
 	{table: "SiteScopedWriteCanaries", item: "sites",
 		why: "no write canary covers sites; it is the table that DEFINES the scope the " +
 			"other policies reference, so its own canary is the circular one"},

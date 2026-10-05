@@ -815,20 +815,18 @@ func (e *DeliveryRefused) Error() string {
 	return fmt.Sprintf("dispatch: destination %q for %s answered HTTP %d", e.Name, e.Topic, e.Status)
 }
 
-// Retryable reports whether the relay should spend another attempt.
+// The retry decision is NOT made here, and the omission is worth recording.
 //
-// True for 5xx, 408 and 429 - a receiver that is down, timing out, or rate-limiting. False
-// for the rest of the 4xx, which are the receiver saying the request itself is wrong and
-// will say so again identically.
-func (e *DeliveryRefused) retryable() bool {
-	switch {
-	case e.Status >= 500:
-		return true
-	case e.Status == http.StatusRequestTimeout, e.Status == http.StatusTooManyRequests:
-		return true
-	}
-	return false
-}
+// A 4xx other than 408 and 429 is the receiver saying the request itself is wrong, and it
+// will say so again identically - so spending the relay's whole `MaxAttempts` budget on
+// one is a dead letter an operator waits longer for than it needs to.
+//
+// `outbox.Relay` has no hook for that: its `MaxAttempts` is the only retry policy it
+// offers, so this package cannot express the distinction without changing that type.
+// Rather than carry a method no caller could reach - which `internal/deadexport` reports
+// as TEST-ONLY the moment somebody writes one - the rule is written down here, in the
+// comment, where whoever adds the hook will find it. It is prose rather than a const
+// because an unused const is a second finding rather than a first.
 
 // errNoEnqueuer is returned when a queued dispatch arrives with no enqueuer wired.
 //

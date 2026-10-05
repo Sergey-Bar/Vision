@@ -146,11 +146,6 @@ func (c *Corpus) Find(pattern string, excludePrefix ...string) (bool, string) {
 	return true, files[0]
 }
 
-// FilesContaining lists the scanned files that contain the pattern.
-func (c *Corpus) filesContaining(pattern string, excludePrefix ...string) []string {
-	return c.match(pattern, excludePrefix...)
-}
-
 func (c *Corpus) match(pattern string, excludePrefix ...string) []string {
 	var out []string
 	for _, rel := range c.files {

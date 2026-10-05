@@ -9,7 +9,7 @@ claim narrowed to what is true; nine of the seventeen never-red gates proven by 
 with a transcript, and the other nine recorded with what was tried and what the failure
 was. See "The 2026-10-04 pass over the acceptance criteria and the never-red list".)
 
-Gate: 25 gates green, `pwsh -File scripts/verify.ps1 -NoRace`, 2026-10-04, 12 of 25 gates
+Gate: 26 gates green, `pwsh -File scripts/verify.ps1 -NoRace`, 2026-10-04, 12 of 25 gates
 now recorded red by hand (was 8 before the force-red harness). Acceptance:
 9 pass, 0 fail, 4 not runnable in this build.
 
@@ -50,7 +50,7 @@ rather than the per-package **schema** the plan asked for, because migration 000
 hardcodes `public` and a per-schema harness would apply **no row-level security at
 all**; the reason is in R13.
 
-**Verification:** `scripts/verify.ps1` green - twenty-five gates: contract-check
+**Verification:** `scripts/verify.ps1` green - twenty-six gates: contract-check
 across all three published contract surfaces, contract-sync, vet, gofmt,
 `golangci-lint` (including gosec), the generated-code check,
 `go test -race -count=1 -json -coverprofile ./...`, skip-audit, no-silent-skips,
@@ -66,7 +66,7 @@ races. The most recent dated run record is
 of seventeen, zero failed, zero skipped, against a real database - including
 `recovery-drill`, which is the gate that skips whenever the database variable is
 absent, and which was the reason the previous run of that record was not evidence
-even though it was green. The twenty-five gates above are a later tree than that
+even though it was green. The twenty-six gates above are a later tree than that
 record: skip-audit, no-silent-skips, cover-floor, dead-export, predicate-cov,
 tree-state, fuzz and flake were added
 after it, so the record's own gate list is a statement about that run, not about
@@ -683,7 +683,7 @@ and all four are recorded at the code:
    header died on it with `printf: Illegal option -`, which names a shell status
    rather than the line.
 
-Step 1 runs FIVE of the twenty-five gates and says so in the transcript and in its
+Step 1 runs FIVE of the twenty-six gates and says so in the transcript and in its
 footer. The grep names the five rather than matching `==>`, which also matches the
 twenty "not selected" lines — a reader handed twenty of those above five `ok` lines
 has been given the opposite of the point.
@@ -1052,7 +1052,7 @@ one that stays is the regression test for the real fix, and it replays on every
 
 ## The `fuzz` gate, and why it is bounded
 
-Twenty-five gates now. `fuzz` runs all six targets for `-FuzzSeconds` each — 20 by
+twenty-six gates now. `fuzz` runs all six targets for `-FuzzSeconds` each — 20 by
 default, raise it for a release check — and a failing input is committed under
 `testdata/fuzz/` where it replays forever after.
 
@@ -1062,9 +1062,9 @@ repository has already paid for that twice in the tools it named and did not run
 is the part that finds new inputs. Both halves are recorded in the gate's comment
 rather than left as a guess about which one matters.
 
-### Seven of twenty-five gates have ever been recorded red
+### Seven of twenty-six gates have ever been recorded red
 
-`scripts/verify.ps1` runs twenty-five gates. Every run leaves a record in
+`scripts/verify.ps1` runs twenty-six gates. Every run leaves a record in
 `dist/verification/` saying, per gate, whether it passed or failed. There are **40**
 records. `TestAGateThatHasNeverFailedIsNamed` reads all of them and answers the
 question the count of gates cannot:
@@ -1084,7 +1084,7 @@ A gate that has never gone red is either working or is not checking anything, an
 two are indistinguishable from its output. `golangci-lint` named eleven linters for
 this repository's whole life without running once, and the first run found **526
 findings** — nothing about it was visible, because it printed a line and exited 0. So
-"twenty-four gates, all passed" claims much less than it appears to, and this makes
+"twenty-five gates, all passed" claims much less than it appears to, and this makes
 the seventeen visible **by name**.
 
 The assertion is not the log line. It is:
@@ -1149,7 +1149,7 @@ what makes a re-run reproduce rather than re-roll.
 
 `-race` is already on the main `test` gate. This is deliberately **not** `+2` runs of
 everything: four packages, three counts, and a written reason per package is a gate
-somebody runs. Twenty-five gates that take an hour are twenty-four gates.
+somebody runs. twenty-six gates that take an hour are twenty-five gates.
 
 #### The cross-module package, and the gate that caught me naming it wrongly
 
