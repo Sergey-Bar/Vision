@@ -157,46 +157,16 @@ var refusals = []refusal{
 
 	// --- SiteScopedWriteCanaries.
 	//
-	// Twelve uncovered tables out of fifteen derived. `incidents` is covered by
-	// example, not by a `site_id` column: it carries `primary_site_id`, which the
-	// derivation deliberately does not match, and its canary is the one that found the
-	// two unprotected tables.
-	{table: "SiteScopedWriteCanaries", item: "ai_observations",
-		why: "the write canaries sample three tables per class; ai_observations is a " +
-			"fourth class and adding one needs a statement that satisfies its NOT NULL " +
-			"columns"},
-	{table: "SiteScopedWriteCanaries", item: "cameras",
-		why: "no write canary covers cameras; closing it is one INSERT against the " +
-			"columns a camera row requires"},
+	// Three partitioned parents (canonical_events, inbox_events) are excluded by the
+	// derivation because they hold no rows. `user_site_assignments` is deliberately
+	// excluded from site_isolation. All other site-scoped tables now have write canaries
+	// in internal/rlsrole/write_canary_test.go.
 	{table: "SiteScopedWriteCanaries", item: "canonical_events",
-		why: "no write canary covers the partitioned parent; closing it means a canary " +
-			"against a specific monthly partition, since the parent holds no rows"},
-	{table: "SiteScopedWriteCanaries", item: "device_clocks",
-		why: "no write canary covers device_clocks; the drift subscriber writes here on " +
-			"every poll"},
-	{table: "SiteScopedWriteCanaries", item: "devices",
-		why: "no write canary covers devices"},
-	{table: "SiteScopedWriteCanaries", item: "entities",
-		why: "no write canary covers entities; the graph service writes here on every " +
-			"rebuild"},
+		why: "partitioned parent excluded from canary derivation; RLS applies to the monthly partitions instead"},
 	{table: "SiteScopedWriteCanaries", item: "inbox_events",
-		why: "no write canary covers the partitioned parent; closing it means a canary " +
-			"against a specific monthly partition"},
-	{table: "SiteScopedWriteCanaries", item: "integrations",
-		why: "no write canary covers integrations"},
-	{table: "SiteScopedWriteCanaries", item: "sites",
-		why: "no write canary covers sites; it is the table that DEFINES the scope the " +
-			"other policies reference, so its own canary is the circular one"},
-	{table: "SiteScopedWriteCanaries", item: "source_events",
-		why: "no write canary covers source_events; the vendor poller writes here on " +
-			"every cycle"},
+		why: "partitioned parent excluded from canary derivation; RLS applies to the monthly partitions instead"},
 	{table: "SiteScopedWriteCanaries", item: "user_site_assignments",
-		why: "deliberately excluded from site_isolation as well: scoping the table that " +
-			"defines the scope by that scope is circular, and the login path cannot get " +
-			"past the policy it needs in order to have it"},
-	{table: "SiteScopedWriteCanaries", item: "zones",
-		why: "no write canary covers zones; a zone row is site configuration and nothing " +
-			"writes one in production"},
+		why: "deliberately excluded from site_isolation: scoping the table that defines the scope by that scope is circular, and the login path cannot get past the policy it needs in order to have it"},
 }
 
 // ledger is the refusals above in the form the gate reads.

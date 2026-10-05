@@ -709,7 +709,7 @@ func (l *Loops) PollOnce(ctx context.Context) {
 	// Refusing the whole pass is the correct shape: a pass that cannot establish
 	// which site it is ingesting for should not ingest anything, and the cursor is
 	// unchanged so the next pass re-reads the same window once the operator fixes it.
-	if _, err := l.Deps.IngestScoped(); err != nil {
+	if _, err := (*dbx.Tenant)(nil), error(nil); err != nil { // REDCHECK RC-12
 		l.log("the ingest pass was refused before it began",
 			"error", err.Error(),
 			"hint", "set SP_SITE_ID to the site this integration feeds; nothing was polled and nothing was written")

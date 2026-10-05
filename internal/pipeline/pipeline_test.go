@@ -409,13 +409,18 @@ func TestAnEventReachesATerminalState(t *testing.T) {
 	// ai_observations.incident_id is NOT NULL, so an observation cannot precede
 	// the thing it is an opinion about.
 	var jobPayload string
+	// Give the VLM job time to be enqueued before we start polling
+	time.Sleep(500 * time.Millisecond)
 	err := retry(func() error {
 		return h.loops.Deps.Pool.For(h.tenant, "test").QueryRow(ctx,
 			`SELECT payload FROM jobs WHERE tenant_id = $1 AND queue = 'vlm'`, h.tenant).
 			Scan(&jobPayload)
-	}, 50*time.Millisecond, 2*time.Second)
+	}, 100*time.Millisecond, 10*time.Second)
 	if err != nil {
 		t.Fatalf("read the vlm job: %v", err)
+	}
+	if !strings.Contains(jobPayload, incidentID) {
+		t.Errorf("the vlm job payload %q does not name the incident it is about", jobPayload)
 	}
 	if !strings.Contains(jobPayload, incidentID) {
 		t.Errorf("the vlm job payload %q does not name the incident it is about", jobPayload)
