@@ -255,7 +255,7 @@ func DeriveDispatchExecutors(root string, dispatchTypes map[string]bool) (Table,
 			item.Covered = true
 			item.Evidence = where
 		} else {
-			item.Evidence = "a case label in internal/dispatch's registeredExecutors"
+			item.Evidence = "a case label in internal/dispatch's executorFor"
 		}
 		t.Items = append(t.Items, item)
 	}
@@ -266,10 +266,33 @@ func DeriveDispatchExecutors(root string, dispatchTypes map[string]bool) (Table,
 // executorCase matches a case label in a switch on a dispatch type. The map-key form
 // is accepted as well, because the executor registry could reasonably be either and
 // a gate that only understood one would report a false green on the other.
+// The registration is read from `internal/dispatch/dispatch.go`. Two shapes are accepted for
+// a case label, because both are reasonable and a gate that understood only one would report
+// a false green on the other:
+//
+//	dispatch.go:	case "notify_operator":
+//	dispatch.go:	case TypeNotifyOperator:
+//
+// The second is a constant declared in the same file, so the gate resolves the identifier
+// through that file's own constant block rather than guessing. That resolution is why this
+// is not a hardcoded list of the four names: a list would need editing when a name changed,
+// and a list nobody edited is a gate passing on a stale vocabulary.
+//
+// `executorFor` is the function whose cases count. The lookup accepts both a package-level
+// `func executorFor` and a method - `func (d *Dispatcher) executorFor` - because the
+// executor table became a method when the destinations moved behind a struct, and a gate
+// pinned to one spelling reported four uncovered types against a working dispatcher. That
+// is a false red on a tree whose side effects all work, which is the other direction of the
+// same failure and just as misleading.
 var (
-	executorCase   = regexp.MustCompile(`case\s+"([a-z_]+)"\s*:`)
-	executorMapKey = regexp.MustCompile(`"([a-z_]+)"\s*:\s*[A-Za-z_]`)
+	executorCaseLiteral = regexp.MustCompile(`case\s+"([a-z_]+)"\s*:`)
+	executorCaseConst   = regexp.MustCompile(`case\s+([A-Z][A-Za-z0-9_]*)\s*:`)
+	executorFuncDecl    = regexp.MustCompile(`func\s+(?:\([^)]*\)\s*)?(registeredExecutors|executorFor)\b`)
 )
+
+// constantDecl matches a file-local string constant declaration, e.g.
+// `TypeNotifyOperator = "notify_operator"`.
+var constantDecl = regexp.MustCompile(`(?m)^\s*([A-Z][A-Za-z0-9_]*)\s*=\s*"([a-z_]+)"`)
 
 // registeredExecutors reads the labels in `internal/dispatch`'s executor switch.
 func registeredExecutors(src string) map[string]string {
@@ -277,16 +300,27 @@ func registeredExecutors(src string) map[string]string {
 	if strings.TrimSpace(src) == "" {
 		return out
 	}
-	// Only the switch is scanned, not the whole file: the file also carries the
-	// topics and the payload-renderer vocabulary, and a name shared between two
-	// vocabularies would otherwise read as an executor registration.
-	body := executorSwitchBody(src)
-	for _, m := range executorCase.FindAllStringSubmatch(body, -1) {
-		out[m[1]] = "internal/dispatch registeredExecutors case " + m[1]
+	constants := map[string]string{}
+	for _, m := range constantDecl.FindAllStringSubmatch(src, -1) {
+		constants[m[1]] = m[2]
 	}
-	for _, m := range executorMapKey.FindAllStringSubmatch(body, -1) {
-		if _, already := out[m[1]]; !already {
-			out[m[1]] = "internal/dispatch registeredExecutors key " + m[1]
+
+	body := executorSwitchBody(src)
+	for _, m := range executorCaseLiteral.FindAllStringSubmatch(body, -1) {
+		out[m[1]] = "internal/dispatch executorFor case \"" + m[1] + "\""
+	}
+	for _, m := range executorCaseConst.FindAllStringSubmatch(body, -1) {
+		value, known := constants[m[1]]
+		if !known {
+			// A label whose constant is not declared in this file. Recorded under its own
+			// name so it appears in the table as an entry nothing matched, rather than
+			// contributing nothing silently.
+			out[m[1]] = "internal/dispatch executorFor case " + m[1] +
+				" (constant not declared in that file)"
+			continue
+		}
+		if _, already := out[value]; !already {
+			out[value] = "internal/dispatch executorFor case " + m[1]
 		}
 	}
 	return out
@@ -303,14 +337,14 @@ func registeredExecutors(src string) map[string]string {
 // gate name something as covered that a reviewer then has to look at, which is the
 // safe direction.
 func executorSwitchBody(src string) string {
-	at := strings.Index(src, "func registeredExecutors(")
-	if at < 0 {
+	at := executorFuncDecl.FindStringIndex(src)
+	if at == nil {
 		return src
 	}
-	if end := strings.Index(src[at:], "\n}\n"); end > 0 {
-		return src[at : at+end+2]
+	if end := strings.Index(src[at[1]:], "\n}\n"); end > 0 {
+		return src[at[1] : at[1]+end+2]
 	}
-	return src[at:]
+	return src[at[1]:]
 }
 
 // ---------------------------------------------------------------------------

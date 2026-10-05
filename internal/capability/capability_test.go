@@ -88,37 +88,22 @@ type refusal struct {
 // what is not working, and what would make it work. An entry that answers only the
 // first is a backlog item with extra steps.
 //
-// The three groups, in the order a reader wants them:
+// The DispatchExecutors group is GONE, and its absence is the point.
 //
-//   - **Dispatch.** Refused only because the executor does not exist yet, and each one
-//     names the commit that closes it. `internal/dispatch` is the closing work and it is
-//     in this same branch, so these are entries with a shelf life measured in commits,
-//     not features.
-//   - **Queues.** Three of the four declared queues have no producer at all. These are
-//     M1 scope decisions, not defects waiting to be fixed by the next person to look:
-//     `evidence_fetch` closes when the evidence worker lands, `rule_bulk` when bulk
-//     compile is scheduled, `checkpoint_seal` when sealing becomes incremental.
-//   - **Contract.** Declared routes nothing implements, and one implemented route the
-//     contract does not declare. Both are Tier 2 work in the same branch.
+// It landed with four refusals and `internal/dispatch` closed all four. The gate then
+// failed on its own stale-refusal check - "fetch_evidence is in the refusal ledger and IS
+// now covered" - which is exactly the friction the two-direction rule exists to create. An
+// exemption that survives its defect closing is an exemption nobody is maintaining.
+//
+// The remaining two groups:
+//
+//   - Queues. Three of the four declared queues have no producer at all. These are scope
+//     decisions, not defects waiting to be fixed by the next person to look:
+//     `evidence_fetch` closes when the evidence worker lands, `rule_bulk` when bulk compile
+//     is scheduled, `checkpoint_seal` when sealing becomes incremental.
+//   - Contract. Declared routes nothing implements, and one implemented route the contract
+//     does not declare.
 var refusals = []refusal{
-	// --- DispatchExecutors: closed by internal/dispatch, which lands in this branch.
-	//
-	// `notify_operator` is the one that matters most: a shipped built-in bundle rule
-	// asks for it, so an operator who installs this product and waits for a
-	// notification is waiting for a thing with no code behind it.
-	{table: "DispatchExecutors", item: "notify_operator",
-		why: "the dispatcher lands later in this branch; until then a rule asking for " +
-			"notify_operator parses, validates and is discarded"},
-	{table: "DispatchExecutors", item: "notify_supervisor",
-		why: "the dispatcher lands later in this branch and shares the notify executor " +
-			"with a different destination"},
-	{table: "DispatchExecutors", item: "request_vlm",
-		why: "the dispatcher lands later in this branch; the VLM queue exists and the " +
-			"rule that selects it does not"},
-	{table: "DispatchExecutors", item: "fetch_evidence",
-		why: "the dispatcher lands later in this branch; QueueEvidenceFetch has no " +
-			"producer, so an executor alone would enqueue into nothing"},
-
 	// --- QueueEndpoints.
 	{table: "QueueEndpoints", item: "evidence_fetch",
 		why: "the evidence worker lands later in this branch; nothing enqueues evidence " +
