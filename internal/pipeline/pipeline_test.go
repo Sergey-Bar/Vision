@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"strings"
@@ -28,6 +29,23 @@ import (
 	"github.com/Sergey-Bar/Ai-Captain/internal/simulate"
 	"github.com/Sergey-Bar/Ai-Captain/internal/testutil"
 )
+
+func retry(fn func() error, interval, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		if err := fn(); err == nil {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timed out: %w", deadlineError{})
+		}
+		time.Sleep(interval)
+	}
+}
+
+type deadlineError struct{}
+
+func (deadlineError) Error() string { return "deadline exceeded" }
 
 // The end-to-end pipeline test.
 //
@@ -391,9 +409,12 @@ func TestAnEventReachesATerminalState(t *testing.T) {
 	// ai_observations.incident_id is NOT NULL, so an observation cannot precede
 	// the thing it is an opinion about.
 	var jobPayload string
-	if err := h.loops.Deps.Pool.For(h.tenant, "test").QueryRow(ctx,
-		`SELECT payload FROM jobs WHERE tenant_id = $1 AND queue = 'vlm'`, h.tenant).
-		Scan(&jobPayload); err != nil {
+	err := retry(func() error {
+		return h.loops.Deps.Pool.For(h.tenant, "test").QueryRow(ctx,
+			`SELECT payload FROM jobs WHERE tenant_id = $1 AND queue = 'vlm'`, h.tenant).
+			Scan(&jobPayload)
+	}, 50*time.Millisecond, 2*time.Second)
+	if err != nil {
 		t.Fatalf("read the vlm job: %v", err)
 	}
 	if !strings.Contains(jobPayload, incidentID) {

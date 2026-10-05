@@ -440,10 +440,11 @@ func (s *Server) handleIncidentList(w http.ResponseWriter, r *http.Request, p id
 	state := r.URL.Query().Get("state")
 	degradedStr := r.URL.Query().Get("degraded")
 	var degraded *bool
-	if degradedStr == "true" {
+	switch degradedStr {
+	case "true":
 		v := true
 		degraded = &v
-	} else if degradedStr == "false" {
+	case "false":
 		v := false
 		degraded = &v
 	}

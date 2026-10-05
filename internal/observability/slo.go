@@ -76,14 +76,24 @@ func ReadingsFrom(r *Registry) Readings {
 	if r == nil {
 		return Readings{}
 	}
+	var visibilities []time.Duration
+	if r.IncidentVisibility != nil {
+		// The reservoir stores seconds as float64; convert to time.Duration
+		samples := r.IncidentVisibility.Samples()
+		visibilities = make([]time.Duration, len(samples))
+		for i, s := range samples {
+			visibilities[i] = time.Duration(s * float64(time.Second))
+		}
+	}
 	return Readings{
 		LostEvents: float64(r.Counters.Get(CounterInboxAccepted)) -
 			float64(r.Counters.Get(CounterInboxDeadLettered)),
-		DeadLettered:        float64(r.Counters.Get(CounterInboxDeadLettered)),
-		AIDegradedDecisions: r.Gauges.Get(GaugeIncidentDegraded),
-		AIDegradedMeasured:  r.Gauges.Measured(GaugeIncidentDegraded),
-		DiskFreePercent:     r.Gauges.Get(GaugeEvidenceDiskFree),
-		DiskFreeMeasured:    r.Gauges.Measured(GaugeEvidenceDiskFree),
+		DeadLettered:         float64(r.Counters.Get(CounterInboxDeadLettered)),
+		IncidentVisibilities: visibilities,
+		AIDegradedDecisions:  r.Gauges.Get(GaugeIncidentDegraded),
+		AIDegradedMeasured:   r.Gauges.Measured(GaugeIncidentDegraded),
+		DiskFreePercent:      r.Gauges.Get(GaugeEvidenceDiskFree),
+		DiskFreeMeasured:     r.Gauges.Measured(GaugeEvidenceDiskFree),
 	}
 }
 

@@ -384,6 +384,11 @@ func (l *Loops) SampleGauges(ctx context.Context) {
 		l.set(observability.GaugeIngestLagSeconds, p95)
 	}
 
+	// Incident visibility p95 from the reservoir.
+	if vis := l.Deps.Metrics.IncidentVisibility.QuantileSeconds(0.95); vis >= 0 {
+		l.set(observability.GaugeIncidentVisibility, vis)
+	}
+
 	// Devices in the severe drift band, and the AI plane's absence. Both are
 	// gauges rather than counters because they are states an operator watches
 	// drift, not events they accumulate.
@@ -1215,6 +1220,13 @@ func (l *Loops) decide(ctx context.Context, item inbox.Lease, result normalize.R
 	}
 	l.log("incident raised", "incident_id", incidentID, "rule_id", decision.RuleID,
 		"state", string(decision.State), "dispatches", len(decision.Dispatch))
+
+	// Incident visibility: time from event normalization to incident creation.
+	// This is the SLO's incident_visibility p95 - the AI path latency.
+	if l.Deps.Metrics != nil && l.Deps.Metrics.IncidentVisibility != nil {
+		vis := time.Since(result.NormalizedAt).Seconds()
+		l.Deps.Metrics.IncidentVisibility.Observe(vis)
+	}
 
 	// The rule's dispatches were enqueued by `CreateIncident`, in its transaction.
 	// There is deliberately nothing here: a second transaction at this point is the gap

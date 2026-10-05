@@ -59,6 +59,7 @@ const (
 	GaugeAIUnavailable      = "ai_unavailable"
 	GaugeClockSevereDevices = "clock_severe_device_count"
 	GaugePostgresConns      = "postgres_conns_in_use"
+	GaugeIncidentVisibility = "incident_visibility_seconds"
 )
 
 // The closed set, split by kind.
@@ -89,6 +90,7 @@ var gaugeMetrics = map[string]bool{
 	GaugeJobQueueDepth: true, GaugeClockDriftMS: true, GaugeDeadLetterCount: true,
 	GaugeEvidenceDiskFree: true, GaugeIncidentOpen: true, GaugeIncidentDegraded: true,
 	GaugeAIUnavailable: true, GaugeClockSevereDevices: true, GaugePostgresConns: true,
+	GaugeIncidentVisibility: true,
 }
 
 // knownMetrics is the union, so a call site can ask whether a name is legal at
@@ -308,6 +310,10 @@ type Registry struct {
 	// evaluated without keeping every observation for ever.
 	IngestLag *Reservoir
 
+	// IncidentVisibility keeps a reservoir of incident visibility samples so the
+	// SLO's p95 can be evaluated without keeping every observation for ever.
+	IncidentVisibility *Reservoir
+
 	// slo is the last evaluation's verdict, so the process that runs the
 	// objectives and the surface an operator reads them on share one record
 	// without either knowing about the other.
@@ -352,9 +358,10 @@ func (r *Registry) SLOs() SLOState {
 // NewRegistry builds a registry.
 func NewRegistry() *Registry {
 	return &Registry{
-		Counters:  NewCounters(),
-		Gauges:    NewGauges(),
-		IngestLag: NewReservoir(1024),
+		Counters:           NewCounters(),
+		Gauges:             NewGauges(),
+		IngestLag:          NewReservoir(1024),
+		IncidentVisibility: NewReservoir(1024),
 	}
 }
 
@@ -374,6 +381,9 @@ func (r *Registry) Render() string {
 	}
 	if lag := r.IngestLag.QuantileSeconds(0.95); lag >= 0 {
 		fmtGauge(&b, GaugeIngestLagSeconds, lag)
+	}
+	if vis := r.IncidentVisibility.QuantileSeconds(0.95); vis >= 0 {
+		fmtGauge(&b, GaugeIncidentVisibility, vis)
 	}
 	return b.String()
 }
@@ -455,4 +465,11 @@ func (r *Reservoir) Len() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return len(r.values)
+}
+
+// Samples returns a copy of all samples in the reservoir.
+func (r *Reservoir) Samples() []float64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]float64(nil), r.values...)
 }
