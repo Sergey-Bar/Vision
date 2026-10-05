@@ -194,7 +194,7 @@ func mustFailText(t *testing.T, m Model, budget float64) string {
 // because an operator reading "budget exceeded" on day one of a month concludes they
 // have overspent a month.
 func TestTheCeilingRefusesTheCallThatWouldCrossIt(t *testing.T) {
-	g := newFixedGuard(t, thePriceList(), 200)
+	g := newFixedGuard(t)
 	site := "north-gate"
 
 	affordable := g.EventsAffordable(site)
@@ -235,7 +235,7 @@ func TestTheCeilingRefusesTheCallThatWouldCrossIt(t *testing.T) {
 // One at a time would let a burst through, which is the shape of the incident this
 // guards against.
 func TestABatchIsPricedAsABatch(t *testing.T) {
-	g := newFixedGuard(t, thePriceList(), 200)
+	g := newFixedGuard(t)
 	site := "north-gate"
 
 	if err := g.Spend(site, 50); err == nil {
@@ -254,7 +254,7 @@ func TestABatchIsPricedAsABatch(t *testing.T) {
 // A negative event count would CREDIT a budget, and a budget that can be credited is
 // not a budget.
 func TestANegativeBatchIsRefusedRatherThanCredited(t *testing.T) {
-	g := newFixedGuard(t, thePriceList(), 200)
+	g := newFixedGuard(t)
 	if err := g.Spend("north-gate", -10); err == nil {
 		t.Fatal("a negative batch was accepted")
 	}
@@ -266,7 +266,7 @@ func TestANegativeBatchIsRefusedRatherThanCredited(t *testing.T) {
 // Sites do not share a budget, because a single counter across every site is one
 // site's events spending another's allowance.
 func TestSitesDoNotShareABudget(t *testing.T) {
-	g := newFixedGuard(t, thePriceList(), 200)
+	g := newFixedGuard(t)
 	if err := g.Spend("north-gate", 44); err != nil {
 		t.Fatalf("north-gate: %v", err)
 	}
@@ -282,7 +282,7 @@ func TestSitesDoNotShareABudget(t *testing.T) {
 // two sites in two zones do not disagree about when the budget resets.
 func TestTheBudgetResetsOnAUtcDayBoundary(t *testing.T) {
 	day := time.Date(2026, 10, 4, 23, 59, 0, 0, time.UTC)
-	g := newFixedGuard(t, thePriceList(), 200)
+	g := newFixedGuard(t)
 	g.WithClock(func() time.Time { return day })
 
 	if err := g.Spend("north-gate", 44); err != nil {
@@ -302,7 +302,7 @@ func TestTheBudgetResetsOnAUtcDayBoundary(t *testing.T) {
 // Check must not charge. An operator asking whether a site would fit, and a worker
 // spending the budget, are the same question with one side.
 func TestCheckDoesNotSpend(t *testing.T) {
-	g := newFixedGuard(t, thePriceList(), 200)
+	g := newFixedGuard(t)
 	for i := 0; i < 100; i++ {
 		if err := g.Check("north-gate", 10); err != nil {
 			t.Fatalf("Check refused on iteration %d: %v", i, err)
@@ -319,7 +319,7 @@ func TestCheckDoesNotSpend(t *testing.T) {
 
 // The report and the guard read the same numbers.
 func TestTheReportIsTheGuardsOwnNumbers(t *testing.T) {
-	g := newFixedGuard(t, thePriceList(), 200)
+	g := newFixedGuard(t)
 	if err := g.Spend("north-gate", 10); err != nil {
 		t.Fatalf("spend: %v", err)
 	}
@@ -337,11 +337,17 @@ func TestTheReportIsTheGuardsOwnNumbers(t *testing.T) {
 	}
 }
 
+// testBudget is the budget every guard in this file is built with. A CONSTANT
+// rather than a parameter because `unparam` is right: fifteen call sites all
+// passing 200 is a signature that asks a reader to think about a choice nobody is
+// making.
+const testBudget = 200.0
+
 // newFixedGuard is a guard with a frozen clock, so every assertion above is about
 // the arithmetic and none of them is about when the test ran.
-func newFixedGuard(t *testing.T, m Model, budget float64) *Guard {
+func newFixedGuard(t *testing.T) *Guard {
 	t.Helper()
-	g, err := NewGuard(m, budget)
+	g, err := NewGuard(thePriceList(), testBudget)
 	if err != nil {
 		t.Fatalf("new guard: %v", err)
 	}

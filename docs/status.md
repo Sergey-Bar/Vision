@@ -1,6 +1,11 @@
 # Status
 
-Last revised 2026-10-04, third pass (the demo, the documents a judge reads, the coverage
+Last revised 2026-10-05 (the POC's Linux build, `pocctl adjudicate`, the cost model with
+an enforced per-site daily ceiling, the coverage panel, and the zero-zone measurement.
+Criterion 10 moves from NOT RUN to PASS: 10 pass, 0 fail, 3 not runnable. See
+"The 2026-10-05 pass: the POC builds, the adjudicator, the cost model".)
+
+Previously 2026-10-04, third pass (the demo, the documents a judge reads, the coverage
 panel, and the POC's Linux build. Found and recorded: the console login form has an empty
 CSRF token and the POST never checks one. See "The 2026-10-04 pass, second half".)
 
@@ -9,9 +14,9 @@ claim narrowed to what is true; nine of the seventeen never-red gates proven by 
 with a transcript, and the other nine recorded with what was tried and what the failure
 was. See "The 2026-10-04 pass over the acceptance criteria and the never-red list".)
 
-Gate: 25 gates green, `pwsh -File scripts/verify.ps1 -NoRace`, 2026-10-04, 12 of 25 gates
-now recorded red by hand (was 8 before the force-red harness). Acceptance:
-9 pass, 0 fail, 4 not runnable in this build.
+Gate: 25 gates green, `pwsh -File scripts/verify.ps1 -NoRace`, 2026-10-05, 17 of 25 gates
+now recorded red by hand (was 8). Acceptance:
+10 pass, 0 fail, 3 not runnable in this build.
 
 Previously 2026-10-04 (Phase 0: the product runs. `Dockerfile`,
 `docker-compose.yml`, `cmd/security-seed`, a distroless runtime image with an
@@ -629,6 +634,98 @@ Red-checked, and the corpus file is the mutation's evidence:
 --- restored ---
     ok
 ```
+
+## The 2026-10-05 pass: the POC builds, the adjudicator, the cost model
+
+### `pocctl adjudicate` — a false-positive rate without anybody watching footage
+
+Criterion 07 asks for `FP / (TP + FP)` over events **a person adjudicated**, and
+`testdata/groundtruth.json` exists for that with a `$comment` forbidding it being
+filled with a number nobody looked at. This does not weaken that rule. It commits
+answers for the two clips whose verdict is in the frame — `bird-synthetic.mp4`, a
+drawn bird on a flat background offered to a vehicle detector, and
+`injection-hostile.mp4`, the adversarial fixture with the injection string rendered
+as pixels over a frame with no vehicle — in a separate
+`testdata/groundtruth.synthetic.json`.
+
+`car-crossing.mp4` is **not** in it. A real car on a real road is a judgement about
+what counts as a crossing, and nobody has watched the footage, so it has no mark in
+either file. A test fails if somebody adds one, because a `$comment` is not a
+control.
+
+The file is keyed by **clip, not by tag**: tags are generated per run, so a
+committed file cannot carry them. `Store.TagsForClip` resolves a clip to this run's
+own pushed tags through `detections.clip_ref`, and the join is the same
+outbox → detection → run join `MarkGroundTruth` uses — so a synthetic verdict lands
+on an event that actually left the process or it does not land at all. A clip that
+resolves to nothing is reported `NOT FOUND` and **not counted**, with the count of
+what was not counted printed beside the rate.
+
+Seven tests pin the boundary rather than the arithmetic, and one of them asserts
+`testdata/groundtruth.json` is **still empty**, so a well-meaning edit is caught by
+a gate rather than by whoever reads it next.
+
+### `internal/cost` — the arithmetic, and a ceiling that refuses
+
+Criterion 10 is two halves and only one is a number. `$0.15 per event` is `3 calls ×
+$0.05 per call`, and the two are different numbers: a site that corroborates
+against three signals spends three times what one that does not, and a model that
+conflates them understates it by a factor of three. The event rate is an argument
+at every call site and never a default, because a default event rate turns a cost
+model into a sales claim.
+
+The **daily** ceiling is derived from the monthly budget and cannot be set beside
+it. A monthly budget checked monthly lets a site spend a month's money in a day and
+find out afterwards; a daily ceiling bounds the rate, which is what an event-rate
+spike actually violates.
+
+Two real defects the tests found, both in the code:
+
+- `Headroom` returned `Budget/USD` unconditionally, so a site **nine times over
+  budget reported `0.11x`** — a positive headroom on the one site in a table with
+  no room left.
+- Every money comparison was exact, and `0.05 × 3` is `0.15000000000000002`, so a
+  site sitting exactly on its ceiling was refused the event that lands on it. Half a
+  cent of tolerance; rounding to cents instead would make `USD` disagree with the
+  sum of its own `Calls × PerCall`.
+
+Criterion 10 moves from `NOT RUN` to `PASS`, and its evidence leads with the **rate
+it used** and says the claim holds up to 44 events/day and that this build has
+never seen a site's rate. A criterion row that said pass with no rate in it would be
+a claim about a site nobody has.
+
+### The zero-zone measurement
+
+Every `*.zones.json` opens with the same sentence: *a wrong line produces ZERO
+events and NO error*. That is the failure the measurement makes falsifiable — if
+the detector proposes a box and it touches no declared zone, the **zone** is wrong.
+
+A **line** is crossed, not contained: a crossing is a box travelling *over* a line,
+so the test is a segment/rectangle intersection in all three arrangements. A
+containment test would call every box touching a line a hit, which makes the
+measurement vacuous on the exact geometry it exists to check. And a **concave**
+polygon is not missed by the corner test — a small box in the notch of an L has no
+corner and no edge midpoint inside it.
+
+It is refused at load rather than reported clean: a zone file declaring no geometry
+makes the measurement 100 % by construction, and a line with the wrong endpoint
+count is a file somebody will read and believe.
+
+### Phase 3.3
+
+`evidence` is the fourth write-canary class and the one this file was missing
+longest — it is the table a tenant's whole compliance claim rests on, and a
+cross-tenant write into it is a fabricated exhibit. Its `sha256` CHECK means the
+canary's values must be 64 real hex characters, and its `storage_ref` CHECK refuses
+absolute paths, so the canary uses a **relative** reference and a failure here is a
+policy failure rather than a constraint one.
+
+The dead-export gate found two ledger entries that had stopped matching anything and
+six exports in `internal/cost` that nothing outside read. Four are now unexported,
+`RollDay` is deleted (the calendar key already makes yesterday's invisible), and two
+are wired where they belong: criterion 10 now asks the guard `Check()` before it
+`Spend()`, demonstrating the preflight does not charge for the question, and
+asserts the refusal is `ErrOverBudget` by `errors.Is` rather than a nil check.
 
 ## The 2026-10-04 pass, second half: the demo, the documents, and the coverage panel
 

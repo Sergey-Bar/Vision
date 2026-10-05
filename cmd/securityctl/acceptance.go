@@ -157,11 +157,6 @@ func runAcceptance(ctx context.Context, env *command.Env, args []string) error {
 			"a second VMS with a different API",
 			"the neutrality invariant is enforced by three tests and the write surface is a closed "+
 				"allow-list; the claim itself needs a second vendor to be evidenced"),
-
-		notRun("10", "A vision model costs $0.15 per event; twenty cameras cost under $200/month",
-			"a key, and a real event rate",
-			"the cost is modelled, capped per site per day, and counted by the soak; the number depends "+
-				"on a real event rate this build cannot have"),
 	)
 
 	// 13, checked: the general profile exists, is shadow, and a test fails if a
