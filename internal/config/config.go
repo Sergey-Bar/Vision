@@ -33,6 +33,15 @@ import (
 	"time"
 
 	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
+
+	// `dispatch` owns the destinations file format and its validation, so it owns the
+	// default path too. The dependency runs config -> dispatch rather than the reverse:
+	// `config` is the package that decides WHERE things live, and a file format's
+	// default location is part of that decision.
+	//
+	// It is not a cycle. `dispatch` imports `dbx`, `jobs`, `outbox` and `rules`, and
+	// none of them import `config`.
+	"github.com/Sergey-Bar/Ai-Captain/internal/dispatch"
 )
 
 // Config is the resolved configuration for one install.
@@ -85,8 +94,13 @@ type Config struct {
 	// CheckpointDir and CheckpointKeyPath seal the audit ledger. An empty
 	// CheckpointDir is allowed and disables sealing, which is itself visible in
 	// the readiness report rather than silently doing nothing.
+	// DispatchDestinationsPath is the file `internal/dispatch` reads its notification
+	// destinations from. See the assignment in LoadFrom for why it is a path and not a
+	// value on this struct.
 	CheckpointDir     string
 	CheckpointKeyPath string
+
+	DispatchDestinationsPath string
 
 	// PollInterval is how often the ingest loop asks the adapter for events.
 	PollInterval time.Duration
@@ -177,6 +191,21 @@ func LoadFrom(get Lookup) (Config, error) {
 	c.EvidenceRoot = strings.TrimSpace(get("SP_EVIDENCE_ROOT"))
 	c.CheckpointDir = strings.TrimSpace(get("SP_CHECKPOINT_DIR"))
 	c.CheckpointKeyPath = strings.TrimSpace(get("SP_CHECKPOINT_KEY"))
+
+	// DispatchDestinationsPath is where `internal/dispatch` reads its destinations from.
+	//
+	// A PATH and not the destinations themselves, for the reason `internal/config` says
+	// about every other field: a field on Config is a field somebody will print, and a
+	// destination carries a URL and a `secret_ref` rather than a secret - the secret is
+	// named, not held. Putting the destinations on Config would make that rule harder to
+	// keep, and `dispatch.LoadDestinations` already owns the file format and its
+	// validation.
+	//
+	// Absent means the default path, and a missing default path means an install with no
+	// destinations, which is a supported configuration and not an error. A bundle that
+	// notifies is refused at startup by `dispatcher.CheckDestinations`.
+	c.DispatchDestinationsPath = strings.TrimSpace(
+		envOr(get, "SP_DISPATCH_DESTINATIONS", dispatch.DefaultDestinationsPath))
 
 	c.AIEndpoint = strings.TrimRight(strings.TrimSpace(get("SP_AI_ENDPOINT")), "/")
 	c.LogLevel = strings.ToLower(envOr(get, "SP_LOG_LEVEL", DefaultLogLevel))

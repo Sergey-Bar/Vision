@@ -222,10 +222,8 @@ trust.** It now also runs in a container, which is not a second gate and not a
 Linux fork of one:
 
 ```powershell
-.\scripts\verify.ps1            # contract-check (three surfaces), contract-sync,
-                                # vet, gofmt, lint, generated-code, test -race
-                                # -p 1, red-check, migration-phases, sql-guard,
-                                # skills-audit, rules-lint, rls-canary, ai-runtime
+.\scripts\verify.ps1            # see below - this comment used to name 14 of 26
+                                # gates and say `-p 1`, and both were wrong
 .\scripts\verify.ps1 -NoRace    # same, without the race detector
 .\scripts\run-verify.ps1        # same, with the toolchain on PATH - none of go,
                                 # gofmt, gcc, golangci-lint, protoc or

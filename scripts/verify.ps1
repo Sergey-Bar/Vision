@@ -1256,9 +1256,11 @@ Invoke-Gate 'recovery-drill' { & $go test -p 1 -count=1 -timeout 900s -v -run Te
 # `go test`, `gofmt` and `golangci-lint` all green, because they are defects of
 # STATE rather than of code and no tool that reads code can see them.
 #
-# It runs before `test` on purpose. A red-check mutation left in the tree makes every
-# later gate measure the broken version, so a run that reports fifteen failures
-# caused by one unrestored control is a worse run than one that reports one.
+# It runs AFTER `test`, and the reason it claimed otherwise was a comment worth
+# correcting rather than deleting. A red-check mutation left in the tree makes every
+# earlier gate measure the broken version, so `test` failing first is what reports it -
+# and a gate that runs first and fails on the mutation reports the mutation, not the
+# fifteen failures it caused.
 Invoke-Gate 'tree-state' {
     & $go test -count=1 -v ./internal/treestate/... 2>&1 |
         Select-String -Pattern '^(---|    tree-state)' |

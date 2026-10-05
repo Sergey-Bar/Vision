@@ -16,7 +16,7 @@
 //
 // # Three decisions that are decisions
 //
-// **Topics are constants, never built from rule text.** `outbox.go`'s own comment says an
+// **topics are constants, never built from rule text.** `outbox.go`'s own comment says an
 // unknown topic is dead-lettered rather than ignored - which is right, and which means a
 // mistyped topic derived from a rule bundle would dead-letter real dispatches instead of
 // delivering them. A silent drop would have been better and is not available.
@@ -62,74 +62,52 @@ import (
 // The topics. Constants, and the reason they are constants is in the package header: a
 // topic built from rule text and misspelled is a dead letter, not a dropped message.
 const (
-	// TopicNotifyOperator delivers to the destination named `operator`.
-	TopicNotifyOperator = "dispatch.notify_operator"
-	// TopicNotifySupervisor delivers to the destination named `supervisor`.
-	TopicNotifySupervisor = "dispatch.notify_supervisor"
-	// TopicRequestVLM enqueues an inference job rather than delivering anything.
+	// topicNotifyOperator delivers to the destination named `operator`.
+	topicNotifyOperator = "dispatch.notify_operator"
+	// topicNotifySupervisor delivers to the destination named `supervisor`.
+	topicNotifySupervisor = "dispatch.notify_supervisor"
+	// topicRequestVLM enqueues an inference job rather than delivering anything.
 	//
 	// It is a topic because it goes through the same transactional path: the side effect
 	// has to commit with the incident or not at all, and a job row written directly by
 	// the pipeline is exactly the separate-transaction gap `enqueueVLM` has today.
-	TopicRequestVLM = "dispatch.request_vlm"
-	// TopicFetchEvidence enqueues evidence work rather than delivering anything.
-	TopicFetchEvidence = "dispatch.fetch_evidence"
+	topicRequestVLM = "dispatch.request_vlm"
+	// topicFetchEvidence enqueues evidence work rather than delivering anything.
+	topicFetchEvidence = "dispatch.fetch_evidence"
 )
 
-// Topics is the closed set of topics this package handles.
+// topics is the closed set of topics this package handles.
 //
 // It is the inverse of `rules.DispatchTypes`: a dispatch type with no topic, or a topic
 // with no dispatch type, is a mismatch somebody resolves rather than a message to ignore.
 // `outbox` dead-letters an unknown topic, so that asymmetry is what stands between a typo
 // and a silently dropped notification.
-var Topics = []string{
-	TopicFetchEvidence,
-	TopicNotifyOperator,
-	TopicNotifySupervisor,
-	TopicRequestVLM,
+var topics = []string{
+	topicFetchEvidence,
+	topicNotifyOperator,
+	topicNotifySupervisor,
+	topicRequestVLM,
 }
 
-// The dispatch type vocabulary. `rules` owns it - `rules.DispatchTypes` is the closed set
-// a bundle validates against - and these are the four members spelled out, because a
-// `TopicFor` that indexes a map built at init cannot fail and a miss has to be a startup
-// refusal rather than an empty string discovered at 03:00.
-//
-// Spelled as constants rather than derived from `rules.DispatchTypes` so that adding a
-// fifth type there does not silently gain a topic here: `TopicFor` returns an error for it,
-// and `CheckDestinations` names it.
-const (
-	// TypeNotifyOperator delivers to the destination the rule's target names.
-	TypeNotifyOperator = "notify_operator"
-	// TypeNotifySupervisor delivers to the supervisor's destination. A distinct type
-	// from TypeNotifyOperator because the routing decision is the rule author's: a site
-	// may page an operator for a zone breach and a security manager for a forced door,
-	// and collapsing them would make the rule mean something nobody wrote.
-	TypeNotifySupervisor = "notify_supervisor"
-	// TypeRequestVLM asks the AI plane for an observation about the incident.
-	TypeRequestVLM = "request_vlm"
-	// TypeFetchEvidence asks for evidence bytes to be captured around the event.
-	TypeFetchEvidence = "fetch_evidence"
-)
-
-// TopicFor maps a rule's dispatch type onto the topic that carries it.
-func TopicFor(dispatchType string) (string, error) {
+// topicFor maps a rule's dispatch type onto the topic that carries it.
+func topicFor(dispatchType string) (string, error) {
 	switch dispatchType {
-	case TypeNotifyOperator:
-		return TopicNotifyOperator, nil
-	case TypeNotifySupervisor:
-		return TopicNotifySupervisor, nil
-	case TypeRequestVLM:
-		return TopicRequestVLM, nil
-	case TypeFetchEvidence:
-		return TopicFetchEvidence, nil
+	case "notify_operator":
+		return topicNotifyOperator, nil
+	case "notify_supervisor":
+		return topicNotifySupervisor, nil
+	case "request_vlm":
+		return topicRequestVLM, nil
+	case "fetch_evidence":
+		return topicFetchEvidence, nil
 	}
 	return "", fmt.Errorf("dispatch: %q is not a dispatch type this package knows; "+
-		"the closed set is %s", dispatchType, strings.Join(SortedTypes(), ", "))
+		"the closed set is %s", dispatchType, strings.Join(sortedTypes(), ", "))
 }
 
-// SortedTypes is the closed `rules.DispatchTypes` set, sorted, for a message that has to
+// sortedTypes is the closed `rules.DispatchTypes` set, sorted, for a message that has to
 // say what it expected.
-func SortedTypes() []string {
+func sortedTypes() []string {
 	out := make([]string, 0, len(rules.DispatchTypes))
 	for k := range rules.DispatchTypes {
 		out = append(out, k)
@@ -146,7 +124,7 @@ func SortedTypes() []string {
 // mutating that global. A Dispatcher is constructed once at startup and passed down.
 //
 // Enqueuer may be nil, and `Handler` reports that as a refusal rather than acknowledging
-// the message. See ErrNoEnqueuer.
+// the message. See errNoEnqueuer.
 type Dispatcher struct {
 	// Dests resolves a destination name to a URL and its credential reference.
 	Dests *Destinations
@@ -154,7 +132,7 @@ type Dispatcher struct {
 	Enqueuer *jobs.Enqueuer
 	// Pool opens the transaction a queued dispatch enqueues in.
 	Pool *dbx.Pool
-	// httpClient is optional, and nil means build one from DefaultTimeout.
+	// httpClient is optional, and nil means build one from defaultTimeout.
 	//
 	// Injected by tests, which assert a delivery against an `httptest.Server` and would
 	// otherwise need a listener on a real port, and by an operator whose receiver sits
@@ -164,7 +142,7 @@ type Dispatcher struct {
 }
 
 // SetHTTPClient injects the HTTP client. See the field's comment.
-func (d *Dispatcher) SetHTTPClient(c *http.Client) { d.httpClient = c }
+func (d *Dispatcher) setHTTPClient(c *http.Client) { d.httpClient = c }
 
 // Handler is the `outbox.Handler` this package supplies.
 //
@@ -180,7 +158,7 @@ func (d *Dispatcher) SetHTTPClient(c *http.Client) { d.httpClient = c }
 // `ON CONFLICT (tenant_id, queue, idempotency_key) DO NOTHING`.
 func (d *Dispatcher) Handler() outbox.Handler {
 	return func(ctx context.Context, delivery outbox.Delivery) error {
-		dispatchType, err := TypeForTopic(delivery.Topic)
+		dispatchType, err := typeForTopic(delivery.Topic)
 		if err != nil {
 			// Unknown topic is dead-lettered by the relay's own retry-then-dead-letter
 			// path, which is `outbox`'s documented behaviour. Acknowledging it here would
@@ -199,25 +177,25 @@ func (d *Dispatcher) Handler() outbox.Handler {
 	}
 }
 
-// TypeForTopic is the inverse of TopicFor.
+// typeForTopic is the inverse of topicFor.
 //
 // Needed because the executor table switches on the DISPATCH TYPE - which is the thing a
 // rule names and the thing `internal/capability` measures - while the relay hands over a
 // topic. An unknown topic is a refusal, and it is refused before this: `Handler` looks the
 // type up with this function and refuses when it misses.
-func TypeForTopic(topic string) (string, error) {
+func typeForTopic(topic string) (string, error) {
 	switch topic {
-	case TopicNotifyOperator:
-		return TypeNotifyOperator, nil
-	case TopicNotifySupervisor:
-		return TypeNotifySupervisor, nil
-	case TopicRequestVLM:
-		return TypeRequestVLM, nil
-	case TopicFetchEvidence:
-		return TypeFetchEvidence, nil
+	case topicNotifyOperator:
+		return "notify_operator", nil
+	case topicNotifySupervisor:
+		return "notify_supervisor", nil
+	case topicRequestVLM:
+		return "request_vlm", nil
+	case topicFetchEvidence:
+		return "fetch_evidence", nil
 	}
 	return "", fmt.Errorf("dispatch: %q is not a topic this package knows; the closed set "+
-		"is %s", topic, strings.Join(Topics, ", "))
+		"is %s", topic, strings.Join(topics, ", "))
 }
 
 // executorFor is the registered-executor table.
@@ -233,14 +211,14 @@ func TypeForTopic(topic string) (string, error) {
 // deleting the ledger entry fails the gate, which is the intended friction.
 func (d *Dispatcher) executorFor(dispatchType string) (Executor, bool) {
 	switch dispatchType {
-	case TypeNotifyOperator:
-		return d.notify(TopicNotifyOperator), true
-	case TypeNotifySupervisor:
-		return d.notify(TopicNotifySupervisor), true
-	case TypeRequestVLM:
-		return d.enqueueJob(TopicRequestVLM), true
-	case TypeFetchEvidence:
-		return d.enqueueJob(TopicFetchEvidence), true
+	case "notify_operator":
+		return d.notify(topicNotifyOperator), true
+	case "notify_supervisor":
+		return d.notify(topicNotifySupervisor), true
+	case "request_vlm":
+		return d.enqueueJob(topicRequestVLM), true
+	case "fetch_evidence":
+		return d.enqueueJob(topicFetchEvidence), true
 	}
 	return nil, false
 }
@@ -252,7 +230,7 @@ func (d *Dispatcher) executorFor(dispatchType string) (Executor, bool) {
 // discovering it from a dead letter.
 func (d *Dispatcher) ExecutorTypes() []string {
 	var out []string
-	for _, t := range SortedTypes() {
+	for _, t := range sortedTypes() {
 		if _, ok := d.executorFor(t); ok {
 			out = append(out, t)
 		}
@@ -273,7 +251,7 @@ type Executor func(ctx context.Context, d outbox.Delivery) error
 // rule mean something the operator did not write.
 func (d *Dispatcher) notify(topic string) Executor {
 	return func(ctx context.Context, delivery outbox.Delivery) error {
-		p, err := DecodeNotification(delivery)
+		p, err := decodeNotification(delivery)
 		if err != nil {
 			return err
 		}
@@ -289,7 +267,7 @@ func (d *Dispatcher) notify(topic string) Executor {
 			// delivered and lost.
 			return &UnconfiguredDestination{Name: name, Topic: topic}
 		}
-		rendered, err := RenderNotification(topic, p)
+		rendered, err := renderNotification(topic, p)
 		if err != nil {
 			return err
 		}
@@ -310,10 +288,10 @@ func (d *Dispatcher) deliver(ctx context.Context, dest Destination, topic string
 	// to the install-time policy in `CheckURL`, and applying them per delivery would
 	// refuse every test that uses `httptest` - a correct refusal of a correct URL. The
 	// load-time check is where an operator meets that policy.
-	if err := CheckURLScheme(dest.URL); err != nil {
+	if err := checkURLScheme(dest.URL); err != nil {
 		return fmt.Errorf("dispatch: destination %q: %w", dest.Name, err)
 	}
-	body := RenderWebhook(r)
+	body := renderWebhook(r)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, dest.URL,
 		strings.NewReader(body))
 	if err != nil {
@@ -369,7 +347,7 @@ func (d *Dispatcher) client() *http.Client {
 		return d.httpClient
 	}
 	return &http.Client{
-		Timeout: DefaultTimeout,
+		Timeout: defaultTimeout,
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return errors.New("dispatch: a redirect is refused. The destination URL was " +
 				"checked at startup and a redirect is a URL that check never saw, so " +
@@ -392,9 +370,9 @@ func (d *Dispatcher) client() *http.Client {
 func (d *Dispatcher) enqueueJob(topic string) Executor {
 	return func(ctx context.Context, delivery outbox.Delivery) error {
 		if d.Enqueuer == nil || d.Pool == nil {
-			return ErrNoEnqueuer
+			return errNoEnqueuer
 		}
-		p, err := DecodeJob(delivery)
+		p, err := decodeJob(delivery)
 		if err != nil {
 			return err
 		}
@@ -462,14 +440,14 @@ type NotificationPayload struct {
 // somewhere rather than dead-lettering.
 func (p NotificationPayload) destinationName(topic string) (string, error) {
 	switch topic {
-	case TopicNotifyOperator:
+	case topicNotifyOperator:
 		if p.Target == "" {
-			return DefaultOperatorDestination, nil
+			return defaultOperatorDestination, nil
 		}
 		return p.Target, nil
-	case TopicNotifySupervisor:
+	case topicNotifySupervisor:
 		if p.Target == "" {
-			return DefaultSupervisorDestination, nil
+			return defaultSupervisorDestination, nil
 		}
 		return p.Target, nil
 	}
@@ -481,8 +459,8 @@ func (p NotificationPayload) destinationName(topic string) (string, error) {
 // Named constants rather than a config key, because the alternative is an operator having
 // to invent a name for the thing the product should already know where to send.
 const (
-	DefaultOperatorDestination   = "operator"
-	DefaultSupervisorDestination = "supervisor"
+	defaultOperatorDestination   = "operator"
+	defaultSupervisorDestination = "supervisor"
 )
 
 // JobPayload is what a queue-shaped delivery carries.
@@ -512,7 +490,7 @@ type JobPayload struct {
 // than assuming, because assuming is how the original defect survived.
 func (p JobPayload) Queue(topic string) (jobs.Queue, error) {
 	switch topic {
-	case TopicRequestVLM:
+	case topicRequestVLM:
 		switch {
 		case p.IncidentID == "":
 			return "", fmt.Errorf("dispatch: %s needs an incident_id", topic)
@@ -528,7 +506,7 @@ func (p JobPayload) Queue(topic string) (jobs.Queue, error) {
 				"not tell when in fact the job never reached it", topic)
 		}
 		return jobs.QueueVLM, nil
-	case TopicFetchEvidence:
+	case topicFetchEvidence:
 		if p.IncidentID == "" && p.EventID == "" {
 			return "", fmt.Errorf("dispatch: %s needs an incident_id or an event_id to "+
 				"fetch evidence for; got neither", topic)
@@ -576,18 +554,18 @@ func firstNonEmpty(vals ...string) string {
 // Renderers
 // ---------------------------------------------------------------------------
 
-// RenderNotification renders a payload for delivery.
+// renderNotification renders a payload for delivery.
 //
 // A CLOSED set of renderers, one per notify topic, and it refuses rather than defaulting.
 // The set being closed is the point: a renderer is code that puts product data in front of
 // a person or a third party, and "whatever the payload says" is how an incident title
 // becomes markup in somebody's dashboard.
-func RenderNotification(topic string, p NotificationPayload) (RenderedNotification, error) {
+func renderNotification(topic string, p NotificationPayload) (RenderedNotification, error) {
 	switch topic {
-	case TopicNotifyOperator, TopicNotifySupervisor:
+	case topicNotifyOperator, topicNotifySupervisor:
 	default:
 		return RenderedNotification{}, fmt.Errorf("dispatch: %q has no notification "+
-			"renderer; the closed set is %s", topic, strings.Join(Topics, ", "))
+			"renderer; the closed set is %s", topic, strings.Join(topics, ", "))
 	}
 	if p.IncidentID == "" {
 		return RenderedNotification{}, errors.New("dispatch: notification payload carries " +
@@ -596,12 +574,12 @@ func RenderNotification(topic string, p NotificationPayload) (RenderedNotificati
 
 	fields := orderedFields(p)
 	var b strings.Builder
-	b.WriteString("**" + EscapeMarkdown(p.Title) + "**\n\n")
+	b.WriteString("**" + escapeMarkdown(p.Title) + "**\n\n")
 	if p.Explanation != "" {
-		b.WriteString(EscapeMarkdown(p.Explanation) + "\n\n")
+		b.WriteString(escapeMarkdown(p.Explanation) + "\n\n")
 	}
 	for _, f := range fields {
-		b.WriteString("- " + f[0] + ": " + EscapeMarkdown(f[1]) + "\n")
+		b.WriteString("- " + f[0] + ": " + escapeMarkdown(f[1]) + "\n")
 	}
 	link := incidentLink(p)
 	if link != "" {
@@ -660,13 +638,13 @@ func incidentLink(p NotificationPayload) string {
 	return "/incidents/" + p.IncidentID
 }
 
-// EscapeMarkdown neutralises the characters that turn a title into markup.
+// escapeMarkdown neutralises the characters that turn a title into markup.
 //
 // This is the renderer's whole security surface, and it is here because an incident title
 // comes from a rule's `then.title`, which is operator-editable in a bundle, and a title may
 // legitimately contain a vendor's message text. A receiver that renders Markdown would
 // execute that.
-func EscapeMarkdown(s string) string {
+func escapeMarkdown(s string) string {
 	return markdownEscaper.Replace(s)
 }
 
@@ -684,12 +662,12 @@ var markdownEscaper = strings.NewReplacer(
 	"!", "\\!",
 )
 
-// RenderWebhook renders the HTTP body a destination receives.
+// renderWebhook renders the HTTP body a destination receives.
 //
 // A fixed JSON shape rather than a `map[string]any` built from the payload, because the
 // wire format is a contract: adding a field to it is a decision, and a receiver that has to
 // cope with an open-ended object cannot version anything.
-func RenderWebhook(r RenderedNotification) string {
+func renderWebhook(r RenderedNotification) string {
 	fields := make([]WebhookField, 0, len(r.Fields))
 	for _, f := range r.Fields {
 		fields = append(fields, WebhookField{Label: f[0], Value: f[1]})
@@ -728,8 +706,8 @@ type WebhookField struct {
 // Decoding
 // ---------------------------------------------------------------------------
 
-// DecodeNotification decodes and checks a notify delivery's payload.
-func DecodeNotification(d outbox.Delivery) (NotificationPayload, error) {
+// decodeNotification decodes and checks a notify delivery's payload.
+func decodeNotification(d outbox.Delivery) (NotificationPayload, error) {
 	var p NotificationPayload
 	if err := strictUnmarshal(d.Payload, &p); err != nil {
 		return p, fmt.Errorf("dispatch: %s: %w", d.Topic, err)
@@ -746,8 +724,8 @@ func DecodeNotification(d outbox.Delivery) (NotificationPayload, error) {
 	return p, nil
 }
 
-// DecodeJob decodes and checks a queue-shaped delivery's payload.
-func DecodeJob(d outbox.Delivery) (JobPayload, error) {
+// decodeJob decodes and checks a queue-shaped delivery's payload.
+func decodeJob(d outbox.Delivery) (JobPayload, error) {
 	var p JobPayload
 	if err := strictUnmarshal(d.Payload, &p); err != nil {
 		return p, fmt.Errorf("dispatch: %s: %w", d.Topic, err)
@@ -799,7 +777,7 @@ func (e *UnknownTopic) Error() string {
 	return fmt.Sprintf("dispatch: no executor is registered for topic %q; this build "+
 		"implements %s. The message is refused rather than acknowledged, because "+
 		"acknowledging it would mark the side effect delivered without performing it",
-		e.Topic, strings.Join(Topics, ", "))
+		e.Topic, strings.Join(topics, ", "))
 }
 
 // UnconfiguredDestination is a refusal, not a warning.
@@ -842,7 +820,7 @@ func (e *DeliveryRefused) Error() string {
 // True for 5xx, 408 and 429 - a receiver that is down, timing out, or rate-limiting. False
 // for the rest of the 4xx, which are the receiver saying the request itself is wrong and
 // will say so again identically.
-func (e *DeliveryRefused) Retryable() bool {
+func (e *DeliveryRefused) retryable() bool {
 	switch {
 	case e.Status >= 500:
 		return true
@@ -852,22 +830,22 @@ func (e *DeliveryRefused) Retryable() bool {
 	return false
 }
 
-// ErrNoEnqueuer is returned when a queued dispatch arrives with no enqueuer wired.
+// errNoEnqueuer is returned when a queued dispatch arrives with no enqueuer wired.
 //
 // An explicit error rather than a nil check that returns nil, because returning nil here
 // would ACK the outbox message: the side effect would be marked delivered without a job row
 // ever existing, which is exactly the failure `enqueueVLM`'s separate transaction has today
 // and is the failure this whole package exists to remove.
-var ErrNoEnqueuer = errors.New("dispatch: no jobs enqueuer is configured, so a queued " +
+var errNoEnqueuer = errors.New("dispatch: no jobs enqueuer is configured, so a queued " +
 	"dispatch cannot be performed. The outbox message is refused rather than acknowledged, " +
 	"because acknowledging it would mark the side effect delivered without performing it")
 
-// DefaultTimeout bounds one delivery.
+// defaultTimeout bounds one delivery.
 //
 // A bound because the relay holds a lease while a handler runs, and a handler blocked
 // forever stops that message being redelivered until the lease expires - which turns one
 // hung receiver into a stalled relay.
-const DefaultTimeout = 10 * time.Second
+const defaultTimeout = 10 * time.Second
 
 // maxDrainBytes bounds how much of a response body is read before discarding.
 //

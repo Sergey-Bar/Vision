@@ -53,6 +53,7 @@ import (
 	"github.com/Sergey-Bar/Ai-Captain/internal/config"
 	"github.com/Sergey-Bar/Ai-Captain/internal/correlator"
 	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
+	"github.com/Sergey-Bar/Ai-Captain/internal/dispatch"
 	"github.com/Sergey-Bar/Ai-Captain/internal/evidence"
 	"github.com/Sergey-Bar/Ai-Captain/internal/graph"
 	"github.com/Sergey-Bar/Ai-Captain/internal/identity"
@@ -149,18 +150,75 @@ func run() error {
 	vlm := airuntime.NewVLMWorker(jobWorker, aiClient,
 		&observations.Writer{Pool: pool}, store, registry, log)
 
+	// The dispatch destinations, and the refusal that a bundle naming an unconfigured
+	// destination is refused at STARTUP.
+	//
+	// The destinations file is optional - an install that sends no notifications is a
+	// supported configuration - but a bundle that DOES notify and has nowhere to send it is
+	// refused before the daemon comes up, not at 03:00 when the first page fails. The
+	// check needs the active bundle, which is not compiled until the pool is up, so it runs
+	// immediately after the services are constructed and is the one startup check that can
+	// fail.
+	destinations, err := dispatch.LoadDestinations(cfg.DispatchDestinationsPath)
+	if err != nil {
+		return err
+	}
+	dispatcher := &dispatch.Dispatcher{
+		Dests:    destinations,
+		Enqueuer: jobs.New(pool),
+		Pool:     pool,
+	}
+
 	relay := &outbox.Relay{
 		Pool:    pool,
 		Metrics: registry,
-		Handler: func(_ context.Context, d outbox.Delivery) error {
-			// M1 dispatches no side effects. Acknowledging and logging is the honest
-			// behaviour; a topic with no consumer that silently disappears is a
-			// dead-letter backlog nobody is watching.
-			log.Info("outbox message acknowledged",
-				"tenant_id", d.TenantID, "topic", d.Topic, "outbox_id", d.OutboxID)
+		// The real handler. It was `log.Info(...); return nil` with the comment "M1
+		// dispatches no side effects", which meant every message the outbox table ever
+		// held was marked delivered without anything being delivered - and since
+		// `outbox.Enqueue` had no production caller, the table was empty and the
+		// acknowledgement path had never run once.
+		//
+		// `Dispatcher.Handler` refuses rather than acknowledging anything it cannot
+		// perform, so an unimplemented topic dead-letters instead of being recorded as
+		// successful. That is the whole reason it is not a log line.
+		Handler: func(ctx context.Context, d outbox.Delivery) error {
+			err := dispatcher.Handler()(ctx, d)
+			if err != nil {
+				// Logged and returned: the return is what makes the relay retry and then
+				// dead-letter, and the log is what makes it diagnosable at the moment it
+				// stops. Both halves, deliberately - a returned error with no log is a
+				// dead letter nobody investigates, and a log with no returned error is the
+				// bug this whole package removes.
+				log.Warn("outbox message refused",
+					"tenant_id", d.TenantID, "site_id", d.SiteID, "topic", d.Topic,
+					"outbox_id", d.OutboxID, "attempt", d.AttemptCount,
+					"idempotency_key", d.IdempotencyKey, "error", err.Error())
+				return err
+			}
+			log.Info("outbox message delivered",
+				"tenant_id", d.TenantID, "site_id", d.SiteID, "topic", d.Topic,
+				"outbox_id", d.OutboxID, "idempotency_key", d.IdempotencyKey)
 			return nil
 		},
 		MaxAttempts: 5,
+	}
+
+	// The startup refusal, and the only check here that can fail.
+	//
+	// It needs the ACTIVE bundle, which is not compiled until the pool is up, so it runs
+	// after the services are constructed. A bundle that names a dispatch this install
+	// cannot perform - an unconfigured destination, or a dispatch type this build has no
+	// executor for - stops the daemon coming up.
+	//
+	// The alternative is a dead letter at 03:00, discovered by whoever is on call, from a
+	// row that says only "not delivered". This says which rule, which target, and what
+	// destinations DO exist.
+	//
+	// It is a refusal rather than a warning on purpose. A product whose one advertised
+	// side effect is dead but which starts cleanly is worse than one that does not start:
+	// the first looks like a working install.
+	if err := checkActiveBundleDispatch(ctx, pool, dispatcher, bundlesSvc, log); err != nil {
+		return err
 	}
 
 	server := &api.Server{
@@ -323,6 +381,55 @@ func readiness(ctx context.Context, pool *dbx.Pool, log *slog.Logger) error {
 			"request, which to a monitor is indistinguishable from a healthy service")
 	}
 	log.Info("the schema is present", "migrations", applied)
+	return nil
+}
+
+// checkActiveBundleDispatch refuses to start when the active bundle asks for a side effect
+// this install cannot perform.
+//
+// Three outcomes, and they are three different answers rather than two:
+//
+//   - No active bundle: nothing to check, the daemon starts. A fresh install that has not
+//     activated anything is not misconfigured.
+//   - The bundle store is unreachable: an ERROR, and NOT "everything is fine". The check
+//     could not run, so reporting that the install's dispatches are all covered would be
+//     the one claim this daemon has no evidence for.
+//   - The bundle compiles and every dispatch resolves: the daemon starts.
+//
+// The last two share a code path and must not: the temptation is to log a warning for any
+// error from `Active`, which silently converts an outage into a clean startup.
+func checkActiveBundleDispatch(ctx context.Context, pool *dbx.Pool, d *dispatch.Dispatcher,
+	bundlesSvc *bundles.Service, log *slog.Logger) error {
+	_, content, err := bundlesSvc.Active(ctx, pool.For("", "bundles").TenantID())
+	if err != nil {
+		if errors.Is(err, bundles.ErrNoActiveBundle) {
+			log.Info("no active bundle yet; the dispatch check has nothing to do")
+			return nil
+		}
+		return fmt.Errorf("security-core: the active bundle could not be read, so its "+
+			"dispatches cannot be checked: %w", err)
+	}
+
+	bundle, problems := rules.NewCompiler().Compile(content)
+	for _, p := range problems {
+		if p.Severity == rules.SeverityError {
+			// The bundle store accepted a bundle the compiler now rejects. That is a real
+			// finding and it is refused rather than skipped, because the alternative is
+			// starting with a bundle whose dispatches nobody has read.
+			return fmt.Errorf("security-core: the active bundle no longer compiles, so its "+
+				"dispatches cannot be checked: %s", p)
+		}
+	}
+	if bundle == nil {
+		return errors.New("security-core: the active bundle compiled to nothing, so its " +
+			"dispatches cannot be checked")
+	}
+
+	if err := d.CheckDestinations(bundle); err != nil {
+		return err
+	}
+	log.Info("the active bundle's dispatches are all performable",
+		"rules", len(bundle.Compiled), "destinations", len(d.Dests.Names()))
 	return nil
 }
 

@@ -29,7 +29,6 @@ package pipeline // wired by cmd/security-core, the composition root
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -1122,9 +1121,11 @@ func (l *Loops) decide(ctx context.Context, item inbox.Lease, result normalize.R
 		return
 	}
 	l.log("incident raised", "incident_id", incidentID, "rule_id", decision.RuleID,
-		"state", string(decision.State))
+		"state", string(decision.State), "dispatches", len(decision.Dispatch))
 
-	l.enqueueVLM(ctx, item.Key.TenantID, l.Deps.SiteID, incidentID, result.EventID)
+	// The rule's dispatches were enqueued by `CreateIncident`, in its transaction.
+	// There is deliberately nothing here: a second transaction at this point is the gap
+	// this comment replaces.
 }
 
 // incidentTitle names the incident after the rule that raised it. A title is
@@ -1138,40 +1139,30 @@ func incidentTitle(d rules.Decision) string {
 	return title
 }
 
-// enqueueVLM queues the second opinion, after the incident it is about.
+// enqueueVLM IS GONE, and what replaced it is in `internal/incidents`.
 //
-// Ordering is forced by ai_observations.incident_id being NOT NULL ON DELETE
-// CASCADE. An observation cannot precede its incident, which is also the right
-// order semantically: the observation is a recorded second opinion on a decision
+// It ran AFTER `CreateIncident` had committed, in its own transaction, and that is the
+// exact gap invariant 1 is about applied to a side effect rather than an event: the
+// incident could commit and the work about it be lost, with nothing recording that the
+// work was owed. Two lines removed the gap and neither of them is a workaround:
+//
+//   - the outbox row is now written by `dispatch.EnqueueOutbox`, inside
+//     `CreateIncident`'s own transaction, so the incident and the promise of a second
+//     opinion commit together or not at all;
+//   - the JOB is written by the relay from that row, in a transaction of its own, and
+//     `jobs.Enqueue`'s `ON CONFLICT` makes a redelivery a no-op rather than a second
+//     inference.
+//
+// The job also stops being wrong. The payload was `{incidentId, eventId}` and nothing
+// else, so `airuntime.Worker` returned `DegradationAbsent` at its evidence check and
+// returned before it ever contacted the runtime: every incident got a degraded observation
+// and an operator reading it concluded the model could not tell. `dispatch` refuses to
+// build a VLM job with no evidence id, so that state is no longer reachable.
+//
+// Ordering is unchanged and is still forced by `ai_observations.incident_id` being NOT
+// NULL ON DELETE CASCADE. An observation cannot precede its incident, which is also the
+// right order semantically: the observation is a recorded second opinion on a decision
 // that has already been made, and it never rewrites it. That is invariant 2.
-func (l *Loops) enqueueVLM(ctx context.Context, tenant, site, incidentID, eventID string) {
-	payload, err := json.Marshal(map[string]string{
-		"incidentId": incidentID,
-		"eventId":    eventID,
-	})
-	if err != nil {
-		l.log("vlm payload could not be encoded", "error", err.Error())
-		return
-	}
-	err = l.Deps.Pool.InTenant(ctx, dbx.TenantContext{TenantID: tenant, ActorID: "consume"},
-		func(tx pgx.Tx) error {
-			_, _, err := l.Deps.Enqueuer.Enqueue(ctx, tx, jobs.Enqueue{
-				TenantID: tenant, SiteID: site,
-				Queue:          jobs.QueueVLM,
-				IdempotencyKey: "vlm:" + incidentID,
-				Payload:        payload,
-				MaxAttempts:    3,
-			})
-			return err
-		})
-	if err != nil {
-		// The incident stands. A missing second opinion is a degraded AI plane,
-		// which the decision already recorded; losing the decision over it would
-		// invert the priority.
-		l.log("vlm job could not be enqueued; the incident is unaffected",
-			"incident_id", incidentID, "error", err.Error())
-	}
-}
 
 // ---------------------------------------------------------------------------
 // The bundle cache.

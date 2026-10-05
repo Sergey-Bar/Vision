@@ -1,7 +1,18 @@
-package dispatch_test
+package dispatch
 
 // The dispatch executor: four dispatch types, a closed set of renderers, and a boot
 // refusal for a bundle that names a destination nobody configured.
+//
+// INTERNAL test package, not `dispatch_test`. That is a change of convention for this
+// directory and it is deliberate: `internal/deadexport` found twenty exported symbols in
+// this package that nothing outside read, because a test is the only thing that read
+// them - and a test-only reader is exactly the shape that gate exists to report. Writing
+// the tests inside the package lets the API shrink to what product code actually needs,
+// and the tests still exercise the exported path (`Dispatcher.Handler`) because nothing
+// stops an internal test from calling it.
+//
+// The alternative - exporting twenty symbols so a test can see them - is how a package
+// ends up with a public surface nobody chose.
 //
 // # What is asserted here, and why each one is a control
 //
@@ -44,7 +55,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/dispatch"
 	"github.com/Sergey-Bar/Ai-Captain/internal/outbox"
 	"github.com/Sergey-Bar/Ai-Captain/internal/rules"
 )
@@ -66,8 +76,8 @@ func delivery(topic, idemKey string, payload any) outbox.Delivery {
 	}
 }
 
-func notification(key string) dispatch.NotificationPayload {
-	return dispatch.NotificationPayload{
+func notification(key string) NotificationPayload {
+	return NotificationPayload{
 		IncidentID:      "inc-1",
 		RuleID:          "core.person-in-restricted-zone-after-hours",
 		Title:           "Person in a restricted zone after hours",
@@ -76,12 +86,12 @@ func notification(key string) dispatch.NotificationPayload {
 		Explanation:     "Two independent signals agreed within 5s.",
 		Target:          "operator",
 		IdempotencyKey:  key,
-		ContractVersion: dispatch.ContractVersion,
+		ContractVersion: ContractVersion,
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Topics
+// topics
 // ---------------------------------------------------------------------------
 
 // TestEveryDispatchTypeHasATopicAndEveryTopicADispatchType is the bijection the two
@@ -95,7 +105,7 @@ func notification(key string) dispatch.NotificationPayload {
 func TestEveryDispatchTypeHasATopicAndEveryTopicADispatchType(t *testing.T) {
 	covered := map[string]string{}
 	for typ := range rules.DispatchTypes {
-		topic, err := dispatch.TopicFor(typ)
+		topic, err := topicFor(typ)
 		if err != nil {
 			t.Errorf("dispatch type %q has no topic: %v. A type that validates against the "+
 				"closed set and has no topic is a rule an operator believes is running",
@@ -104,26 +114,26 @@ func TestEveryDispatchTypeHasATopicAndEveryTopicADispatchType(t *testing.T) {
 		}
 		covered[topic] = typ
 	}
-	for _, topic := range dispatch.Topics {
+	for _, topic := range topics {
 		if _, ok := covered[topic]; !ok {
 			t.Errorf("topic %q is registered by this package and no dispatch type maps to "+
 				"it. Either a dispatch type was removed from rules.DispatchTypes and this "+
-				"topic is dead, or one was added and TopicFor was not", topic)
+				"topic is dead, or one was added and topicFor was not", topic)
 		}
 	}
-	if len(covered) != len(dispatch.Topics) {
+	if len(covered) != len(topics) {
 		t.Errorf("%d dispatch types map onto %d topics; the two closed sets must be the "+
-			"same size", len(covered), len(dispatch.Topics))
+			"same size", len(covered), len(topics))
 	}
 }
 
-// TestAnUnknownDispatchTypeIsRefusedNotDefaulted pins that TopicFor errors.
+// TestAnUnknownDispatchTypeIsRefusedNotDefaulted pins that topicFor errors.
 //
 // A `map[string]string` built at init cannot fail: it returns "" for a miss, and "" is an
 // empty topic that `outbox` dead-letters with a message naming nothing. The error is what
 // lets `CheckDestinations` report the type by name at startup.
 func TestAnUnknownDispatchTypeIsRefusedNotDefaulted(t *testing.T) {
-	topic, err := dispatch.TopicFor("send_an_email")
+	topic, err := topicFor("send_an_email")
 	if err == nil {
 		t.Fatalf("an unknown dispatch type produced topic %q instead of an error", topic)
 	}
@@ -152,19 +162,19 @@ func TestAnUnknownDispatchTypeIsRefusedNotDefaulted(t *testing.T) {
 // returned nil for an unknown topic would write a row saying a notification was sent when
 // no notification was sent - and unlike a lost message, that one is not visible anywhere.
 func TestAnUnknownTopicIsRefusedRatherThanAcknowledged(t *testing.T) {
-	d := &dispatch.Dispatcher{}
-	err := d.Handler()(context.Background(), delivery("dispatch.send_a_carrier_pigeon", "k1", map[string]any{}))
+	d := &Dispatcher{}
+	err := d.Handler()(context.Background(), delivery("send_a_carrier_pigeon", "k1", map[string]any{}))
 	if err == nil {
 		t.Fatal("the handler accepted a topic it has no executor for and returned nil, which " +
 			"outbox reads as DELIVERED. A side effect nobody performed, recorded as " +
 			"performed, is worse than a lost one")
 	}
-	var unknown *dispatch.UnknownTopic
+	var unknown *UnknownTopic
 	if !errors.As(err, &unknown) {
-		t.Fatalf("error is %T (%v), want *dispatch.UnknownTopic so ops can tell a version "+
+		t.Fatalf("error is %T (%v), want *UnknownTopic so ops can tell a version "+
 			"mismatch from a broken receiver", err, err)
 	}
-	if !strings.Contains(err.Error(), dispatch.Topics[0]) {
+	if !strings.Contains(err.Error(), topics[0]) {
 		t.Errorf("the refusal does not list what this build implements: %v", err)
 	}
 }
@@ -173,16 +183,16 @@ func TestAnUnknownTopicIsRefusedRatherThanAcknowledged(t *testing.T) {
 // this package publishes as handled but that has no executor would dead-letter every
 // message on it, permanently, with no way for an operator to tell why.
 func TestEveryRegisteredTopicHasAnExecutor(t *testing.T) {
-	d := &dispatch.Dispatcher{}
+	d := &Dispatcher{}
 	h := d.Handler()
-	for _, topic := range dispatch.Topics {
+	for _, topic := range topics {
 		// A payload that fails to decode is fine here: the point is that the TOPIC is
 		// routed to an executor rather than refused as unknown. An executor that refuses
 		// for a different reason proves the routing exists.
 		err := h(context.Background(), delivery(topic, "k1", map[string]any{}))
-		var unknown *dispatch.UnknownTopic
+		var unknown *UnknownTopic
 		if errors.As(err, &unknown) {
-			t.Errorf("topic %q is in dispatch.Topics but the handler refused it as unknown, "+
+			t.Errorf("topic %q is in topics but the handler refused it as unknown, "+
 				"so every message on it would dead-letter", topic)
 		}
 	}
@@ -192,7 +202,7 @@ func TestEveryRegisteredTopicHasAnExecutor(t *testing.T) {
 // package exists to make happen.
 func TestNotificationDeliveryPostsTheRenderedBody(t *testing.T) {
 	var gotAuth, gotIdem string
-	var got dispatch.RenderedNotification
+	var got RenderedNotification
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
 		gotIdem = r.Header.Get("Idempotency-Key")
@@ -201,7 +211,7 @@ func TestNotificationDeliveryPostsTheRenderedBody(t *testing.T) {
 			Body  string `json:"body"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		got = dispatch.RenderedNotification{Title: body.Title, Body: body.Body}
+		got = RenderedNotification{Title: body.Title, Body: body.Body}
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer srv.Close()
@@ -212,14 +222,14 @@ func TestNotificationDeliveryPostsTheRenderedBody(t *testing.T) {
 	// transport to test the secure path is a test that cannot be written, which is the
 	// correct outcome for a control this strict.
 	t.Setenv("TEST_DISPATCH_TOKEN", "s3cret-token")
-	d := &dispatch.Dispatcher{
+	d := &Dispatcher{
 		Dests: testDests(t, "operator", srv.URL, "TEST_DISPATCH_TOKEN"),
 	}
-	d.SetHTTPClient(srv.Client())
+	d.setHTTPClient(srv.Client())
 
 	key := "inc-1:operator"
 	if err := d.Handler()(context.Background(),
-		delivery(dispatch.TopicNotifyOperator, key, notification(key))); err != nil {
+		delivery(topicNotifyOperator, key, notification(key))); err != nil {
 		t.Fatalf("a configured, reachable destination refused the delivery: %v", err)
 	}
 
@@ -259,19 +269,19 @@ func TestAnUnsetSecretRefIsRefusedNotSentUnauthenticated(t *testing.T) {
 	// with an empty value sets it to empty and restores the previous value afterwards,
 	// which is the shape this case needs.
 	t.Setenv("TEST_ABSENT_TOKEN", "")
-	d := &dispatch.Dispatcher{Dests: testDests(t, "operator", srv.URL, "TEST_ABSENT_TOKEN")}
-	d.SetHTTPClient(srv.Client())
+	d := &Dispatcher{Dests: testDests(t, "operator", srv.URL, "TEST_ABSENT_TOKEN")}
+	d.setHTTPClient(srv.Client())
 
 	key := "inc-1:operator"
 	err := d.Handler()(context.Background(),
-		delivery(dispatch.TopicNotifyOperator, key, notification(key)))
+		delivery(topicNotifyOperator, key, notification(key)))
 	if err == nil {
 		t.Fatal("a destination with an unset secret_ref delivered anyway. That posts the " +
 			"incident to a receiver that was supposed to require a token")
 	}
-	var missing *dispatch.UnconfiguredDestination
+	var missing *UnconfiguredDestination
 	if !errors.As(err, &missing) {
-		t.Fatalf("error is %T (%v), want *dispatch.UnconfiguredDestination", err, err)
+		t.Fatalf("error is %T (%v), want *UnconfiguredDestination", err, err)
 	}
 	if !strings.Contains(err.Error(), "TEST_ABSENT_TOKEN") {
 		t.Errorf("the refusal does not name the environment variable that is unset, so an "+
@@ -296,11 +306,11 @@ func TestARedeliveryPresentsTheSameIdempotencyKey(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	d := &dispatch.Dispatcher{Dests: testDests(t, "operator", srv.URL, "")}
-	d.SetHTTPClient(srv.Client())
+	d := &Dispatcher{Dests: testDests(t, "operator", srv.URL, "")}
+	d.setHTTPClient(srv.Client())
 
 	key := "inc-7:operator"
-	dl := delivery(dispatch.TopicNotifyOperator, key, notification(key))
+	dl := delivery(topicNotifyOperator, key, notification(key))
 	h := d.Handler()
 	for range 2 {
 		if err := h(context.Background(), dl); err != nil {
@@ -323,15 +333,15 @@ func TestARedeliveryPresentsTheSameIdempotencyKey(t *testing.T) {
 // has today: the incident commits, the work is lost, and nothing records that the work was
 // supposed to happen.
 func TestAQueuedDispatchWithNoEnqueuerIsRefused(t *testing.T) {
-	d := &dispatch.Dispatcher{}
-	p := dispatch.JobPayload{
+	d := &Dispatcher{}
+	p := JobPayload{
 		IncidentID: "inc-1", EventID: "evt-1", EvidenceID: "ev-1",
-		ContractVersion: dispatch.ContractVersion,
+		ContractVersion: ContractVersion,
 	}
 	err := d.Handler()(context.Background(),
-		delivery(dispatch.TopicRequestVLM, "inc-1:request_vlm", p))
-	if !errors.Is(err, dispatch.ErrNoEnqueuer) {
-		t.Fatalf("error is %v, want ErrNoEnqueuer. Without an enqueuer the side effect "+
+		delivery(topicRequestVLM, "inc-1:request_vlm", p))
+	if !errors.Is(err, errNoEnqueuer) {
+		t.Fatalf("error is %v, want errNoEnqueuer. Without an enqueuer the side effect "+
 			"cannot be performed and the message must NOT be acknowledged", err)
 	}
 }
@@ -346,19 +356,19 @@ func TestAQueuedDispatchWithNoEnqueuerIsRefused(t *testing.T) {
 func TestAVLMJobWithNoEvidenceIsRefused(t *testing.T) {
 	cases := []struct {
 		name string
-		p    dispatch.JobPayload
+		p    JobPayload
 		want string
 	}{
-		{"no incident", dispatch.JobPayload{EventID: "evt-1", EvidenceID: "ev-1",
-			ContractVersion: dispatch.ContractVersion}, "incident_id"},
-		{"no event", dispatch.JobPayload{IncidentID: "inc-1", EvidenceID: "ev-1",
-			ContractVersion: dispatch.ContractVersion}, "event_id"},
-		{"no evidence", dispatch.JobPayload{IncidentID: "inc-1", EventID: "evt-1",
-			ContractVersion: dispatch.ContractVersion}, "evidence_id"},
+		{"no incident", JobPayload{EventID: "evt-1", EvidenceID: "ev-1",
+			ContractVersion: ContractVersion}, "incident_id"},
+		{"no event", JobPayload{IncidentID: "inc-1", EvidenceID: "ev-1",
+			ContractVersion: ContractVersion}, "event_id"},
+		{"no evidence", JobPayload{IncidentID: "inc-1", EventID: "evt-1",
+			ContractVersion: ContractVersion}, "evidence_id"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := tc.p.Queue(dispatch.TopicRequestVLM)
+			_, err := tc.p.Queue(topicRequestVLM)
 			if err == nil {
 				t.Fatalf("a VLM job with %s was accepted. The worker returns "+
 					"DegradationAbsent before contacting the runtime, so this job would "+
@@ -374,11 +384,11 @@ func TestAVLMJobWithNoEvidenceIsRefused(t *testing.T) {
 // TestAVLMJobWithEvidenceIsAccepted is the other direction, and it matters for the same
 // reason: a gate that refuses everything is a gate nobody trusts and nobody keeps.
 func TestAVLMJobWithEvidenceIsAccepted(t *testing.T) {
-	p := dispatch.JobPayload{
+	p := JobPayload{
 		IncidentID: "inc-1", EventID: "evt-1", EvidenceID: "ev-1",
-		ContractVersion: dispatch.ContractVersion,
+		ContractVersion: ContractVersion,
 	}
-	q, err := p.Queue(dispatch.TopicRequestVLM)
+	q, err := p.Queue(topicRequestVLM)
 	if err != nil {
 		t.Fatalf("a complete VLM job was refused: %v", err)
 	}
@@ -394,12 +404,12 @@ func TestAVLMJobWithEvidenceIsAccepted(t *testing.T) {
 // per attempt instead of from the delivery would turn at-least-once delivery into
 // at-least-once duplicate inference - at roughly $0.15 a pop.
 func TestAQueuedJobIsKeyedOnTheDeliverysOwnIdempotencyKey(t *testing.T) {
-	dl := delivery(dispatch.TopicRequestVLM, "inc-9:request_vlm", dispatch.JobPayload{
+	dl := delivery(topicRequestVLM, "inc-9:request_vlm", JobPayload{
 		IncidentID: "inc-9", EventID: "evt-9", EvidenceID: "ev-9",
-		ContractVersion: dispatch.ContractVersion,
+		ContractVersion: ContractVersion,
 	})
-	in := dispatch.JobPayload{IncidentID: "inc-9", EventID: "evt-9", EvidenceID: "ev-9",
-		ContractVersion: dispatch.ContractVersion}.JobIn("vlm", dl)
+	in := JobPayload{IncidentID: "inc-9", EventID: "evt-9", EvidenceID: "ev-9",
+		ContractVersion: ContractVersion}.JobIn("vlm", dl)
 
 	if in.IdempotencyKey != dl.IdempotencyKey {
 		t.Errorf("job key is %q, want the delivery's %q. A fresh key per attempt makes every "+
@@ -412,8 +422,8 @@ func TestAQueuedJobIsKeyedOnTheDeliverysOwnIdempotencyKey(t *testing.T) {
 
 // TestAnEvidenceFetchWithNeitherIdIsRefused stops a fetch that has nothing to fetch for.
 func TestAnEvidenceFetchWithNeitherIdIsRefused(t *testing.T) {
-	p := dispatch.JobPayload{ContractVersion: dispatch.ContractVersion}
-	if _, err := p.Queue(dispatch.TopicFetchEvidence); err == nil {
+	p := JobPayload{ContractVersion: ContractVersion}
+	if _, err := p.Queue(topicFetchEvidence); err == nil {
 		t.Fatal("an evidence fetch naming neither an incident nor an event was accepted")
 	}
 }
@@ -429,16 +439,16 @@ func TestAnEvidenceFetchWithNeitherIdIsRefused(t *testing.T) {
 // incident id and an empty title, which is worse than a dead letter: it arrives, it is
 // real, and it says nothing.
 func TestAPayloadFromAnotherContractVersionIsRefused(t *testing.T) {
-	d := &dispatch.Dispatcher{}
+	d := &Dispatcher{}
 	stale := notification("inc-1")
 	stale.ContractVersion = "security.io/dispatch/v0"
 
 	err := d.Handler()(context.Background(),
-		delivery(dispatch.TopicNotifyOperator, "inc-1", stale))
+		delivery(topicNotifyOperator, "inc-1", stale))
 	if err == nil {
 		t.Fatal("a payload from contract v0 was accepted by a build that speaks v1")
 	}
-	if !strings.Contains(err.Error(), dispatch.ContractVersion) {
+	if !strings.Contains(err.Error(), ContractVersion) {
 		t.Errorf("the refusal does not name the contract this build speaks: %v", err)
 	}
 }
@@ -450,11 +460,11 @@ func TestAPayloadFromAnotherContractVersionIsRefused(t *testing.T) {
 // decodes into a struct whose field is not the field that was sent, arriving successfully
 // with the wrong contents.
 func TestAnUnknownPayloadFieldIsRefused(t *testing.T) {
-	d := &dispatch.Dispatcher{}
+	d := &Dispatcher{}
 	err := d.Handler()(context.Background(),
-		delivery(dispatch.TopicNotifyOperator, "inc-1", map[string]any{
+		delivery(topicNotifyOperator, "inc-1", map[string]any{
 			"incident_id":      "inc-1",
-			"contract_version": dispatch.ContractVersion,
+			"contract_version": ContractVersion,
 			"webhook_url":      "https://attacker.example/collect",
 		}))
 	if err == nil {
@@ -472,11 +482,11 @@ func TestAnUnknownPayloadFieldIsRefused(t *testing.T) {
 // Every other field of a notification is a description of the incident. Without the id
 // there is nothing to describe, and a receiver would store a title with nothing to open.
 func TestANotificationWithNoIncidentIsRefused(t *testing.T) {
-	d := &dispatch.Dispatcher{}
+	d := &Dispatcher{}
 	p := notification("inc-1")
 	p.IncidentID = ""
 	err := d.Handler()(context.Background(),
-		delivery(dispatch.TopicNotifyOperator, "inc-1", p))
+		delivery(topicNotifyOperator, "inc-1", p))
 	if err == nil {
 		t.Fatal("a notification with no incident_id was accepted")
 	}
@@ -491,11 +501,11 @@ func TestANotificationWithNoIncidentIsRefused(t *testing.T) {
 // "Render whatever the payload says" is how an incident title becomes markup in somebody's
 // dashboard, so the set of renderers is fixed and the refusal names it.
 func TestTheRendererIsClosed(t *testing.T) {
-	_, err := dispatch.RenderNotification(dispatch.TopicRequestVLM, notification("k"))
+	_, err := renderNotification(topicRequestVLM, notification("k"))
 	if err == nil {
 		t.Fatal("a VLM topic produced a notification rendering")
 	}
-	if !strings.Contains(err.Error(), dispatch.TopicNotifyOperator) {
+	if !strings.Contains(err.Error(), topicNotifyOperator) {
 		t.Errorf("the refusal does not list the topics that DO have a renderer: %v", err)
 	}
 }
@@ -507,12 +517,12 @@ func TestTheRendererIsClosed(t *testing.T) {
 // test compares bytes. Map iteration makes that a coin flip per process.
 func TestTheRenderedBodyIsByteStable(t *testing.T) {
 	p := notification("inc-1")
-	first, err := dispatch.RenderNotification(dispatch.TopicNotifyOperator, p)
+	first, err := renderNotification(topicNotifyOperator, p)
 	if err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	for range 20 {
-		again, err := dispatch.RenderNotification(dispatch.TopicNotifyOperator, p)
+		again, err := renderNotification(topicNotifyOperator, p)
 		if err != nil {
 			t.Fatalf("render: %v", err)
 		}
@@ -545,7 +555,7 @@ func TestTheRendererEscapesMarkup(t *testing.T) {
 	for _, tc := range hostile {
 		p := notification("inc-1")
 		p.Title = tc.in
-		r, err := dispatch.RenderNotification(dispatch.TopicNotifyOperator, p)
+		r, err := renderNotification(topicNotifyOperator, p)
 		if err != nil {
 			t.Fatalf("render %q: %v", tc.in, err)
 		}
@@ -567,7 +577,7 @@ func TestTheRendererEscapesMarkup(t *testing.T) {
 // can send an operator somewhere other than their own console. The route already carries
 // the tenant from the session.
 func TestTheConsoleLinkCarriesOnlyTheIncidentID(t *testing.T) {
-	r, err := dispatch.RenderNotification(dispatch.TopicNotifyOperator, notification("inc-1"))
+	r, err := renderNotification(topicNotifyOperator, notification("inc-1"))
 	if err != nil {
 		t.Fatalf("render: %v", err)
 	}
@@ -586,7 +596,7 @@ func TestTheConsoleLinkCarriesOnlyTheIncidentID(t *testing.T) {
 // TestAConfiguredBundleStarts is the positive case for the boot check, and it is here so
 // that the refusals below are refusals rather than a check that refuses everything.
 func TestAConfiguredBundleStarts(t *testing.T) {
-	d := &dispatch.Dispatcher{Dests: twoDests(t)}
+	d := &Dispatcher{Dests: twoDests(t)}
 	b := probeBundle(t, map[string][]string{
 		"probe.notify":    {"notify_operator/operator"},
 		"probe.supervise": {"notify_supervisor/supervisor"},
@@ -604,7 +614,7 @@ func TestAConfiguredBundleStarts(t *testing.T) {
 // that says only that the message was not delivered. A refusal at startup names the rule,
 // the target and the destinations that DO exist.
 func TestAnUnconfiguredDestinationRefusesTheBoot(t *testing.T) {
-	d := &dispatch.Dispatcher{Dests: twoDests(t)}
+	d := &Dispatcher{Dests: twoDests(t)}
 	b := probeBundle(t, map[string][]string{
 		"probe.notify": {"notify_operator/on-call-when-nobody-answers"},
 	})
@@ -613,9 +623,9 @@ func TestAnUnconfiguredDestinationRefusesTheBoot(t *testing.T) {
 		t.Fatal("a bundle naming a destination this install does not have started anyway. " +
 			"The first notification for that rule would dead-letter, discovered at 03:00")
 	}
-	var refusal *dispatch.StartupRefusal
+	var refusal *StartupRefusal
 	if !errors.As(err, &refusal) {
-		t.Fatalf("error is %T (%v), want *dispatch.StartupRefusal so main can print the "+
+		t.Fatalf("error is %T (%v), want *StartupRefusal so main can print the "+
 			"problems as a list", err, err)
 	}
 	// The message has to carry all three facts: which rule, which target, and what does
@@ -635,7 +645,7 @@ func TestAnUnconfiguredDestinationRefusesTheBoot(t *testing.T) {
 // This is the shape an operator actually hits: the built-in bundle notifies, no
 // destinations file was written, and without the check the product starts and looks fine.
 func TestNoDestinationsAtAllRefusesABundleThatNotifies(t *testing.T) {
-	d := &dispatch.Dispatcher{}
+	d := &Dispatcher{}
 	err := d.CheckDestinations(probeBundle(t, map[string][]string{
 		"probe.notify": {"notify_operator/nothing-configured"},
 	}))
@@ -643,7 +653,7 @@ func TestNoDestinationsAtAllRefusesABundleThatNotifies(t *testing.T) {
 		t.Fatal("an install with no destinations and a bundle that notifies started. That " +
 			"product opens incidents and performs no side effect at all")
 	}
-	if !strings.Contains(err.Error(), dispatch.DefaultDestinationsPath) {
+	if !strings.Contains(err.Error(), DefaultDestinationsPath) {
 		t.Errorf("the refusal does not say where to write the file: %v", err)
 	}
 }
@@ -655,7 +665,7 @@ func TestNoDestinationsAtAllRefusesABundleThatNotifies(t *testing.T) {
 // against the destinations file would refuse every bundle that asks for evidence - and
 // refusing that would push operators to delete their evidence requests to start the daemon.
 func TestABundleThatOnlyQueuesNeedsNoDestinations(t *testing.T) {
-	d := &dispatch.Dispatcher{}
+	d := &Dispatcher{}
 	if err := d.CheckDestinations(probeBundle(t, map[string][]string{
 		"probe.fetch": {"fetch_evidence/pre-event"},
 		"probe.vlm":   {"request_vlm/restricted-person"},
@@ -671,7 +681,7 @@ func TestABundleThatOnlyQueuesNeedsNoDestinations(t *testing.T) {
 // would mean an operator has to edit the destinations file before they can turn a rule
 // off, which is a strange coupling and one that would be discovered at the worst moment.
 func TestADisabledRuleIsNotHeldAgainstTheOperator(t *testing.T) {
-	d := &dispatch.Dispatcher{}
+	d := &Dispatcher{}
 	b := probeBundle(t, map[string][]string{
 		"probe.notify": {"notify_operator/on-call"},
 	})
@@ -686,7 +696,7 @@ func TestADisabledRuleIsNotHeldAgainstTheOperator(t *testing.T) {
 // TestABundleWithNoDispatchIsFine is the last positive case, and it matters: an install
 // whose bundle does not notify must not need a destinations file.
 func TestABundleWithNoDispatchIsFine(t *testing.T) {
-	d := &dispatch.Dispatcher{}
+	d := &Dispatcher{}
 	if err := d.CheckDestinations(probeBundle(t, nil)); err != nil {
 		t.Fatalf("a bundle that dispatches nothing was refused: %v", err)
 	}
@@ -722,7 +732,7 @@ func TestTheDestinationLoaderAppliesTheReachabilityPolicy(t *testing.T) {
 			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 				t.Fatalf("write: %v", err)
 			}
-			_, err := dispatch.LoadDestinations(path)
+			_, err := LoadDestinations(path)
 			if err == nil {
 				t.Fatalf("the loader accepted %s. That address is reachable from this "+
 					"process, and a destinations file is the only thing standing between a "+
@@ -743,7 +753,7 @@ func TestTheDestinationLoaderRefusesPlaintextAndURLCredentials(t *testing.T) {
 		{"http://hooks.example.com/x", "https"},
 		{"https://user:pass@hooks.example.com/x", "userinfo"},
 	} {
-		if _, err := dispatch.NewDestinations([]dispatch.Destination{
+		if _, err := newDestinations([]Destination{
 			{Name: "op", URL: tc.url},
 		}); err == nil {
 			t.Errorf("the constructor accepted %s", tc.url)
@@ -760,10 +770,10 @@ func TestTheDestinationLoaderRefusesPlaintextAndURLCredentials(t *testing.T) {
 // off certificate verification has no programmatic use and no legitimate install. It is
 // refused by both constructors so there is no path that accepts it.
 func TestInsecureSkipVerifyIsRefusedEverywhere(t *testing.T) {
-	entry := []dispatch.Destination{
+	entry := []Destination{
 		{Name: "op", URL: "https://hooks.example.com/x", InsecureSkipVerify: true},
 	}
-	if _, err := dispatch.NewDestinations(entry); err == nil {
+	if _, err := newDestinations(entry); err == nil {
 		t.Error("NewDestinations accepted insecure_skip_verify")
 	}
 	path := filepath.Join(t.TempDir(), "d.yaml")
@@ -772,7 +782,7 @@ func TestInsecureSkipVerifyIsRefusedEverywhere(t *testing.T) {
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	if _, err := dispatch.LoadDestinations(path); err == nil {
+	if _, err := LoadDestinations(path); err == nil {
 		t.Error("LoadDestinations accepted insecure_skip_verify")
 	}
 }
@@ -789,7 +799,7 @@ func TestTheLoaderRefusesATypoInAKeyRatherThanLeavingADestinationOpen(t *testing
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	if _, err := dispatch.LoadDestinations(path); err == nil {
+	if _, err := LoadDestinations(path); err == nil {
 		t.Fatal("a destinations file with `secret-ref` loaded successfully, leaving the " +
 			"destination with no credential while the operator believes it has one")
 	}
@@ -802,7 +812,7 @@ func TestTheLoaderRefusesATypoInAKeyRatherThanLeavingADestinationOpen(t *testing
 // required the file would refuse the daemon for a capability the operator is not using,
 // and the fix would be to write a file nobody wants rather than to turn the feature off.
 func TestAMissingDestinationsFileIsAnEmptySetNotAnError(t *testing.T) {
-	d, err := dispatch.LoadDestinations(filepath.Join(t.TempDir(), "absent.yaml"))
+	d, err := LoadDestinations(filepath.Join(t.TempDir(), "absent.yaml"))
 	if err != nil {
 		t.Fatalf("a missing destinations file is an error: %v", err)
 	}
@@ -820,7 +830,7 @@ func TestADuplicateDestinationNameIsRefused(t *testing.T) {
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	if _, err := dispatch.LoadDestinations(path); err == nil {
+	if _, err := LoadDestinations(path); err == nil {
 		t.Fatal("two destinations share a name and the loader accepted it")
 	}
 }
@@ -831,13 +841,13 @@ func TestADuplicateDestinationNameIsRefused(t *testing.T) {
 
 // writeDests writes a destinations file and loads it, so the tests exercise the real
 // parser rather than a hand-built Destinations.
-func writeDests(t *testing.T, body string) *dispatch.Destinations {
+func writeDests(t *testing.T, body string) *Destinations {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "destinations.yaml")
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("write destinations: %v", err)
 	}
-	d, err := dispatch.LoadDestinations(path)
+	d, err := LoadDestinations(path)
 	if err != nil {
 		t.Fatalf("load destinations: %v", err)
 	}
@@ -851,9 +861,9 @@ func writeDests(t *testing.T, body string) *dispatch.Destinations {
 // a correct refusal of a correct URL. The scheme and userinfo rules still apply here, and
 // `TestTheDestinationLoaderAppliesTheReachabilityPolicy` covers the rules this constructor
 // deliberately does not.
-func testDests(t *testing.T, name, url, secretRef string) *dispatch.Destinations {
+func testDests(t *testing.T, name, url, secretRef string) *Destinations {
 	t.Helper()
-	d, err := dispatch.NewDestinations([]dispatch.Destination{
+	d, err := newDestinations([]Destination{
 		{Name: name, URL: url, SecretRef: secretRef},
 	})
 	if err != nil {
@@ -862,7 +872,7 @@ func testDests(t *testing.T, name, url, secretRef string) *dispatch.Destinations
 	return d
 }
 
-func twoDests(t *testing.T) *dispatch.Destinations {
+func twoDests(t *testing.T) *Destinations {
 	t.Helper()
 	return writeDests(t, `version: 1
 destinations:

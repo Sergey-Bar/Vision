@@ -110,9 +110,9 @@ var (
 		"internal/identity.KeySize":     {Symbol: "internal/identity.KeySize", Why: "published constant: the generated key length, stated in the key-rotation runbook and checked by an operator's own tooling"},
 		"internal/identity.TokenLength": {Symbol: "internal/identity.TokenLength", Why: "published constant: the session token length, which the login handler's own documentation and the incident runbook state by name"},
 
-		"internal/inbox.StatusReceived":  {Symbol: "internal/inbox.StatusReceived", Why: "the inbox lifecycle vocabulary. Statuses are stored as text and read by the recovery drill, by `securityctl doctor` and by the ops screen rather than by a Go caller"},
-		"internal/jobs.Status":           {Prefix: "internal/jobs.Status", Why: "the job lifecycle vocabulary. Statuses are stored as text and read by the recovery drill, by the soak criteria and by the ops screen rather than by a Go caller"},
-		"internal/jobs.Queue":            {Prefix: "internal/jobs.Queue", Why: "the job queue vocabulary. Queues are stored as text and named by the durable claim path and by the operator's runbook"},
+		"internal/inbox.StatusReceived": {Symbol: "internal/inbox.StatusReceived", Why: "the inbox lifecycle vocabulary. Statuses are stored as text and read by the recovery drill, by `securityctl doctor` and by the ops screen rather than by a Go caller"},
+		"internal/jobs.Status":          {Prefix: "internal/jobs.Status", Why: "the job lifecycle vocabulary. Statuses are stored as text and read by the recovery drill, by the soak criteria and by the ops screen rather than by a Go caller"},
+
 		"internal/jobs.ErrNotClaimed":    {Symbol: "internal/jobs.ErrNotClaimed", Why: "sentinel: the claim returns it when a lease lapsed, which is the zero-accepted-event-loss path, and the reason is recorded on the job row"},
 		"internal/jobs.VLMLeaseDuration": {Symbol: "internal/jobs.VLMLeaseDuration", Why: "published bound: how long a VLM job may hold its lease before another worker may take it. It is a recovery-timeout an operator tunes by name"},
 
@@ -168,11 +168,16 @@ var (
 		// input format: the JSON Schema in contracts/json-schema names them, the
 		// compiler switches over them, and a member with no in-tree producer is a
 		// rule construct the language offers and the built-in bundle does not use.
-		"internal/rules.Kind":                 {Prefix: "internal/rules.Kind", Why: "the compiled rule-kind vocabulary. It is the enum of an untrusted input format — rule-bundle.schema.json names every member — and the compiler switches over the set, so a member no built-in rule uses is a construct the language offers, not dead code"},
-		"internal/rules.Degrade":              {Prefix: "internal/rules.Degrade", Why: "the rule engine's degradation-reason vocabulary. The reasons are written onto the incident's verification row and read by the operator and by the evaluation harness"},
-		"internal/rules.KnownEventTypes":      {Symbol: "internal/rules.KnownEventTypes", Why: "published vocabulary: the canonical event types a rule may match, shared by the bundle schema, the compiler's validation and the adapter's normaliser. It is read by a bundle that is not in this tree (a site's own bundle) and by the rule-lint gate's vocabulary check"},
-		"internal/rules.DeviceKinds":          {Symbol: "internal/rules.DeviceKinds", Why: "published vocabulary: the device kinds a rule may match, shared by the bundle schema and the compiler. A site's own bundle names them"},
-		"internal/rules.DispatchTypes":        {Symbol: "internal/rules.DispatchTypes", Why: "published vocabulary: the dispatch actions a rule may request, shared by the bundle schema and the compiler. A site's own bundle names them, and P8's policy engine is the consumer that will read them"},
+		"internal/rules.Kind":            {Prefix: "internal/rules.Kind", Why: "the compiled rule-kind vocabulary. It is the enum of an untrusted input format — rule-bundle.schema.json names every member — and the compiler switches over the set, so a member no built-in rule uses is a construct the language offers, not dead code"},
+		"internal/rules.Degrade":         {Prefix: "internal/rules.Degrade", Why: "the rule engine's degradation-reason vocabulary. The reasons are written onto the incident's verification row and read by the operator and by the evaluation harness"},
+		"internal/rules.KnownEventTypes": {Symbol: "internal/rules.KnownEventTypes", Why: "published vocabulary: the canonical event types a rule may match, shared by the bundle schema, the compiler's validation and the adapter's normaliser. It is read by a bundle that is not in this tree (a site's own bundle) and by the rule-lint gate's vocabulary check"},
+		"internal/rules.DeviceKinds":     {Symbol: "internal/rules.DeviceKinds", Why: "published vocabulary: the device kinds a rule may match, shared by the bundle schema and the compiler. A site's own bundle names them"},
+		// `internal/rules.DispatchTypes` was HERE, excused as "published vocabulary ... and P8's
+		// policy engine is the consumer that will read them". It is deleted because
+		// `internal/capability` now reads it - which is the whole point: the closed set was
+		// declared for a consumer that did not exist, and the vocabulary was dead in exactly
+		// the way a vocabulary is dead when nothing dispatches anything. Its reader is the
+		// gate that measures whether every member has an executor.
 		"internal/rules.Severities":           {Symbol: "internal/rules.Severities", Why: "published vocabulary: the incident severities a rule may declare, shared by the bundle schema and the compiler"},
 		"internal/rules.DefaultBusinessHours": {Symbol: "internal/rules.DefaultBusinessHours", Why: "published default: the business-hours window a schedule condition gets when the bundle omits one. It is a product decision recorded in docs/ai-and-data.md"},
 		"internal/rules.TierC":                {Symbol: "internal/rules.TierC", Why: "published constant: the tier a Tier C signal carries, which is the vocabulary the schema's tier field is expressed in"},

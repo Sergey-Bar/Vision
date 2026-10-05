@@ -30,6 +30,7 @@ import (
 
 	"github.com/Sergey-Bar/Ai-Captain/internal/audit"
 	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
+	"github.com/Sergey-Bar/Ai-Captain/internal/dispatch"
 	"github.com/Sergey-Bar/Ai-Captain/internal/rules"
 )
 
@@ -208,6 +209,40 @@ func (s *Service) CreateIncident(ctx context.Context, in Create) (string, error)
 			orDefault(in.Decision.Reason, "unspecified"),
 			explain(in.Decision), string(in.Decision.DegradedReason)); err != nil {
 			return fmt.Errorf("incidents: record verification: %w", err)
+		}
+
+		// The dispatches the winning rule asked for, in THIS transaction.
+		//
+		// This is the durability fix. `internal/pipeline` used to call `CreateIncident`,
+		// let it commit, and only then open a SECOND transaction to enqueue the VLM job -
+		// so an incident could commit and the work about it be lost, with nothing
+		// recording that the work was supposed to happen. Invariant 1 is "anything reaching
+		// inbox_events reaches a terminal state"; the same has to be true of a side effect
+		// an incident promises, and the only way to get it is one transaction.
+		//
+		// `outbox.Enqueue` takes the caller's `pgx.Tx` precisely so this is possible. The
+		// rows are written here and the relay drains them afterwards, which is what makes
+		// the commit atomic without making the delivery synchronous with the ingest.
+		//
+		// A dispatch that cannot be built is an ERROR rather than a skip. A rule whose
+		// notification could not be encoded is a rule whose notification is missing, and
+		// returning nil here would commit the incident and record nothing - the same
+		// silent gap this block removes.
+		if err := dispatch.EnqueueOutbox(ctx, tx, dispatch.Request{
+			TenantID:   in.TenantID,
+			SiteID:     in.SiteID,
+			IncidentID: id,
+			// The trigger event, which a VLM job cannot be built without: the worker
+			// looks the evidence up from the event.
+			EventID:    first(in.SupportingEventIDs),
+			EvidenceID: first(in.EvidenceIDs),
+			RuleID:     in.Decision.RuleID,
+			Title:      orDefault(in.Title, in.Decision.RuleID),
+			Severity:   orDefault(in.Decision.Severity, "medium"),
+			OccurredAt: in.Decision.OccurredAt,
+			Dispatch:   in.Decision.Dispatch,
+		}); err != nil {
+			return fmt.Errorf("incidents: enqueue dispatches: %w", err)
 		}
 
 		if s.Audit != nil {

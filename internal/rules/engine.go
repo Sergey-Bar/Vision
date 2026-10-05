@@ -123,6 +123,9 @@ type Outcome struct {
 	// that compiled, passed every test, and notified nobody.
 	Dispatch []Dispatch
 	Severity string
+	// OccurredAt is the trigger's `normalized_at`, carried so Resolve can stamp the
+	// decision with when the thing happened rather than when the decision was made.
+	OccurredAt time.Time
 	// SupportingEvents are the signal ids that satisfied the rule.
 	SupportingEvents []string
 	// SupportingObservations are the observation ids that participated.
@@ -258,6 +261,7 @@ func (e *Engine) Resolve(outcomes []Outcome) Decision {
 		if o.State == StateSuppressed && o.Matched {
 			return Decision{
 				State: StateSuppressed, RuleID: o.RuleID, Reason: o.Reason,
+				OccurredAt: o.OccurredAt,
 				// A suppressing rule's dispatch is carried even though the rule did not
 				// raise an incident: `then: {suppress: true, dispatch: [...]}` is legal,
 				// and a side effect the rule asked for is a side effect the operator
@@ -276,6 +280,7 @@ func (e *Engine) Resolve(outcomes []Outcome) Decision {
 		if o.State == StateContradicted && o.Matched {
 			return Decision{
 				State: StateContradicted, RuleID: o.RuleID, Reason: o.Reason,
+				OccurredAt:          o.OccurredAt,
 				Dispatch:            o.Dispatch,
 				ContradictingEvents: o.ContradictingEvents,
 				DriftExclusions:     d.DriftExclusions,
@@ -308,6 +313,7 @@ func (e *Engine) Resolve(outcomes []Outcome) Decision {
 			if outcomes[i].Matched {
 				return Decision{
 					State: outcomes[i].State, RuleID: outcomes[i].RuleID, Reason: outcomes[i].Reason,
+					OccurredAt:       outcomes[i].OccurredAt,
 					Dispatch:         outcomes[i].Dispatch,
 					SupportingEvents: outcomes[i].SupportingEvents,
 					DriftExclusions:  d.DriftExclusions,
@@ -391,9 +397,21 @@ type Decision struct {
 	SupportingEvents       []string
 	SupportingObservations []string
 	ContradictingEvents    []string
-	DriftExclusions        []Exclusion
-	Degraded               bool
-	DegradedReason         DegradedReason
+	// OccurredAt is when the trigger event happened, in the site-relative-normalized
+	// form `normalized_at` carries.
+	//
+	// On Decision rather than derived by the caller from the signal, because a
+	// notification has to say when the thing happened and the only clock that answers
+	// that is the one the rules layer already computed. A notification stamped with the
+	// time it was RENDERED is a different and much less useful fact, and an incident row
+	// stamped `now()` is already the thing this fixes.
+	//
+	// Zero when no rule matched, which is the correct answer: there was no event to
+	// stamp.
+	OccurredAt      time.Time
+	DriftExclusions []Exclusion
+	Degraded        bool
+	DegradedReason  DegradedReason
 }
 
 func (e *Engine) evaluateRule(rule CompiledRule, trigger Signal, available []Signal) Outcome {
@@ -410,6 +428,11 @@ func (e *Engine) evaluateRule(rule CompiledRule, trigger Signal, available []Sig
 	out.Matched = true
 	out.Action = rule.Then
 	out.Dispatch = rule.Then.Dispatch
+	// The trigger's normalized time, not the engine's clock. `normalized_at` is the only
+	// field a time predicate may read - a camera forty seconds fast puts its events forty
+	// seconds from where they happened - and it is equally the only field an operator's
+	// notification should quote.
+	out.OccurredAt = trigger.NormalizedAt
 
 	if rule.Then.Suppress {
 		out.State = StateSuppressed

@@ -137,7 +137,7 @@ func LoadDestinations(path string) (*Destinations, error) {
 				"duplicate name makes the effective one a matter of file order, which is "+
 				"how a site ends up notifying one of two receivers", path, d.Name)
 		}
-		if err := CheckURL(d.URL); err != nil {
+		if err := checkURL(d.URL); err != nil {
 			return nil, fmt.Errorf("dispatch: destinations %s: %q: %w", path, d.Name, err)
 		}
 		if d.InsecureSkipVerify {
@@ -183,7 +183,7 @@ func LoadDestinations(path string) (*Destinations, error) {
 // `insecure_skip_verify` is still refused here: unlike a host choice, turning off
 // certificate verification has no legitimate programmatic use, and it is the one setting a
 // caller cannot be trusted with.
-func NewDestinations(entries []Destination) (*Destinations, error) {
+func newDestinations(entries []Destination) (*Destinations, error) {
 	out := &Destinations{byName: map[string]Destination{}}
 	for i, d := range entries {
 		if strings.TrimSpace(d.Name) == "" {
@@ -193,7 +193,7 @@ func NewDestinations(entries []Destination) (*Destinations, error) {
 		if _, dup := out.byName[d.Name]; dup {
 			return nil, fmt.Errorf("dispatch: destination %q is declared twice", d.Name)
 		}
-		if err := CheckURLScheme(d.URL); err != nil {
+		if err := checkURLScheme(d.URL); err != nil {
 			return nil, fmt.Errorf("dispatch: destination %q: %w", d.Name, err)
 		}
 		if d.InsecureSkipVerify {
@@ -207,11 +207,11 @@ func NewDestinations(entries []Destination) (*Destinations, error) {
 	return out, nil
 }
 
-// CheckURLScheme refuses a plaintext or credential-bearing destination URL.
+// checkURLScheme refuses a plaintext or credential-bearing destination URL.
 //
 // The half of `CheckURL` that does not depend on where the host points, so
 // `NewDestinations` can apply it without applying the reachability policy.
-func CheckURLScheme(raw string) error {
+func checkURLScheme(raw string) error {
 	if strings.TrimSpace(raw) == "" {
 		return errors.New("url is required; a destination with no url is a rule that " +
 			"dead-letters every notification")
@@ -265,8 +265,8 @@ type destinationsDoc struct {
 //
 //  3. **No userinfo.** `https://user:pass@host/` puts a credential in the URL, and a URL
 //     ends up in logs. The `secret_ref` field exists for that.
-func CheckURL(raw string) error {
-	if err := CheckURLScheme(raw); err != nil {
+func checkURL(raw string) error {
+	if err := checkURLScheme(raw); err != nil {
 		return err
 	}
 	u, err := url.Parse(raw)
@@ -344,28 +344,28 @@ func blockedIP(ip net.IP) (bool, string) {
 // `insecure_skip_verify` field this package refuses at startup.
 func TLSConfig() *tls.Config { return &tls.Config{MinVersion: tls.VersionTLS12} }
 
-// ExampleDestinations is the documented shape, written to a comment rather than to a
+// exampleDestinations is the documented shape, written to a comment rather than to a
 // `.example` file.
 //
 // A file would drift: nothing reads it, so nothing checks it, and it would sit in the
 // release archive claiming to be a configuration example while carrying a syntax the parser
 // no longer accepts. This comment is a compile error the day the struct changes.
-const ExampleDestinations = `
+const exampleDestinations = `
 version: 1
 destinations:
-  # The escalation path for this site. ` + DefaultOperatorDestination + ` is what a rule
+  # The escalation path for this site. ` + defaultOperatorDestination + ` is what a rule
   # means when it omits ` + "`target`" + `.
-  - name: ` + DefaultOperatorDestination + `
+  - name: ` + defaultOperatorDestination + `
     url: https://hooks.example.internal/security-platform
     # Names an environment variable holding a bearer token. The value is read at
     # delivery and is never stored in this file, a log, or a payload.
     secret_ref: SP_DISPATCH_OPERATOR_TOKEN
 
   # A different receiver for supervisor escalation. Keeping it separate from
-  # ` + DefaultOperatorDestination + ` is the point: ` + "`notify_operator`" + ` and
+  # ` + defaultOperatorDestination + ` is the point: ` + "`notify_operator`" + ` and
   # ` + "`notify_supervisor`" + ` are a routing decision, and collapsing them would make
   # a rule mean something its author did not write.
-  - name: ` + DefaultSupervisorDestination + `
+  - name: ` + defaultSupervisorDestination + `
     url: https://security.example.com/platform-alerts
     secret_ref: SP_DISPATCH_SUPERVISOR_TOKEN
 `
@@ -376,8 +376,8 @@ destinations:
 // directory and nothing in a deployment sets that to what anyone expects.
 const DefaultDestinationsPath = "/etc/security-platform/dispatch-destinations.yaml"
 
-// ErrNoDestinationsFile is what an operator sees when they have not written one.
-var ErrNoDestinationsFile = fmt.Errorf(
+// errNoDestinationsFile is what an operator sees when they have not written one.
+var errNoDestinationsFile = fmt.Errorf(
 	"no destinations are configured (looked for %s). Notifications a rule asks for will "+
 		"be refused and dead-lettered. Write the file with this shape:\n%s",
-	filepath.ToSlash(DefaultDestinationsPath), ExampleDestinations)
+	filepath.ToSlash(DefaultDestinationsPath), exampleDestinations)
