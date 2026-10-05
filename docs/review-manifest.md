@@ -179,8 +179,8 @@ says nothing.
 - **Five Milestone routes are worse than `Unverified`.** `routes.go` marks them
   `CONTRADICTED` or `NOT-ANSWERABLE` against Milestone's own docs. `/System/Time` means
   the clock probe has no input, so `drift_exclusions` and Gate 3.7 are inert.
-- **`docs/status.md`'s systemd claim is still wrong.** It says `Type=notify`;
-  `deploy/systemd/security-core.service:25` says `Type=simple`.
+- **`docs/status.md`'s systemd claim was wrong.** It said `Type=notify`;
+  `deploy/systemd/security-core.service:25` says `Type=simple`. **Fixed in this branch.**
 
 ## Pre-existing defect found while running the gates
 

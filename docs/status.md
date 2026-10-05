@@ -2096,15 +2096,16 @@ that marked its own homework would make the flag a claim the tool makes about
 itself — and it prints how many routes a human could promote and why that is
 their decision.
 
-**The systemd unit still says `Type=notify`.** Nothing in the tree implements an
-`sd_notify` handshake, so a unit written by `securityctl install` waits out
-systemd's start timeout before being killed as failed. This is a one-line
-`Type=simple` and it is not changed here because a unit's service type is a
-deployment decision a human signs. The same unit also sets
-`MemoryDenyWriteExecute`, `SystemCallFilter=@system-service` and
-`PrivateDevices`, each of which is incompatible with binding a GPU runtime: a
-site that binds one needs those three relaxed, and doing so is an operator's
-choice rather than a default.
+**The systemd unit says `Type=simple`.** The unit written by `securityctl install`
+uses `Type=simple` because nothing in the tree implements an `sd_notify` handshake
+— a unit that declares `notify` and whose process never notifies waits out
+systemd's start timeout before being killed as failed. The readiness signal is
+`/v1/health/ready` instead. If `sd_notify` is ever added, the correct change is
+the notifier plus `Type=notify`, not `Type=notify` alone. The unit also sets
+`MemoryDenyWriteExecute`, `SystemCallFilter=@system-service` and `PrivateDevices`,
+each of which is incompatible with binding a GPU runtime: a site that binds one
+needs those three relaxed, and doing so is an operator's choice rather than a
+default.
 
 **`systemd` is not exercised here.** The units are written and their content is
 asserted, and this repository has no systemd to start them under. An install has
