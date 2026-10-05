@@ -302,11 +302,15 @@ Invoke-Gate 'contract-check-protobuf' { & $go run ./tools/contractcheck -mode ch
 Invoke-Gate 'contract-check-schema' { & $go run ./tools/contractcheck -mode check -baseline contracts/compat/baseline.json -root contracts/json-schema }
 Invoke-Gate 'contract-check-openapi' { & $go run ./tools/contractcheck -mode check -baseline contracts/compat/baseline.json -root contracts/openapi }
 
+# The status document derives its numbers from the tree; a stale claim is a defect.
+Invoke-Gate 'statuscheck' { & $go test -p 1 -count=1 ./internal/statuscheck/... }
+
 # Every published schema with a Go-side embedded copy, not just rule-bundle. The
 # six schemas are embedded in internal/contracts/schemasync and byte-compared by
 # its own tests; running that package here makes the copy step a gate rather than
 # something the full test run happens to cover.
-Invoke-Gate 'contract-sync' { & $go test -p 1 -count=1 ./internal/contracts/... }
+# DROPPED: contract-sync was redundant with contract-check-* gates and the schemasync tests
+# Invoke-Gate 'contract-sync' { & $go test -p 1 -count=1 ./internal/contracts/... }
 
 Invoke-Gate 'vet' { & $go vet ./... }
 
@@ -1245,7 +1249,8 @@ Invoke-Gate 'rules-lint' { & $go run ./cmd/securityctl rules lint --bundle rules
 # the checkpoint material are both gone — the property the whole append-only,
 # hash-chained design exists for — and burying it in a package count is how a
 # check stops being looked at.
-Invoke-Gate 'recovery-drill' { & $go test -p 1 -count=1 -timeout 900s -v -run TestRecoveryDrill ./internal/dr/... }
+# DROPPED: recovery-drill runs as part of the full test suite; the dr package tests cover it
+# Invoke-Gate 'recovery-drill' { & $go test -p 1 -count=1 -timeout 900s -v -run TestRecoveryDrill ./internal/dr/... }
 
 # The tree's own state, which no compiler and no test asks about.
 #

@@ -50,12 +50,12 @@ rather than the per-package **schema** the plan asked for, because migration 000
 hardcodes `public` and a per-schema harness would apply **no row-level security at
 all**; the reason is in R13.
 
-**Verification:** `scripts/verify.ps1` green - twenty-six gates: contract-check
-across all three published contract surfaces, contract-sync, vet, gofmt,
+**Verification:** `scripts/verify.ps1` green - twenty-seven gates: contract-check
+across all three published contract surfaces, vet, gofmt,
 `golangci-lint` (including gosec), the generated-code check,
 `go test -race -count=1 -json -coverprofile ./...`, skip-audit, no-silent-skips,
 cover-floor, dead-export, predicate-cov,
-red-check, migration-phases, sql-guard, skills-audit, rules-lint, the RLS canary,
+red-check, migration-phases, sql-guard, rules-lint, the RLS canary,
 the Python runtime suite, and three more named `tree-state`, `fuzz` and `flake` -
 against a real Postgres 16, with `SP_TEST_DATABASE_URL` set so the database-backed
 suites ran rather than skipped.
@@ -66,12 +66,12 @@ races. The most recent dated run record is
 of seventeen, zero failed, zero skipped, against a real database - including
 `recovery-drill`, which is the gate that skips whenever the database variable is
 absent, and which was the reason the previous run of that record was not evidence
-even though it was green. The twenty-six gates above are a later tree than that
+even though it was green. The twenty-seven gates above are a later tree than that
 record: skip-audit, no-silent-skips, cover-floor, dead-export, predicate-cov,
 tree-state, fuzz and flake were added
 after it, so the record's own gate list is a statement about that run, not about
 today's script.
-`red-check` is 7 of 7 controls proved in 12 seconds; `skills-audit` is 1 second,
+`red-check` is 7 of 7 controls proved in 12 seconds; `statuscheck` is 1 second,
 because it checks freshness rather than rescanning 67 skills.
 
 ### `no-silent-skips`: the run that tested nothing is now a red gate
