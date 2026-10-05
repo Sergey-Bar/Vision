@@ -3088,3 +3088,38 @@ the failure message names the missing compiler.
   why the race step is called out above as unverified rather than passed.
 - Python 3.14 via the `py` launcher. The runtime targets 3.11+ syntax and uses
   the standard library only, which CI asserts.
+
+## The 2026-10-05 pass, third: the search gateway, the plan table, and Q4
+
+### Q4 is half a gate, and says so
+
+`internal/golden` pins one decision per committed fixture in
+`internal/golden/decisions.json` and checks three things about it, all of which
+need no database:
+
+- **every fixture has a decision, and every decision has a fixture.** Both
+  directions, because they fail differently. A fixture with no decision is
+  behaviour nobody has decided; a decision with no fixture is a row that will never
+  be checked and reads as coverage. Both pass silently, and both make the gate
+  **shrink** as the tree grows — which is the opposite of what a gate is for.
+- **every decision is internally consistent**, so a row cannot say `raised: false`
+  and name a rule, or `raised: true` with no rule to re-derive from.
+- **the POC's machine-derivable verdicts do not contradict the product's
+  decisions.** The two modules cannot share Go code, so this compares two committed
+  *files* rather than two executions, and the test says that is the weaker claim.
+
+**What is NOT here:** replaying each scenario through `pipeline.Loops` and comparing
+what the pipeline reaches. The file holds twelve decisions and nothing has compared
+them against a pipeline yet. **A decision file nobody has compared against a
+pipeline is a list of claims**, and the test file names that gap in its own header
+rather than leaving it to be discovered.
+
+The decisions are reasoned from the shipped rule, not measured, and the `why` on each
+one says which rule clause makes it a decision rather than an absence.
+`motion-restricted-zone.json` is the only fixture that can raise, because the
+bundle's one production rule needs motion-or-analytics AND a `/restricted` zone AND
+an hour after `business-hours` in Asia/Jerusalem. Eleven of the twelve are not about
+detection at all — they are about the inbox, and their zeros are invariant 1 pinned
+as fixtures. `duplicate-delivery.json` and `reconnect-replay.json` are the two most
+valuable rows in the file: a non-zero count on either means a customer is being
+charged twice for one second.

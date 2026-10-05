@@ -1,0 +1,102 @@
+{
+  "schema": 1,
+  "note": "Q4. One decision per committed fixture, pinned here so a reviewer can DIFF a decision rather than read a test and take its word. The two modules -- the POC under poc/active-monitoring and this product -- cannot share Go code, so what is compared is two committed artefacts: this file, and the POC's groundtruth.synthetic.json. Nothing here claims the two implementations are equivalent; it claims both agree about the decisions below, and it fails when either changes its mind. The execution half -- replaying each scenario through pipeline.Loops and comparing what it reaches -- is not in this commit and is stated as missing in the test file that names the gap. A decision file nobody has compared against a pipeline is a list of claims, and calling that a gate would be the error this file exists to prevent.",
+  "golden": [
+    {
+      "scenario": "motion-restricted-zone.json",
+      "title": "Motion in a restricted zone after hours, corroborated by a door sensor.",
+      "raised": true,
+      "ruleId": "core.person-in-restricted-zone-after-hours",
+      "incidents": 1,
+      "why": "The ONLY committed scenario that can raise, and the reason is the rule rather than the fixture. The bundle ships one production rule and it names three things: eventType motion or analytics, zone.pathPrefix /restricted, and an INVERTED business-hours schedule. This fixture is motion, in a restricted zone, at an hour that is after hours in Asia/Jerusalem, corroborated by a second signal at evidence tier B -- the rule's minSignals and minEvidenceTier exactly. Everything else in this file raises nothing, and that is a fact about the RULE rather than about the other eleven fixtures: eleven of them are not about detection at all. They are about the inbox."
+    },
+    {
+      "scenario": "analytics-object-crossed.json",
+      "title": "Analytics line-crossing and loitering on an unrestricted camera.",
+      "raised": false,
+      "ruleId": "",
+      "incidents": 0,
+      "why": "Analytics, so the eventType matches -- and on an UNRESTRICTED camera, so zone.pathPrefix does not. This is the fixture that keeps the zone predicate honest: a rule that fired on any analytics event would raise here, and the fact that it does not is the zone filter being a filter and not a formality. It is also the scenario a reader should check first when the bundle changes, because it is the one whose non-raise is a decision rather than an absence."
+    },
+    {
+      "scenario": "alarm-lifecycle.json",
+      "title": "An alarm created, then acknowledged, then closed, as three feed entries.",
+      "raised": false,
+      "ruleId": "",
+      "incidents": 0,
+      "why": "An alarm lifecycle is an OPERATOR workflow, not a detection. The bundle's one rule filters on motion or analytics and this is neither, so nothing fires. What this fixture actually proves is that three feed entries about one alarm become three canonical events in the right order, which is invariant 1 -- zero accepted event loss -- rather than anything about rules."
+    },
+    {
+      "scenario": "bookmark-and-metadata.json",
+      "title": "A bookmark and a metadata event, which are the two evidence-fetch triggers.",
+      "raised": false,
+      "ruleId": "",
+      "incidents": 0,
+      "why": "Evidence-fetch triggers. Raising no incident is right -- an operator's bookmark is a request for footage, not a claim that something happened -- and the fixture's value is that the bookmark reaches the graph as provenance so a later edge can cite where it came from. Criterion 09's measurement replays a bookmark against the scripted endpoint; this is the fixture the ingest half sees."
+    },
+    {
+      "scenario": "camera-offline-online.json",
+      "title": "A camera going offline and returning.",
+      "raised": false,
+      "ruleId": "",
+      "incidents": 0,
+      "why": "Device health, and a clock reference the drift subsystem re-measures. It raises no incident because an offline camera is not an intrusion, and a product that raised one would be generating work for an operator on every network blip. This fixture is the evidence for the coverage panel's clock_drift row rather than for the incident queue."
+    },
+    {
+      "scenario": "delayed-arrival.json",
+      "title": "An event whose observed time precedes its arrival by 45 seconds.",
+      "raised": false,
+      "ruleId": "",
+      "incidents": 0,
+      "why": "Arrival order contradicts observation order, which is what normalized_at exists for. It raises no incident because the event is not motion in a restricted zone, but it IS the fixture that would catch a normaliser reading observed_at where a time-window predicate should read its own column. That is why it is here rather than in a normaliser's own test: it is here so the DECISION is pinned."
+    },
+    {
+      "scenario": "duplicate-delivery.json",
+      "title": "One source event delivered twice.",
+      "raised": false,
+      "ruleId": "",
+      "incidents": 0,
+      "why": "The inbox must turn two deliveries into one canonical event and no second side effect, so the count here is 0 and not 1. This is invariant 1 stated as a fixture: kill -9 and a vendor retry are the same shape. A product that raised two incidents here would be charging a customer twice for one event, and the count in this file is what catches it."
+    },
+    {
+      "scenario": "malformed-envelopes.json",
+      "title": "Envelopes that are readable JSON but break the assumed field contract.",
+      "raised": false,
+      "ruleId": "",
+      "incidents": 0,
+      "why": "No id, no type, an unparseable timestamp, and a type nobody has seen. Each is expected to reach a TERMINAL state -- processed, or dead-lettered with its own reason column -- and none may reach a rule. Zero incidents is the correct decision, and the reason it is pinned is that a malformed envelope reaching the rule engine is a crash; a crash that raises an incident is worse than one that does not."
+    },
+    {
+      "scenario": "missing-camera.json",
+      "title": "An event from a camera id that was never registered on this platform.",
+      "raised": false,
+      "ruleId": "",
+      "incidents": 0,
+      "why": "An unregistered camera produces an UNATTRIBUTED event, which is correct behaviour: the product refuses to attribute an event to a device it has never heard of rather than guessing. Zero incidents follows, because the rule's zone filter needs an attributable event. The fixture is the answer to 'what happens when the vendor invents a camera', and the answer is a row that says so."
+    },
+    {
+      "scenario": "out-of-order-arrival.json",
+      "title": "Two events delivered newest-first.",
+      "raised": false,
+      "ruleId": "",
+      "incidents": 0,
+      "why": "Arrival order contradicting observation order is what the lease and the ORDER BY received_at claim exist for, and this fixture is the one that would catch a pipeline sorting by arrival. Neither event is a detection, so zero incidents -- but if this ever becomes 1 it means the two were treated as two independent things rather than one window."
+    },
+    {
+      "scenario": "reconnect-replay.json",
+      "title": "A reconnect that re-serves the previous window, duplicating every id.",
+      "raised": false,
+      "ruleId": "",
+      "incidents": 0,
+      "why": "The vendor's normal behaviour on a flaky link, and the most important negative in this file. Every id repeats, and the inbox must produce ONE canonical event for each. A count of 0 here with a non-zero count anywhere else means dedupe broke, and dedupe breaking is how a customer is charged twice for the same second."
+    },
+    {
+      "scenario": "recording-state.json",
+      "title": "Recording starting and stopping, which evidence retention depends on.",
+      "raised": false,
+      "ruleId": "",
+      "incidents": 0,
+      "why": "Evidence retention bookkeeping. It raises no incident because recording state is not a detection, and its value is in evidence.retain_until rather than in the incident queue. A fixture that raised here would mean retention was wired to the rule engine, which is exactly the coupling this product argues against."
+    }
+  ]
+}
