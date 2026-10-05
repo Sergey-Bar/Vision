@@ -328,12 +328,14 @@ func run() error {
 		// The evidence volume, so `evidence_disk_free_percent` measures the
 		// filesystem the evidence store actually writes to rather than whatever the
 		// process's working directory happens to be on.
-		EvidenceRoot:  cfg.EvidenceRoot,
-		PollInterval:  cfg.PollInterval,
-		ClaimBatch:    cfg.ClaimBatchSize,
-		LeaseDuration: cfg.LeaseDuration,
-		Jobs:          jobWorker,
-		AIEndpoint:    cfg.AIEndpoint,
+		EvidenceRoot:           cfg.EvidenceRoot,
+		EvidenceStore:          store,
+		RetentionSweepInterval: cfg.RetentionSweepInterval,
+		PollInterval:           cfg.PollInterval,
+		ClaimBatch:             cfg.ClaimBatchSize,
+		LeaseDuration:          cfg.LeaseDuration,
+		Jobs:                   jobWorker,
+		AIEndpoint:             cfg.AIEndpoint,
 		// The relay runs in the pipeline, not here, so the whole process has one
 		// place that decides what runs and in what order at shutdown.
 		Relay:       relay,

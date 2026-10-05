@@ -78,6 +78,7 @@ var (
 		"internal/config.DefaultEvidenceFetchPreRoll":   {Symbol: "internal/config.DefaultEvidenceFetchPreRoll", Why: "published default: the default pre-roll for evidence fetch bookmarks, stated in the site configuration documentation"},
 		"internal/config.DefaultEvidenceFetchPostRoll":  {Symbol: "internal/config.DefaultEvidenceFetchPostRoll", Why: "published default: the default post-roll for evidence fetch bookmarks, stated in the site configuration documentation"},
 		"internal/config.DefaultEvidenceFetchRetainFor": {Symbol: "internal/config.DefaultEvidenceFetchRetainFor", Why: "published default: the default retention period for evidence fetch receipts, stated in the site configuration documentation"},
+		"internal/config.DefaultRetentionSweepInterval": {Symbol: "internal/config.DefaultRetentionSweepInterval", Why: "published default: the default interval for the retention sweep, stated in the site configuration documentation"},
 
 		"internal/correlator.DefaultTiers":  {Symbol: "internal/correlator.DefaultTiers", Why: "published default tier policy. The tiers are a product decision recorded in docs/ai-and-data.md, and the function is the seam a site configuration overrides"},
 		"internal/correlator.MaxCandidates": {Symbol: "internal/correlator.MaxCandidates", Why: "published bound: the ceiling on correlation candidates per trigger. It is a cost limit an operator can lower, so the number belongs to the configuration contract"},
@@ -247,7 +248,6 @@ var (
 
 		"internal/evidence.Exists":         {Symbol: "internal/evidence.Exists", Why: "TEST-ONLY. Whether a stored reference is present. The console's evidence list and the retention sweep should both ask it; neither does, so a fetch can be reported for a reference the store was never told about"},
 		"internal/evidence.StagingResidue": {Symbol: "internal/evidence.StagingResidue", Why: "TEST-ONLY. What the staging directory still holds after a crash. It should be what `securityctl doctor` reports: a crash mid-fetch leaves footage staged for ever and nothing surfaces it"},
-		"internal/evidence.Sweep":          {Symbol: "internal/evidence.Sweep", Why: "TEST-ONLY. The retention sweep. Nothing schedules it, so evidence is kept until the disk fills, which on a camera site is the least interesting way to run out of space"},
 
 		"internal/graph.AddEdge":      {Symbol: "internal/graph.AddEdge", Why: "TEST-ONLY. The single-edge adder behind the bulk one. Either the bulk form should be built on it or the single form should go; a pair where only one has a caller is a pair whose shape is undecided"},
 		"internal/graph.CheckRebuild": {Symbol: "internal/graph.CheckRebuild", Why: "TEST-ONLY. The rebuild check that reports a graph problem rather than storing it. The console's topology view should render its findings; until then a broken edge set is found by a test and by nobody else"},

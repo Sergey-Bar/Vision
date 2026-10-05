@@ -44,6 +44,7 @@ import (
 	"github.com/Sergey-Bar/Ai-Captain/internal/clock"
 	"github.com/Sergey-Bar/Ai-Captain/internal/correlator"
 	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
+	"github.com/Sergey-Bar/Ai-Captain/internal/evidence"
 	"github.com/Sergey-Bar/Ai-Captain/internal/graph"
 	"github.com/Sergey-Bar/Ai-Captain/internal/inbox"
 	"github.com/Sergey-Bar/Ai-Captain/internal/incidents"
@@ -120,6 +121,12 @@ type Deps struct {
 	// one -- and the SLO's `DiskFreeMeasured` stays false, which is the flag for
 	// "this objective knows nothing here" rather than "this objective is healthy".
 	EvidenceRoot string
+
+	// EvidenceStore is the evidence filesystem store, used by the retention sweep.
+	EvidenceStore *evidence.Store
+
+	// RetentionSweepInterval is how often the retention sweep runs. Zero disables it.
+	RetentionSweepInterval time.Duration
 
 	// InSchedule resolves a schedule id against a site-local instant. A Deps with
 	// none gets `rules.SiteScheduleResolver(SiteLocation)`, which is the same
@@ -227,6 +234,12 @@ func Start(ctx context.Context, d Deps) *Loops {
 	l.spawn(l.ctx, "outbox", l.runOutbox)
 	l.spawn(l.ctx, "gauges", l.runGauges)
 
+	if l.Deps.EvidenceStore != nil && l.Deps.RetentionSweepInterval > 0 {
+		l.spawn(l.ctx, "retention-sweep", l.runRetentionSweep)
+	} else if l.Deps.EvidenceStore != nil {
+		l.log("retention sweep disabled; set SP_RETENTION_SWEEP_INTERVAL to enable")
+	}
+
 	return l
 }
 
@@ -247,6 +260,86 @@ func (l *Loops) runGauges(ctx context.Context) {
 			return
 		case <-ticker.C:
 			l.SampleGauges(ctx)
+		}
+	}
+}
+
+// runRetentionSweep runs the evidence retention sweep periodically.
+func (l *Loops) runRetentionSweep(ctx context.Context) {
+	ticker := time.NewTicker(l.Deps.RetentionSweepInterval)
+	defer ticker.Stop()
+	l.runSweepOnce(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			l.runSweepOnce(ctx)
+		}
+	}
+}
+
+// runSweepOnce runs a single retention sweep.
+func (l *Loops) runSweepOnce(ctx context.Context) {
+	if l.Deps.EvidenceStore == nil || l.Deps.Pool == nil {
+		return
+	}
+	scope, err := l.Deps.Scoped("retention-sweep")
+	if err != nil {
+		l.log("retention sweep: could not get scoped connection", "error", err.Error())
+		return
+	}
+
+	policy := evidence.RetentionPolicy{
+		// Expire objects whose retain_until is in the past
+		Before: time.Now().UTC(),
+		// StoredAt reads the stored_at from the evidence row
+		StoredAt: func(ref string) (time.Time, error) {
+			var storedAt time.Time
+			err := scope.QueryRow(ctx, `
+				SELECT stored_at FROM evidence
+				WHERE storage_ref = $1 AND tenant_id = $2`,
+				ref, l.Deps.Tenant).Scan(&storedAt)
+			if err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					return time.Time{}, nil // unknown age -> keep
+				}
+				return time.Time{}, err
+			}
+			return storedAt.UTC(), nil
+		},
+		// SkipLegalHold checks the legal_hold column
+		SkipLegalHold: func(ref string) (bool, error) {
+			var legalHold bool
+			err := scope.QueryRow(ctx, `
+				SELECT legal_hold FROM evidence
+				WHERE storage_ref = $1 AND tenant_id = $2`,
+				ref, l.Deps.Tenant).Scan(&legalHold)
+			if err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					return false, nil
+				}
+				return false, err
+			}
+			return legalHold, nil
+		},
+	}
+
+	result, err := l.Deps.EvidenceStore.Sweep(l.Deps.Tenant, policy, false)
+	if err != nil {
+		l.log("retention sweep failed", "error", err.Error())
+		return
+	}
+	if result.Removed > 0 || result.Errors != nil {
+		l.log("retention sweep completed",
+			"scanned", result.Scanned,
+			"removed", result.Removed,
+			"freed_bytes", result.Freed,
+			"errors", len(result.Errors))
+	}
+	if result.Errors != nil {
+		for _, e := range result.Errors {
+			l.log("retention sweep error", "error", e)
 		}
 	}
 }

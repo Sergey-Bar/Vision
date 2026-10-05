@@ -136,6 +136,10 @@ type Config struct {
 	// EvidenceFetchRetainFor is how long a bookmark receipt is kept before the
 	// retention sweep may delete it. Default 90 days.
 	EvidenceFetchRetainFor time.Duration
+
+	// RetentionSweepInterval is how often the retention sweep runs. Default 1 hour.
+	// Set to 0 to disable automatic sweeps.
+	RetentionSweepInterval time.Duration
 }
 
 // Lookup resolves an environment variable. Load takes one so the tests are
@@ -158,6 +162,7 @@ const (
 	DefaultEvidenceFetchPreRoll   = 5 * time.Second
 	DefaultEvidenceFetchPostRoll  = 10 * time.Second
 	DefaultEvidenceFetchRetainFor = 90 * 24 * time.Hour
+	DefaultRetentionSweepInterval = time.Hour
 )
 
 // Ceilings for the bounded values. A batch size or lease that can be set
@@ -246,6 +251,14 @@ func LoadFrom(get Lookup) (Config, error) {
 		c.EvidenceFetchRetainFor, err = time.ParseDuration(v)
 		if err != nil {
 			return c, fmt.Errorf("config: SP_EVIDENCE_FETCH_RETAIN_FOR: %w", err)
+		}
+	}
+	c.RetentionSweepInterval = DefaultRetentionSweepInterval
+	if v := strings.TrimSpace(get("SP_RETENTION_SWEEP_INTERVAL")); v != "" {
+		var err error
+		c.RetentionSweepInterval, err = time.ParseDuration(v)
+		if err != nil {
+			return c, fmt.Errorf("config: SP_RETENTION_SWEEP_INTERVAL: %w", err)
 		}
 	}
 
@@ -343,6 +356,14 @@ func (c Config) validate() error {
 		return fmt.Errorf("config: SP_EVIDENCE_FETCH_RETAIN_FOR must be at least 1h, got %s",
 			c.EvidenceFetchRetainFor)
 	}
+	if c.RetentionSweepInterval < 0 {
+		return fmt.Errorf("config: SP_RETENTION_SWEEP_INTERVAL cannot be negative, got %s",
+			c.RetentionSweepInterval)
+	}
+	if c.RetentionSweepInterval > 0 && c.RetentionSweepInterval < time.Minute {
+		return fmt.Errorf("config: SP_RETENTION_SWEEP_INTERVAL must be 0 (disabled) or at least 1m, got %s",
+			c.RetentionSweepInterval)
+	}
 	// The three refusals below are the "insecure by default" pairings. Same shape
 	// as the ceilings above: the failure mode is a configuration that loads and
 	// then quietly hands somebody else's traffic the wrong answer, so the answer
@@ -439,6 +460,7 @@ func (c Config) Redacted() map[string]any {
 		"evidence_fetch_pre_roll":   c.EvidenceFetchPreRoll.String(),
 		"evidence_fetch_post_roll":  c.EvidenceFetchPostRoll.String(),
 		"evidence_fetch_retain_for": c.EvidenceFetchRetainFor.String(),
+		"retention_sweep_interval":  c.RetentionSweepInterval.String(),
 	}
 }
 
