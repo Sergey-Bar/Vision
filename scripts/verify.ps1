@@ -606,6 +606,24 @@ Invoke-Gate 'cover-floor' {
 # grep misses build-tagged producers and counts a declaration as a use of itself.
 Invoke-Gate 'dead-export' { & $go test -p 1 -count=1 ./internal/deadexport/... }
 
+# The "declared but does not happen" class, at the declaration level.
+#
+# `dead-export` catches an exported symbol nothing reads. This catches the seven things a
+# reader is TOLD will happen and nothing performs: a rule's dispatch, a work queue, a
+# metric name, a capability, an OpenAPI operation, a partitioned table's horizon, and a
+# site-bearing table's write isolation.
+#
+# It lands WITH its refusals rather than empty, and the refusals are printed in full on
+# every run. That is the whole point: `then.dispatch: notify_operator` parsed, validated
+# against a closed set and was discarded, and every one of the 72,000 lines of tests passed
+# while `outbox.Enqueue` had no production caller and the relay drained an empty table.
+#
+# The gate fails in BOTH directions by construction - a gap with no entry fails, and an
+# entry for a closed gap fails - so a refusal cannot accumulate by adding rows and cannot
+# be made permanent by forgetting to delete one. `-v` because the per-table summary IS the
+# artefact: it is the list of what this product declares and does not do.
+Invoke-Gate 'capability' { & $go test -p 1 -count=1 -v ./internal/capability/... }
+
 # `normalized_at` is the only field a time-window predicate may read.
 #
 # The rule is in AGENTS.md and in three package comments and is enforced nowhere. A
