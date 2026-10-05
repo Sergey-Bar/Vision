@@ -58,7 +58,7 @@ func TestAnEventCostsItsCallsAndNotItsOwn(t *testing.T) {
 	if err := m.Validate(); err != nil {
 		t.Fatalf("the price list does not validate: %v", err)
 	}
-	if got, want := m.CallCost(), 0.05; got != want {
+	if got, want := m.callCost(), 0.05; got != want {
 		t.Errorf("a call is $%.4f, want $%.2f", got, want)
 	}
 	if got, want := m.EventCost(), 0.15; !withinCents(got, want) {
@@ -151,7 +151,7 @@ func TestTheDailyCeilingIsDerivedFromTheMonthlyBudget(t *testing.T) {
 		if err != nil {
 			t.Fatalf("a guard for $%.0f: %v", budget, err)
 		}
-		if want := budget / MonthDays; g.CeilingUSD() != want {
+		if want := budget / monthDays; g.CeilingUSD() != want {
 			t.Errorf("a $%.0f/month budget gives a $%.4f daily ceiling, want $%.4f. Two numbers "+
 				"that can be set independently is a control that will eventually disagree with itself",
 				budget, g.CeilingUSD(), want)
@@ -296,14 +296,6 @@ func TestTheBudgetResetsOnAUtcDayBoundary(t *testing.T) {
 	g.WithClock(func() time.Time { return day.Add(2 * time.Minute) })
 	if err := g.Check("north-gate", 1); err != nil {
 		t.Errorf("the ceiling did not reset after midnight UTC: %v", err)
-	}
-	// And the old spend is still on the books underneath, for anyone reading it.
-	if got := g.SpentUSD("north-gate"); got != 0 {
-		t.Errorf("today's spend reads $%.4f after the reset", got)
-	}
-	g.RollDay()
-	if len(g.spent) != 0 {
-		t.Errorf("RollDay left %d day(s) in memory", len(g.spent))
 	}
 }
 

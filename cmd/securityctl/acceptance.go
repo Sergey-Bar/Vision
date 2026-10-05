@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -527,21 +528,43 @@ func checkCost() criterionVerdict {
 		v.Evidence = "the budget guard would not build: " + err.Error()
 		return v
 	}
-	// Prove the ceiling refuses, at the boundary rather than by assertion.
+	// Prove the ceiling refuses, at the boundary rather than by assertion — and prove
+	// the PREFLIGHT does not charge, because an operator asking "would this site fit"
+	// and a worker spending the budget are the same question with one side and a
+	// check that costs money answers it expensively.
 	affordable := guard.EventsAffordable("acceptance")
+	if err := guard.Check("acceptance", affordable); err != nil {
+		v.Verdict = "fail"
+		v.Evidence = fmt.Sprintf("the preflight refused a site on what it can afford: %v", err)
+		return v
+	}
+	if guard.SpentUSD("acceptance") != 0 {
+		v.Verdict = "fail"
+		v.Evidence = "asking whether a site fits charged it for the question"
+		return v
+	}
 	if err := guard.Spend("acceptance", affordable); err != nil {
 		v.Verdict = "fail"
 		v.Evidence = fmt.Sprintf("a site could not spend the %d events its own ceiling affords: %v", affordable, err)
 		return v
 	}
-	refused := guard.Spend("acceptance", 1) == nil
+	over := guard.Spend("acceptance", 1)
+	refused := errors.Is(over, cost.ErrOverBudget)
+	// And that the refusal is the BUDGET saying no rather than something else. An
+	// operator reading "over budget" on day one of a month concludes they have
+	// overspent a month, so the error has to name the ceiling and the UTC day, and
+	// `ErrOverBudget` is what lets a caller tell that apart from the provider being
+	// down — two things that look identical in a log line and mean opposite things to
+	// whoever has to act on it.
+	named := over != nil && strings.Contains(over.Error(), "daily ceiling") && strings.Contains(over.Error(), "UTC")
 
 	v.Verdict = "pass"
 	v.Evidence = "$0.15 per event is 3 calls x $0.05, and the two are different numbers: a " +
 		"site that corroborates against three signals spends three times what one that does not.\n" +
 		m.Explain(eventsPerDay, budgetUSD) +
-		fmt.Sprintf("  enforced: the guard affords %d events for a site today and %s the %dth\n",
-			affordable, map[bool]string{true: "REFUSES", false: "ALLOWS"}[refused], affordable+1) +
+		fmt.Sprintf("  enforced: the guard affords %d events for a site today and %s the %dth, "+
+			"with an ErrOverBudget naming the ceiling and the UTC day: %t\n",
+			affordable, map[bool]string{true: "REFUSES", false: "ALLOWS"}[refused], affordable+1, named) +
 		fmt.Sprintf("    (ceiling $%.4f/day, derived from the monthly budget rather than set beside it)\n",
 			guard.CeilingUSD()) +
 		"  NOT MEASURED: the event rate. 40/day is a scenario, not a reading from a site. The claim\n" +

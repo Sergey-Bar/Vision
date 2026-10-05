@@ -301,9 +301,6 @@ var (
 		// the package rather than the symbol. Closing them properly means a
 		// `tools/` runner per gate so the script can invoke the package directly,
 		// and that is a real change to the gate script rather than to these packages.
-
-		"internal/deadexport.Check":   {Symbol: "internal/deadexport.Check", Why: "UNWIRED (test-only caller). This gate's entry point. verify.ps1 reaches the package through `go test`, so the symbol itself has no external caller; the close is a `tools/deadexport` runner so the script can invoke it directly"},
-		"internal/statuscheck.Check":  {Symbol: "internal/statuscheck.Check", Why: "UNWIRED (test-only caller). The status gate's entry point, and it is the gate that caught this gate's own drift three times. Same close as internal/deadexport.Check: a `tools/statuscheck` runner, so the script stops reaching the package through `go test`"},
 		"internal/statuscheck.Derive": {Symbol: "internal/statuscheck.Derive", Why: "UNWIRED (test-only caller). The countable-claims derivation behind internal/statuscheck. It has an external test package reader today -- statuscheck_test.go -- which is a real consumer, and this entry is here because the derivation is also what `securityctl status` should print, so a caller in the command would close it properly"},
 
 		// Two lease defaults, one per job family. The inbox worker and the outbox

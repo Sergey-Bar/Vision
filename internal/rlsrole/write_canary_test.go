@@ -69,7 +69,7 @@ func tenantContext(tenant string, sites []string) dbx.TenantContext {
 //
 // # What these canaries do NOT claim
 //
-// That they cover every site-scoped table. They cover three of fifteen, and
+// That they cover every site-scoped table. They cover four of fifteen, and
 // `TestTheSiteScopedTablesAreAllCovered` logs the uncovered ones on every run,
 // because a sample is a choice somebody made rather than a property anybody checked.
 // The first version of this file was how that choice got audited, and the answer was
@@ -128,6 +128,32 @@ var writeCanaries = []writeCanary{
 			(tenant_id, site_id, topic, payload, idempotency_key)
 			VALUES ($1, $2, 'canary', '{"canary":true}'::jsonb, 'canary_outbox_' || $1)`,
 		delete: `DELETE FROM outbox_events WHERE tenant_id = $1 AND idempotency_key = 'canary_outbox_' || $1`,
+	},
+	{
+		// evidence is the FOURTH class, and it is the one this file was missing for
+		// the longest. It is in a different shape from the three above:
+		//
+		//   - it is the table a tenant's whole compliance claim rests on. Every other
+		//     row in this database describes something that happened; this row IS the
+		//     thing a customer hands an auditor, and an evidence row that a cross-tenant
+		//     write can insert is a fabricated exhibit.
+		//   - it carries a content hash with a CHECK constraint, so the canary's values
+		//     have to be a real 64 hex characters. A canary that gets the column list
+		//     wrong fails on the constraint rather than on the policy, which is the
+		//     failure mode the incidents entry above warns about.
+		//   - `storage_ref` has a CHECK refusing an absolute path, which is the
+		//     path-traversal control sitting next to the isolation control. The canary
+		//     therefore uses a RELATIVE reference, so it is refused for the RIGHT
+		//     reason and a failure here is a policy failure rather than a constraint
+		//     one.
+		table: "evidence",
+		insert: `INSERT INTO evidence
+			(evidence_id, tenant_id, site_id, kind, tier, observed_at, captured_at,
+			 storage_ref, media_type, size_bytes, sha256, retention_policy)
+			VALUES ('evd_canary_' || $1, $1, $2, 'snapshot', 'C', now(), now(),
+			        'canary/' || $1, 'application/octet-stream', 1,
+			        repeat('a', 64), 'default')`,
+		delete: `DELETE FROM evidence WHERE tenant_id = $1 AND evidence_id = 'evd_canary_' || $1`,
 	},
 }
 

@@ -68,8 +68,8 @@ func (m Model) Validate() error {
 	return nil
 }
 
-// CallCost is one call's price.
-func (m Model) CallCost() float64 { return m.PerCall }
+// callCost is one call's price.
+func (m Model) callCost() float64 { return m.PerCall }
 
 // EventCost is what one event costs: the calls it takes times the price of one.
 //
@@ -118,20 +118,20 @@ type Month struct {
 	DailyCeilingUSD float64
 }
 
-// MonthDays is the projection length.
+// monthDays is the projection length.
 //
 // 30 rather than the calendar length on purpose: a projection that varies with the
 // month makes two projections of the same site disagree, and a reader comparing them
 // concludes one of the sites changed.
-const MonthDays = 30
+const monthDays = 30
 
 // MonthAt prices a month at an event rate against a budget.
 func (m Model) MonthAt(eventsPerDay float64, budgetUSD float64) Month {
 	d := m.DayAt(eventsPerDay)
 	return Month{
-		Days: MonthDays, EventsPerDay: eventsPerDay,
-		CallsPerDay: d.Calls, Calls: d.Calls * MonthDays, USD: d.USD * MonthDays,
-		BudgetUSD: budgetUSD, DailyCeilingUSD: budgetUSD / MonthDays,
+		Days: monthDays, EventsPerDay: eventsPerDay,
+		CallsPerDay: d.Calls, Calls: d.Calls * monthDays, USD: d.USD * monthDays,
+		BudgetUSD: budgetUSD, DailyCeilingUSD: budgetUSD / monthDays,
 	}
 }
 
@@ -160,10 +160,10 @@ func (mo Month) Headroom() float64 {
 // over it.
 func (mo Month) OverBudget() bool { return mo.BudgetUSD > 0 && mo.USD-mo.BudgetUSD > cents }
 
-// CamerasInTheCriterion is the camera count criterion 10's headline number is
+// camerasInTheCriterion is the camera count criterion 10's headline number is
 // stated against. Named so a reader can see it is a constant of the CLAIM and not of
 // the arithmetic.
-const CamerasInTheCriterion = 20
+const camerasInTheCriterion = 20
 
 // Explain is the whole derivation as lines, and it is the deliverable.
 //
@@ -177,7 +177,7 @@ func (m Model) Explain(eventsPerDay, budgetUSD float64) string {
 	fmt.Fprintf(&b, "  %.0f events/day x %.1f calls/event = %.0f calls/day\n",
 		eventsPerDay, m.CallsPerEvent, mo.CallsPerDay)
 	fmt.Fprintf(&b, "  %.0f calls/day x $%.4f/call = $%.4f/day\n", mo.CallsPerDay, m.PerCall, day.USD)
-	fmt.Fprintf(&b, "  $%.4f/day x %d days = $%.2f/month at this event rate\n", day.USD, MonthDays, mo.USD)
+	fmt.Fprintf(&b, "  $%.4f/day x %d days = $%.2f/month at this event rate\n", day.USD, monthDays, mo.USD)
 	if mo.OverBudget() {
 		fmt.Fprintf(&b, "  budget $%.2f/month: OVER by $%.2f (%.1fx the budget)\n",
 			mo.BudgetUSD, mo.USD-mo.BudgetUSD, mo.USD/mo.BudgetUSD)
@@ -185,10 +185,10 @@ func (m Model) Explain(eventsPerDay, budgetUSD float64) string {
 		fmt.Fprintf(&b, "  budget $%.2f/month: %.1fx headroom\n", mo.BudgetUSD, mo.Headroom())
 	}
 	fmt.Fprintf(&b, "  per-site daily ceiling $%.4f = $%.2f / %d days, so a DAY that reached it is\n",
-		mo.DailyCeilingUSD, mo.BudgetUSD, MonthDays)
+		mo.DailyCeilingUSD, mo.BudgetUSD, monthDays)
 	fmt.Fprintf(&b, "  refused even though the month has not been spent\n")
 	fmt.Fprintf(&b, "  $%.2f/month over %d cameras is $%.2f/camera/month\n",
-		mo.USD, CamerasInTheCriterion, mo.USD/CamerasInTheCriterion)
+		mo.USD, camerasInTheCriterion, mo.USD/camerasInTheCriterion)
 	// The threshold, because "under $200/month" needs a rate to be true at.
 	fmt.Fprintf(&b, "  under $%.2f/month holds up to %.0f events/day at %.1f calls/event\n",
 		mo.BudgetUSD, mo.maxEventsPerDay(), m.CallsPerEvent)
@@ -244,7 +244,7 @@ func NewGuard(m Model, monthlyBudgetUSD float64) (*Guard, error) {
 	}
 	return &Guard{
 		model:      m,
-		ceilingUSD: monthlyBudgetUSD / MonthDays,
+		ceilingUSD: monthlyBudgetUSD / monthDays,
 		spent:      map[dayKey]float64{},
 		now:        func() time.Time { return time.Now().UTC() },
 	}, nil
@@ -330,20 +330,6 @@ func (g *Guard) check(site string, events int) error {
 			ErrOverBudget, site, g.spent[k], g.ceilingUSD, k.day, events, want)
 	}
 	return nil
-}
-
-// RollDay discards spend from any day but today.
-//
-// An in-memory guard that never rolls refuses every site forever after its first day,
-// and a caller holding one long-lived guard needs to know that. The calendar key means
-// yesterday's spend is already invisible; this is the memory.
-func (g *Guard) RollDay() {
-	today := g.now().UTC().Format("2006-01-02")
-	for k := range g.spent {
-		if k.day != today {
-			delete(g.spent, k)
-		}
-	}
 }
 
 // SpendReport is the guard's state for one site.
