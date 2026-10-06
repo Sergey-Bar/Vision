@@ -79,6 +79,7 @@ var (
 		"internal/config.DefaultEvidenceFetchPostRoll":  {Symbol: "internal/config.DefaultEvidenceFetchPostRoll", Why: "published default: the default post-roll for evidence fetch bookmarks, stated in the site configuration documentation"},
 		"internal/config.DefaultEvidenceFetchRetainFor": {Symbol: "internal/config.DefaultEvidenceFetchRetainFor", Why: "published default: the default retention period for evidence fetch receipts, stated in the site configuration documentation"},
 		"internal/config.DefaultRetentionSweepInterval": {Symbol: "internal/config.DefaultRetentionSweepInterval", Why: "published default: the default interval for the retention sweep, stated in the site configuration documentation"},
+		"internal/config.DefaultVLMConcurrency":         {Symbol: "internal/config.DefaultVLMConcurrency", Why: "published default: the default VLM worker concurrency, stated in the site configuration documentation"},
 
 		"internal/correlator.DefaultTiers":  {Symbol: "internal/correlator.DefaultTiers", Why: "published default tier policy. The tiers are a product decision recorded in docs/ai-and-data.md, and the function is the seam a site configuration overrides"},
 		"internal/correlator.MaxCandidates": {Symbol: "internal/correlator.MaxCandidates", Why: "published bound: the ceiling on correlation candidates per trigger. It is a cost limit an operator can lower, so the number belongs to the configuration contract"},

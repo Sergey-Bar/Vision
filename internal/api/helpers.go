@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -62,8 +61,3 @@ func copyStream(dst io.Writer, src io.Reader, buf []byte) (int64, error) {
 func asGate(err error, target **bundles.ErrGateNotSatisfied) bool {
 	return errors.As(err, target)
 }
-
-// ctxContext aliases context.Context for the reader interfaces, so their
-// signatures read as `ctx context.Context` without every implementation needing
-// the import spelled out.
-type ctxContext = context.Context

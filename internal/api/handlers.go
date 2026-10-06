@@ -61,25 +61,29 @@ type Deps struct {
 // carries the site so no implementation can quietly omit it.
 type DeadLetterReader interface {
 	Read(ctx context.Context, tenant, site, kind string, limit int) ([]DeadLetter, error)
+	ReadWithCursor(ctx context.Context, tenant, site, kind, cursor string, limit int) ([]DeadLetter, string, error)
 	Replay(ctx context.Context, tenant, site, kind, id string) error
 }
 
 // DeadLetter is one inbox or job dead letter.
 type DeadLetter struct {
-	Kind        string    `json:"kind"`
-	ID          string    `json:"id"`
-	Queue       string    `json:"queue,omitempty"`
-	Integration string    `json:"integrationId,omitempty"`
-	SourceEvent string    `json:"sourceEventId,omitempty"`
-	Attempts    int       `json:"attempts"`
-	Reason      string    `json:"reason"`
-	UpdatedAt   time.Time `json:"updatedAt"`
-	Replayable  bool      `json:"replayable"`
+	Kind           string    `json:"kind"`
+	ID             string    `json:"id"`
+	Queue          string    `json:"queue,omitempty"`
+	Integration    string    `json:"integrationId,omitempty"`
+	SourceEvent    string    `json:"sourceEventId,omitempty"`
+	Attempts       int       `json:"attempts"`
+	Reason         string    `json:"reason"`
+	UpdatedAt      time.Time `json:"updatedAt"`
+	CreatedAt      time.Time `json:"createdAt,omitempty"`
+	DeadLetteredAt time.Time `json:"deadLetteredAt,omitempty"`
+	Replayable     bool      `json:"replayable"`
 }
 
 // ClockDriftReader is the device clock surface.
 type ClockDriftReader interface {
-	List(ctx contextContext, tenant string, limit int) ([]DriftView, error)
+	List(ctx context.Context, tenant string, limit int) ([]DriftView, error)
+	ListWithCursor(ctx context.Context, tenant, cursor string, limit int) (string, []DriftView, error)
 }
 
 // DriftView is one device's clock state as the operator sees it.
@@ -101,10 +105,6 @@ type Backlog struct {
 	JobDeadLetter   int64 `json:"jobDeadLetter"`
 	OutboxPending   int64 `json:"outboxPending"`
 }
-
-// contextContext is an alias so the interface signatures above read clearly
-// without importing context into every reader's implementation.
-type contextContext = ctxContext
 
 // RegisterRoutes wires the API and console onto a mux.
 //
@@ -868,7 +868,8 @@ func (s *Server) handleDeadLetters(w http.ResponseWriter, r *http.Request, p ide
 	}
 	kind := r.URL.Query().Get("kind")
 	limit := parseLimit(r.URL.Query().Get("limit"), 100, 500)
-	items, err := d.DeadLetters.Read(r.Context(), p.TenantID, primarySiteOf(p), kind, limit)
+	cursor := r.URL.Query().Get("cursor")
+	items, nextCursor, err := d.DeadLetters.ReadWithCursor(r.Context(), p.TenantID, primarySiteOf(p), kind, cursor, limit)
 	if err != nil {
 		status := http.StatusInternalServerError
 		if errors.Is(err, ErrNotWired) {
@@ -877,7 +878,7 @@ func (s *Server) handleDeadLetters(w http.ResponseWriter, r *http.Request, p ide
 		WriteError(w, status, "dead_letters_unavailable", err.Error(), requestID(r))
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"items": items})
+	WriteJSON(w, http.StatusOK, map[string]any{"items": items, "nextCursor": nextCursor})
 }
 
 func (s *Server) handleDeadLetterReplay(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
@@ -918,7 +919,9 @@ func (s *Server) handleClockDrift(w http.ResponseWriter, r *http.Request, p iden
 			requestID(r))
 		return
 	}
-	items, err := d.ClockDrift.List(r.Context(), p.TenantID, 500)
+	limit := parseLimit(r.URL.Query().Get("limit"), 500, 1000)
+	cursor := r.URL.Query().Get("cursor")
+	nextCursor, items, err := d.ClockDrift.ListWithCursor(r.Context(), p.TenantID, cursor, limit)
 	if err != nil {
 		status := http.StatusInternalServerError
 		if errors.Is(err, ErrNotWired) {
@@ -933,11 +936,18 @@ func (s *Server) handleClockDrift(w http.ResponseWriter, r *http.Request, p iden
 			severe++
 		}
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"items": items, "severeCount": severe})
+	WriteJSON(w, http.StatusOK, map[string]any{"items": items, "severeCount": severe, "nextCursor": nextCursor})
 }
 
 func (s *Server) handleRuleList(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
-	list, err := d.Bundles.List(r.Context(), p.TenantID)
+	if d.Bundles == nil {
+		WriteError(w, http.StatusServiceUnavailable, "not_wired",
+			"The bundle service is not configured.", requestID(r))
+		return
+	}
+	limit := parseLimit(r.URL.Query().Get("limit"), 50, 200)
+	cursor := r.URL.Query().Get("cursor")
+	list, nextCursor, err := d.Bundles.ListWithCursor(r.Context(), p.TenantID, cursor, limit)
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, "rules_failed", err.Error(), requestID(r))
 		return
@@ -948,7 +958,7 @@ func (s *Server) handleRuleList(w http.ResponseWriter, r *http.Request, p identi
 			active = m.Version
 		}
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"items": list, "activeVersion": active})
+	WriteJSON(w, http.StatusOK, map[string]any{"items": list, "activeVersion": active, "nextCursor": nextCursor})
 }
 
 type ruleStoreRequest struct {

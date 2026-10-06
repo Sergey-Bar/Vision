@@ -350,7 +350,7 @@ func run() error {
 		ClockPolicy: clockPolicy(),
 	})
 
-	go runVLMWorker(ctx, jobWorker, vlm.Handle, cfg.Tenant, log)
+	go runVLMWorker(ctx, jobWorker, vlm.Handle, cfg.Tenant, log, cfg.VLMConcurrency)
 
 	go runEvidenceFetchWorker(ctx, evidenceFetchJobWorker, cfg.Tenant, log)
 
@@ -532,18 +532,30 @@ func newSealer(cfg config.Config, pool *dbx.Pool, registry *observability.Regist
 }
 
 func runVLMWorker(ctx context.Context, w *jobs.Worker,
-	handler func(context.Context, jobs.Job) error, tenant string, log *slog.Logger) {
+	handler func(context.Context, jobs.Job) error, tenant string, log *slog.Logger, concurrency int) {
 	w.Handler = handler
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(time.Second):
-		}
-		if _, err := w.Run(ctx, tenant, "vlm", 4); err != nil && ctx.Err() == nil {
-			log.Error("the vlm worker could not run", "error", err.Error())
-		}
+	if concurrency <= 0 {
+		log.Info("vlm worker disabled (concurrency=0)")
+		<-ctx.Done()
+		return
 	}
+	for i := 0; i < concurrency; i++ {
+		go func(id int) {
+			log.Info("vlm worker started", "id", id)
+			for {
+				select {
+				case <-ctx.Done():
+					log.Info("vlm worker stopped", "id", id)
+					return
+				case <-time.After(time.Second):
+				}
+				if _, err := w.Run(ctx, tenant, "vlm", 4); err != nil && ctx.Err() == nil {
+					log.Error("the vlm worker could not run", "id", id, "error", err.Error())
+				}
+			}
+		}(i)
+	}
+	<-ctx.Done()
 }
 
 func runEvidenceFetchWorker(ctx context.Context, w *jobs.Worker, tenant string, log *slog.Logger) {

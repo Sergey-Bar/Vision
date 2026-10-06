@@ -29,6 +29,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -140,6 +141,10 @@ type Config struct {
 	// RetentionSweepInterval is how often the retention sweep runs. Default 1 hour.
 	// Set to 0 to disable automatic sweeps.
 	RetentionSweepInterval time.Duration
+
+	// VLMConcurrency is how many VLM jobs run in parallel. Default 1.
+	// Set to 0 to disable the VLM worker entirely.
+	VLMConcurrency int
 }
 
 // Lookup resolves an environment variable. Load takes one so the tests are
@@ -163,6 +168,7 @@ const (
 	DefaultEvidenceFetchPostRoll  = 10 * time.Second
 	DefaultEvidenceFetchRetainFor = 90 * 24 * time.Hour
 	DefaultRetentionSweepInterval = time.Hour
+	DefaultVLMConcurrency         = 1
 )
 
 // Ceilings for the bounded values. A batch size or lease that can be set
@@ -261,6 +267,14 @@ func LoadFrom(get Lookup) (Config, error) {
 			return c, fmt.Errorf("config: SP_RETENTION_SWEEP_INTERVAL: %w", err)
 		}
 	}
+	c.VLMConcurrency = DefaultVLMConcurrency
+	if v := strings.TrimSpace(get("SP_VLM_CONCURRENCY")); v != "" {
+		var err error
+		c.VLMConcurrency, err = strconv.Atoi(v)
+		if err != nil {
+			return c, fmt.Errorf("config: SP_VLM_CONCURRENCY: %w", err)
+		}
+	}
 
 	var err error
 	if c.TrustedProxyCIDRs, err = cidrListEnv(get, "SP_TRUSTED_PROXY_CIDRS"); err != nil {
@@ -338,6 +352,10 @@ func (c Config) validate() error {
 	if c.PollInterval < time.Second || c.PollInterval > MaxPollInterval {
 		return fmt.Errorf("config: SP_POLL_INTERVAL must be between 1s and %s, got %s",
 			MaxPollInterval, c.PollInterval)
+	}
+	if c.VLMConcurrency < 0 || c.VLMConcurrency > 16 {
+		return fmt.Errorf("config: SP_VLM_CONCURRENCY must be between 0 and 16, got %d",
+			c.VLMConcurrency)
 	}
 	if c.AIDeadline < time.Second {
 		return fmt.Errorf("config: SP_AI_DEADLINE must be at least 1s, got %s: a sub-second "+
@@ -461,6 +479,7 @@ func (c Config) Redacted() map[string]any {
 		"evidence_fetch_post_roll":  c.EvidenceFetchPostRoll.String(),
 		"evidence_fetch_retain_for": c.EvidenceFetchRetainFor.String(),
 		"retention_sweep_interval":  c.RetentionSweepInterval.String(),
+		"vlm_concurrency":           c.VLMConcurrency,
 	}
 }
 

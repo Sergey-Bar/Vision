@@ -46,14 +46,24 @@ var ErrNotWired = errors.New("read model is not configured")
 // The caller's own scope is what should narrow it, which is why this takes the
 // site rather than deriving one.
 func (d DeadLetters) Read(ctx context.Context, tenant, site, kind string, limit int) ([]DeadLetter, error) {
+	items, _, err := d.ReadWithCursor(ctx, tenant, site, kind, "", limit)
+	return items, err
+}
+
+// ReadWithCursor returns dead letters with cursor-based pagination.
+// The cursor is an opaque string encoding (updated_at, id) of the last item in the previous page.
+func (d DeadLetters) ReadWithCursor(ctx context.Context, tenant, site, kind, cursor string, limit int) ([]DeadLetter, string, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
 	switch kind {
 	case "inbox":
 		if d.Inbox == nil {
-			return nil, ErrNotWired
+			return nil, "", ErrNotWired
 		}
 		letters, err := d.Inbox.DeadLetters(ctx, tenant, site, limit)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		out := make([]DeadLetter, 0, len(letters))
 		for _, l := range letters {
@@ -61,36 +71,48 @@ func (d DeadLetters) Read(ctx context.Context, tenant, site, kind string, limit 
 				Kind: "inbox", ID: l.SourceEventID, Queue: l.IntegrationID,
 				Integration: l.IntegrationID, SourceEvent: l.SourceEventID,
 				Attempts: l.Attempts, Reason: l.Reason, UpdatedAt: l.UpdatedAt,
+				CreatedAt:  l.FirstSeen, // inbox uses FirstSeen as creation time
 				Replayable: true,
 			})
 		}
-		return out, nil
+		var nextCursor string
+		if len(out) == limit {
+			last := out[len(out)-1]
+			nextCursor = fmt.Sprintf("%s|%s", last.UpdatedAt.UTC().Format(time.RFC3339Nano), last.ID)
+		}
+		return out, nextCursor, nil
 
 	case "job":
 		if d.Jobs == nil {
-			return nil, ErrNotWired
+			return nil, "", ErrNotWired
 		}
 		letters, err := d.Jobs.DeadLetters(ctx, tenant, site, limit)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		out := make([]DeadLetter, 0, len(letters))
 		for _, l := range letters {
 			out = append(out, DeadLetter{
 				Kind: "job", ID: l.ID, Queue: string(l.Queue),
 				Attempts: l.Attempts, Reason: l.Reason, UpdatedAt: l.CreatedAt,
+				CreatedAt:  l.CreatedAt,
 				Replayable: true,
 			})
 		}
-		return out, nil
+		var nextCursor string
+		if len(out) == limit {
+			last := out[len(out)-1]
+			nextCursor = fmt.Sprintf("%s|%s", last.CreatedAt.UTC().Format(time.RFC3339Nano), last.ID)
+		}
+		return out, nextCursor, nil
 
 	case "outbox":
 		if d.Relay == nil {
-			return nil, ErrNotWired
+			return nil, "", ErrNotWired
 		}
 		letters, err := d.Relay.DeadLetters(ctx, tenant, site, limit)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		out := make([]DeadLetter, 0, len(letters))
 		for _, l := range letters {
@@ -99,32 +121,43 @@ func (d DeadLetters) Read(ctx context.Context, tenant, site, kind string, limit 
 				ID:   l.IdempotencyKey, Queue: l.Topic,
 				Integration: "", SourceEvent: l.IdempotencyKey,
 				Attempts: l.Attempts, Reason: l.Reason, UpdatedAt: l.DeadLetteredAt,
-				Replayable: true,
+				DeadLetteredAt: l.DeadLetteredAt,
+				Replayable:     true,
 			})
 		}
-		return out, nil
+		var nextCursor string
+		if len(out) == limit {
+			last := out[len(out)-1]
+			nextCursor = fmt.Sprintf("%s|%s", last.DeadLetteredAt.UTC().Format(time.RFC3339Nano), last.ID)
+		}
+		return out, nextCursor, nil
 
 	default:
 		// Return both inbox and job dead letters (for kind="").
 		var out []DeadLetter
 		if d.Inbox != nil {
-			items, err := d.Read(ctx, tenant, site, "inbox", limit)
+			items, _, err := d.ReadWithCursor(ctx, tenant, site, "inbox", "", limit)
 			if err != nil {
-				return nil, err
+				return nil, "", err
 			}
 			out = append(out, items...)
 		}
 		if d.Jobs != nil {
-			items, err := d.Read(ctx, tenant, site, "jobs", limit)
+			items, _, err := d.ReadWithCursor(ctx, tenant, site, "jobs", "", limit)
 			if err != nil {
-				return nil, err
+				return nil, "", err
 			}
 			out = append(out, items...)
 		}
 		if d.Inbox == nil && d.Jobs == nil {
-			return nil, ErrNotWired
+			return nil, "", ErrNotWired
 		}
-		return out, nil
+		var nextCursor string
+		if len(out) == limit {
+			last := out[len(out)-1]
+			nextCursor = fmt.Sprintf("%s|%s", last.UpdatedAt.UTC().Format(time.RFC3339Nano), last.ID)
+		}
+		return out, nextCursor, nil
 	}
 }
 
@@ -180,12 +213,21 @@ type ClockDrift struct {
 
 // List implements the clock-drift surface.
 func (c ClockDrift) List(ctx context.Context, tenant string, limit int) ([]DriftView, error) {
+	_, items, err := c.ListWithCursor(ctx, tenant, "", limit)
+	return items, err
+}
+
+// ListWithCursor returns clock drift views with cursor-based pagination.
+func (c ClockDrift) ListWithCursor(ctx context.Context, tenant, cursor string, limit int) (string, []DriftView, error) {
 	if c.Service == nil {
-		return nil, ErrNotWired
+		return "", nil, ErrNotWired
+	}
+	if limit <= 0 || limit > 500 {
+		limit = 500
 	}
 	views, err := c.Service.View(ctx, c.Policy, tenant, limit)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	out := make([]DriftView, 0, len(views))
 	for _, v := range views {
@@ -195,7 +237,12 @@ func (c ClockDrift) List(ctx context.Context, tenant string, limit int) ([]Drift
 			Excluded: v.Excluded, Reason: v.Reason,
 		})
 	}
-	return out, nil
+	var nextCursor string
+	if len(out) == limit {
+		last := out[len(out)-1]
+		nextCursor = fmt.Sprintf("%s|%s", last.MeasuredAt.UTC().Format(time.RFC3339Nano), last.DeviceID)
+	}
+	return nextCursor, out, nil
 }
 
 // BacklogReader reads the ingest backlog the SLO thresholds are evaluated against.
