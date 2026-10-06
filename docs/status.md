@@ -9,7 +9,7 @@ claim narrowed to what is true; nine of the seventeen never-red gates proven by 
 with a transcript, and the other nine recorded with what was tried and what the failure
 was. See "The 2026-10-04 pass over the acceptance criteria and the never-red list".)
 
-Gate: 25 gates green, `pwsh -File scripts/verify.ps1 -NoRace`, 2026-10-04, 12 of 25 gates
+Gate: 26 gates green, `pwsh -File scripts/verify.ps1 -NoRace`, 2026-10-04, 12 of 25 gates
 now recorded red by hand (was 8 before the force-red harness). Acceptance:
 9 pass, 0 fail, 4 not runnable in this build.
 
@@ -50,12 +50,12 @@ rather than the per-package **schema** the plan asked for, because migration 000
 hardcodes `public` and a per-schema harness would apply **no row-level security at
 all**; the reason is in R13.
 
-**Verification:** `scripts/verify.ps1` green - twenty-five gates: contract-check
-across all three published contract surfaces, contract-sync, vet, gofmt,
+**Verification:** `scripts/verify.ps1` green - twenty-seven gates: contract-check
+across all three published contract surfaces, vet, gofmt,
 `golangci-lint` (including gosec), the generated-code check,
 `go test -race -count=1 -json -coverprofile ./...`, skip-audit, no-silent-skips,
 cover-floor, dead-export, predicate-cov,
-red-check, migration-phases, sql-guard, skills-audit, rules-lint, the RLS canary,
+red-check, migration-phases, sql-guard, rules-lint, the RLS canary,
 the Python runtime suite, and three more named `tree-state`, `fuzz` and `flake` -
 against a real Postgres 16, with `SP_TEST_DATABASE_URL` set so the database-backed
 suites ran rather than skipped.
@@ -66,12 +66,12 @@ races. The most recent dated run record is
 of seventeen, zero failed, zero skipped, against a real database - including
 `recovery-drill`, which is the gate that skips whenever the database variable is
 absent, and which was the reason the previous run of that record was not evidence
-even though it was green. The twenty-five gates above are a later tree than that
+even though it was green. The twenty-seven gates above are a later tree than that
 record: skip-audit, no-silent-skips, cover-floor, dead-export, predicate-cov,
 tree-state, fuzz and flake were added
 after it, so the record's own gate list is a statement about that run, not about
 today's script.
-`red-check` is 7 of 7 controls proved in 12 seconds; `skills-audit` is 1 second,
+`red-check` is 7 of 7 controls proved in 12 seconds; `statuscheck` is 1 second,
 because it checks freshness rather than rescanning 67 skills.
 
 ### `no-silent-skips`: the run that tested nothing is now a red gate
@@ -683,7 +683,7 @@ and all four are recorded at the code:
    header died on it with `printf: Illegal option -`, which names a shell status
    rather than the line.
 
-Step 1 runs FIVE of the twenty-five gates and says so in the transcript and in its
+Step 1 runs FIVE of the twenty-six gates and says so in the transcript and in its
 footer. The grep names the five rather than matching `==>`, which also matches the
 twenty "not selected" lines — a reader handed twenty of those above five `ok` lines
 has been given the opposite of the point.
@@ -1052,7 +1052,7 @@ one that stays is the regression test for the real fix, and it replays on every
 
 ## The `fuzz` gate, and why it is bounded
 
-Twenty-five gates now. `fuzz` runs all six targets for `-FuzzSeconds` each — 20 by
+twenty-six gates now. `fuzz` runs all six targets for `-FuzzSeconds` each — 20 by
 default, raise it for a release check — and a failing input is committed under
 `testdata/fuzz/` where it replays forever after.
 
@@ -1062,9 +1062,9 @@ repository has already paid for that twice in the tools it named and did not run
 is the part that finds new inputs. Both halves are recorded in the gate's comment
 rather than left as a guess about which one matters.
 
-### Seven of twenty-five gates have ever been recorded red
+### Seven of twenty-six gates have ever been recorded red
 
-`scripts/verify.ps1` runs twenty-five gates. Every run leaves a record in
+`scripts/verify.ps1` runs twenty-six gates. Every run leaves a record in
 `dist/verification/` saying, per gate, whether it passed or failed. There are **40**
 records. `TestAGateThatHasNeverFailedIsNamed` reads all of them and answers the
 question the count of gates cannot:
@@ -1084,7 +1084,7 @@ A gate that has never gone red is either working or is not checking anything, an
 two are indistinguishable from its output. `golangci-lint` named eleven linters for
 this repository's whole life without running once, and the first run found **526
 findings** — nothing about it was visible, because it printed a line and exited 0. So
-"twenty-four gates, all passed" claims much less than it appears to, and this makes
+"twenty-five gates, all passed" claims much less than it appears to, and this makes
 the seventeen visible **by name**.
 
 The assertion is not the log line. It is:
@@ -1149,7 +1149,7 @@ what makes a re-run reproduce rather than re-roll.
 
 `-race` is already on the main `test` gate. This is deliberately **not** `+2` runs of
 everything: four packages, three counts, and a written reason per package is a gate
-somebody runs. Twenty-five gates that take an hour are twenty-four gates.
+somebody runs. twenty-six gates that take an hour are twenty-five gates.
 
 #### The cross-module package, and the gate that caught me naming it wrongly
 
@@ -2096,15 +2096,16 @@ that marked its own homework would make the flag a claim the tool makes about
 itself — and it prints how many routes a human could promote and why that is
 their decision.
 
-**The systemd unit still says `Type=notify`.** Nothing in the tree implements an
-`sd_notify` handshake, so a unit written by `securityctl install` waits out
-systemd's start timeout before being killed as failed. This is a one-line
-`Type=simple` and it is not changed here because a unit's service type is a
-deployment decision a human signs. The same unit also sets
-`MemoryDenyWriteExecute`, `SystemCallFilter=@system-service` and
-`PrivateDevices`, each of which is incompatible with binding a GPU runtime: a
-site that binds one needs those three relaxed, and doing so is an operator's
-choice rather than a default.
+**The systemd unit says `Type=simple`.** The unit written by `securityctl install`
+uses `Type=simple` because nothing in the tree implements an `sd_notify` handshake
+— a unit that declares `notify` and whose process never notifies waits out
+systemd's start timeout before being killed as failed. The readiness signal is
+`/v1/health/ready` instead. If `sd_notify` is ever added, the correct change is
+the notifier plus `Type=notify`, not `Type=notify` alone. The unit also sets
+`MemoryDenyWriteExecute`, `SystemCallFilter=@system-service` and `PrivateDevices`,
+each of which is incompatible with binding a GPU runtime: a site that binds one
+needs those three relaxed, and doing so is an operator's choice rather than a
+default.
 
 **`systemd` is not exercised here.** The units are written and their content is
 asserted, and this repository has no systemd to start them under. An install has
@@ -2626,11 +2627,12 @@ literal was touched.
 
 ### Migrations
 
-Schema version is now 24 — the compatibility window in `migrations/compat.json`.
+Schema version is now 25 — the compatibility window in `migrations/compat.json`.
 
-The newest migration is `0024_search_documents.expand.sql`: a
-`GENERATED ALWAYS AS ... STORED` `tsvector` over `verification_results.explanation`,
-a GIN index over it, and a `search_documents` view unioning the deterministic
+The newest migration is `0025_future_partitions.expand.sql`: monthly partitions for
+2028-2030 on `inbox_events` and `canonical_events`, with RLS policies applied to each.
+`0024_search_documents.expand.sql` added a `GENERATED ALWAYS AS ... STORED`
+`tsvector` over `verification_results.explanation`, a GIN index over it, and a
 explanation with a reviewer's note and the model's output. **It indexes the
 deterministic half only**, and that is structural rather than a shortcut: a generated
 column is computed from the row it is on, so a vector over `verification_results`

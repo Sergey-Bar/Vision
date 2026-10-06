@@ -67,6 +67,18 @@ type Meta struct {
 // ErrNotStored is returned for a bundle version that is not in the store.
 var ErrNotStored = errors.New("bundles: no such version is stored")
 
+// ErrNoActiveBundle is "this tenant has activated nothing yet", as distinct from "the
+// bundle store is unreachable".
+//
+// The two are different failures and were previously the same `fmt.Errorf` with no
+// sentinel, so a caller could not tell "nothing to do" from "cannot tell". The pipeline
+// already needs the distinction - `internal/pipeline` carries its own copy of the message
+// as `errNoActiveBundle` because it had no other way - and so does the startup dispatch
+// check, where the two demand opposite responses: no active bundle means there is nothing
+// to refuse and the daemon starts, while an unreachable store means the check could not
+// run and must not report that everything is fine.
+var ErrNoActiveBundle = errors.New("bundles: no active bundle")
+
 // ErrGateNotSatisfied is returned when a bundle cannot be activated.
 //
 // Every reason is named, because an operator at a site with no network cannot go
@@ -201,7 +213,7 @@ func (s *Service) ActiveBundle(ctx context.Context, tenant string) (version, con
 		tenant).Scan(&version, &contentHash, &content)
 	if err != nil {
 		if isNoRows(err) {
-			return "", "", nil, fmt.Errorf("bundles: no active bundle for tenant %s", tenant)
+			return "", "", nil, fmt.Errorf("%w for tenant %s", ErrNoActiveBundle, tenant)
 		}
 		return "", "", nil, fmt.Errorf("bundles: active: %w", err)
 	}
@@ -210,13 +222,51 @@ func (s *Service) ActiveBundle(ctx context.Context, tenant string) (version, con
 
 // List returns every stored bundle, newest first.
 func (s *Service) List(ctx context.Context, tenant string) ([]Meta, error) {
-	rows, err := s.Pool.For(tenant, "bundles").Query(ctx, `
+	out, _, err := s.ListWithCursor(ctx, tenant, "", 50)
+	return out, err
+}
+
+// ListWithCursor returns a page of bundles with cursor-based pagination.
+// The cursor is an opaque string encoding (created_at, bundle_id) of the last
+// item in the previous page. An empty cursor means the first page.
+func (s *Service) ListWithCursor(ctx context.Context, tenant, cursor string, limit int) ([]Meta, string, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+
+	// Parse cursor if provided
+	var cursorTime time.Time
+	var cursorID string
+	if cursor != "" {
+		parts := strings.Split(cursor, "|")
+		if len(parts) == 2 {
+			if t, err := time.Parse(time.RFC3339Nano, parts[0]); err == nil {
+				cursorTime = t
+				cursorID = parts[1]
+			}
+		}
+	}
+
+	query := `
 		SELECT bundle_id, version, content_hash, source_reference, created_by, created_at,
 		       active, COALESCE(supersedes_version, ''), lint_status, COALESCE(activate_diff_digest, '')
-		  FROM rule_bundles WHERE tenant_id = $1
-		 ORDER BY created_at DESC`, tenant)
+		  FROM rule_bundles WHERE tenant_id = $1`
+
+	args := []any{tenant}
+	argIdx := 2
+
+	if !cursorTime.IsZero() {
+		query += fmt.Sprintf(" AND (created_at < $%d OR (created_at = $%d AND bundle_id < $%d))", argIdx, argIdx, argIdx+1)
+		args = append(args, cursorTime, cursorID)
+		argIdx += 2
+	}
+
+	query += fmt.Sprintf(" ORDER BY created_at DESC, bundle_id DESC LIMIT $%d", argIdx)
+	args = append(args, limit)
+
+	rows, err := s.Pool.For(tenant, "bundles").Query(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("bundles: list: %w", err)
+		return nil, "", fmt.Errorf("bundles: list: %w", err)
 	}
 	defer rows.Close()
 
@@ -226,11 +276,18 @@ func (s *Service) List(ctx context.Context, tenant string) ([]Meta, error) {
 		if err := rows.Scan(&m.BundleID, &m.Version, &m.ContentHash, &m.SourceReference,
 			&m.CreatedBy, &m.CreatedAt, &m.Active, &m.Supersedes, &m.LintStatus,
 			&m.ActivateDiffDigest); err != nil {
-			return nil, fmt.Errorf("bundles: scan: %w", err)
+			return nil, "", fmt.Errorf("bundles: scan: %w", err)
 		}
 		out = append(out, m)
 	}
-	return out, rows.Err()
+
+	var nextCursor string
+	if len(out) == limit {
+		last := out[len(out)-1]
+		nextCursor = fmt.Sprintf("%s|%s", last.CreatedAt.UTC().Format(time.RFC3339Nano), last.BundleID)
+	}
+
+	return out, nextCursor, rows.Err()
 }
 
 // LintStatusFor is the whole of the lint status, as a function.

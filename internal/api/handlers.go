@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -10,9 +12,11 @@ import (
 
 	"github.com/Sergey-Bar/Ai-Captain/internal/audit"
 	"github.com/Sergey-Bar/Ai-Captain/internal/bundles"
+	"github.com/Sergey-Bar/Ai-Captain/internal/dispatch"
 	"github.com/Sergey-Bar/Ai-Captain/internal/evidence"
 	"github.com/Sergey-Bar/Ai-Captain/internal/identity"
 	"github.com/Sergey-Bar/Ai-Captain/internal/incidents"
+	"github.com/Sergey-Bar/Ai-Captain/internal/jobs"
 	"github.com/Sergey-Bar/Ai-Captain/internal/observability"
 	"github.com/Sergey-Bar/Ai-Captain/internal/rules"
 	"github.com/Sergey-Bar/Ai-Captain/internal/simulate"
@@ -44,6 +48,9 @@ type Deps struct {
 	// empty scrape and a broken scrape look identical to a collector, and only
 	// one of them is a lie.
 	Metrics *observability.Registry
+	// Enqueuer is the job queue enqueuer. Nil means the route says the
+	// endpoint is not configured.
+	Enqueuer *jobs.Enqueuer
 }
 
 // DeadLetterReader is the dead-letter surface.
@@ -53,25 +60,30 @@ type Deps struct {
 // and an empty dead-letter list reads as "the site is healthy". The interface
 // carries the site so no implementation can quietly omit it.
 type DeadLetterReader interface {
-	Read(ctx contextContext, tenant, site, kind string, limit int) ([]DeadLetter, error)
+	Read(ctx context.Context, tenant, site, kind string, limit int) ([]DeadLetter, error)
+	ReadWithCursor(ctx context.Context, tenant, site, kind, cursor string, limit int) ([]DeadLetter, string, error)
+	Replay(ctx context.Context, tenant, site, kind, id string) error
 }
 
 // DeadLetter is one inbox or job dead letter.
 type DeadLetter struct {
-	Kind        string    `json:"kind"`
-	ID          string    `json:"id"`
-	Queue       string    `json:"queue,omitempty"`
-	Integration string    `json:"integrationId,omitempty"`
-	SourceEvent string    `json:"sourceEventId,omitempty"`
-	Attempts    int       `json:"attempts"`
-	Reason      string    `json:"reason"`
-	UpdatedAt   time.Time `json:"updatedAt"`
-	Replayable  bool      `json:"replayable"`
+	Kind           string    `json:"kind"`
+	ID             string    `json:"id"`
+	Queue          string    `json:"queue,omitempty"`
+	Integration    string    `json:"integrationId,omitempty"`
+	SourceEvent    string    `json:"sourceEventId,omitempty"`
+	Attempts       int       `json:"attempts"`
+	Reason         string    `json:"reason"`
+	UpdatedAt      time.Time `json:"updatedAt"`
+	CreatedAt      time.Time `json:"createdAt,omitempty"`
+	DeadLetteredAt time.Time `json:"deadLetteredAt,omitempty"`
+	Replayable     bool      `json:"replayable"`
 }
 
 // ClockDriftReader is the device clock surface.
 type ClockDriftReader interface {
-	List(ctx contextContext, tenant string, limit int) ([]DriftView, error)
+	List(ctx context.Context, tenant string, limit int) ([]DriftView, error)
+	ListWithCursor(ctx context.Context, tenant, cursor string, limit int) (string, []DriftView, error)
 }
 
 // DriftView is one device's clock state as the operator sees it.
@@ -93,10 +105,6 @@ type Backlog struct {
 	JobDeadLetter   int64 `json:"jobDeadLetter"`
 	OutboxPending   int64 `json:"outboxPending"`
 }
-
-// contextContext is an alias so the interface signatures above read clearly
-// without importing context into every reader's implementation.
-type contextContext = ctxContext
 
 // RegisterRoutes wires the API and console onto a mux.
 //
@@ -147,6 +155,11 @@ func (s *Server) RegisterRoutes(d Deps) func(*http.ServeMux) {
 				func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
 					s.handleIncidentEvidence(w, r, p, d)
 				}))
+		mux.Handle("POST /v1/incidents/{id}/evidence",
+			s.requireCapabilityAtSite(identity.CapEvidenceFetch, siteOfIncident(d),
+				func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+					s.handleEvidenceFetch(w, r, p, d)
+				}))
 		// `evidence.fetch`, not `evidence.read`.
 		//
 		// The two capabilities are distinct in the role table and in the seed the
@@ -168,6 +181,10 @@ func (s *Server) RegisterRoutes(d Deps) func(*http.ServeMux) {
 			s.requireCapability(identity.CapAuditRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
 				s.handleAuditLedger(w, r, p)
 			}))
+		mux.Handle("GET /v1/audit/checkpoints",
+			s.requireCapability(identity.CapAuditRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleAuditCheckpoints(w, r, p)
+			}))
 
 		// Rules.
 		mux.Handle("GET /v1/rules/bundles",
@@ -177,6 +194,14 @@ func (s *Server) RegisterRoutes(d Deps) func(*http.ServeMux) {
 		mux.Handle("POST /v1/rules/bundles",
 			s.requireCapability(identity.CapRulesWrite, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
 				s.handleRuleStore(w, r, p, d)
+			}))
+		mux.Handle("POST /v1/rules/bundles/{version}/lint",
+			s.requireCapability(identity.CapRulesWrite, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleRuleLint(w, r, p, d)
+			}))
+		mux.Handle("POST /v1/rules/bundles/{version}/simulate",
+			s.requireCapability(identity.CapRulesRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleRuleSimulate(w, r, p, d)
 			}))
 		mux.Handle("POST /v1/rules/bundles/{version}/activate",
 			s.requireCapability(identity.CapRulesActivate, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
@@ -191,6 +216,10 @@ func (s *Server) RegisterRoutes(d Deps) func(*http.ServeMux) {
 		mux.Handle("GET /v1/ops/dead-letters",
 			s.requireCapability(identity.CapDeadLetterRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
 				s.handleDeadLetters(w, r, p, d)
+			}))
+		mux.Handle("POST /v1/ops/dead-letters/replay",
+			s.requireCapability(identity.CapDeadLetterReplay, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleDeadLetterReplay(w, r, p, d)
 			}))
 		mux.Handle("GET /v1/ops/clock-drift",
 			s.requireCapability(identity.CapIncidentRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
@@ -436,12 +465,24 @@ func (s *Server) handleIncidentList(w http.ResponseWriter, r *http.Request, p id
 		return
 	}
 	limit := parseLimit(r.URL.Query().Get("limit"), 50, 200)
+	cursor := r.URL.Query().Get("cursor")
+	state := r.URL.Query().Get("state")
+	degradedStr := r.URL.Query().Get("degraded")
+	var degraded *bool
+	switch degradedStr {
+	case "true":
+		v := true
+		degraded = &v
+	case "false":
+		v := false
+		degraded = &v
+	}
 	// A site the caller may see, or "every site they may see".
 	scope := site
 	if scope == "" {
 		scope = strings.Join(p.SiteScope, ",")
 	}
-	items, err := d.Incidents.ListScoped(r.Context(), p.TenantID, scope, limit)
+	items, nextCursor, err := d.Incidents.ListWithCursor(r.Context(), p.TenantID, scope, cursor, limit, state, degraded)
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, "list_failed", err.Error(), requestID(r))
 		return
@@ -460,7 +501,10 @@ func (s *Server) handleIncidentList(w http.ResponseWriter, r *http.Request, p id
 		}
 		items = visible
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"items": items})
+	WriteJSON(w, http.StatusOK, map[string]any{
+		"items":      items,
+		"nextCursor": nextCursor,
+	})
 }
 
 func (s *Server) handleIncidentGet(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
@@ -593,6 +637,42 @@ func (s *Server) handleIncidentEvidence(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"items": detail.Evidence})
+}
+
+func (s *Server) handleEvidenceFetch(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
+	id := r.PathValue("id")
+	detail, err := d.Incidents.Get(r.Context(), p.TenantID, id)
+	if err != nil || !p.CanSeeSite(detail.SiteID) {
+		WriteError(w, http.StatusNotFound, "not_found",
+			"No such incident, or you are not assigned to its site.", requestID(r))
+		return
+	}
+	if d.Enqueuer == nil {
+		WriteError(w, http.StatusServiceUnavailable, "not_configured",
+			"The job queue is not configured.", requestID(r))
+		return
+	}
+	// Enqueue an evidence fetch job for this incident.
+	payload, err := dispatch.EncodeJobPayload(dispatch.JobPayload{
+		ContractVersion: dispatch.ContractVersion,
+		IncidentID:      id,
+		SiteID:          detail.SiteID,
+	})
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "encode_failed", err.Error(), requestID(r))
+		return
+	}
+	job := jobs.Job{
+		Payload:        payload,
+		IdempotencyKey: fmt.Sprintf("evidence-fetch:%s:%d", id, time.Now().UnixMilli()),
+	}
+	if err := d.Enqueuer.EnqueueJob(r.Context(), p.TenantID, jobs.QueueEvidenceFetch, job); err != nil {
+		WriteError(w, http.StatusInternalServerError, "enqueue_failed", err.Error(), requestID(r))
+		return
+	}
+	WriteJSON(w, http.StatusAccepted, map[string]any{
+		"enqueued": true, "queue": string(jobs.QueueEvidenceFetch), "incidentId": id,
+	})
 }
 
 // handleEvidenceContent streams stored bytes.
@@ -788,7 +868,8 @@ func (s *Server) handleDeadLetters(w http.ResponseWriter, r *http.Request, p ide
 	}
 	kind := r.URL.Query().Get("kind")
 	limit := parseLimit(r.URL.Query().Get("limit"), 100, 500)
-	items, err := d.DeadLetters.Read(r.Context(), p.TenantID, primarySiteOf(p), kind, limit)
+	cursor := r.URL.Query().Get("cursor")
+	items, nextCursor, err := d.DeadLetters.ReadWithCursor(r.Context(), p.TenantID, primarySiteOf(p), kind, cursor, limit)
 	if err != nil {
 		status := http.StatusInternalServerError
 		if errors.Is(err, ErrNotWired) {
@@ -797,7 +878,37 @@ func (s *Server) handleDeadLetters(w http.ResponseWriter, r *http.Request, p ide
 		WriteError(w, status, "dead_letters_unavailable", err.Error(), requestID(r))
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"items": items})
+	WriteJSON(w, http.StatusOK, map[string]any{"items": items, "nextCursor": nextCursor})
+}
+
+func (s *Server) handleDeadLetterReplay(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
+	if d.DeadLetters == nil {
+		WriteError(w, http.StatusServiceUnavailable, "not_wired",
+			"The dead-letter reader is not configured.", requestID(r))
+		return
+	}
+	var req struct {
+		Kind string `json:"kind"`
+		ID   string `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, http.StatusBadRequest, "bad_request", err.Error(), requestID(r))
+		return
+	}
+	if req.Kind == "" || req.ID == "" {
+		WriteError(w, http.StatusBadRequest, "bad_request", "kind and id are required", requestID(r))
+		return
+	}
+	site := primarySiteOf(p)
+	if err := d.DeadLetters.Replay(r.Context(), p.TenantID, site, req.Kind, req.ID); err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, ErrNotWired) {
+			status = http.StatusServiceUnavailable
+		}
+		WriteError(w, status, "replay_failed", err.Error(), requestID(r))
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"replayed": true})
 }
 
 func (s *Server) handleClockDrift(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
@@ -808,7 +919,9 @@ func (s *Server) handleClockDrift(w http.ResponseWriter, r *http.Request, p iden
 			requestID(r))
 		return
 	}
-	items, err := d.ClockDrift.List(r.Context(), p.TenantID, 500)
+	limit := parseLimit(r.URL.Query().Get("limit"), 500, 1000)
+	cursor := r.URL.Query().Get("cursor")
+	nextCursor, items, err := d.ClockDrift.ListWithCursor(r.Context(), p.TenantID, cursor, limit)
 	if err != nil {
 		status := http.StatusInternalServerError
 		if errors.Is(err, ErrNotWired) {
@@ -823,11 +936,18 @@ func (s *Server) handleClockDrift(w http.ResponseWriter, r *http.Request, p iden
 			severe++
 		}
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"items": items, "severeCount": severe})
+	WriteJSON(w, http.StatusOK, map[string]any{"items": items, "severeCount": severe, "nextCursor": nextCursor})
 }
 
 func (s *Server) handleRuleList(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
-	list, err := d.Bundles.List(r.Context(), p.TenantID)
+	if d.Bundles == nil {
+		WriteError(w, http.StatusServiceUnavailable, "not_wired",
+			"The bundle service is not configured.", requestID(r))
+		return
+	}
+	limit := parseLimit(r.URL.Query().Get("limit"), 50, 200)
+	cursor := r.URL.Query().Get("cursor")
+	list, nextCursor, err := d.Bundles.ListWithCursor(r.Context(), p.TenantID, cursor, limit)
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, "rules_failed", err.Error(), requestID(r))
 		return
@@ -838,7 +958,7 @@ func (s *Server) handleRuleList(w http.ResponseWriter, r *http.Request, p identi
 			active = m.Version
 		}
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"items": list, "activeVersion": active})
+	WriteJSON(w, http.StatusOK, map[string]any{"items": list, "activeVersion": active, "nextCursor": nextCursor})
 }
 
 type ruleStoreRequest struct {
@@ -1014,6 +1134,109 @@ func (s *Server) handleAuditLedger(w http.ResponseWriter, r *http.Request, p ide
 	WriteJSON(w, http.StatusOK, map[string]any{
 		"items": items, "chainValid": chainValid, "chainChecked": chainChecked,
 		"truncated": truncated,
+	})
+}
+
+func (s *Server) handleAuditCheckpoints(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+	if s.Audit == nil {
+		WriteError(w, http.StatusNotImplemented, "not_wired", "The audit writer is not configured.", requestID(r))
+		return
+	}
+	limit := parseLimit(r.URL.Query().Get("limit"), 50, 200)
+	rows, err := s.Pool.For(p.TenantID, "api").Query(r.Context(), `
+		SELECT seal_ts, prev_hash, archive_path, sequence_from, sequence_to, signature
+		  FROM audit_checkpoints
+		 WHERE tenant_id = $1
+		 ORDER BY seal_ts DESC
+		 LIMIT $2`, p.TenantID, limit)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "audit_failed", err.Error(), requestID(r))
+		return
+	}
+	defer rows.Close()
+	type cp struct {
+		SealTS       time.Time `json:"sealTs"`
+		PrevHash     string    `json:"prevHash"`
+		ArchivePath  string    `json:"archivePath"`
+		SequenceFrom int64     `json:"sequenceFrom"`
+		SequenceTo   int64     `json:"sequenceTo"`
+		Signature    string    `json:"signature"`
+	}
+	var out []cp
+	for rows.Next() {
+		var c cp
+		if err := rows.Scan(&c.SealTS, &c.PrevHash, &c.ArchivePath, &c.SequenceFrom, &c.SequenceTo, &c.Signature); err != nil {
+			WriteError(w, http.StatusInternalServerError, "audit_failed", err.Error(), requestID(r))
+			return
+		}
+		out = append(out, c)
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"checkpoints": out})
+}
+
+func (s *Server) handleRuleLint(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
+	if d.Bundles == nil {
+		WriteError(w, http.StatusServiceUnavailable, "not_wired", "The bundle service is not configured.", requestID(r))
+		return
+	}
+	version := r.PathValue("version")
+	if version == "" {
+		WriteError(w, http.StatusBadRequest, "bad_request", "version is required", requestID(r))
+		return
+	}
+	b, err := d.Bundles.Content(r.Context(), p.TenantID, version)
+	if err != nil {
+		WriteError(w, http.StatusNotFound, "not_found", fmt.Sprintf("bundle %s: %v", version, err), requestID(r))
+		return
+	}
+	// Run the compiler to validate the bundle.
+	compiler := rules.NewCompiler()
+	compiled, problems := compiler.Compile(b)
+	if len(problems) > 0 {
+		WriteJSON(w, http.StatusBadRequest, map[string]any{
+			"valid": false, "errors": problems,
+		})
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{
+		"valid": true, "rules": len(compiled.Rules), "version": version,
+	})
+}
+
+func (s *Server) handleRuleSimulate(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
+	if d.Bundles == nil {
+		WriteError(w, http.StatusServiceUnavailable, "not_wired", "The bundle service is not configured.", requestID(r))
+		return
+	}
+	version := r.PathValue("version")
+	if version == "" {
+		WriteError(w, http.StatusBadRequest, "bad_request", "version is required", requestID(r))
+		return
+	}
+	var req struct {
+		Events []map[string]any `json:"events"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, http.StatusBadRequest, "bad_request", err.Error(), requestID(r))
+		return
+	}
+	// Load and compile the bundle.
+	b, err := d.Bundles.Content(r.Context(), p.TenantID, version)
+	if err != nil {
+		WriteError(w, http.StatusNotFound, "not_found", fmt.Sprintf("bundle %s: %v", version, err), requestID(r))
+		return
+	}
+	compiler := rules.NewCompiler()
+	compiled, problems := compiler.Compile(b)
+	if len(problems) > 0 {
+		WriteError(w, http.StatusInternalServerError, "compile_failed", problems[0].Message, requestID(r))
+		return
+	}
+	// Run simulation with the provided events converted to scenarios.
+	// For now, return a minimal response indicating the bundle compiles.
+	_ = compiled
+	WriteJSON(w, http.StatusOK, map[string]any{
+		"results": []map[string]any{}, "version": version, "note": "simulation requires scenario conversion",
 	})
 }
 

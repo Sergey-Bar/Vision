@@ -130,6 +130,8 @@ type Result struct {
 	Available []rules.Signal
 	// Window describes what was searched.
 	Window WindowReport
+	// Gap is the clock gap assessment for the correlation window.
+	Gap clock.Gap
 }
 
 // SignalsFor assembles the trigger and its candidate window.
@@ -161,12 +163,13 @@ func (c *Correlator) SignalsFor(
 	window, report := windowFor(b)
 	out.Window = report
 
-	available, err := c.readCandidates(ctx, tenant, site, triggerEventID,
+	available, gap, err := c.readCandidates(ctx, tenant, site, triggerEventID,
 		trigger.NormalizedAt, window, tiers.CandidateTier, &out.Window)
 	if err != nil {
 		return out, err
 	}
 	out.Available = available
+	out.Gap = gap
 	return out, nil
 }
 
@@ -355,7 +358,7 @@ func (c *Correlator) readTrigger(ctx context.Context, tenant, site, eventID stri
 func (c *Correlator) readCandidates(
 	ctx context.Context, tenant, site, triggerEventID string,
 	at time.Time, window time.Duration, tier rules.Tier, report *WindowReport,
-) ([]rules.Signal, error) {
+) ([]rules.Signal, clock.Gap, error) {
 	scope := c.Pool.WithSites(tenant, "correlator", []string{site})
 	rows, err := scope.Query(ctx, `
 		SELECT `+scanColumns+`
@@ -370,7 +373,7 @@ func (c *Correlator) readCandidates(
 		tenant, site, triggerEventID,
 		at.Add(-window), at.Add(window), MaxCandidates+1)
 	if err != nil {
-		return nil, fmt.Errorf("correlator: read candidates: %w", err)
+		return nil, clock.Gap{}, fmt.Errorf("correlator: read candidates: %w", err)
 	}
 	defer rows.Close()
 
@@ -389,7 +392,7 @@ func (c *Correlator) readCandidates(
 			&band, &drift, &obsID, &profile, &structured,
 			&insufficient, &degraded, &detail,
 		); err != nil {
-			return nil, fmt.Errorf("correlator: scan candidate: %w", err)
+			return nil, clock.Gap{}, fmt.Errorf("correlator: scan candidate: %w", err)
 		}
 
 		if drift > 0 || band != "" {
@@ -406,7 +409,7 @@ func (c *Correlator) readCandidates(
 		out = append(out, s)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("correlator: candidate rows: %w", err)
+		return nil, clock.Gap{}, fmt.Errorf("correlator: candidate rows: %w", err)
 	}
 
 	// One more than the cap was requested precisely so "we stopped" is
@@ -416,6 +419,19 @@ func (c *Correlator) readCandidates(
 		report.Truncated = true
 	}
 	report.Candidates = len(out)
+
+	// Assess the clock gap for this correlation window.
+	// The window is centered on the trigger event; we use the same bounds
+	// that the SQL query used.
+	windowStart := at.Add(-window)
+	windowEnd := at.Add(window)
+	gap := clock.AssessGap(clock.GapState{
+		EventCount:      len(out),
+		Window:          clock.Window{From: windowStart, To: windowEnd},
+		State:           nil, // Device state not available per-event; excluded by drift check already.
+		EvidenceFetched: true,
+		EvidenceNeeded:  true,
+	})
 
 	// The SQL orders already, and it is re-applied here because the order is a
 	// property of the result rather than of the query that produced it: the
@@ -429,7 +445,7 @@ func (c *Correlator) readCandidates(
 		}
 		return out[i].EventID < out[j].EventID
 	})
-	return out, nil
+	return out, gap, nil
 }
 
 // decodeTags pulls the tag list out of a device's attributes document.

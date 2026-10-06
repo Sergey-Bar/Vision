@@ -108,8 +108,24 @@ type Outcome struct {
 	// State is the verification state this rule produces.
 	State VerificationState
 	// Action is what the rule asks for.
-	Action   Action
+	Action Action
+	// Dispatch is the side-effect half of Action, promoted to its own field.
+	//
+	// It is not new information: `Action.Dispatch` carries the same slice, and this is
+	// a reference to it rather than a copy. It is here because a caller that wants the
+	// side effects has to know they are in there, and a field a reader has to go
+	// looking for inside another struct is a field nobody looks for.
+	//
+	// Before this field existed the side effects had no carrier at all: `Then.Dispatch`
+	// was parsed, validated against the closed set at compile time, and read by exactly
+	// two call sites in the tree, both of which render text for `rules explain`. A rule
+	// author who wrote `dispatch: [{type: notify_operator, target: on-call}]` got a rule
+	// that compiled, passed every test, and notified nobody.
+	Dispatch []Dispatch
 	Severity string
+	// OccurredAt is the trigger's `normalized_at`, carried so Resolve can stamp the
+	// decision with when the thing happened rather than when the decision was made.
+	OccurredAt time.Time
 	// SupportingEvents are the signal ids that satisfied the rule.
 	SupportingEvents []string
 	// SupportingObservations are the observation ids that participated.
@@ -245,6 +261,13 @@ func (e *Engine) Resolve(outcomes []Outcome) Decision {
 		if o.State == StateSuppressed && o.Matched {
 			return Decision{
 				State: StateSuppressed, RuleID: o.RuleID, Reason: o.Reason,
+				OccurredAt: o.OccurredAt,
+				// A suppressing rule's dispatch is carried even though the rule did not
+				// raise an incident: `then: {suppress: true, dispatch: [...]}` is legal,
+				// and a side effect the rule asked for is a side effect the operator
+				// configured. What it must NOT do is raise an incident, and
+				// `CreateIncident` is absent from this literal for that reason.
+				Dispatch:         o.Dispatch,
 				SupportingEvents: o.SupportingEvents,
 				DriftExclusions:  d.DriftExclusions,
 				Degraded:         d.Degraded,
@@ -257,6 +280,8 @@ func (e *Engine) Resolve(outcomes []Outcome) Decision {
 		if o.State == StateContradicted && o.Matched {
 			return Decision{
 				State: StateContradicted, RuleID: o.RuleID, Reason: o.Reason,
+				OccurredAt:          o.OccurredAt,
+				Dispatch:            o.Dispatch,
 				ContradictingEvents: o.ContradictingEvents,
 				DriftExclusions:     d.DriftExclusions,
 				Degraded:            d.Degraded,
@@ -288,6 +313,8 @@ func (e *Engine) Resolve(outcomes []Outcome) Decision {
 			if outcomes[i].Matched {
 				return Decision{
 					State: outcomes[i].State, RuleID: outcomes[i].RuleID, Reason: outcomes[i].Reason,
+					OccurredAt:       outcomes[i].OccurredAt,
+					Dispatch:         outcomes[i].Dispatch,
 					SupportingEvents: outcomes[i].SupportingEvents,
 					DriftExclusions:  d.DriftExclusions,
 					Degraded:         d.Degraded || outcomes[i].Degraded,
@@ -308,6 +335,7 @@ func (e *Engine) Resolve(outcomes []Outcome) Decision {
 		Severity:               best.Severity,
 		Reason:                 best.Reason,
 		Action:                 best.Action,
+		Dispatch:               best.Dispatch,
 		SupportingEvents:       best.SupportingEvents,
 		SupportingObservations: best.SupportingObservations,
 		// The drift exclusions of every outcome were collected above, including
@@ -348,18 +376,42 @@ func firstDegradedReason(fallback Decision, o Outcome) DegradedReason {
 
 // Decision is the folded verdict for one event.
 type Decision struct {
-	State                  VerificationState
-	RuleID                 string
-	Severity               string
-	Reason                 string
-	Action                 Action
+	State    VerificationState
+	RuleID   string
+	Severity string
+	Reason   string
+	Action   Action
+	// Dispatch is the side effects the winning rule asked for, promoted out of
+	// `Action.Dispatch`.
+	//
+	// It is carried separately for the same reason it is on `Outcome`: the caller that
+	// enqueues side effects needs to see that the decision carries them, and a field
+	// buried in another struct is a field nobody reads. It is a reference to the same
+	// slice, not a copy.
+	//
+	// Every return path in Resolve that can produce a matched rule with a dispatch sets
+	// this, which is stated here rather than left to inspection: a Resolve branch that
+	// forgets it produces exactly the silent no-op this field was added to remove.
+	Dispatch               []Dispatch
 	Escalate               bool
 	SupportingEvents       []string
 	SupportingObservations []string
 	ContradictingEvents    []string
-	DriftExclusions        []Exclusion
-	Degraded               bool
-	DegradedReason         DegradedReason
+	// OccurredAt is when the trigger event happened, in the site-relative-normalized
+	// form `normalized_at` carries.
+	//
+	// On Decision rather than derived by the caller from the signal, because a
+	// notification has to say when the thing happened and the only clock that answers
+	// that is the one the rules layer already computed. A notification stamped with the
+	// time it was RENDERED is a different and much less useful fact, and an incident row
+	// stamped `now()` is already the thing this fixes.
+	//
+	// Zero when no rule matched, which is the correct answer: there was no event to
+	// stamp.
+	OccurredAt      time.Time
+	DriftExclusions []Exclusion
+	Degraded        bool
+	DegradedReason  DegradedReason
 }
 
 func (e *Engine) evaluateRule(rule CompiledRule, trigger Signal, available []Signal) Outcome {
@@ -375,6 +427,12 @@ func (e *Engine) evaluateRule(rule CompiledRule, trigger Signal, available []Sig
 	}
 	out.Matched = true
 	out.Action = rule.Then
+	out.Dispatch = rule.Then.Dispatch
+	// The trigger's normalized time, not the engine's clock. `normalized_at` is the only
+	// field a time predicate may read - a camera forty seconds fast puts its events forty
+	// seconds from where they happened - and it is equally the only field an operator's
+	// notification should quote.
+	out.OccurredAt = trigger.NormalizedAt
 
 	if rule.Then.Suppress {
 		out.State = StateSuppressed

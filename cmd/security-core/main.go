@@ -53,12 +53,15 @@ import (
 	"github.com/Sergey-Bar/Ai-Captain/internal/config"
 	"github.com/Sergey-Bar/Ai-Captain/internal/correlator"
 	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
+	"github.com/Sergey-Bar/Ai-Captain/internal/dispatch"
 	"github.com/Sergey-Bar/Ai-Captain/internal/evidence"
+	"github.com/Sergey-Bar/Ai-Captain/internal/evidencefetch"
 	"github.com/Sergey-Bar/Ai-Captain/internal/graph"
 	"github.com/Sergey-Bar/Ai-Captain/internal/identity"
 	"github.com/Sergey-Bar/Ai-Captain/internal/inbox"
 	"github.com/Sergey-Bar/Ai-Captain/internal/incidents"
 	"github.com/Sergey-Bar/Ai-Captain/internal/jobs"
+	"github.com/Sergey-Bar/Ai-Captain/internal/migrate"
 	"github.com/Sergey-Bar/Ai-Captain/internal/milestone"
 	"github.com/Sergey-Bar/Ai-Captain/internal/normalize"
 	"github.com/Sergey-Bar/Ai-Captain/internal/observability"
@@ -149,18 +152,108 @@ func run() error {
 	vlm := airuntime.NewVLMWorker(jobWorker, aiClient,
 		&observations.Writer{Pool: pool}, store, registry, log)
 
+	// Evidence fetch worker: places Milestone bookmarks for incidents.
+	// It runs on the evidence_fetch queue and is wired with the same dependencies
+	// the pipeline uses, so a bookmark and its receipt are durable.
+	evidenceFetchWorker := &evidencefetch.Worker{
+		Facts:     evidencefetch.NewPoolFacts(pool),
+		Store:     store,
+		Bookmarks: adapter,
+		Policy:    clockPolicy(),
+		Audit:     writer,
+		Log:       log,
+		PreRoll:   cfg.EvidenceFetchPreRoll,
+		PostRoll:  cfg.EvidenceFetchPostRoll,
+		RetainFor: cfg.EvidenceFetchRetainFor,
+	}
+	evidenceFetchJobWorker := &jobs.Worker{
+		Enqueuer: jobs.Enqueuer{Pool: pool},
+		Name:     jobs.QueueEvidenceFetch,
+		Handler: func(ctx context.Context, j jobs.Job) error {
+			_, err := evidenceFetchWorker.Handle(ctx, j)
+			return err
+		},
+		Logf: func(format string, args ...any) {
+			log.Info("evidence_fetch", append([]any{"worker", "evidence_fetch", format}, args...)...)
+		},
+	}
+
+	// The dispatch destinations, and the refusal that a bundle naming an unconfigured
+	// destination is refused at STARTUP.
+	//
+	// The destinations file is optional - an install that sends no notifications is a
+	// supported configuration - but a bundle that DOES notify and has nowhere to send it is
+	// refused before the daemon comes up, not at 03:00 when the first page fails. The
+	// check needs the active bundle, which is not compiled until the pool is up, so it runs
+	// immediately after the services are constructed and is the one startup check that can
+	// fail.
+	destinations, err := dispatch.LoadDestinations(cfg.DispatchDestinationsPath)
+	if err != nil {
+		return err
+	}
+	dispatcher := &dispatch.Dispatcher{
+		Dests:    destinations,
+		Enqueuer: jobs.New(pool),
+		Pool:     pool,
+	}
+
 	relay := &outbox.Relay{
 		Pool:    pool,
 		Metrics: registry,
-		Handler: func(_ context.Context, d outbox.Delivery) error {
-			// M1 dispatches no side effects. Acknowledging and logging is the honest
-			// behaviour; a topic with no consumer that silently disappears is a
-			// dead-letter backlog nobody is watching.
-			log.Info("outbox message acknowledged",
-				"tenant_id", d.TenantID, "topic", d.Topic, "outbox_id", d.OutboxID)
+		// The real handler. It was `log.Info(...); return nil` with the comment "M1
+		// dispatches no side effects", which meant every message the outbox table ever
+		// held was marked delivered without anything being delivered - and since
+		// `outbox.Enqueue` had no production caller, the table was empty and the
+		// acknowledgement path had never run once.
+		//
+		// `Dispatcher.Handler` refuses rather than acknowledging anything it cannot
+		// perform, so an unimplemented topic dead-letters instead of being recorded as
+		// successful. That is the whole reason it is not a log line.
+		Handler: func(ctx context.Context, d outbox.Delivery) error {
+			err := dispatcher.Handler()(ctx, d)
+			if err != nil {
+				// Logged and returned: the return is what makes the relay retry and then
+				// dead-letter, and the log is what makes it diagnosable at the moment it
+				// stops. Both halves, deliberately - a returned error with no log is a
+				// dead letter nobody investigates, and a log with no returned error is the
+				// bug this whole package removes.
+				log.Warn("outbox message refused",
+					"tenant_id", d.TenantID, "site_id", d.SiteID, "topic", d.Topic,
+					"outbox_id", d.OutboxID, "attempt", d.AttemptCount,
+					"idempotency_key", d.IdempotencyKey, "error", err.Error())
+				return err
+			}
+			log.Info("outbox message delivered",
+				"tenant_id", d.TenantID, "site_id", d.SiteID, "topic", d.Topic,
+				"outbox_id", d.OutboxID, "idempotency_key", d.IdempotencyKey)
 			return nil
 		},
 		MaxAttempts: 5,
+	}
+
+	// Ensure future partitions exist (creates 3 years ahead by default).
+	// This is safe to run repeatedly - it only creates partitions that don't exist.
+	migrator := &migrate.Runner{Pool: pool.Pool}
+	if _, err := migrator.EnsurePartitions(ctx, 3); err != nil {
+		log.Warn("could not ensure future partitions", "error", err.Error())
+	}
+
+	// The startup refusal, and the only check here that can fail.
+	//
+	// It needs the ACTIVE bundle, which is not compiled until the pool is up, so it runs
+	// after the services are constructed. A bundle that names a dispatch this install
+	// cannot perform - an unconfigured destination, or a dispatch type this build has no
+	// executor for - stops the daemon coming up.
+	//
+	// The alternative is a dead letter at 03:00, discovered by whoever is on call, from a
+	// row that says only "not delivered". This says which rule, which target, and what
+	// destinations DO exist.
+	//
+	// It is a refusal rather than a warning on purpose. A product whose one advertised
+	// side effect is dead but which starts cleanly is worse than one that does not start:
+	// the first looks like a working install.
+	if err := checkActiveBundleDispatch(ctx, pool, dispatcher, bundlesSvc, log); err != nil {
+		return err
 	}
 
 	server := &api.Server{
@@ -243,19 +336,23 @@ func run() error {
 		// The evidence volume, so `evidence_disk_free_percent` measures the
 		// filesystem the evidence store actually writes to rather than whatever the
 		// process's working directory happens to be on.
-		EvidenceRoot:  cfg.EvidenceRoot,
-		PollInterval:  cfg.PollInterval,
-		ClaimBatch:    cfg.ClaimBatchSize,
-		LeaseDuration: cfg.LeaseDuration,
-		Jobs:          jobWorker,
-		AIEndpoint:    cfg.AIEndpoint,
+		EvidenceRoot:           cfg.EvidenceRoot,
+		EvidenceStore:          store,
+		RetentionSweepInterval: cfg.RetentionSweepInterval,
+		PollInterval:           cfg.PollInterval,
+		ClaimBatch:             cfg.ClaimBatchSize,
+		LeaseDuration:          cfg.LeaseDuration,
+		Jobs:                   jobWorker,
+		AIEndpoint:             cfg.AIEndpoint,
 		// The relay runs in the pipeline, not here, so the whole process has one
 		// place that decides what runs and in what order at shutdown.
 		Relay:       relay,
 		ClockPolicy: clockPolicy(),
 	})
 
-	go runVLMWorker(ctx, jobWorker, vlm.Handle, cfg.Tenant, log)
+	go runVLMWorker(ctx, jobWorker, vlm.Handle, cfg.Tenant, log, cfg.VLMConcurrency)
+
+	go runEvidenceFetchWorker(ctx, evidenceFetchJobWorker, cfg.Tenant, log)
 
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.ListenAndServe(ctx, cfg.Listen, cfg.TLSCertFile, cfg.TLSKeyFile) }()
@@ -326,6 +423,55 @@ func readiness(ctx context.Context, pool *dbx.Pool, log *slog.Logger) error {
 	return nil
 }
 
+// checkActiveBundleDispatch refuses to start when the active bundle asks for a side effect
+// this install cannot perform.
+//
+// Three outcomes, and they are three different answers rather than two:
+//
+//   - No active bundle: nothing to check, the daemon starts. A fresh install that has not
+//     activated anything is not misconfigured.
+//   - The bundle store is unreachable: an ERROR, and NOT "everything is fine". The check
+//     could not run, so reporting that the install's dispatches are all covered would be
+//     the one claim this daemon has no evidence for.
+//   - The bundle compiles and every dispatch resolves: the daemon starts.
+//
+// The last two share a code path and must not: the temptation is to log a warning for any
+// error from `Active`, which silently converts an outage into a clean startup.
+func checkActiveBundleDispatch(ctx context.Context, pool *dbx.Pool, d *dispatch.Dispatcher,
+	bundlesSvc *bundles.Service, log *slog.Logger) error {
+	_, content, err := bundlesSvc.Active(ctx, pool.For("", "bundles").TenantID())
+	if err != nil {
+		if errors.Is(err, bundles.ErrNoActiveBundle) {
+			log.Info("no active bundle yet; the dispatch check has nothing to do")
+			return nil
+		}
+		return fmt.Errorf("security-core: the active bundle could not be read, so its "+
+			"dispatches cannot be checked: %w", err)
+	}
+
+	bundle, problems := rules.NewCompiler().Compile(content)
+	for _, p := range problems {
+		if p.Severity == rules.SeverityError {
+			// The bundle store accepted a bundle the compiler now rejects. That is a real
+			// finding and it is refused rather than skipped, because the alternative is
+			// starting with a bundle whose dispatches nobody has read.
+			return fmt.Errorf("security-core: the active bundle no longer compiles, so its "+
+				"dispatches cannot be checked: %s", p)
+		}
+	}
+	if bundle == nil {
+		return errors.New("security-core: the active bundle compiled to nothing, so its " +
+			"dispatches cannot be checked")
+	}
+
+	if err := d.CheckDestinations(bundle); err != nil {
+		return err
+	}
+	log.Info("the active bundle's dispatches are all performable",
+		"rules", len(bundle.Compiled), "destinations", len(d.Dests.Names()))
+	return nil
+}
+
 // readinessChecks is the health set.
 //
 // A check named "aiRuntime" is informational and never makes the core unready,
@@ -386,16 +532,41 @@ func newSealer(cfg config.Config, pool *dbx.Pool, registry *observability.Regist
 }
 
 func runVLMWorker(ctx context.Context, w *jobs.Worker,
-	handler func(context.Context, jobs.Job) error, tenant string, log *slog.Logger) {
+	handler func(context.Context, jobs.Job) error, tenant string, log *slog.Logger, concurrency int) {
 	w.Handler = handler
+	if concurrency <= 0 {
+		log.Info("vlm worker disabled (concurrency=0)")
+		<-ctx.Done()
+		return
+	}
+	for i := 0; i < concurrency; i++ {
+		go func(id int) {
+			log.Info("vlm worker started", "id", id)
+			for {
+				select {
+				case <-ctx.Done():
+					log.Info("vlm worker stopped", "id", id)
+					return
+				case <-time.After(time.Second):
+				}
+				if _, err := w.Run(ctx, tenant, "vlm", 4); err != nil && ctx.Err() == nil {
+					log.Error("the vlm worker could not run", "id", id, "error", err.Error())
+				}
+			}
+		}(i)
+	}
+	<-ctx.Done()
+}
+
+func runEvidenceFetchWorker(ctx context.Context, w *jobs.Worker, tenant string, log *slog.Logger) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-time.After(time.Second):
 		}
-		if _, err := w.Run(ctx, tenant, "vlm", 4); err != nil && ctx.Err() == nil {
-			log.Error("the vlm worker could not run", "error", err.Error())
+		if _, err := w.Run(ctx, tenant, "evidence_fetch", 4); err != nil && ctx.Err() == nil {
+			log.Error("the evidence fetch worker could not run", "error", err.Error())
 		}
 	}
 }

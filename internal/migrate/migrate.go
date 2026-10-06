@@ -86,6 +86,125 @@ func (r *Runner) CurrentVersion(ctx context.Context) (int, error) {
 	return v, nil
 }
 
+// EnsurePartitions creates monthly partitions for the next N years on the
+// partitioned tables that need them (inbox_events and canonical_events).
+// It is safe to call repeatedly; it only creates partitions that do not exist.
+// The function returns the number of partitions created.
+func (r *Runner) EnsurePartitions(ctx context.Context, yearsAhead int) (int, error) {
+	if yearsAhead <= 0 {
+		yearsAhead = 3
+	}
+	if yearsAhead > 10 {
+		yearsAhead = 10
+	}
+
+	created := 0
+	tables := []struct {
+		name        string
+		partitionBy string
+	}{
+		{name: "inbox_events", partitionBy: "received_at"},
+		{name: "canonical_events", partitionBy: "observed_at"},
+	}
+
+	// Find the latest partition boundary for each table
+	for _, t := range tables {
+		// Get the maximum partition boundary
+		var maxBoundary time.Time
+		err := r.Pool.QueryRow(ctx, fmt.Sprintf(`
+			SELECT max(pg_get_partition_constraint_def(c.oid))
+			FROM pg_class c
+			JOIN pg_namespace n ON n.oid = c.relnamespace
+			WHERE n.nspname = 'public' AND c.relname = '%s'`, t.name)).Scan(&maxBoundary)
+		if err != nil || maxBoundary.IsZero() {
+			// No partitions exist yet or error - fall back to finding from existing partitions
+			err = r.Pool.QueryRow(ctx, fmt.Sprintf(`
+				SELECT max(to_boundary)
+				FROM (
+					SELECT
+						substring(relname FROM '_(\d{4}_\d{2})$') as part,
+						CASE
+							WHEN substring(relname FROM '_(\d{4}_\d{2})$') ~ '^\d{4}_\d{2}$'
+							THEN (substring(relname FROM '_(\d{4}_\d{2})$') || '-01T00:00:00Z')::timestamptz
+						END as to_boundary
+					FROM pg_class c
+					JOIN pg_namespace n ON n.oid = c.relnamespace
+					WHERE n.nspname = 'public'
+					  AND c.relkind = 'r'
+					  AND c.relname LIKE '%s_%%'
+					  AND c.relname NOT LIKE '%%_default'
+				) s
+				WHERE to_boundary IS NOT NULL`, t.name)).Scan(&maxBoundary)
+			if err != nil || maxBoundary.IsZero() {
+				// No partitions found, start from the beginning of the current year
+				maxBoundary = time.Now().UTC().Truncate(24 * time.Hour)
+				maxBoundary = time.Date(maxBoundary.Year(), 1, 1, 0, 0, 0, 0, time.UTC)
+			}
+		}
+
+		// Create partitions for the next N years
+		targetEnd := time.Now().UTC().AddDate(yearsAhead, 0, 0)
+		targetEnd = time.Date(targetEnd.Year(), 1, 1, 0, 0, 0, 0, time.UTC)
+
+		for boundary := maxBoundary; boundary.Before(targetEnd); boundary = boundary.AddDate(0, 1, 0) {
+			from := boundary
+			to := boundary.AddDate(0, 1, 0)
+			suffix := from.Format("2006_01")
+			partitionName := fmt.Sprintf("%s_%s", t.name, suffix)
+
+			// Check if partition already exists
+			var exists bool
+			err := r.Pool.QueryRow(ctx, `
+				SELECT EXISTS (
+					SELECT 1 FROM pg_class c
+					JOIN pg_namespace n ON n.oid = c.relnamespace
+					WHERE n.nspname = 'public' AND c.relname = $1
+				)`, partitionName).Scan(&exists)
+			if err != nil {
+				return created, fmt.Errorf("migrate: check partition %s: %w", partitionName, err)
+			}
+			if exists {
+				continue
+			}
+
+			// Create the partition
+			ddl := fmt.Sprintf(
+				"CREATE TABLE %s PARTITION OF %s FOR VALUES FROM ($1) TO ($2)",
+				partitionName, t.name)
+			if _, err := r.Pool.Exec(ctx, ddl, from, to); err != nil {
+				return created, fmt.Errorf("migrate: create partition %s: %w", partitionName, err)
+			}
+			created++
+
+			// Apply RLS policies to the new partition (same as 0008/0015)
+			_, err = r.Pool.Exec(ctx, fmt.Sprintf(
+				"ALTER TABLE %s ENABLE ROW LEVEL SECURITY", partitionName))
+			if err != nil {
+				return created, fmt.Errorf("migrate: enable RLS on %s: %w", partitionName, err)
+			}
+			_, err = r.Pool.Exec(ctx, fmt.Sprintf(
+				"ALTER TABLE %s FORCE ROW LEVEL SECURITY", partitionName))
+			if err != nil {
+				return created, fmt.Errorf("migrate: force RLS on %s: %w", partitionName, err)
+			}
+			_, err = r.Pool.Exec(ctx, fmt.Sprintf(
+				`CREATE POLICY tenant_isolation ON %s USING (tenant_id = app_current_tenant() OR app_is_system_worker())
+				 WITH CHECK (tenant_id = app_current_tenant() OR app_is_system_worker())`, partitionName))
+			if err != nil {
+				return created, fmt.Errorf("migrate: create tenant_isolation on %s: %w", partitionName, err)
+			}
+			_, err = r.Pool.Exec(ctx, fmt.Sprintf(
+				`CREATE POLICY site_isolation ON %s USING (app_site_visible(site_id) OR app_is_system_worker())
+				 WITH CHECK (app_site_visible(site_id) OR app_is_system_worker())`, partitionName))
+			if err != nil {
+				return created, fmt.Errorf("migrate: create site_isolation on %s: %w", partitionName, err)
+			}
+		}
+	}
+
+	return created, nil
+}
+
 // Applied returns the migration ledger in version order.
 func (r *Runner) Applied(ctx context.Context) ([]Applied, error) {
 	rows, err := r.Pool.Query(ctx,

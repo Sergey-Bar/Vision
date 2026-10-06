@@ -144,6 +144,31 @@ func (e *Enqueuer) Enqueue(ctx context.Context, tx pgx.Tx, in Enqueue) (created 
 	return true, id, nil
 }
 
+// EnqueueJob adds a job in its own transaction, or does nothing if the key already exists.
+// This is a convenience wrapper for callers that don't have a transaction context.
+func (e *Enqueuer) EnqueueJob(ctx context.Context, tenantID string, q Queue, job Job) error {
+	return e.Pool.InTenant(ctx, dbx.TenantContext{
+		TenantID: tenantID,
+		ActorID:  "api",
+	}, func(tx pgx.Tx) error {
+		created, _, err := e.Enqueue(ctx, tx, Enqueue{
+			TenantID:       tenantID,
+			Queue:          q,
+			IdempotencyKey: job.IdempotencyKey,
+			Payload:        job.Payload,
+			MaxAttempts:    job.MaxAttempts,
+			RunAfter:       job.RunAfter,
+		})
+		if err != nil {
+			return err
+		}
+		if !created {
+			return fmt.Errorf("job already exists with key %s", job.IdempotencyKey)
+		}
+		return nil
+	})
+}
+
 // DefaultLeaseDuration is the visibility timeout for a general job.
 const DefaultLeaseDuration = 60 * time.Second
 

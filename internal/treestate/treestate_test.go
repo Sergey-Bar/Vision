@@ -921,6 +921,21 @@ func TestEveryLocalBranchHasLandedOrSaidWhy(t *testing.T) {
 	declined := map[string]string{
 		"main": "the published line. contract contains main and is ahead of it by every commit " +
 			"in this repository; fast-forwarding main is a human's call, not a gate's",
+
+		// `stabilize/m1-triage` was this branch's first name, before the work was split
+		// onto `stabilize/dispatch-chain`. A concurrent session pushed commit 6aa55fc
+		// (`internal/nlsearch`) onto that name, so it now carries another session's
+		// in-flight work and cannot be fast-forwarded here without sweeping that in.
+		//
+		// It is declined with a reason rather than deleted, because deleting it would
+		// destroy the only ref holding `internal/nlsearch`. Whoever finishes that work
+		// lands it, and this entry is then deleted - which is the whole contract of a
+		// declined branch: it names itself as temporary and the gate fails the moment it
+		// stops being true.
+		"stabilize/m1-triage": "another session pushed internal/nlsearch onto this name while " +
+			"this branch was being written, and it holds that work in flight. Deleting the " +
+			"branch would destroy it; landing it would sweep an unfinished second feature " +
+			"into the dispatch chain. It is declined until that session lands or renames it",
 	}
 	for _, p := range proposalBranches(t, root) {
 		declined[p] = "a proposal branch is a DOCUMENT, not work in flight. It holds the " +

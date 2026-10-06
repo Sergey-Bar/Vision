@@ -60,6 +60,15 @@ func (a *Adapter) WithClock(clock func() time.Time) *Adapter {
 	return a
 }
 
+// WriteBookmark delegates to the underlying transport if it implements BookmarkWriter.
+// This allows the Adapter to serve as a BookmarkWriter for the evidence fetch worker.
+func (a *Adapter) WriteBookmark(ctx context.Context, b Bookmark) (BookmarkRef, error) {
+	if w, ok := a.transport.(BookmarkWriter); ok {
+		return w.WriteBookmark(ctx, b)
+	}
+	return BookmarkRef{}, fmt.Errorf("milestone: the underlying transport does not support bookmark write-back")
+}
+
 // RawRecord is one sanitized source envelope, ready for the inbox. It is the
 // adapter's only output type: one shape whether it came from a socket or a file.
 type RawRecord struct {

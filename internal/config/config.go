@@ -29,10 +29,20 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
+
+	// `dispatch` owns the destinations file format and its validation, so it owns the
+	// default path too. The dependency runs config -> dispatch rather than the reverse:
+	// `config` is the package that decides WHERE things live, and a file format's
+	// default location is part of that decision.
+	//
+	// It is not a cycle. `dispatch` imports `dbx`, `jobs`, `outbox` and `rules`, and
+	// none of them import `config`.
+	"github.com/Sergey-Bar/Ai-Captain/internal/dispatch"
 )
 
 // Config is the resolved configuration for one install.
@@ -85,8 +95,13 @@ type Config struct {
 	// CheckpointDir and CheckpointKeyPath seal the audit ledger. An empty
 	// CheckpointDir is allowed and disables sealing, which is itself visible in
 	// the readiness report rather than silently doing nothing.
+	// DispatchDestinationsPath is the file `internal/dispatch` reads its notification
+	// destinations from. See the assignment in LoadFrom for why it is a path and not a
+	// value on this struct.
 	CheckpointDir     string
 	CheckpointKeyPath string
+
+	DispatchDestinationsPath string
 
 	// PollInterval is how often the ingest loop asks the adapter for events.
 	PollInterval time.Duration
@@ -112,6 +127,24 @@ type Config struct {
 
 	// ShutdownGrace bounds how long in-flight requests get to finish.
 	ShutdownGrace time.Duration
+
+	// EvidenceFetchPreRoll is how far before the incident window the bookmark
+	// should open. Default 5s.
+	EvidenceFetchPreRoll time.Duration
+	// EvidenceFetchPostRoll is how far after the incident window the bookmark
+	// should extend. Default 10s.
+	EvidenceFetchPostRoll time.Duration
+	// EvidenceFetchRetainFor is how long a bookmark receipt is kept before the
+	// retention sweep may delete it. Default 90 days.
+	EvidenceFetchRetainFor time.Duration
+
+	// RetentionSweepInterval is how often the retention sweep runs. Default 1 hour.
+	// Set to 0 to disable automatic sweeps.
+	RetentionSweepInterval time.Duration
+
+	// VLMConcurrency is how many VLM jobs run in parallel. Default 1.
+	// Set to 0 to disable the VLM worker entirely.
+	VLMConcurrency int
 }
 
 // Lookup resolves an environment variable. Load takes one so the tests are
@@ -124,13 +157,18 @@ func DefaultLookup(key string) string { return os.Getenv(key) }
 
 // Defaults for the values where a default does not change behaviour.
 const (
-	DefaultListen        = "127.0.0.1:8443"
-	DefaultPollInterval  = 5 * time.Second
-	DefaultClaimBatch    = 64
-	DefaultLeaseDuration = 60 * time.Second
-	DefaultAIDeadline    = 10 * time.Second
-	DefaultShutdownGrace = 20 * time.Second
-	DefaultLogLevel      = "info"
+	DefaultListen                 = "127.0.0.1:8443"
+	DefaultPollInterval           = 5 * time.Second
+	DefaultClaimBatch             = 64
+	DefaultLeaseDuration          = 60 * time.Second
+	DefaultAIDeadline             = 10 * time.Second
+	DefaultShutdownGrace          = 20 * time.Second
+	DefaultLogLevel               = "info"
+	DefaultEvidenceFetchPreRoll   = 5 * time.Second
+	DefaultEvidenceFetchPostRoll  = 10 * time.Second
+	DefaultEvidenceFetchRetainFor = 90 * 24 * time.Hour
+	DefaultRetentionSweepInterval = time.Hour
+	DefaultVLMConcurrency         = 1
 )
 
 // Ceilings for the bounded values. A batch size or lease that can be set
@@ -178,9 +216,65 @@ func LoadFrom(get Lookup) (Config, error) {
 	c.CheckpointDir = strings.TrimSpace(get("SP_CHECKPOINT_DIR"))
 	c.CheckpointKeyPath = strings.TrimSpace(get("SP_CHECKPOINT_KEY"))
 
+	// DispatchDestinationsPath is where `internal/dispatch` reads its destinations from.
+	//
+	// A PATH and not the destinations themselves, for the reason `internal/config` says
+	// about every other field: a field on Config is a field somebody will print, and a
+	// destination carries a URL and a `secret_ref` rather than a secret - the secret is
+	// named, not held. Putting the destinations on Config would make that rule harder to
+	// keep, and `dispatch.LoadDestinations` already owns the file format and its
+	// validation.
+	//
+	// Absent means the default path, and a missing default path means an install with no
+	// destinations, which is a supported configuration and not an error. A bundle that
+	// notifies is refused at startup by `dispatcher.CheckDestinations`.
+	c.DispatchDestinationsPath = strings.TrimSpace(
+		envOr(get, "SP_DISPATCH_DESTINATIONS", dispatch.DefaultDestinationsPath))
+
 	c.AIEndpoint = strings.TrimRight(strings.TrimSpace(get("SP_AI_ENDPOINT")), "/")
 	c.LogLevel = strings.ToLower(envOr(get, "SP_LOG_LEVEL", DefaultLogLevel))
 	c.ShutdownGrace = DefaultShutdownGrace
+
+	c.EvidenceFetchPreRoll = DefaultEvidenceFetchPreRoll
+	if v := strings.TrimSpace(get("SP_EVIDENCE_FETCH_PRE_ROLL")); v != "" {
+		var err error
+		c.EvidenceFetchPreRoll, err = time.ParseDuration(v)
+		if err != nil {
+			return c, fmt.Errorf("config: SP_EVIDENCE_FETCH_PRE_ROLL: %w", err)
+		}
+	}
+	c.EvidenceFetchPostRoll = DefaultEvidenceFetchPostRoll
+	if v := strings.TrimSpace(get("SP_EVIDENCE_FETCH_POST_ROLL")); v != "" {
+		var err error
+		c.EvidenceFetchPostRoll, err = time.ParseDuration(v)
+		if err != nil {
+			return c, fmt.Errorf("config: SP_EVIDENCE_FETCH_POST_ROLL: %w", err)
+		}
+	}
+	c.EvidenceFetchRetainFor = DefaultEvidenceFetchRetainFor
+	if v := strings.TrimSpace(get("SP_EVIDENCE_FETCH_RETAIN_FOR")); v != "" {
+		var err error
+		c.EvidenceFetchRetainFor, err = time.ParseDuration(v)
+		if err != nil {
+			return c, fmt.Errorf("config: SP_EVIDENCE_FETCH_RETAIN_FOR: %w", err)
+		}
+	}
+	c.RetentionSweepInterval = DefaultRetentionSweepInterval
+	if v := strings.TrimSpace(get("SP_RETENTION_SWEEP_INTERVAL")); v != "" {
+		var err error
+		c.RetentionSweepInterval, err = time.ParseDuration(v)
+		if err != nil {
+			return c, fmt.Errorf("config: SP_RETENTION_SWEEP_INTERVAL: %w", err)
+		}
+	}
+	c.VLMConcurrency = DefaultVLMConcurrency
+	if v := strings.TrimSpace(get("SP_VLM_CONCURRENCY")); v != "" {
+		var err error
+		c.VLMConcurrency, err = strconv.Atoi(v)
+		if err != nil {
+			return c, fmt.Errorf("config: SP_VLM_CONCURRENCY: %w", err)
+		}
+	}
 
 	var err error
 	if c.TrustedProxyCIDRs, err = cidrListEnv(get, "SP_TRUSTED_PROXY_CIDRS"); err != nil {
@@ -259,10 +353,34 @@ func (c Config) validate() error {
 		return fmt.Errorf("config: SP_POLL_INTERVAL must be between 1s and %s, got %s",
 			MaxPollInterval, c.PollInterval)
 	}
+	if c.VLMConcurrency < 0 || c.VLMConcurrency > 16 {
+		return fmt.Errorf("config: SP_VLM_CONCURRENCY must be between 0 and 16, got %d",
+			c.VLMConcurrency)
+	}
 	if c.AIDeadline < time.Second {
 		return fmt.Errorf("config: SP_AI_DEADLINE must be at least 1s, got %s: a sub-second "+
 			"client deadline produces degraded observations that say nothing about the runtime",
 			c.AIDeadline)
+	}
+	if c.EvidenceFetchPreRoll < 0 {
+		return fmt.Errorf("config: SP_EVIDENCE_FETCH_PRE_ROLL cannot be negative, got %s",
+			c.EvidenceFetchPreRoll)
+	}
+	if c.EvidenceFetchPostRoll < 0 {
+		return fmt.Errorf("config: SP_EVIDENCE_FETCH_POST_ROLL cannot be negative, got %s",
+			c.EvidenceFetchPostRoll)
+	}
+	if c.EvidenceFetchRetainFor < time.Hour {
+		return fmt.Errorf("config: SP_EVIDENCE_FETCH_RETAIN_FOR must be at least 1h, got %s",
+			c.EvidenceFetchRetainFor)
+	}
+	if c.RetentionSweepInterval < 0 {
+		return fmt.Errorf("config: SP_RETENTION_SWEEP_INTERVAL cannot be negative, got %s",
+			c.RetentionSweepInterval)
+	}
+	if c.RetentionSweepInterval > 0 && c.RetentionSweepInterval < time.Minute {
+		return fmt.Errorf("config: SP_RETENTION_SWEEP_INTERVAL must be 0 (disabled) or at least 1m, got %s",
+			c.RetentionSweepInterval)
 	}
 	// The three refusals below are the "insecure by default" pairings. Same shape
 	// as the ceilings above: the failure mode is a configuration that loads and
@@ -339,24 +457,29 @@ func (c Config) Redacted() map[string]any {
 		checkpoint = c.CheckpointDir
 	}
 	return map[string]any{
-		"listen":                c.Listen,
-		"tls":                   c.TLSCertFile != "",
-		"behind_proxy":          c.BehindProxy,
-		"trusted_proxy_cidrs":   strings.Join(cidrStrings(c.TrustedProxyCIDRs), ","),
-		"session_cookie_secure": c.SessionCookieSecure,
-		"tenant_id":             c.Tenant,
-		"site_id":               c.SiteID,
-		"integration_id":        c.IntegrationID,
-		"database":              c.Database.DSN(),
-		"evidence_root":         c.EvidenceRoot,
-		"checkpoints":           checkpoint,
-		"poll_interval":         c.PollInterval.String(),
-		"claim_batch":           c.ClaimBatchSize,
-		"lease_duration":        c.LeaseDuration.String(),
-		"ai_endpoint":           ai,
-		"ai_deadline":           c.AIDeadline.String(),
-		"log_level":             c.LogLevel,
-		"shutdown_grace":        c.ShutdownGrace.String(),
+		"listen":                    c.Listen,
+		"tls":                       c.TLSCertFile != "",
+		"behind_proxy":              c.BehindProxy,
+		"trusted_proxy_cidrs":       strings.Join(cidrStrings(c.TrustedProxyCIDRs), ","),
+		"session_cookie_secure":     c.SessionCookieSecure,
+		"tenant_id":                 c.Tenant,
+		"site_id":                   c.SiteID,
+		"integration_id":            c.IntegrationID,
+		"database":                  c.Database.DSN(),
+		"evidence_root":             c.EvidenceRoot,
+		"checkpoints":               checkpoint,
+		"poll_interval":             c.PollInterval.String(),
+		"claim_batch":               c.ClaimBatchSize,
+		"lease_duration":            c.LeaseDuration.String(),
+		"ai_endpoint":               ai,
+		"ai_deadline":               c.AIDeadline.String(),
+		"log_level":                 c.LogLevel,
+		"shutdown_grace":            c.ShutdownGrace.String(),
+		"evidence_fetch_pre_roll":   c.EvidenceFetchPreRoll.String(),
+		"evidence_fetch_post_roll":  c.EvidenceFetchPostRoll.String(),
+		"evidence_fetch_retain_for": c.EvidenceFetchRetainFor.String(),
+		"retention_sweep_interval":  c.RetentionSweepInterval.String(),
+		"vlm_concurrency":           c.VLMConcurrency,
 	}
 }
 

@@ -29,7 +29,6 @@ package pipeline // wired by cmd/security-core, the composition root
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -45,6 +44,7 @@ import (
 	"github.com/Sergey-Bar/Ai-Captain/internal/clock"
 	"github.com/Sergey-Bar/Ai-Captain/internal/correlator"
 	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
+	"github.com/Sergey-Bar/Ai-Captain/internal/evidence"
 	"github.com/Sergey-Bar/Ai-Captain/internal/graph"
 	"github.com/Sergey-Bar/Ai-Captain/internal/inbox"
 	"github.com/Sergey-Bar/Ai-Captain/internal/incidents"
@@ -121,6 +121,12 @@ type Deps struct {
 	// one -- and the SLO's `DiskFreeMeasured` stays false, which is the flag for
 	// "this objective knows nothing here" rather than "this objective is healthy".
 	EvidenceRoot string
+
+	// EvidenceStore is the evidence filesystem store, used by the retention sweep.
+	EvidenceStore *evidence.Store
+
+	// RetentionSweepInterval is how often the retention sweep runs. Zero disables it.
+	RetentionSweepInterval time.Duration
 
 	// InSchedule resolves a schedule id against a site-local instant. A Deps with
 	// none gets `rules.SiteScheduleResolver(SiteLocation)`, which is the same
@@ -228,6 +234,12 @@ func Start(ctx context.Context, d Deps) *Loops {
 	l.spawn(l.ctx, "outbox", l.runOutbox)
 	l.spawn(l.ctx, "gauges", l.runGauges)
 
+	if l.Deps.EvidenceStore != nil && l.Deps.RetentionSweepInterval > 0 {
+		l.spawn(l.ctx, "retention-sweep", l.runRetentionSweep)
+	} else if l.Deps.EvidenceStore != nil {
+		l.log("retention sweep disabled; set SP_RETENTION_SWEEP_INTERVAL to enable")
+	}
+
 	return l
 }
 
@@ -248,6 +260,86 @@ func (l *Loops) runGauges(ctx context.Context) {
 			return
 		case <-ticker.C:
 			l.SampleGauges(ctx)
+		}
+	}
+}
+
+// runRetentionSweep runs the evidence retention sweep periodically.
+func (l *Loops) runRetentionSweep(ctx context.Context) {
+	ticker := time.NewTicker(l.Deps.RetentionSweepInterval)
+	defer ticker.Stop()
+	l.runSweepOnce(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			l.runSweepOnce(ctx)
+		}
+	}
+}
+
+// runSweepOnce runs a single retention sweep.
+func (l *Loops) runSweepOnce(ctx context.Context) {
+	if l.Deps.EvidenceStore == nil || l.Deps.Pool == nil {
+		return
+	}
+	scope, err := l.Deps.Scoped("retention-sweep")
+	if err != nil {
+		l.log("retention sweep: could not get scoped connection", "error", err.Error())
+		return
+	}
+
+	policy := evidence.RetentionPolicy{
+		// Expire objects whose retain_until is in the past
+		Before: time.Now().UTC(),
+		// StoredAt reads the stored_at from the evidence row
+		StoredAt: func(ref string) (time.Time, error) {
+			var storedAt time.Time
+			err := scope.QueryRow(ctx, `
+				SELECT stored_at FROM evidence
+				WHERE storage_ref = $1 AND tenant_id = $2`,
+				ref, l.Deps.Tenant).Scan(&storedAt)
+			if err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					return time.Time{}, nil // unknown age -> keep
+				}
+				return time.Time{}, err
+			}
+			return storedAt.UTC(), nil
+		},
+		// SkipLegalHold checks the legal_hold column
+		SkipLegalHold: func(ref string) (bool, error) {
+			var legalHold bool
+			err := scope.QueryRow(ctx, `
+				SELECT legal_hold FROM evidence
+				WHERE storage_ref = $1 AND tenant_id = $2`,
+				ref, l.Deps.Tenant).Scan(&legalHold)
+			if err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					return false, nil
+				}
+				return false, err
+			}
+			return legalHold, nil
+		},
+	}
+
+	result, err := l.Deps.EvidenceStore.Sweep(l.Deps.Tenant, policy, false)
+	if err != nil {
+		l.log("retention sweep failed", "error", err.Error())
+		return
+	}
+	if result.Removed > 0 || result.Errors != nil {
+		l.log("retention sweep completed",
+			"scanned", result.Scanned,
+			"removed", result.Removed,
+			"freed_bytes", result.Freed,
+			"errors", len(result.Errors))
+	}
+	if result.Errors != nil {
+		for _, e := range result.Errors {
+			l.log("retention sweep error", "error", e)
 		}
 	}
 }
@@ -290,6 +382,11 @@ func (l *Loops) SampleGauges(ctx context.Context) {
 	// nobody took.
 	if p95 := l.Deps.Metrics.IngestLag.QuantileSeconds(0.95); p95 >= 0 {
 		l.set(observability.GaugeIngestLagSeconds, p95)
+	}
+
+	// Incident visibility p95 from the reservoir.
+	if vis := l.Deps.Metrics.IncidentVisibility.QuantileSeconds(0.95); vis >= 0 {
+		l.set(observability.GaugeIncidentVisibility, vis)
 	}
 
 	// Devices in the severe drift band, and the AI plane's absence. Both are
@@ -1122,9 +1219,18 @@ func (l *Loops) decide(ctx context.Context, item inbox.Lease, result normalize.R
 		return
 	}
 	l.log("incident raised", "incident_id", incidentID, "rule_id", decision.RuleID,
-		"state", string(decision.State))
+		"state", string(decision.State), "dispatches", len(decision.Dispatch))
 
-	l.enqueueVLM(ctx, item.Key.TenantID, l.Deps.SiteID, incidentID, result.EventID)
+	// Incident visibility: time from event normalization to incident creation.
+	// This is the SLO's incident_visibility p95 - the AI path latency.
+	if l.Deps.Metrics != nil && l.Deps.Metrics.IncidentVisibility != nil {
+		vis := time.Since(result.NormalizedAt).Seconds()
+		l.Deps.Metrics.IncidentVisibility.Observe(vis)
+	}
+
+	// The rule's dispatches were enqueued by `CreateIncident`, in its transaction.
+	// There is deliberately nothing here: a second transaction at this point is the gap
+	// this comment replaces.
 }
 
 // incidentTitle names the incident after the rule that raised it. A title is
@@ -1138,40 +1244,30 @@ func incidentTitle(d rules.Decision) string {
 	return title
 }
 
-// enqueueVLM queues the second opinion, after the incident it is about.
+// enqueueVLM IS GONE, and what replaced it is in `internal/incidents`.
 //
-// Ordering is forced by ai_observations.incident_id being NOT NULL ON DELETE
-// CASCADE. An observation cannot precede its incident, which is also the right
-// order semantically: the observation is a recorded second opinion on a decision
+// It ran AFTER `CreateIncident` had committed, in its own transaction, and that is the
+// exact gap invariant 1 is about applied to a side effect rather than an event: the
+// incident could commit and the work about it be lost, with nothing recording that the
+// work was owed. Two lines removed the gap and neither of them is a workaround:
+//
+//   - the outbox row is now written by `dispatch.EnqueueOutbox`, inside
+//     `CreateIncident`'s own transaction, so the incident and the promise of a second
+//     opinion commit together or not at all;
+//   - the JOB is written by the relay from that row, in a transaction of its own, and
+//     `jobs.Enqueue`'s `ON CONFLICT` makes a redelivery a no-op rather than a second
+//     inference.
+//
+// The job also stops being wrong. The payload was `{incidentId, eventId}` and nothing
+// else, so `airuntime.Worker` returned `DegradationAbsent` at its evidence check and
+// returned before it ever contacted the runtime: every incident got a degraded observation
+// and an operator reading it concluded the model could not tell. `dispatch` refuses to
+// build a VLM job with no evidence id, so that state is no longer reachable.
+//
+// Ordering is unchanged and is still forced by `ai_observations.incident_id` being NOT
+// NULL ON DELETE CASCADE. An observation cannot precede its incident, which is also the
+// right order semantically: the observation is a recorded second opinion on a decision
 // that has already been made, and it never rewrites it. That is invariant 2.
-func (l *Loops) enqueueVLM(ctx context.Context, tenant, site, incidentID, eventID string) {
-	payload, err := json.Marshal(map[string]string{
-		"incidentId": incidentID,
-		"eventId":    eventID,
-	})
-	if err != nil {
-		l.log("vlm payload could not be encoded", "error", err.Error())
-		return
-	}
-	err = l.Deps.Pool.InTenant(ctx, dbx.TenantContext{TenantID: tenant, ActorID: "consume"},
-		func(tx pgx.Tx) error {
-			_, _, err := l.Deps.Enqueuer.Enqueue(ctx, tx, jobs.Enqueue{
-				TenantID: tenant, SiteID: site,
-				Queue:          jobs.QueueVLM,
-				IdempotencyKey: "vlm:" + incidentID,
-				Payload:        payload,
-				MaxAttempts:    3,
-			})
-			return err
-		})
-	if err != nil {
-		// The incident stands. A missing second opinion is a degraded AI plane,
-		// which the decision already recorded; losing the decision over it would
-		// invert the priority.
-		l.log("vlm job could not be enqueued; the incident is unaffected",
-			"incident_id", incidentID, "error", err.Error())
-	}
-}
 
 // ---------------------------------------------------------------------------
 // The bundle cache.

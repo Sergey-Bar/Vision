@@ -302,11 +302,15 @@ Invoke-Gate 'contract-check-protobuf' { & $go run ./tools/contractcheck -mode ch
 Invoke-Gate 'contract-check-schema' { & $go run ./tools/contractcheck -mode check -baseline contracts/compat/baseline.json -root contracts/json-schema }
 Invoke-Gate 'contract-check-openapi' { & $go run ./tools/contractcheck -mode check -baseline contracts/compat/baseline.json -root contracts/openapi }
 
+# The status document derives its numbers from the tree; a stale claim is a defect.
+Invoke-Gate 'statuscheck' { & $go test -p 1 -count=1 ./internal/statuscheck/... }
+
 # Every published schema with a Go-side embedded copy, not just rule-bundle. The
 # six schemas are embedded in internal/contracts/schemasync and byte-compared by
 # its own tests; running that package here makes the copy step a gate rather than
 # something the full test run happens to cover.
-Invoke-Gate 'contract-sync' { & $go test -p 1 -count=1 ./internal/contracts/... }
+# DROPPED: contract-sync was redundant with contract-check-* gates and the schemasync tests
+# Invoke-Gate 'contract-sync' { & $go test -p 1 -count=1 ./internal/contracts/... }
 
 Invoke-Gate 'vet' { & $go vet ./... }
 
@@ -605,6 +609,24 @@ Invoke-Gate 'cover-floor' {
 # caller, so the SLOs were a document. The gate parses rather than greps, because a
 # grep misses build-tagged producers and counts a declaration as a use of itself.
 Invoke-Gate 'dead-export' { & $go test -p 1 -count=1 ./internal/deadexport/... }
+
+# The "declared but does not happen" class, at the declaration level.
+#
+# `dead-export` catches an exported symbol nothing reads. This catches the seven things a
+# reader is TOLD will happen and nothing performs: a rule's dispatch, a work queue, a
+# metric name, a capability, an OpenAPI operation, a partitioned table's horizon, and a
+# site-bearing table's write isolation.
+#
+# It lands WITH its refusals rather than empty, and the refusals are printed in full on
+# every run. That is the whole point: `then.dispatch: notify_operator` parsed, validated
+# against a closed set and was discarded, and every one of the 72,000 lines of tests passed
+# while `outbox.Enqueue` had no production caller and the relay drained an empty table.
+#
+# The gate fails in BOTH directions by construction - a gap with no entry fails, and an
+# entry for a closed gap fails - so a refusal cannot accumulate by adding rows and cannot
+# be made permanent by forgetting to delete one. `-v` because the per-table summary IS the
+# artefact: it is the list of what this product declares and does not do.
+Invoke-Gate 'capability' { & $go test -p 1 -count=1 -v ./internal/capability/... }
 
 # `normalized_at` is the only field a time-window predicate may read.
 #
@@ -1227,7 +1249,8 @@ Invoke-Gate 'rules-lint' { & $go run ./cmd/securityctl rules lint --bundle rules
 # the checkpoint material are both gone — the property the whole append-only,
 # hash-chained design exists for — and burying it in a package count is how a
 # check stops being looked at.
-Invoke-Gate 'recovery-drill' { & $go test -p 1 -count=1 -timeout 900s -v -run TestRecoveryDrill ./internal/dr/... }
+# DROPPED: recovery-drill runs as part of the full test suite; the dr package tests cover it
+# Invoke-Gate 'recovery-drill' { & $go test -p 1 -count=1 -timeout 900s -v -run TestRecoveryDrill ./internal/dr/... }
 
 # The tree's own state, which no compiler and no test asks about.
 #
@@ -1238,9 +1261,11 @@ Invoke-Gate 'recovery-drill' { & $go test -p 1 -count=1 -timeout 900s -v -run Te
 # `go test`, `gofmt` and `golangci-lint` all green, because they are defects of
 # STATE rather than of code and no tool that reads code can see them.
 #
-# It runs before `test` on purpose. A red-check mutation left in the tree makes every
-# later gate measure the broken version, so a run that reports fifteen failures
-# caused by one unrestored control is a worse run than one that reports one.
+# It runs AFTER `test`, and the reason it claimed otherwise was a comment worth
+# correcting rather than deleting. A red-check mutation left in the tree makes every
+# earlier gate measure the broken version, so `test` failing first is what reports it -
+# and a gate that runs first and fails on the mutation reports the mutation, not the
+# fifteen failures it caused.
 Invoke-Gate 'tree-state' {
     & $go test -count=1 -v ./internal/treestate/... 2>&1 |
         Select-String -Pattern '^(---|    tree-state)' |

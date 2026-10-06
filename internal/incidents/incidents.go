@@ -30,6 +30,7 @@ import (
 
 	"github.com/Sergey-Bar/Ai-Captain/internal/audit"
 	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
+	"github.com/Sergey-Bar/Ai-Captain/internal/dispatch"
 	"github.com/Sergey-Bar/Ai-Captain/internal/rules"
 )
 
@@ -210,6 +211,40 @@ func (s *Service) CreateIncident(ctx context.Context, in Create) (string, error)
 			return fmt.Errorf("incidents: record verification: %w", err)
 		}
 
+		// The dispatches the winning rule asked for, in THIS transaction.
+		//
+		// This is the durability fix. `internal/pipeline` used to call `CreateIncident`,
+		// let it commit, and only then open a SECOND transaction to enqueue the VLM job -
+		// so an incident could commit and the work about it be lost, with nothing
+		// recording that the work was supposed to happen. Invariant 1 is "anything reaching
+		// inbox_events reaches a terminal state"; the same has to be true of a side effect
+		// an incident promises, and the only way to get it is one transaction.
+		//
+		// `outbox.Enqueue` takes the caller's `pgx.Tx` precisely so this is possible. The
+		// rows are written here and the relay drains them afterwards, which is what makes
+		// the commit atomic without making the delivery synchronous with the ingest.
+		//
+		// A dispatch that cannot be built is an ERROR rather than a skip. A rule whose
+		// notification could not be encoded is a rule whose notification is missing, and
+		// returning nil here would commit the incident and record nothing - the same
+		// silent gap this block removes.
+		if err := dispatch.EnqueueOutbox(ctx, tx, dispatch.Request{
+			TenantID:   in.TenantID,
+			SiteID:     in.SiteID,
+			IncidentID: id,
+			// The trigger event, which a VLM job cannot be built without: the worker
+			// looks the evidence up from the event.
+			EventID:    first(in.SupportingEventIDs),
+			EvidenceID: first(in.EvidenceIDs),
+			RuleID:     in.Decision.RuleID,
+			Title:      orDefault(in.Title, in.Decision.RuleID),
+			Severity:   orDefault(in.Decision.Severity, "medium"),
+			OccurredAt: in.Decision.OccurredAt,
+			Dispatch:   in.Decision.Dispatch,
+		}); err != nil {
+			return fmt.Errorf("incidents: enqueue dispatches: %w", err)
+		}
+
 		if s.Audit != nil {
 			if _, err := s.Audit.Append(ctx, tx, audit.Entry{
 				TenantID:        in.TenantID,
@@ -282,6 +317,93 @@ type Summary struct {
 // List returns a tenant's incident feed, newest first.
 func (s *Service) List(ctx context.Context, tenant, siteID string, limit int) ([]Summary, error) {
 	return s.ListScoped(ctx, tenant, siteID, limit)
+}
+
+// ListWithCursor returns a page of incidents with cursor-based pagination.
+// The cursor is an opaque string encoding (created_at, incident_id) of the last
+// item in the previous page. An empty cursor means the first page.
+func (s *Service) ListWithCursor(ctx context.Context, tenant, siteIDs string, cursor string, limit int, state string, degraded *bool) ([]Summary, string, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	var sites []string
+	for _, s := range strings.Split(siteIDs, ",") {
+		if s = strings.TrimSpace(s); s != "" {
+			sites = append(sites, s)
+		}
+	}
+
+	// Parse cursor if provided
+	var cursorTime time.Time
+	var cursorID string
+	if cursor != "" {
+		parts := strings.Split(cursor, "|")
+		if len(parts) == 2 {
+			if t, err := time.Parse(time.RFC3339Nano, parts[0]); err == nil {
+				cursorTime = t
+				cursorID = parts[1]
+			}
+		}
+	}
+
+	query := `
+		SELECT incident_id, primary_site_id, state, severity, title, rule_id,
+		       created_at, first_event_at, degraded, degraded_reasons,
+		       rule_bundle_version, policy_version
+		  FROM incidents
+		 WHERE tenant_id = $1
+		   AND ($2::text[] IS NULL OR primary_site_id = ANY($2::text[]))`
+
+	args := []any{tenant, sites}
+	argIdx := 3
+
+	if !cursorTime.IsZero() {
+		query += fmt.Sprintf(" AND (created_at < $%d OR (created_at = $%d AND incident_id < $%d))", argIdx, argIdx, argIdx+1)
+		args = append(args, cursorTime, cursorID)
+		argIdx += 2
+	}
+
+	if state != "" {
+		query += fmt.Sprintf(" AND state = $%d", argIdx)
+		args = append(args, state)
+		argIdx++
+	}
+
+	if degraded != nil {
+		query += fmt.Sprintf(" AND degraded = $%d", argIdx)
+		args = append(args, *degraded)
+		argIdx++
+	}
+
+	query += fmt.Sprintf(" ORDER BY created_at DESC, incident_id DESC LIMIT $%d", argIdx)
+	args = append(args, limit)
+
+	rows, err := s.Pool.For(tenant, "incidents").Query(ctx, query, args...)
+	if err != nil {
+		return nil, "", fmt.Errorf("incidents: list: %w", err)
+	}
+	defer rows.Close()
+
+	var out []Summary
+	for rows.Next() {
+		var item Summary
+		var reasons []byte
+		if err := rows.Scan(&item.IncidentID, &item.SiteID, &item.State, &item.Severity,
+			&item.Title, &item.RuleID, &item.CreatedAt, &item.FirstEvent,
+			&item.Degraded, &reasons, &item.BundleVersion, &item.PolicyVersion); err != nil {
+			return nil, "", fmt.Errorf("incidents: scan: %w", err)
+		}
+		_ = json.Unmarshal(reasons, &item.DegradedReasons)
+		out = append(out, item)
+	}
+
+	var nextCursor string
+	if len(out) == limit {
+		last := out[len(out)-1]
+		nextCursor = fmt.Sprintf("%s|%s", last.CreatedAt.UTC().Format(time.RFC3339Nano), last.IncidentID)
+	}
+
+	return out, nextCursor, rows.Err()
 }
 
 // ListScoped returns the incident feed restricted to a set of sites.

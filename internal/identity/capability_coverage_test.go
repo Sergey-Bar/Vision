@@ -34,7 +34,7 @@ var capUse = regexp.MustCompile(`\bCap[A-Z][A-Za-z0-9_]*`)
 // Each entry is a capability the shipped role table grants and that nothing in
 // the tree checks. It is a list rather than a fix because two of them are
 // features being built by another participant: deleting CapIdentityManage or
-// CapDeadLetterReplay here would remove the name a route under construction is
+// CapIncidentEscalate here would remove the name a route under construction is
 // going to use, and an agent may not deactivate a capability on the strength of
 // a search it ran rather than on a decision somebody signed. The list is a
 // record of that, not a permission: adding to it is a human decision, and the
@@ -43,7 +43,6 @@ var capabilitiesDeclaredButNotYetEnforced = map[string]string{
 	"CapIncidentEscalate": "no route gates an escalation; it was never wired up",
 	"CapIdentityManage":   "the identity management surface gates on identity.* and is owned by another participant",
 	"CapSiteConfigure":    "no route gates site configuration",
-	"CapDeadLetterReplay": "the replay control gates on dead_letter.read; a separate replay capability was declared and never used",
 }
 
 // The control. A capability in this vocabulary is a promise that some route or

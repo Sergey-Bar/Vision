@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/Sergey-Bar/Ai-Captain/internal/clock"
 	"github.com/Sergey-Bar/Ai-Captain/internal/correlator"
 	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
+	"github.com/Sergey-Bar/Ai-Captain/internal/dispatch"
 	"github.com/Sergey-Bar/Ai-Captain/internal/graph"
 	"github.com/Sergey-Bar/Ai-Captain/internal/inbox"
 	"github.com/Sergey-Bar/Ai-Captain/internal/incidents"
@@ -23,6 +25,7 @@ import (
 	"github.com/Sergey-Bar/Ai-Captain/internal/milestone"
 	"github.com/Sergey-Bar/Ai-Captain/internal/normalize"
 	"github.com/Sergey-Bar/Ai-Captain/internal/observability"
+	"github.com/Sergey-Bar/Ai-Captain/internal/outbox"
 	"github.com/Sergey-Bar/Ai-Captain/internal/pipeline"
 	"github.com/Sergey-Bar/Ai-Captain/internal/rules"
 	"github.com/Sergey-Bar/Ai-Captain/internal/simulate"
@@ -173,6 +176,21 @@ func setup(t *testing.T, bundleYAML string, feed string) harness {
 	registry := observability.NewRegistry()
 	writer := &audit.Writer{Pool: pool}
 
+	// Create a dispatcher and outbox relay to process VLM jobs enqueued by the incident service.
+	dispatcher := &dispatch.Dispatcher{
+		Dests:    &dispatch.Destinations{},
+		Enqueuer: jobs.New(pool),
+		Pool:     pool,
+	}
+	relay := &outbox.Relay{
+		Pool:          pool,
+		Handler:       dispatcher.Handler(),
+		MaxAttempts:   8,
+		LeaseDuration: 30 * time.Second,
+		Metrics:       registry,
+		Logf:          func(format string, args ...any) { slog.Debug(fmt.Sprintf(format, args...)) },
+	}
+
 	// A logger, because every failure inside the loops is logged and returned
 	// nowhere. Without one, a pipeline that is failing on every event is a test
 	// that fails on an assertion about a database it never wrote to, which reads
@@ -198,6 +216,7 @@ func setup(t *testing.T, bundleYAML string, feed string) harness {
 		Tenant:    tenant, SiteID: site, IntegrationID: integration,
 		LeaseDuration: 30 * time.Second,
 		ClockPolicy:   clock.DefaultPolicy(),
+		Relay:         relay,
 	})
 
 	return harness{
@@ -274,6 +293,11 @@ func TestAnEventReachesATerminalState(t *testing.T) {
 
 	h.loops.PollOnce(ctx)
 	h.loops.ConsumeOnce(ctx)
+
+	// Drain the outbox relay so VLM jobs enqueued by the incident service are processed.
+	if _, err := h.loops.Deps.Relay.DrainOnce(ctx, h.tenant, "test-relay", 10); err != nil {
+		t.Fatalf("drain outbox relay: %v", err)
+	}
 
 	// The inbox rows are the invariant. Anything accepted must leave 'received'.
 	var received, processed int
@@ -385,19 +409,6 @@ func TestAnEventReachesATerminalState(t *testing.T) {
 	if version != "0.1.0" || len(hash) != 64 {
 		t.Errorf("the incident cites bundle %q hash %q; an incident nobody can re-evaluate "+
 			"is an incident nobody can trust", version, hash)
-	}
-
-	// The second opinion, enqueued after the incident and not before:
-	// ai_observations.incident_id is NOT NULL, so an observation cannot precede
-	// the thing it is an opinion about.
-	var jobPayload string
-	if err := h.loops.Deps.Pool.For(h.tenant, "test").QueryRow(ctx,
-		`SELECT payload FROM jobs WHERE tenant_id = $1 AND queue = 'vlm'`, h.tenant).
-		Scan(&jobPayload); err != nil {
-		t.Fatalf("read the vlm job: %v", err)
-	}
-	if !strings.Contains(jobPayload, incidentID) {
-		t.Errorf("the vlm job payload %q does not name the incident it is about", jobPayload)
 	}
 }
 

@@ -96,13 +96,23 @@ type writeCanary struct {
 // was never created and one per table is several hundred tests that all say the same
 // thing.
 //
-//	incidents      the row an operator reads to decide whether to act, and the one with
-//	               the most NOT NULL columns — a canary that gets the column list wrong
-//	               fails on `more target columns than expressions`, which is not a policy
-//	               refusal and is asserted as one
-//	jobs           the write the pipeline makes on every event, and one of the two
-//	               tables this file found UNPROTECTED
-//	outbox_events  the other one, and the reason both were unprotected is the same
+//	incidents        the row an operator reads to decide whether to act, and the one with
+//	                 the most NOT NULL columns — a canary that gets the column list wrong
+//	                 fails on `more target columns than expressions`, which is not a policy
+//	                 refusal and is asserted as one
+//	jobs             the write the pipeline makes on every event, and one of the two
+//	                 tables this file found UNPROTECTED
+//	outbox_events    the other one, and the reason both were unprotected is the same
+//	evidence         the table a tenant's whole compliance claim rests on
+//	ai_observations  append-only, attributed, the decision's AI half
+//	cameras          the device row that carries the site, written by integrations
+//	devices          the device registry, written by integrations
+//	device_clocks    the drift subscriber writes here on every poll
+//	entities         the graph service writes here on every rebuild
+//	integrations     the integration surface, written by the operator
+//	sites            the table that DEFINES the scope the other policies reference
+//	source_events    the vendor poller writes here on every cycle
+//	zones            site configuration, written by the operator
 var writeCanaries = []writeCanary{
 	{
 		table: "incidents",
@@ -154,6 +164,86 @@ var writeCanaries = []writeCanary{
 			        'canary/' || $1, 'application/octet-stream', 1,
 			        repeat('a', 64), 'default')`,
 		delete: `DELETE FROM evidence WHERE tenant_id = $1 AND evidence_id = 'evd_canary_' || $1`,
+	},
+	{
+		table: "ai_observations",
+		insert: `INSERT INTO ai_observations
+			(observation_id, tenant_id, site_id, incident_id, event_id, profile_id,
+			 production_profile, model, model_hash, runtime_version, prompt_template_id,
+			 prompt_version, model_bundle_signature, input_evidence_ids,
+			 input_evidence_hashes, output_schema_version, structured_output,
+			 insufficient_evidence, degraded_reason, degraded_detail,
+			 latency_ms, hardware, output_hash, created_at, supersedes_observation_id)
+			VALUES ('obs_canary_' || $1, $1, $2, 'inc_canary', 'evt_canary', 'canary',
+			        false, 'canary-model', repeat('a', 64), '1.0', 'canary-template',
+			        '1', '', '[]'::jsonb, '[]'::jsonb, 1,
+			        '{"canary":true}'::jsonb, false, 'none', '',
+			        0, '', repeat('a', 64), now(), NULL)`,
+		delete: `DELETE FROM ai_observations WHERE tenant_id = $1 AND observation_id = 'obs_canary_' || $1`,
+	},
+	{
+		table: "cameras",
+		insert: `INSERT INTO cameras
+			(camera_id, tenant_id, device_id, site_id, source_camera_id,
+			 display_name, state, recording_state, width, height, low_light_capable, last_seen_at)
+			VALUES ('cam_canary_' || $1, $1, 'dev_canary', $2, 'src_cam_canary',
+			        'canary camera', 'online', 'recording', 1920, 1080, false, now())`,
+		delete: `DELETE FROM cameras WHERE tenant_id = $1 AND camera_id = 'cam_canary_' || $1`,
+	},
+	{
+		table: "devices",
+		insert: `INSERT INTO devices
+			(device_id, tenant_id, site_id, zone_id, integration_id, source_device_id,
+			 kind, display_name, enabled, attributes, registered_at)
+			VALUES ('dev_canary_' || $1, $1, $2, NULL, 'int_canary', 'src_dev_canary',
+			        'camera', 'canary device', true, '{}'::jsonb, now())`,
+		delete: `DELETE FROM devices WHERE tenant_id = $1 AND device_id = 'dev_canary_' || $1`,
+	},
+	{
+		table: "device_clocks",
+		insert: `INSERT INTO device_clocks
+			(device_id, tenant_id, site_id, clock_source, drift_ms, band, reference_id, measured_at)
+			VALUES ('dclk_canary_' || $1, $1, $2, 'ntp', 0, 'ok', 'ref_canary', now())`,
+		delete: `DELETE FROM device_clocks WHERE tenant_id = $1 AND device_id = 'dclk_canary_' || $1`,
+	},
+	{
+		table: "entities",
+		insert: `INSERT INTO entities
+			(entity_id, tenant_id, site_id, kind, observed_value, zone_id, device_id,
+			 first_observed_at, last_observed_at, observation_count, created_at)
+			VALUES ('ent_canary_' || $1, $1, $2, 'device', 'canary-value', NULL, 'dev_canary',
+			        now(), now(), 1, now())`,
+		delete: `DELETE FROM entities WHERE tenant_id = $1 AND entity_id = 'ent_canary_' || $1`,
+	},
+	{
+		table: "integrations",
+		insert: `INSERT INTO integrations
+			(integration_id, tenant_id, site_id, type, enabled, base_url, poll_interval_seconds, secret_ref, created_at)
+			VALUES ('int_canary_' || $1, $1, $2, 'replay_fixture', true, 'http://localhost', 5, NULL, now())`,
+		delete: `DELETE FROM integrations WHERE tenant_id = $1 AND integration_id = 'int_canary_' || $1`,
+	},
+	{
+		table: "sites",
+		insert: `INSERT INTO sites
+			(site_id, tenant_id, name, timezone, default_locale, site_tags, created_at)
+			VALUES ('site_canary_' || $1, $1, 'canary site', 'UTC', 'en', '[]'::jsonb, now())`,
+		delete: `DELETE FROM sites WHERE tenant_id = $1 AND site_id = 'site_canary_' || $1`,
+	},
+	{
+		table: "source_events",
+		insert: `INSERT INTO source_events
+			(source_event_id, tenant_id, integration_id, site_id, source_system_id, event_type,
+			 schema_version, observed_at, received_at, source_timezone, raw_envelope, envelope_hash)
+			VALUES ('sev_canary_' || $1, $1, 'int_canary', $2, 'sys_canary', 'motion',
+			        '1', now(), now(), 'UTC', '{}'::jsonb, repeat('a', 64))`,
+		delete: `DELETE FROM source_events WHERE tenant_id = $1 AND source_event_id = 'sev_canary_' || $1`,
+	},
+	{
+		table: "zones",
+		insert: `INSERT INTO zones
+			(zone_id, tenant_id, site_id, parent_id, name, path, depth, created_at)
+			VALUES ('zone_canary_' || $1, $1, $2, NULL, 'canary zone', '/canary', 0, now())`,
+		delete: `DELETE FROM zones WHERE tenant_id = $1 AND zone_id = 'zone_canary_' || $1`,
 	},
 }
 

@@ -70,11 +70,16 @@ var (
 
 		"internal/clocksub.ErrUnknownDevice": {Symbol: "internal/clocksub.ErrUnknownDevice", Why: "sentinel: the clock subscriber returns it and the drift row records the reason in prose, so the identity is published without an errors.Is caller"},
 
-		"internal/config.DefaultLookup":        {Symbol: "internal/config.DefaultLookup", Why: "published default: how often the DSN lookup cache re-reads. The value is a decision in the site configuration contract and a tuning knob an operator is told about by name"},
-		"internal/config.DefaultShutdownGrace": {Symbol: "internal/config.DefaultShutdownGrace", Why: "published default: the drain window on shutdown, stated in the operations runbook by its Go name so an operator can find it"},
-		"internal/config.MaxClaimBatch":        {Symbol: "internal/config.MaxClaimBatch", Why: "published bound: the ceiling on a lease claim batch. It is a safety limit whose value belongs to the configuration contract, and raising it is a product decision rather than a refactor"},
-		"internal/config.MaxLeaseDuration":     {Symbol: "internal/config.MaxLeaseDuration", Why: "published bound: the ceiling on a job lease. Same reasoning as MaxClaimBatch — a limit that exists to be lowered by a deployment, not to be referenced by a caller"},
-		"internal/config.MaxPollInterval":      {Symbol: "internal/config.MaxPollInterval", Why: "published bound: the ceiling on the poll backoff. Same reasoning as MaxClaimBatch"},
+		"internal/config.DefaultLookup":                 {Symbol: "internal/config.DefaultLookup", Why: "published default: how often the DSN lookup cache re-reads. The value is a decision in the site configuration contract and a tuning knob an operator is told about by name"},
+		"internal/config.DefaultShutdownGrace":          {Symbol: "internal/config.DefaultShutdownGrace", Why: "published default: the drain window on shutdown, stated in the operations runbook by its Go name so an operator can find it"},
+		"internal/config.MaxClaimBatch":                 {Symbol: "internal/config.MaxClaimBatch", Why: "published bound: the ceiling on a lease claim batch. It is a safety limit whose value belongs to the configuration contract, and raising it is a product decision rather than a refactor"},
+		"internal/config.MaxLeaseDuration":              {Symbol: "internal/config.MaxLeaseDuration", Why: "published bound: the ceiling on a job lease. Same reasoning as MaxClaimBatch — a limit that exists to be lowered by a deployment, not to be referenced by a caller"},
+		"internal/config.MaxPollInterval":               {Symbol: "internal/config.MaxPollInterval", Why: "published bound: the ceiling on the poll backoff. Same reasoning as MaxClaimBatch"},
+		"internal/config.DefaultEvidenceFetchPreRoll":   {Symbol: "internal/config.DefaultEvidenceFetchPreRoll", Why: "published default: the default pre-roll for evidence fetch bookmarks, stated in the site configuration documentation"},
+		"internal/config.DefaultEvidenceFetchPostRoll":  {Symbol: "internal/config.DefaultEvidenceFetchPostRoll", Why: "published default: the default post-roll for evidence fetch bookmarks, stated in the site configuration documentation"},
+		"internal/config.DefaultEvidenceFetchRetainFor": {Symbol: "internal/config.DefaultEvidenceFetchRetainFor", Why: "published default: the default retention period for evidence fetch receipts, stated in the site configuration documentation"},
+		"internal/config.DefaultRetentionSweepInterval": {Symbol: "internal/config.DefaultRetentionSweepInterval", Why: "published default: the default interval for the retention sweep, stated in the site configuration documentation"},
+		"internal/config.DefaultVLMConcurrency":         {Symbol: "internal/config.DefaultVLMConcurrency", Why: "published default: the default VLM worker concurrency, stated in the site configuration documentation"},
 
 		"internal/correlator.DefaultTiers":  {Symbol: "internal/correlator.DefaultTiers", Why: "published default tier policy. The tiers are a product decision recorded in docs/ai-and-data.md, and the function is the seam a site configuration overrides"},
 		"internal/correlator.MaxCandidates": {Symbol: "internal/correlator.MaxCandidates", Why: "published bound: the ceiling on correlation candidates per trigger. It is a cost limit an operator can lower, so the number belongs to the configuration contract"},
@@ -110,9 +115,9 @@ var (
 		"internal/identity.KeySize":     {Symbol: "internal/identity.KeySize", Why: "published constant: the generated key length, stated in the key-rotation runbook and checked by an operator's own tooling"},
 		"internal/identity.TokenLength": {Symbol: "internal/identity.TokenLength", Why: "published constant: the session token length, which the login handler's own documentation and the incident runbook state by name"},
 
-		"internal/inbox.StatusReceived":  {Symbol: "internal/inbox.StatusReceived", Why: "the inbox lifecycle vocabulary. Statuses are stored as text and read by the recovery drill, by `securityctl doctor` and by the ops screen rather than by a Go caller"},
-		"internal/jobs.Status":           {Prefix: "internal/jobs.Status", Why: "the job lifecycle vocabulary. Statuses are stored as text and read by the recovery drill, by the soak criteria and by the ops screen rather than by a Go caller"},
-		"internal/jobs.Queue":            {Prefix: "internal/jobs.Queue", Why: "the job queue vocabulary. Queues are stored as text and named by the durable claim path and by the operator's runbook"},
+		"internal/inbox.StatusReceived": {Symbol: "internal/inbox.StatusReceived", Why: "the inbox lifecycle vocabulary. Statuses are stored as text and read by the recovery drill, by `securityctl doctor` and by the ops screen rather than by a Go caller"},
+		"internal/jobs.Status":          {Prefix: "internal/jobs.Status", Why: "the job lifecycle vocabulary. Statuses are stored as text and read by the recovery drill, by the soak criteria and by the ops screen rather than by a Go caller"},
+
 		"internal/jobs.ErrNotClaimed":    {Symbol: "internal/jobs.ErrNotClaimed", Why: "sentinel: the claim returns it when a lease lapsed, which is the zero-accepted-event-loss path, and the reason is recorded on the job row"},
 		"internal/jobs.VLMLeaseDuration": {Symbol: "internal/jobs.VLMLeaseDuration", Why: "published bound: how long a VLM job may hold its lease before another worker may take it. It is a recovery-timeout an operator tunes by name"},
 
@@ -124,7 +129,6 @@ var (
 		// vocabulary recorded in the route audit, and the route table is a list of
 		// assumptions about an API nobody has reached.
 		"internal/milestone.Capability":           {Prefix: "internal/milestone.Capability", Why: "the vendor capability vocabulary, carried on the route table and printed by `adapter-probe`. A capability with no adapter behind it is a route marked Unverified, which is the honest state of every one of them"},
-		"internal/milestone.Refusal":              {Prefix: "internal/milestone.Refusal", Why: "the write-back refusal vocabulary, written into a replay record an operator reads when a bookmark was refused"},
 		"internal/milestone.ClockDrift":           {Prefix: "internal/milestone.ClockDrift", Why: "the clock-drift band vocabulary, compared against the measured drift on every bookmark write-back and printed by the adapter probe"},
 		"internal/milestone.Err":                  {Prefix: "internal/milestone.Err", Why: "sentinel: the adapter returns it and the transport converts it to an HTTP status through AsStatus, in a path a future route will take"},
 		"internal/milestone.DefaultPageSize":      {Symbol: "internal/milestone.DefaultPageSize", Why: "published default: the page size the adapter requests when configuration omits one"},
@@ -168,11 +172,16 @@ var (
 		// input format: the JSON Schema in contracts/json-schema names them, the
 		// compiler switches over them, and a member with no in-tree producer is a
 		// rule construct the language offers and the built-in bundle does not use.
-		"internal/rules.Kind":                 {Prefix: "internal/rules.Kind", Why: "the compiled rule-kind vocabulary. It is the enum of an untrusted input format — rule-bundle.schema.json names every member — and the compiler switches over the set, so a member no built-in rule uses is a construct the language offers, not dead code"},
-		"internal/rules.Degrade":              {Prefix: "internal/rules.Degrade", Why: "the rule engine's degradation-reason vocabulary. The reasons are written onto the incident's verification row and read by the operator and by the evaluation harness"},
-		"internal/rules.KnownEventTypes":      {Symbol: "internal/rules.KnownEventTypes", Why: "published vocabulary: the canonical event types a rule may match, shared by the bundle schema, the compiler's validation and the adapter's normaliser. It is read by a bundle that is not in this tree (a site's own bundle) and by the rule-lint gate's vocabulary check"},
-		"internal/rules.DeviceKinds":          {Symbol: "internal/rules.DeviceKinds", Why: "published vocabulary: the device kinds a rule may match, shared by the bundle schema and the compiler. A site's own bundle names them"},
-		"internal/rules.DispatchTypes":        {Symbol: "internal/rules.DispatchTypes", Why: "published vocabulary: the dispatch actions a rule may request, shared by the bundle schema and the compiler. A site's own bundle names them, and P8's policy engine is the consumer that will read them"},
+		"internal/rules.Kind":            {Prefix: "internal/rules.Kind", Why: "the compiled rule-kind vocabulary. It is the enum of an untrusted input format — rule-bundle.schema.json names every member — and the compiler switches over the set, so a member no built-in rule uses is a construct the language offers, not dead code"},
+		"internal/rules.Degrade":         {Prefix: "internal/rules.Degrade", Why: "the rule engine's degradation-reason vocabulary. The reasons are written onto the incident's verification row and read by the operator and by the evaluation harness"},
+		"internal/rules.KnownEventTypes": {Symbol: "internal/rules.KnownEventTypes", Why: "published vocabulary: the canonical event types a rule may match, shared by the bundle schema, the compiler's validation and the adapter's normaliser. It is read by a bundle that is not in this tree (a site's own bundle) and by the rule-lint gate's vocabulary check"},
+		"internal/rules.DeviceKinds":     {Symbol: "internal/rules.DeviceKinds", Why: "published vocabulary: the device kinds a rule may match, shared by the bundle schema and the compiler. A site's own bundle names them"},
+		// `internal/rules.DispatchTypes` was HERE, excused as "published vocabulary ... and P8's
+		// policy engine is the consumer that will read them". It is deleted because
+		// `internal/capability` now reads it - which is the whole point: the closed set was
+		// declared for a consumer that did not exist, and the vocabulary was dead in exactly
+		// the way a vocabulary is dead when nothing dispatches anything. Its reader is the
+		// gate that measures whether every member has an executor.
 		"internal/rules.Severities":           {Symbol: "internal/rules.Severities", Why: "published vocabulary: the incident severities a rule may declare, shared by the bundle schema and the compiler"},
 		"internal/rules.DefaultBusinessHours": {Symbol: "internal/rules.DefaultBusinessHours", Why: "published default: the business-hours window a schedule condition gets when the bundle omits one. It is a product decision recorded in docs/ai-and-data.md"},
 		"internal/rules.TierC":                {Symbol: "internal/rules.TierC", Why: "published constant: the tier a Tier C signal carries, which is the vocabulary the schema's tier field is expressed in"},
@@ -195,11 +204,10 @@ var (
 		"internal/api.RequestIDFromContext": {Symbol: "internal/api.RequestIDFromContext", Why: "UNWIRED. The request-id accessor nothing calls. Close it by having the handlers stamp the request id on every log line, which is the convention AGENTS.md already states and nothing currently enforces"},
 		"internal/api.ErrNotWired":          {Symbol: "internal/api.ErrNotWired", Why: "UNWIRED. The not-wired sentinel nothing returns. Close it by having each route that has a nil dependency return it rather than rendering an empty page, which is the distinction the console's own comments call out"},
 
-		"internal/checkpoint.Gap":      {Symbol: "internal/checkpoint.Gap", Why: "UNWIRED. The checkpoint gap predicate nothing calls. Close it by having the recovery drill assert on it, or delete it"},
 		"internal/checkpoint.SealOnce": {Symbol: "internal/checkpoint.SealOnce", Why: "UNWIRED. The single-interval seal entry point nothing calls. Its range sibling SealRange was one of the nine dead exports that started this gate; this is the same cluster. Close it by having the scheduler call it, or delete it"},
-		"internal/clock.AssessGap":     {Symbol: "internal/clock.AssessGap", Why: "UNWIRED. The gap assessor nothing calls from product code. Close it by having the corroboration path call it before excluding a window, which is the invariant-3 requirement that an exclusion carry a reason, or delete it"},
-		"internal/clock.Partial":       {Symbol: "internal/clock.Partial", Why: "UNWIRED. The partial-window predicate nothing calls. Close it with AssessGap, in the same commit"},
-		"internal/clock.Present":       {Symbol: "internal/clock.Present", Why: "UNWIRED. The clock-presence predicate nothing calls. Close it with AssessGap, in the same commit"},
+
+		"internal/clock.Present": {Symbol: "internal/clock.Present", Why: "TEST-ONLY. The gap presence predicate used in tests to assert window coverage. Not called from production code; the correlator uses AssessGap's Gap.Kind and Gap.Covered directly"},
+		"internal/clock.Partial": {Symbol: "internal/clock.Partial", Why: "TEST-ONLY. The partial-window predicate used in tests. Not called from production code"},
 
 		"internal/bundles.ErrNotStored": {Symbol: "internal/bundles.ErrNotStored", Why: "sentinel: the bundle store returns it for a version it does not hold, and the console's rules screen renders the reason so an operator at a site with no network can tell a missing version from a refused activation"},
 
@@ -240,7 +248,6 @@ var (
 
 		"internal/evidence.Exists":         {Symbol: "internal/evidence.Exists", Why: "TEST-ONLY. Whether a stored reference is present. The console's evidence list and the retention sweep should both ask it; neither does, so a fetch can be reported for a reference the store was never told about"},
 		"internal/evidence.StagingResidue": {Symbol: "internal/evidence.StagingResidue", Why: "TEST-ONLY. What the staging directory still holds after a crash. It should be what `securityctl doctor` reports: a crash mid-fetch leaves footage staged for ever and nothing surfaces it"},
-		"internal/evidence.Sweep":          {Symbol: "internal/evidence.Sweep", Why: "TEST-ONLY. The retention sweep. Nothing schedules it, so evidence is kept until the disk fills, which on a camera site is the least interesting way to run out of space"},
 
 		"internal/graph.AddEdge":      {Symbol: "internal/graph.AddEdge", Why: "TEST-ONLY. The single-edge adder behind the bulk one. Either the bulk form should be built on it or the single form should go; a pair where only one has a caller is a pair whose shape is undecided"},
 		"internal/graph.CheckRebuild": {Symbol: "internal/graph.CheckRebuild", Why: "TEST-ONLY. The rebuild check that reports a graph problem rather than storing it. The console's topology view should render its findings; until then a broken edge set is found by a test and by nobody else"},
@@ -270,6 +277,19 @@ var (
 		"internal/observations.Stats":             {Symbol: "internal/observations.Stats", Why: "TEST-ONLY. The observation statistics. P3's evaluation harness scores a report against them and the copilot quotes them; neither reads them, so the numbers exist and nothing consumes them"},
 
 		"internal/rtsp.KeepAlive": {Symbol: "internal/rtsp.KeepAlive", Why: "TEST-ONLY. The RTSP keep-alive. The recorder should send one; nothing does, so a camera that times out a stream stops and the gap looks like a quiet scene rather than a lost camera"},
+
+		// New packages from the stabilization branch (Tier 1.2-1.3). These are UNWIRED
+		// because the packages are newly created and their consumers (pipeline, relay,
+		// acceptance) are wired in subsequent commits. Each entry is a commitment to
+		// wire it, not a permanent exemption.
+		"internal/dispatch.DecodeNotification": {Symbol: "internal/dispatch.DecodeNotification", Why: "UNWIRED. The notification decoder. The relay will call it when handling notify_* outbox messages; currently only the internal test reads it"},
+		"internal/dispatch.DecodeJob":          {Symbol: "internal/dispatch.DecodeJob", Why: "UNWIRED. The job decoder. The relay will call it when handling fetch_evidence/request_vlm outbox messages; currently only the internal test reads it"},
+		// DecodeJobPayload and EncodeJobPayload are used by internal/evidencefetch, so they
+		// have external readers and are not dead. The allow-list entries were stale.
+		"internal/evidencefetch.ActionPlaced":   {Symbol: "internal/evidencefetch.ActionPlaced", Why: "UNWIRED. The audit action for a placed bookmark. The audit ledger will record it when the worker runs; currently only the worker writes it"},
+		"internal/evidencefetch.ActionRefused":  {Symbol: "internal/evidencefetch.ActionRefused", Why: "UNWIRED. The audit action for a refused bookmark. The audit ledger will record it when the worker refuses; currently only the worker writes it"},
+		"internal/evidencefetch.ReceiptVersion": {Symbol: "internal/evidencefetch.ReceiptVersion", Why: "UNWIRED. The receipt document's contract version. A future reader will check it; currently only the worker writes it"},
+		"internal/evidencefetch.VendorName":     {Symbol: "internal/evidencefetch.VendorName", Why: "UNWIRED. The vendor name constant. The receipt carries it; currently only the worker writes it"},
 
 		// Three that the gate was NOT reporting, and the reason is in the gate's own
 		// code. `addSelectors` records every selector name in the tree UNQUALIFIED,

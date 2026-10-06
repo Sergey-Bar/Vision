@@ -525,6 +525,23 @@ func (r *Relay) Replay(ctx context.Context, tenantID string, outboxID int64) err
 	return nil
 }
 
+// ReplayByIdempotencyKey re-queues a dead letter by its idempotency key.
+func (r *Relay) ReplayByIdempotencyKey(ctx context.Context, tenantID, idempotencyKey string) error {
+	// First, find the outbox_id for this idempotency key.
+	var outboxID int64
+	err := r.Pool.For(tenantID, "outbox").QueryRow(ctx, `
+		SELECT outbox_id FROM outbox_events
+		 WHERE tenant_id = $1 AND idempotency_key = $2 AND status = 'dead_letter'`,
+		tenantID, idempotencyKey).Scan(&outboxID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("outbox: message %s is not a dead letter", idempotencyKey)
+		}
+		return fmt.Errorf("outbox: find message: %w", err)
+	}
+	return r.Replay(ctx, tenantID, outboxID)
+}
+
 func (r *Relay) lease() time.Duration {
 	if r.LeaseDuration <= 0 {
 		return DefaultLeaseDuration
