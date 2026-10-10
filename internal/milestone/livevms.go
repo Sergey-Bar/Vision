@@ -138,6 +138,14 @@ func StartLiveServer(ctx context.Context, opts LiveOptions) (*LiveServer, error)
 	// this server honest as routes are added: a route added to the table and not
 	// served here answers 404 and the probe calls it a contradiction, which is the
 	// truth about a device that has it.
+	//
+	// A path is registered once. The Configuration-API family the configurator
+	// drives declares a read and a write on one path (`GET` and `PUT
+	// /cameras/{id}`), and two registrations on one path is a panic in
+	// `ServeMux` — the same collision the bookmarks route already hit. The fix is
+	// the same one: register the path once for the read, and register the write
+	// as a method pattern below, which ServeMux treats as the more specific match.
+	registered := map[string]bool{}
 	for _, route := range Routes {
 		// The bookmarks route is the one the table declares as a READ (with a
 		// `searchTime` task) and the write-back layer declares again as a WRITE. Two
@@ -147,9 +155,22 @@ func StartLiveServer(ctx context.Context, opts LiveOptions) (*LiveServer, error)
 		if route.Path == APIPrefix+"/bookmarks" {
 			continue
 		}
+		if registered[route.Path] {
+			continue
+		}
+		registered[route.Path] = true
 		mux.HandleFunc(route.Path, s.handleRead(route))
 	}
 	mux.HandleFunc(APIPrefix+"/bookmarks", s.handleBookmarks)
+	// The configurator's writes, as method patterns: a scripted acknowledgement
+	// that records the request, so a plan's apply can be driven and observed
+	// against no live site at all.
+	for _, route := range Routes {
+		if !route.WriteBack {
+			continue
+		}
+		mux.HandleFunc(route.Method+" "+route.Path, s.handleWrite())
+	}
 	mux.HandleFunc("/", s.handleUnknown)
 	// ReadHeaderTimeout is set because a server without one is a Slowloris target, and
 	// the fact that this one listens on loopback for a demo does not make the rule
@@ -230,6 +251,33 @@ func (s *LiveServer) withLog(next http.Handler) http.Handler {
 // handleUnknown answers the way a device answers a path it does not have, and says
 // which paths it does have.
 //
+// handleWrite serves one configurator write route with a scripted
+// acknowledgement, and records the request so a test can drive a plan's apply
+// and then read back what the target was asked to write.
+//
+// This is a scripted answer, not a claim about the vendor: the routes it serves
+// are all Unverified, and the acknowledgement shape is as unknown as the
+// request shape. What it does prove is the configurator's own behaviour — a
+// plan applied to a target that answers is recorded and idempotent — which is
+// what can be proven without a live site.
+func (s *LiveServer) handleWrite() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		s.requests = append(s.requests, r.Method+" "+r.URL.Path)
+		s.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		// `json.NewEncoder` rather than `Fprintf` with a `%s` inside a
+		// literal, for the reason `handleUnknown` gives: both values come
+		// from the request, and an encoder cannot be talked into emitting a
+		// body that is not JSON.
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"path":     r.URL.Path,
+			"method":   r.Method,
+			"accepted": true,
+		})
+	}
+}
+
 // A 404 with a list is more useful to a probe than a bare 404, and `Probe` puts the
 // body in its report — so the operator reading the report learns what to try next
 // instead of learning that something is wrong.

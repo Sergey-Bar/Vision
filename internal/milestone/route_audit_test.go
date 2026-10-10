@@ -250,6 +250,18 @@ func TestEveryRouteMatchesTheDocumentedFormInTheAudit(t *testing.T) {
 		{Route{Method: "GET", Path: APIPrefix + "/System/Time"}, "audit §1 row 8", ""},
 		{Route{Method: "POST", Path: APIPrefix + "/bookmarks"}, "audit §1 row 9", ""},
 		{Route{Method: "GET", Path: APIPrefix + "/eventTypes"}, "audit §1 row 10", ""},
+		// The Configuration-API family the site configurator drives. Rows
+		// 11-18, every one NOT-ANSWERABLE-FROM-DOCS: the prefix is documented
+		// and the resources under it are not, so each waits on a human probe
+		// (`.kilo/skills/milestone-probe`) and none of them clears itself.
+		{Route{Method: "GET", Path: APIPrefix + "/cameras"}, "audit §1 row 11", ""},
+		{Route{Method: "GET", Path: APIPrefix + "/cameras/{id}"}, "audit §1 row 12", ""},
+		{Route{Method: "PUT", Path: APIPrefix + "/cameras/{id}"}, "audit §1 row 13", ""},
+		{Route{Method: "GET", Path: APIPrefix + "/recordingServers"}, "audit §1 row 14", ""},
+		{Route{Method: "PUT", Path: APIPrefix + "/recordingServers/{id}"}, "audit §1 row 15", ""},
+		{Route{Method: "GET", Path: APIPrefix + "/rules"}, "audit §1 row 16", ""},
+		{Route{Method: "POST", Path: APIPrefix + "/rules"}, "audit §1 row 17", ""},
+		{Route{Method: "GET", Path: APIPrefix + "/alarmDefinitions"}, "audit §1 row 18", ""},
 	}
 
 	got := map[string]Route{}
@@ -492,6 +504,47 @@ func TestTheAuditNamesTheConstraintTheRouteAuditExistsFor(t *testing.T) {
 			t.Errorf("%s no longer contains %q. The audit is the evidence the route table is "+
 				"checked against; if it has stopped saying these things, the gate above is "+
 				"checking the routes against a document that no longer supports it", auditDoc, want)
+		}
+	}
+}
+
+// TestConfigurationRoutesAreNotEventFeeds guards the one flag that turns a
+// route into a feed. `Adapter.Poll` reads exactly the routes where
+// `Paginated` is true, so a configuration list marked as a page is polled as
+// an event feed - and on a real Milestone it answers with a configuration
+// object, `decodeItems` fails, and every poll produces a Malformed dead
+// letter. A site that reads as permanently broken, from a route declaration
+// alone. The Configuration-API family exists for the configurator and is
+// therefore not a feed; this assertion is what keeps it that way.
+func TestConfigurationRoutesAreNotEventFeeds(t *testing.T) {
+	configPaths := []string{
+		APIPrefix + "/cameras",
+		APIPrefix + "/recordingServers",
+		APIPrefix + "/rules",
+		APIPrefix + "/alarmDefinitions",
+	}
+	declared := map[string]bool{}
+	for _, p := range configPaths {
+		declared[p] = false
+	}
+	seen := map[string]bool{}
+	for _, r := range Routes {
+		if _, isConfig := declared[r.Path]; !isConfig {
+			continue
+		}
+		seen[r.Path] = true
+		if r.Paginated {
+			// Any row on the path is enough to put the path in the feed set.
+			declared[r.Path] = true
+		}
+	}
+	if len(seen) != len(configPaths) {
+		t.Errorf("the audit names %d Configuration-API paths and the table declares %d of them", len(configPaths), len(seen))
+	}
+	for path, paginated := range declared {
+		if paginated {
+			t.Errorf("%s is Paginated, which makes Poll treat it as an event feed; "+
+				"a configuration inventory is not one", path)
 		}
 	}
 }

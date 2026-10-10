@@ -217,6 +217,97 @@ var Routes = []Route{
 			"input today: drift past the severe band is supposed to exclude a device from " +
 			"time-windowed corroboration, and drift cannot be measured. See the audit's §2.7.",
 	},
+
+	// ---------------------------------------------------------------------
+	// The Configuration-API family the site configurator drives.
+	//
+	// These are the routes `securityctl site-config` reads and writes through
+	// the Milestone adapter. They share one property with everything else in
+	// this table: the prefix is documented and the resources under it are
+	// not. EVENTS:40 says cameras, event types and the rest of the
+	// configuration live behind the Configuration REST API, and neither
+	// committed document contains a single one of those resource names, so
+	// every route below is NOT-ANSWERABLE-FROM-DOCS until a human probe runs
+	// (`.kilo/skills/milestone-probe`). None of them clears itself: the
+	// configurator never promotes a flag, and a probe that cannot answer
+	// leaves the route exactly as declared here.
+	//
+	// None of them is `Paginated`, and that is load-bearing rather than an
+	// omission: `Adapter.Poll` builds its feed set from exactly the routes
+	// where `Paginated` is true, so marking a configuration list as a page
+	// makes the adapter poll it as an EVENT FEED - which on a real Milestone
+	// answers with a configuration object, fails `decodeItems`, and produces
+	// a `Malformed` dead letter on every poll. A route is a feed when the
+	// adapter polls it for records, and nothing here is that.
+	// ---------------------------------------------------------------------
+	{
+		Method: "GET", Path: APIPrefix + "/cameras", Expect: "array",
+		Unverified: true,
+		Notes: "The camera list the configurator discovers from. EVENTS:40 points " +
+			"at the Configuration REST API for cameras and neither document names a " +
+			"cameras resource, so this is NOT-ANSWERABLE-FROM-DOCS. Deliberately NOT " +
+			"Paginated: Paginated is the flag that makes a route an event FEED, and a " +
+			"configuration inventory is not one - see the block comment above.",
+	},
+	{
+		Method: "GET", Path: APIPrefix + "/cameras/{id}", Expect: "object",
+		Unverified: true,
+		Notes: "One camera's settings, which is what a reconcile compares the " +
+			"desired state against. NOT-ANSWERABLE-FROM-DOCS: the placeholder and the " +
+			"response schema are both undocumented. 404 here means the camera was " +
+			"removed between listing and reading, which the configurator treats as " +
+			"an adoption decision for the operator rather than an error to retry.",
+	},
+	{
+		Method: "PUT", Path: APIPrefix + "/cameras/{id}", Expect: "object", WriteBack: true,
+		Unverified: true,
+		Notes: "The configurator's camera write. NOT-ANSWERABLE-FROM-DOCS: no " +
+			"document declares a PUT, a body schema, or which camera settings this " +
+			"endpoint would even accept. WriteBack: true so the adapter's task " +
+			"tracking applies, and the idempotency-key convention of dispatch.go " +
+			"is mirrored by the caller: a re-run of the same plan writes the same " +
+			"bytes, so a crash mid-apply is re-run rather than repaired.",
+	},
+	{
+		Method: "GET", Path: APIPrefix + "/recordingServers", Expect: "array",
+		Unverified: true,
+		Notes: "The recording servers, because retention is configured there and " +
+			"not on the camera. NOT-ANSWERABLE-FROM-DOCS: the resource, the shape " +
+			"and the retention field are all undocumented. Not Paginated, and " +
+			"therefore not a feed, for the reason the block comment above gives.",
+	},
+	{
+		Method: "PUT", Path: APIPrefix + "/recordingServers/{id}", Expect: "object", WriteBack: true,
+		Unverified: true,
+		Notes: "The retention write, and the most dangerous route in this table: " +
+			"the configurator only ever extends retention, because a reduction is a " +
+			"data-loss boundary that a human crosses with an explicit command. " +
+			"NOT-ANSWERABLE-FROM-DOCS for the resource and the field name alike.",
+	},
+	{
+		Method: "GET", Path: APIPrefix + "/rules", Expect: "array",
+		Unverified: true,
+		Notes: "The analytics rule list the configurator derives rules into. " +
+			"NOT-ANSWERABLE-FROM-DOCS: nothing is documented about a rules resource, " +
+			"and the distinction between a site's own rules and the adapter's " +
+			"read-only view of them is unknown.",
+	},
+	{
+		Method: "POST", Path: APIPrefix + "/rules", Expect: "object", WriteBack: true,
+		Unverified: true,
+		Notes: "The analytics rule create. NOT-ANSWERABLE-FROM-DOCS. The bundle " +
+			"candidate is rendered by rules.Compiler and activated by a human " +
+			"(the plan's sequencing); this route is only reached after that, and " +
+			"never by the configurator on its own.",
+	},
+	{
+		Method: "GET", Path: APIPrefix + "/alarmDefinitions", Expect: "array",
+		Unverified: true,
+		Notes: "The alarm definitions the site's escalations map onto. " +
+			"NOT-ANSWERABLE-FROM-DOCS. EVENTS:49-50 places alarms in the " +
+			"Configuration API as objects events trigger, which is consistent with " +
+			"a definitions list and says nothing about its name.",
+	},
 }
 
 // RouteByKind maps a fixture event's Kind to the route it stands for.

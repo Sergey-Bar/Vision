@@ -151,7 +151,6 @@ var (
 		"internal/mp4.AVCC":                {Symbol: "internal/mp4.AVCC", Why: "UNWIRED. The length-prefix reader nothing calls. Close it by having the recorder read AVCC when a camera emits length-prefixed NALs, or delete it"},
 		"internal/mp4.AVCCLen":             {Symbol: "internal/mp4.AVCCLen", Why: "UNWIRED. The companion of AVCC and the same decision: wire both in the same commit or delete both"},
 		"internal/mp4.NewPreRoll":          {Symbol: "internal/mp4.NewPreRoll", Why: "UNWIRED. The pre-roll ring constructor nothing calls. Close it by having the RTSP recorder build its pre-roll through it, or delete it"},
-		"internal/mp4.Closed":              {Symbol: "internal/mp4.Closed", Why: "UNWIRED. The recorder's closed-state predicate nothing calls. Close it by having the health surface report it, or delete it"},
 		"internal/mp4.DecoderConfigRecord": {Symbol: "internal/mp4.DecoderConfigRecord", Why: "UNWIRED. The decoder-configuration record extractor nothing calls. Close it by having the evidence viewer render the codec it extracted, or delete it"},
 		"internal/mp4.PreRollDepth":        {Symbol: "internal/mp4.PreRollDepth", Why: "UNWIRED. The pre-roll depth accessor nothing calls. Close it by having the recorder's health line report it, or delete it"},
 		"internal/mp4.PreRollGroups":       {Symbol: "internal/mp4.PreRollGroups", Why: "UNWIRED. The pre-roll group accessor nothing calls. Close it with PreRollDepth, in the same commit"},
@@ -184,7 +183,6 @@ var (
 		// gate that measures whether every member has an executor.
 		"internal/rules.Severities":           {Symbol: "internal/rules.Severities", Why: "published vocabulary: the incident severities a rule may declare, shared by the bundle schema and the compiler"},
 		"internal/rules.DefaultBusinessHours": {Symbol: "internal/rules.DefaultBusinessHours", Why: "published default: the business-hours window a schedule condition gets when the bundle omits one. It is a product decision recorded in docs/ai-and-data.md"},
-		"internal/rules.TierC":                {Symbol: "internal/rules.TierC", Why: "published constant: the tier a Tier C signal carries, which is the vocabulary the schema's tier field is expressed in"},
 		"internal/rules.StateDuplicate":       {Symbol: "internal/rules.StateDuplicate", Why: "part of the verification-state vocabulary the evaluation harness and the incident row share, stored as text and read by the harness rather than by a Go caller"},
 		"internal/rules.MarshalCanonical":     {Symbol: "internal/rules.MarshalCanonical", Why: "UNWIRED. The canonical bundle marshaller nothing calls. Close it by having the bundle digest and the console's rule screen use it, so the digest an operator reads is the bytes the compiler saw, or delete it"},
 		"internal/rules.RuleIDs":              {Symbol: "internal/rules.RuleIDs", Why: "UNWIRED. The rule-id accessor nothing calls. Close it by having the console's rule screen and the activation digest diff list ids through it, or delete it"},
@@ -196,10 +194,21 @@ var (
 		"internal/soak.CostPerCall": {Symbol: "internal/soak.CostPerCall", Why: "published cost constant: the per-call cost the soak report multiplies by a call count, so an operator can read a budget rather than a number"},
 		"internal/soak.Rehearsals":  {Symbol: "internal/soak.Rehearsals", Why: "UNWIRED. The failure-rehearsal runner nothing calls. Close it by having `securityctl loadrun` and `securityctl demo` run the rehearsals before the load, so the degradation path is exercised before it is measured, or delete it"},
 
+		"internal/mp4.Closed": {Symbol: "internal/mp4.Closed", Why: "UNWIRED. The recorder's 'stopped accepting samples' accessor: a cap bound it or the post-roll window closed. Nothing reads it, so a capped clip is indistinguishable from a complete one in every current consumer, which is why `securityctl poc` reports its own distinct halt reason instead. Close it by having the clip report carry Closed() and a capped clip say so in the report, or delete it"},
+
+		// The autonomy layer's decision vocabulary. The action a playbook
+		// returns and the severity and likelihood the matrix is indexed by are
+		// written into the `correlated` broadcast the operator surface renders,
+		// and read there as strings rather than as Go values, so a member with
+		// no in-tree comparator is a decision the POC has not produced yet.
+		"internal/threat.Action":          {Prefix: "internal/threat.Action", Why: "the autonomy layer's action vocabulary: OBSERVE, VERIFY, ESCALATE, HOLD. An action is written into the correlated-incident broadcast the operator surface renders and into the autonomy status badge, so the consumer reads a string rather than comparing in Go"},
+		"internal/threat.Severity":        {Prefix: "internal/threat.Severity", Why: "the severity axis of the decision matrix. The matrix is a table over this set, so the enumeration is the control: adding a severity without adding a row would silently decide nothing"},
+		"internal/threat.Likelihood":      {Prefix: "internal/threat.Likelihood", Why: "the likelihood axis of the decision matrix, same reasoning as Severity"},
+		"internal/threat.DecideFromScore": {Symbol: "internal/threat.DecideFromScore", Why: "the score-only entry point into the matrix: given nothing but a score, decide an action, with no anomaly set to route through. It is the seam a documented override takes (a site that decides purely on score), and it is tested directly against the matrix's boundary rows in internal/threat. UNWIRED in the product path today: the playbook calls DecideWithSight and routes through the full form. Close it by wiring the score-bar's band derivation or the override path through this function, or delete it"},
+
 		"internal/airuntime.MaxResponseBytes": {Symbol: "internal/airuntime.MaxResponseBytes", Why: "published bound: the largest body the AI runtime will read. The AI runtime is untrusted input, so the bound is part of its contract and is asserted by the Python test that drives it"},
 
 		"internal/api.DecodeJSON":           {Symbol: "internal/api.DecodeJSON", Why: "UNWIRED. The request decoder nothing calls. Close it by having the disposition form and the new write routes decode through it, so every body is bounded the same way, or delete it"},
-		"internal/api.WriteJSON":            {Symbol: "internal/api.WriteJSON", Why: "UNWIRED. The response writer nothing calls. Close it with DecodeJSON, in the same commit, so the pair is one decision"},
 		"internal/api.WriteError":           {Symbol: "internal/api.WriteError", Why: "UNWIRED. The error-response writer nothing calls. Close it with the two above: every handler's refusal should render through one writer, which is also what makes the console's error pages consistent"},
 		"internal/api.RequestIDFromContext": {Symbol: "internal/api.RequestIDFromContext", Why: "UNWIRED. The request-id accessor nothing calls. Close it by having the handlers stamp the request id on every log line, which is the convention AGENTS.md already states and nothing currently enforces"},
 		"internal/api.ErrNotWired":          {Symbol: "internal/api.ErrNotWired", Why: "UNWIRED. The not-wired sentinel nothing returns. Close it by having each route that has a nil dependency return it rather than rendering an empty page, which is the distinction the console's own comments call out"},
@@ -219,7 +228,6 @@ var (
 		"internal/graph.Methods":   {Symbol: "internal/graph.Methods", Why: "the graph's closed provenance-method vocabulary, enforced in-package by the edge validator. Same reasoning as Relations: exported so an offerer can check membership, and the enumeration is the control"},
 
 		"internal/identity.ConstantTimeEqual": {Symbol: "internal/identity.ConstantTimeEqual", Why: "published comparator for secrets, used in-package by every secret comparison and exported so a caller outside the identity package compares a secret the same way. Its absence as an external reader is why this entry exists: the function is correct and the discipline is not yet applied outside the package that owns the secrets"},
-		"internal/identity.NewToken":          {Symbol: "internal/identity.NewToken", Why: "published token constructor. The session layer uses it in-package for sessions and CSRF tokens; it is exported because the raw token never reaches storage, so every producer of one needs the same raw-plus-hash shape rather than a hash of something it chose itself"},
 		"internal/identity.PurgeExpired":      {Symbol: "internal/identity.PurgeExpired", Why: "UNWIRED. The collection of dead sessions, challenges and proofs nothing runs. Close it by scheduling it from the janitor job the migrations already have a queue for, or delete it"},
 		"internal/identity.InSiteScope":       {Symbol: "internal/identity.InSiteScope", Why: "UNWIRED. The site-scope predicate nothing calls. Close it by having the console's per-site routes check it, which is migration 21's RESTRICTIVE site_isolation made mechanical at the application edge, or delete it"},
 
@@ -328,6 +336,30 @@ var (
 		// decisions an operator is told about by name in the operations runbook.
 		"internal/jobs.DefaultLeaseDuration":   {Symbol: "internal/jobs.DefaultLeaseDuration", Why: "published default: how long a claimed job is held before another worker may take it. The companion `jobs.VLMLeaseDuration` is the AI-plane figure and is recorded beside it; this is the general one, and both are deployment decisions an operator tunes by name"},
 		"internal/outbox.DefaultLeaseDuration": {Symbol: "internal/outbox.DefaultLeaseDuration", Why: "published default: how long a claimed outbox message is held before the relay may take it again. It is the lease whose loss would cause a duplicate dispatch, which is invariant 1's second half, so the number belongs to the operations contract rather than to a caller"},
+
+		// The POC's categorizer surface. `poc.StreamIngest` builds the engine and
+		// holds it on the hub, and the field that would consume it already exists
+		// beside it: `lastCategorizedHash` guards a categorization loop that has
+		// not been written. Until that loop runs, these three are the API it will
+		// call, so they are recorded here rather than left for the gate to find.
+		//
+		// The reason it has not been written is not oversight: the POC is built
+		// with `NewEngine(nil, ...)` and has no AI plane, so `Classify` answers
+		// `no_ai_runtime` by construction -- the same degradation every other
+		// observation in the demo carries. Wiring the loop before an engine exists
+		// would produce a second copy of the no-runtime path the product already
+		// renders by name.
+		//
+		// The close is a loop that classifies a recorded clip, feeds
+		// `ToSearchFormat` into `poc/search` and `ToRuleFormat` into the anomaly
+		// rules' input, once an engine is bound. `ToRuleFormat` is the one with
+		// no reader at all even then: the rule-side consumer of a categorization
+		// result is a product decision (which anomaly a categorized object
+		// feeds), not a demo step, so that entry may end up deleted rather than
+		// wired.
+		"poc/categorization.Classify":       {Symbol: "poc/categorization.Classify", Why: "UNWIRED. The clip categorizer the POC's ingest hub holds and nothing calls. The POC builds the engine with a nil AI-runtime client by design, so the answer today is a named degradation (`no_ai_runtime`) rather than a classification, and the loop that would drive it is the same loop the hub's `lastCategorizedHash` field already reserves the place for. Close it by running the loop over a recorded clip once an engine is bound"},
+		"poc/categorization.ToSearchFormat": {Symbol: "poc/categorization.ToSearchFormat", Why: "UNWIRED. The categorizer result projected into the search index's document shape. `poc/search` is written and the projection into it is the missing call: the categories a clip yields should be searchable as indices. Close it by having the categorization loop index what it classified"},
+		"poc/categorization.ToRuleFormat":   {Symbol: "poc/categorization.ToRuleFormat", Why: "UNWIRED. The categorizer result projected into the rule engine's input shape. This is the projection with no decided consumer: which anomaly a categorized object feeds is a product decision about the rules, not a demo step, and the POC's own rules are derived from zones rather than from categories. Likely close is DELETE rather than WIRE"},
 	}
 )
 

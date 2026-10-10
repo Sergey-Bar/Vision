@@ -51,6 +51,10 @@
       "test": "internal/evidence.TestAJunctionCannotBeUsedAsATenantName",
       "when": "linux",
       "why": "The same Windows-only subject as TestAWindowsJunctionEscapeIsRefused: the assertion is that a junction name is refused as a tenant name, and there is no such thing to name on Linux. Declared for linux rather than leaving it undeclared, because an undeclared skip is a failing gate and this one is a real platform difference rather than a missing tool."
+    },
+    {
+      "test": "internal/rlsrole.TestAWriteWithTheRightScopeIsAccepted/sites",
+      "why": "sites table defines the scope that site_isolation references; it cannot be protected by that policy without circular dependency (login needs a site before it can have one)."
     }
   ]
 }

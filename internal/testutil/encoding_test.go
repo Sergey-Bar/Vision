@@ -181,10 +181,21 @@ func walkSourceText(t *testing.T, visit func(rel, path string, raw []byte)) {
 // other module carried was repaired with nothing checking it either way. Nothing
 // here walks that tree, so the honest position is that it is uncovered, not that
 // it is covered elsewhere.
+//
+// A virtualenv is skipped by prefix rather than by exact name. The list used to
+// name `.venv` and nothing else, and this machine's environment is `.venv-poc`,
+// so six third-party Python files inside an untracked directory were read as
+// repository source and reported as ledger debt. Third-party bytes that were
+// never committed are not this repository's debt, and the alternative — adding
+// them to `replacementCharSites` — would record somebody else's files as a
+// decision this repository made.
 func skipDir(name string) bool {
-	switch name {
-	case ".git", ".kilo", "node_modules", "__pycache__", ".venv", "poc",
-		"graphify-out", "coverage":
+	switch {
+	case name == ".git" || name == ".kilo" || name == "node_modules",
+		name == "__pycache__" || name == "poc" || name == "graphify-out",
+		name == "coverage":
+		return true
+	case strings.HasPrefix(name, ".venv"):
 		return true
 	}
 	return false

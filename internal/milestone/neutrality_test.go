@@ -172,6 +172,15 @@ var newPackages = []string{
 	"mp4",
 	"detector",
 	"hafnia",
+	// The three packages this elevation adds. They are on the list because
+	// they are new vendor-neutral code and because the list is the thing that
+	// keeps them that way: brief renders facts, dutylog records them, and
+	// siteconfig reconciles them — none of the three may learn a vendor's
+	// name. The Milestone adapter implements siteconfig.CameraInventory in
+	// the product, which is the seam being protected.
+	"brief",
+	"dutylog",
+	"siteconfig",
 }
 
 // vendorWords are the substrings a vendor-neutral package must not contain.

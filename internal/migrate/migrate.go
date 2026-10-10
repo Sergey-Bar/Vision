@@ -167,11 +167,23 @@ func (r *Runner) EnsurePartitions(ctx context.Context, yearsAhead int) (int, err
 				continue
 			}
 
-			// Create the partition
+			// Create the partition.
+			//
+			// The bounds are literals, not parameters. PostgreSQL does not accept
+			// bind parameters inside DDL, so `FROM ($1) TO ($2)` is parsed as DDL
+			// carrying two placeholders and no bindable arguments, and the
+			// statement fails with `mismatched param and argument count` — on
+			// every call, for every partition, which is how this runner reached
+			// 0% coverage without anyone noticing it could not create a partition
+			// at all.
+			//
+			// `from` and `to` are times this function computed from a date loop,
+			// never user input, so the interpolation is safe: the values are
+			// bounded to `YYYY-MM-01` boundaries and rendered in ISO form.
 			ddl := fmt.Sprintf(
-				"CREATE TABLE %s PARTITION OF %s FOR VALUES FROM ($1) TO ($2)",
-				partitionName, t.name)
-			if _, err := r.Pool.Exec(ctx, ddl, from, to); err != nil {
+				"CREATE TABLE %s PARTITION OF %s FOR VALUES FROM ('%s') TO ('%s')",
+				partitionName, t.name, from.Format("2006-01-02"), to.Format("2006-01-02"))
+			if _, err := r.Pool.Exec(ctx, ddl); err != nil {
 				return created, fmt.Errorf("migrate: create partition %s: %w", partitionName, err)
 			}
 			created++

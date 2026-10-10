@@ -262,15 +262,25 @@ type declSite struct {
 	kind string
 }
 
-// loadDirs are the trees the gate covers. `poc` is a second Go module and is
-// pruned by the walk's skip set, not special-cased here.
-var loadDirs = []string{"internal", "cmd", "tools"}
+// loadDirs are the trees the gate covers. `poc` is included because only part
+// of it is a second Go module: `poc/active-monitoring/` has its own `go.mod`
+// and is pruned below, while `poc/` itself is a normal package of this module
+// and is the main() that consumes the autonomy layer.
+var loadDirs = []string{"internal", "cmd", "tools", "web", "poc"}
+
+// nestedModules are the second Go modules inside this repository. They cannot
+// import this module's packages, so they are neither a source of declarations
+// to check nor a reader that can satisfy one, and walking them would report
+// their exports against the wrong module entirely.
+var nestedModules = map[string]bool{
+	"poc/active-monitoring": true,
+}
 
 // defaultSkip are the directory names pruned anywhere in the walk. `.kilo` holds
 // other checkouts of this repository, so a match in it is not a match in the tree
 // being gated.
 var defaultSkip = map[string]bool{
-	".git": true, ".kilo": true, "poc": true, "node_modules": true, "__pycache__": true,
+	".git": true, ".kilo": true, "node_modules": true, "__pycache__": true,
 	"dist": true,
 }
 
@@ -318,6 +328,9 @@ func LoadDir(root string, dirs []string) *Repo {
 			}
 			if info.IsDir() {
 				if defaultSkip[info.Name()] {
+					return filepath.SkipDir
+				}
+				if nestedModules[dirOf(path)] {
 					return filepath.SkipDir
 				}
 				return nil
