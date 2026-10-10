@@ -16,179 +16,267 @@
   "floors": {
     "internal/airuntime": {
       "percent": 34.2,
-      "measured": "2026-10-03"
+      "measured": "2026-10-10"
+    },
+    "internal/anomaly": {
+      "percent": 83.2,
+      "measured": "2026-10-10"
     },
     "internal/api": {
-      "percent": 62.6,
-      "measured": "2026-10-03"
+      "percent": 52.1,
+      "measured": "2026-10-10"
     },
     "internal/audit": {
-      "percent": 14.5,
-      "measured": "2026-10-03"
+      "percent": 14.1,
+      "measured": "2026-10-10"
+    },
+    "internal/brief": {
+      "percent": 92.9,
+      "measured": "2026-10-10"
     },
     "internal/bundles": {
-      "percent": 68.9,
-      "measured": "2026-10-03"
+      "percent": 56.2,
+      "measured": "2026-10-10"
+    },
+    "internal/camerahealth": {
+      "percent": 100,
+      "measured": "2026-10-10"
+    },
+    "internal/capability": {
+      "percent": 84.3,
+      "measured": "2026-10-10"
     },
     "internal/checkpoint": {
       "percent": 46.8,
-      "measured": "2026-10-03"
+      "measured": "2026-10-10"
     },
     "internal/clock": {
       "percent": 95.4,
-      "measured": "2026-10-03"
+      "measured": "2026-10-10"
     },
     "internal/clocksub": {
       "percent": 64.8,
-      "measured": "2026-10-03"
+      "measured": "2026-10-10"
     },
     "internal/command": {
       "percent": 91.1,
-      "measured": "2026-10-03"
+      "measured": "2026-10-10"
     },
     "internal/config": {
-      "percent": 91.6,
-      "measured": "2026-10-03"
+      "percent": 83.4,
+      "measured": "2026-10-10"
     },
     "internal/contracts/schemasync": {
       "percent": 50,
-      "measured": "2026-10-03"
+      "measured": "2026-10-10"
+    },
+    "internal/correlation": {
+      "percent": 89.1,
+      "measured": "2026-10-10"
     },
     "internal/correlator": {
-      "percent": 88.6,
-      "measured": "2026-10-03"
+      "percent": 89.4,
+      "measured": "2026-10-10"
+    },
+    "internal/cost": {
+      "percent": 89,
+      "measured": "2026-10-10"
     },
     "internal/covercheck": {
       "percent": 77.2,
-      "measured": "2026-10-03"
+      "measured": "2026-10-10"
     },
     "internal/dbx": {
-      "percent": 52.9,
-      "measured": "2026-10-03"
+      "percent": 54.3,
+      "measured": "2026-10-10"
     },
     "internal/deadexport": {
-      "percent": 89.5,
-      "measured": "2026-10-03"
+      "percent": 86.8,
+      "measured": "2026-10-10"
     },
     "internal/detector": {
       "percent": 90,
-      "measured": "2026-10-03"
+      "measured": "2026-10-10"
+    },
+    "internal/dispatch": {
+      "percent": 70.7,
+      "measured": "2026-10-10"
+    },
+    "internal/dutylog": {
+      "percent": 85.2,
+      "measured": "2026-10-10"
     },
     "internal/evaluation": {
       "percent": 95.7,
-      "measured": "2026-10-03"
+      "measured": "2026-10-10"
     },
     "internal/evidence": {
       "percent": 78.6,
-      "measured": "2026-10-03"
+      "measured": "2026-10-10"
+    },
+    "internal/evidencefetch": {
+      "percent": 40.2,
+      "measured": "2026-10-10"
     },
     "internal/fixture": {
       "percent": 76,
-      "measured": "2026-10-03"
+      "measured": "2026-10-10"
     },
     "internal/graph": {
       "percent": 67.4,
-      "measured": "2026-10-03"
+      "measured": "2026-10-10"
     },
     "internal/hafnia": {
       "percent": 81.1,
-      "measured": "2026-10-03"
+      "measured": "2026-10-10"
     },
     "internal/identity": {
-      "percent": 67.7,
-      "measured": "2026-10-03"
+      "percent": 68.9,
+      "measured": "2026-10-10"
     },
     "internal/inbox": {
       "percent": 62,
-      "measured": "2026-10-03"
+      "measured": "2026-10-10"
     },
     "internal/incidents": {
-      "percent": 82.4,
-      "measured": "2026-10-03"
+      "percent": 71.1,
+      "measured": "2026-10-10"
     },
     "internal/jobs": {
-      "percent": 38.3,
-      "measured": "2026-10-03"
+      "percent": 36.3,
+      "measured": "2026-10-10"
     },
     "internal/lifecycle": {
       "percent": 81,
-      "measured": "2026-10-03"
+      "measured": "2026-10-10"
     },
     "internal/migrate": {
-      "percent": 71.4,
-      "measured": "2026-10-03"
+      "percent": 78.5,
+      "measured": "2026-10-10"
     },
     "internal/milestone": {
-      "percent": 82.6,
-      "measured": "2026-10-03"
+      "percent": 68.7,
+      "measured": "2026-10-10"
     },
     "internal/mp4": {
       "percent": 83.6,
-      "measured": "2026-10-03"
+      "measured": "2026-10-10"
     },
     "internal/normalize": {
       "percent": 75,
-      "measured": "2026-10-03"
+      "measured": "2026-10-10"
     },
     "internal/observability": {
-      "percent": 97.6,
-      "measured": "2026-10-03"
+      "percent": 96.8,
+      "measured": "2026-10-10"
     },
     "internal/observations": {
       "percent": 84.2,
-      "measured": "2026-10-03"
+      "measured": "2026-10-10"
     },
     "internal/outbox": {
-      "percent": 81.4,
-      "measured": "2026-10-03"
+      "percent": 76.6,
+      "measured": "2026-10-10"
     },
     "internal/pipeline": {
-      "percent": 58.6,
-      "measured": "2026-10-03"
+      "percent": 49.1,
+      "measured": "2026-10-10"
     },
     "internal/predicatecov": {
       "percent": 89.6,
-      "measured": "2026-10-03"
+      "measured": "2026-10-10"
     },
     "internal/release": {
       "percent": 73.8,
-      "measured": "2026-10-03"
+      "measured": "2026-10-10"
     },
     "internal/rtsp": {
-      "percent": 80.3,
-      "measured": "2026-10-03"
+      "percent": 82,
+      "measured": "2026-10-10"
     },
     "internal/rules": {
-      "percent": 75,
-      "measured": "2026-10-03"
+      "percent": 75.3,
+      "measured": "2026-10-10"
+    },
+    "internal/safename": {
+      "percent": 100,
+      "measured": "2026-10-10"
     },
     "internal/simulate": {
       "percent": 55.9,
-      "measured": "2026-10-03"
+      "measured": "2026-10-10"
+    },
+    "internal/siteconfig": {
+      "percent": 79.5,
+      "measured": "2026-10-10"
+    },
+    "internal/sitemodel": {
+      "percent": 76,
+      "measured": "2026-10-10"
     },
     "internal/skipaudit": {
       "percent": 87.6,
-      "measured": "2026-10-03"
+      "measured": "2026-10-10"
     },
     "internal/soak": {
       "percent": 69.1,
-      "measured": "2026-10-03"
+      "measured": "2026-10-10"
     },
     "internal/sqlguard": {
       "percent": 92,
-      "measured": "2026-10-03"
+      "measured": "2026-10-10"
     },
     "internal/statuscheck": {
       "percent": 73.9,
-      "measured": "2026-10-03"
+      "measured": "2026-10-10"
+    },
+    "internal/telemetry": {
+      "percent": 74.1,
+      "measured": "2026-10-10"
     },
     "internal/testutil": {
-      "percent": 54.8,
-      "measured": "2026-10-03"
+      "percent": 59.8,
+      "measured": "2026-10-10"
+    },
+    "internal/threat": {
+      "percent": 85.8,
+      "measured": "2026-10-10"
+    },
+    "internal/treestate": {
+      "percent": 98.4,
+      "measured": "2026-10-10"
+    },
+    "internal/youtube": {
+      "percent": 0,
+      "measured": "2026-10-10"
     },
     "migrations": {
       "percent": 77.3,
-      "measured": "2026-10-03"
+      "measured": "2026-10-10"
+    },
+    "poc": {
+      "percent": 40.8,
+      "measured": "2026-10-10"
+    },
+    "poc/categorization": {
+      "percent": 0,
+      "measured": "2026-10-10"
+    },
+    "poc/search": {
+      "percent": 63.3,
+      "measured": "2026-10-10"
+    },
+    "poc/spatial": {
+      "percent": 0,
+      "measured": "2026-10-10"
+    },
+    "poc/ws": {
+      "percent": 0,
+      "measured": "2026-10-10"
+    },
+    "web": {
+      "percent": 0,
+      "measured": "2026-10-10"
     }
   },
   "excluded": [
