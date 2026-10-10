@@ -1,0 +1,4 @@
+console   http://127.0.0.1:8443/                      the operator surface: incidents, evidence, audit
+health    http://127.0.0.1:8443/v1/health            liveness, and the reason when it is not ready
+ready     http://127.0.0.1:8443/v1/health/ready      the same, for the pipeline being able to serve
+hand-over http://127.0.0.1:8443/handover             the shift hand-over, if SP_HANDOVER_DIR is set

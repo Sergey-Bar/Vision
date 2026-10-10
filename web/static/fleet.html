@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
+  <title>Vision Fleet Dashboard</title>
+  <link rel="stylesheet" href="/static/fleet.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <h1>Vision Fleet Dashboard</h1>
+        <p>Multi-camera analytics, behavioral learning, autonomous operator, conversational search.</p>
+      </div>
+      <div class="topbar-links">
+        <a href="/live" class="link">Single-Camera POC</a>
+        <span id="fleetStatus" class="status-badge">loading…</span>
+      </div>
+    </header>
+
+    <section class="fleet-summary card">
+      <div class="summary-grid">
+        <div class="summary-item">
+          <strong id="totalCameras">0</strong><span>Total Cameras</span>
+        </div>
+        <div class="summary-item healthy">
+          <strong id="healthyCameras">0</strong><span>Healthy</span>
+        </div>
+        <div class="summary-item degraded">
+          <strong id="degradedCameras">0</strong><span>Degraded</span>
+        </div>
+        <div class="summary-item unreachable">
+          <strong id="unreachableCameras">0</strong><span>Unreachable</span>
+        </div>
+        <div class="summary-item disabled">
+          <strong id="disabledCameras">0</strong><span>Disabled</span>
+        </div>
+        <div class="summary-item">
+          <strong id="activeWorkers">0</strong><span>Active Workers</strong>
+        </div>
+        <div class="summary-item">
+          <strong id="totalFrames">0</strong><span>Frames Processed</span>
+        </div>
+      </div>
+      <div class="fleet-controls">
+        <button id="addCameraBtn">+ Add Camera</button>
+        <button id="refreshFleetBtn">🔄 Refresh</button>
+        <select id="fleetFilter" onchange="applyFilter()">
+          <option value="all">All Cameras</option>
+          <option value="healthy">Healthy</option>
+          <option value="degraded">Degraded</option>
+          <option value="unreachable">Unreachable</option>
+          <option value="disabled">Disabled</option>
+        </select>
+      </div>
+    </section>
+
+    <section class="camera-grid card" id="cameraGrid">
+      <h2>Camera Fleet</h2>
+      <div class="grid-container" id="gridContainer">
+        <!-- Camera cards will be inserted here -->
+      </div>
+    </section>
+
+    <section class="alert-timeline card">
+      <h2>Alert Timeline</h2>
+      <div class="timeline-controls">
+        <select id="alertLevelFilter" onchange="applyAlertFilter()">
+          <option value="all">All Levels</option>
+          <option value="emergency">Emergency</option>
+          <option value="critical">Critical</option>
+          <option value="warning">Warning</option>
+          <option value="info">Info</option>
+        </select>
+        <select id="alertTimeRange" onchange="applyAlertFilter()">
+          <option value="1h">Last Hour</option>
+          <option value="6h" selected>Last 6 Hours</option>
+          <option value="24h">Last 24 Hours</option>
+          <option value="7d">Last 7 Days</option>
+        </select>
+        <button id="refreshAlertsBtn">🔄 Refresh Alerts</button>
+      </div>
+      <div class="alert-list" id="alertList">
+        <div class="loading">Loading alerts…</div>
+      </div>
+    </section>
+
+    <section class="operator-panel card">
+      <h2>Autonomous Operator</h2>
+      <div class="operator-tabs">
+        <button class="tab-btn active" data-tab="decisions">Decisions</button>
+        <button class="tab-btn" data-tab="chat">Natural Language</button>
+        <button class="tab-btn" data-tab="anomalies">Anomalies</button>
+      </div>
+      <div class="tab-content">
+        <div id="tab-decisions" class="tab-pane active">
+          <div class="decision-list" id="decisionList">
+            <div class="loading">Loading decisions…</div>
+          </div>
+        </div>
+        <div id="tab-chat" class="tab-pane">
+          <div class="chat-interface">
+            <div class="chat-messages" id="chatMessages"></div>
+            <div class="chat-input-row">
+              <input id="operatorChatInput" placeholder="Ask the operator: 'prioritize camera main_entrance' or 'show me all alerts'">
+              <button id="operatorChatSend">Send</button>
+            </div>
+          </div>
+        </div>
+        <div id="tab-anomalies" class="tab-pane">
+          <div class="anomaly-summary" id="anomalySummary">
+            <div class="loading">Loading anomalies…</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="conversational-search card">
+      <h2>Conversational Search</h2>
+      <p class="search-help">Ask natural language questions across all cameras and time: "How many people were detected today?", "Show me vehicles in parking lot yesterday", "Any incidents in the last hour?"</p>
+      <div class="search-interface">
+        <div class="search-messages" id="searchMessages"></div>
+        <div class="search-input-row">
+          <input id="searchInput" placeholder="Ask a question about your camera fleet…">
+          <button id="searchSend">Search</button>
+        </div>
+        <div class="search-suggestions" id="searchSuggestions"></div>
+      </div>
+    </section>
+
+    <!-- Add Camera Modal -->
+    <dialog id="addCameraModal" class="modal">
+      <form method="dialog">
+        <h3>Add New Camera</h3>
+        <div class="form-group">
+          <label>Camera Name <input id="camName" required></label>
+        </div>
+        <div class="form-group">
+          <label>Camera ID (auto-generated if empty) <input id="camId"></label>
+        </div>
+        <div class="form-group">
+          <label>Stream URL <input id="camUrl" required placeholder="rtsp://... or https://youtube.com/watch?v=..."></label>
+        </div>
+        <div class="form-group">
+          <label>Type
+            <select id="camType">
+              <option value="rtsp">RTSP</option>
+              <option value="youtube">YouTube</option>
+              <option value="onvif">ONVIF</option>
+              <option value="mock">Mock (for testing)</option>
+            </select>
+          </label>
+        </div>
+        <div class="form-group">
+          <label>Profile
+            <select id="camProfile">
+              <option value="maximum">Maximum Accuracy</option>
+              <option value="realtime">Maximum Realtime</option>
+            </select>
+          </label>
+        </div>
+        <div class="form-group">
+          <label>Zone Config (JSON) <textarea id="camZones" placeholder='{"zones": [{"name": "entrance", "type": "restricted", "points": [[0.1,0.1],[0.9,0.1],[0.9,0.9],[0.1,0.9]]}]}'></textarea></label>
+        </div>
+        <menu>
+          <button value="cancel" class="btn-secondary">Cancel</button>
+          <button id="submitCamera" class="btn-primary">Add Camera</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <!-- Camera Detail Modal -->
+    <dialog id="cameraDetailModal" class="modal">
+      <form method="dialog">
+        <h3 id="detailTitle">Camera Details</h3>
+        <div id="detailContent">Loading…</div>
+        <menu>
+          <button value="close" class="btn-secondary">Close</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <!-- Alert Detail Modal -->
+    <dialog id="alertDetailModal" class="modal">
+      <form method="dialog">
+        <h3 id="alertDetailTitle">Alert Details</h3>
+        <div id="alertDetailContent">Loading…</div>
+        <menu>
+          <button id="ackAlertBtn" class="btn-primary">Acknowledge</button>
+          <button id="resolveAlertBtn" class="btn-primary">Resolve</button>
+          <button value="close" class="btn-secondary">Close</button>
+        </menu>
+      </form>
+    </dialog>
+  </main>
+  <script src="/static/fleet.js?v=1"></script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+frontend  http://127.0.0.1:8082/                the dashboard: camera wall, alerts, search
+fleet     http://127.0.0.1:8082/api/status      one row per camera, with its named state
+hand-over http://127.0.0.1:8082/api/dutylog     the shift's hash-chained artifact
+brief     http://127.0.0.1:8082/api/briefs/latest
+config    http://127.0.0.1:8082/api/site-config the artifact this fleet generates
+ask       curl -s http://127.0.0.1:8082/api/investigate -d '{"question":"..."}'

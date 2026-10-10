@@ -174,6 +174,106 @@ step 9 "the seeded site: what a judge is being shown, and what is behind it" \
     sh -c 'securityctl incidents list 2>&1 | head -30 || securityctl status 2>&1 | head -40'
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 10. The camera fleet. The POC in demo mode, and what the fleet says about
+#     itself: one tile per camera with a named state, so a dark camera is a
+#     named camera and not an empty wall.
+#
+# The backend starts the way scripts/run-poc.sh starts it: `go run`, which builds
+# into the toolchain's own cache and runs the result, so no binary lands in the
+# checkout or in $OUT. Two things about how this section runs, both learned the
+# hard way elsewhere in this file. `go run`'s own child is the compiled server,
+# so killing the wrapper alone leaves the binary serving port 8082 - a re-run's
+# steps then curl the PREVIOUS run's server and record a clean pass from stale
+# state; the cleanup below kills the child first and says so when the port is
+# still up. And a fixed sleep is not a readiness wait: a cold build of ./poc
+# measured 32 seconds on the development machine, and a step that curls a dead
+# port exits 0 with empty output, which is the failure this file's own header
+# documents for `serve-camera`. So this waits for /api/healthz, in a bounded
+# loop, and fails the step loudly if it never comes.
+# ---------------------------------------------------------------------------
+note 'Steps 10-13 are the elevation demo. The backend is a `go run`, so the build lands in the toolchain cache and nothing is written to the checkout.'
+POC_LOG=/tmp/poc-demo.log
+
+# The POC binds the port its own config names (poc/config.yaml web.port).
+# `websocket.port` sits above it in the same file, so the match is anchored to
+# the web block rather than taking the first port in the file.
+POC_PORT=$(awk '/^[a-zA-Z]/ { b = $1 }
+                 b == "web:" && /^[[:space:]]*port:/ { gsub(/[^0-9]/, "", $2); print $2; exit }' poc/config.yaml)
+[ -n "$POC_PORT" ] || POC_PORT=8082
+POC_BASE="http://127.0.0.1:$POC_PORT"
+
+ART="$OUT/site-config"
+rm -rf "$ART"
+
+poc_pid=""
+poc_started=""
+stop_poc() {
+    if [ -n "$poc_pid" ]; then
+        # The child first: `go run`'s own process is the wrapper around it.
+        pkill -TERM -P "$poc_pid" 2>/dev/null || true
+        kill -TERM "$poc_pid" 2>/dev/null || true
+        wait "$poc_pid" 2>/dev/null || true
+        poc_pid=""
+    fi
+    if [ -n "$poc_started" ]; then
+        if curl -s -o /dev/null $POC_BASE/api/healthz 2>/dev/null; then
+            note 'Port 8082 is still serving after the stop: the POC process leaked, and a re-run would read it instead of its own build.'
+        fi
+        poc_started=""
+    fi
+}
+
+if curl -s -o /dev/null $POC_BASE/api/healthz 2>/dev/null; then
+    note 'Port 8082 is already serving something, so the POC was not started: the four steps that follow would read another process. This is a leak, and it is recorded rather than worked around.'
+    step 10 "port 8082 is busy, so the fleet steps did not run against this build" \
+        sh -c 'exit 1'
+else
+    go run ./poc -config poc/config.yaml -mode demo > "$POC_LOG" 2>&1 &
+    poc_pid=$!
+    # The wait is bounded and its bound is stated: ninety seconds covers a cold
+    # build on a loaded container, and a build slower than that is reported
+    # rather than measured against nothing.
+    ready=""
+    for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75 76 77 78 79 80 81 82 83 84 85 86 87 88 89 90; do
+        if curl -s -o /dev/null $POC_BASE/api/healthz 2>/dev/null; then
+            ready="yes"; break
+        fi
+        if ! kill -0 "$poc_pid" 2>/dev/null; then
+            break
+        fi
+        sleep 1
+    done
+    if [ -z "$ready" ]; then
+        step 10 "the POC never answered /api/healthz - the steps that follow would measure nothing" \
+            sh -c "cat $POC_LOG"
+    else
+        poc_started="yes"
+        step 10 "the fleet, one camera at a time: each tile's state and its named reason" \
+            sh -c 'curl -s $POC_BASE/api/status | head -c 1400'
+        step 11 "the second-sight gate: why an escalation is held at verify, in the reason chain" \
+            sh -c 'curl -s "$POC_BASE/api/incidents/active" | head -c 1400'
+        step 12 "the hand-over artifact: the duty log's chain head and the brief rendered from it" \
+            sh -c 'curl -s "$POC_BASE/api/dutylog" | head -c 900; printf "\n---\n"; curl -s "$POC_BASE/api/briefs/latest" | head -c 900'
+        step 13 "the configurator's own view: the artifact this fleet generates, digest and all" \
+            sh -c 'curl -s "$POC_BASE/api/site-config" | head -c 1200'
+    fi
+    stop_poc
+fi
+
+# ---------------------------------------------------------------------------
+# 14. The configurator. generate, plan, apply -- and the second plan, which is
+#     the idempotent one: a plan that produces changes twice is a plan nobody
+#     can re-run after a crash.
+# ---------------------------------------------------------------------------
+step 14 "site-config generate: the artifact, every entry with its provenance" \
+    sh -c 'cd "$1" && securityctl site-config generate --site poc/sitemap.yaml --registry poc/registry.yaml --out "$2"' sh "$ROOT" "$ART"
+step 15 "site-config plan: seven objects absent from the target, and the dry run that writes nothing" \
+    sh -c 'cd "$1" && securityctl site-config apply --site poc/sitemap.yaml --registry poc/registry.yaml --dir "$2"' sh "$ROOT" "$ART"
+step 16 "site-config apply: seven changes recorded, then the same plan again" \
+    sh -c 'cd "$1" && securityctl site-config apply --site poc/sitemap.yaml --registry poc/registry.yaml --dir "$2" --yes && printf "\n--- second run:\n" && securityctl site-config apply --site poc/sitemap.yaml --registry poc/registry.yaml --dir "$2" --yes' sh "$ROOT" "$ART"
+
+# ---------------------------------------------------------------------------
 # The footer. What this demo did NOT do, in the transcript itself rather than in
 # a README nobody opens.
 # ---------------------------------------------------------------------------
@@ -182,6 +282,10 @@ finished=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     printf '\n---\n\n'
     printf '## What this demo did not do\n\n'
     printf '%s\n' '- **There is no camera, no VMS and no model behind any row above.** Every AI observation in the seeded site is either explicitly degraded with a named reason or labelled `seeded/absent`. A site where every observation is healthy would look better and prove nothing about the invariant that matters.'
+    printf '%s\n' '- **Steps 10-13 run the POC in DEMO policy.** No stream is fetched, so the fleet is the demo pseudo-camera plus the two configured cameras that say, by name, that demo policy did not start them. The fleet mechanics, the second-sight gate, the hand-over and the configurator''s view are all real; the pixels are synthetic.'
+    printf '%s\n' '- **The POC is started as a script, not built as a binary.** Steps 10-13 use `go run`, which compiles into the toolchain cache, so nothing lands in the checkout or in the output directory; `scripts/run-poc.sh` and `scripts/run-poc.ps1` start the same backend and print the frontend''s URL for an operator who wants to look at it by hand.'
+    printf '%s\n' '- **Steps 14-16 apply to the FILE target.** The configurator''s Milestone target is behind the same interface and every route it would write through is still Unverified in the route table, so a configuration change to a real VMS waits on the human probe the route audit names.'
+    printf '%s\n' '- **There is no GPU in this container.** The investigator answers that it has no engine bound and names the environment variable, which is the behaviour the plan requires; with a GPU and a signed bundle it answers with citations, and the profile stays shadow until a human promotes it.'
     printf '%s\n' '- The RTSP server is a **camera substitute**. It answers a real handshake and streams real H.264, and it does not decide how to encode, when to send a keyframe, or how it behaves on a lossy network.'
     printf '%s\n' '- The vendor endpoint is **scripted**, not a Milestone installation. It serves the route table and it holds no recording.'
     printf '%s\n' '- Step 1 runs FIVE of the twenty-five gates — contract-sync, migration-phases, generated-code, sql-guard and rules-lint — and says so. A full run is `make verify-container`, and this transcript does not stand in for it.'
