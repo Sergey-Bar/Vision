@@ -48,14 +48,23 @@ ENV CGO_ENABLED=0 \
 
 WORKDIR /src
 
-# Dependencies first, on their own layer, so a source edit does not re-download
-# the module cache. `-mod=readonly` means a go.mod that disagrees with go.sum
-# fails the build rather than silently rewriting either — `AGENTS.md` calls a
-# hand-edited dependency list a human-review item.
-COPY go.mod go.sum ./
-RUN go mod download
-
+# The whole tree goes in before the module cache is warmed, because this module
+# has a `replace` pointing at a second module in the tree
+# (`./poc/active-monitoring`). A local replace is resolved during the module
+# graph read, so a dependency-first layer that copies only `go.mod`/`go.sum`
+# and runs `go mod download` fails outright — reproduced:
+#
+#     go: github.com/Sergey-Bar/ai-captain-poc@v0.0.0 (replaced by ./poc/active-monitoring):
+#         reading poc\active-monitoring\go.mod: no such file or directory
+#
+# The split is still worth most of what it was worth: `COPY . .` is the layer a
+# source edit invalidates, so the module cache still survives one, because
+# `go mod download` now sits *after* the copy it needed. `-mod=readonly` still
+# means a go.mod that disagrees with go.sum fails the build rather than
+# silently rewriting either — `AGENTS.md` calls a hand-edited dependency list a
+# human-review item.
 COPY . .
+RUN go mod download
 
 # -buildvcs=false because the build context may or may not carry a .git
 # directory, and a build whose binary stamp depends on which context someone sent
