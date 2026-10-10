@@ -1,0 +1,72 @@
+site:
+  id: "demo-site"
+  cameras:
+    - id: "cam-01"
+      zone_ids: ["entrance", "parking"]
+      position:
+        x: 200
+        y: 400
+    - id: "cam-02"
+      zone_ids: ["restricted", "parking"]
+      position:
+        x: 700
+        y: 250
+  zones:
+    - id: "restricted"
+      type: "restricted"
+      name: "Restricted Area"
+      polygon:
+        - x: 550
+          y: 50
+        - x: 950
+          y: 50
+        - x: 950
+          y: 450
+        - x: 550
+          y: 450
+    - id: "entrance"
+      type: "choke"
+      name: "Main Entrance"
+      polygon:
+        - x: 100
+          y: 300
+        - x: 350
+          y: 300
+        - x: 350
+          y: 550
+        - x: 100
+          y: 550
+    - id: "parking"
+      type: "monitor"
+      name: "Parking Lot"
+      polygon:
+        - x: 0
+          y: 0
+        - x: 1280
+          y: 0
+        - x: 1280
+          y: 720
+        - x: 0
+          y: 720
+  routes:
+    - id: "route-01"
+      points:
+        - x: 200
+          y: 550
+        - x: 200
+          y: 300
+        - x: 700
+          y: 300
+        - x: 700
+          y: 50
+      allowed_direction: "forward"
+  assets:
+    - id: "asset-01"
+      name: "Server Room"
+      type: "server_room"
+      zone_id: "restricted"
+      position:
+        x: 750
+        y: 250
+      metadata:
+        criticality: "high"

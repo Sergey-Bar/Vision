@@ -1,0 +1,14 @@
+# The POC's declared camera registry: what `securityctl site-config` reads the
+# fleet's cameras from when it runs against this demo, and what the demo script
+# drives the configurator with.
+#
+# The camera→zone declaration is NOT here: which zones a camera covers is
+# declared once, in poc/sitemap.yaml, and two declarations of it would drift
+# apart. This file answers "which cameras exist and which stream feeds each".
+cameras:
+  - id: "cam-01"
+    name: "City Square"
+    youtube_url: "https://www.youtube.com/watch?v=VGnFLdQW39A"
+  - id: "cam-02"
+    name: "Harbour Road"
+    youtube_url: "https://www.youtube.com/watch?v=JQ_jwk_7OVE"

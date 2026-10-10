@@ -1,0 +1,1405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Live Analytics - POC</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0d1117; color: #e6edf3; min-height: 100vh; padding: 16px;
+        }
+        .container { max-width: 1500px; margin: 0 auto; }
+        header { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 16px; }
+        h1 { font-size: 22px; font-weight: 600; }
+        .subtitle { color: #8b949e; font-size: 13px; }
+        .badge { display: inline-block; padding: 3px 10px; border-radius: 11px; font-size: 11px; font-weight: 600; }
+        .badge.ok { background: #238636; color: #fff; }
+        .badge.warn { background: #d29922; color: #1a1a1a; }
+        .badge.err { background: #da3633; color: #fff; }
+        .badge.dim { background: #21262d; color: #8b949e; border: 1px solid #30363d; }
+
+        .layout { display: grid; grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr); gap: 16px; }
+        @media (max-width: 1080px) { .layout { grid-template-columns: 1fr; } }
+        .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 14px; margin-bottom: 16px; }
+        .card h2 { font-size: 14px; font-weight: 600; margin-bottom: 10px; color: #f0f6fc; display: flex; justify-content: space-between; align-items: center; }
+        .card h2 .hint { font-weight: 400; font-size: 11px; color: #8b949e; }
+
+        .stream-row { display: flex; gap: 8px; margin-bottom: 10px; }
+        .stream-row input {
+            flex: 1; padding: 8px 10px; background: #0d1117; border: 1px solid #30363d;
+            border-radius: 6px; color: #e6edf3; font-size: 13px;
+        }
+        .stream-row input:focus { outline: none; border-color: #58a6ff; }
+        button {
+            background: #238636; color: #fff; border: none; padding: 8px 16px; border-radius: 6px;
+            font-size: 13px; font-weight: 500; cursor: pointer;
+        }
+        button:hover { background: #2ea043; }
+        button.secondary { background: #21262d; border: 1px solid #30363d; }
+        button.secondary:hover { background: #30363d; }
+
+        .player-wrap { position: relative; width: 100%; aspect-ratio: 16 / 9; background: #000; border-radius: 6px; overflow: hidden; }
+        .player-wrap iframe, .player-wrap .yt-slot { position: absolute; inset: 0; width: 100%; height: 100%; }
+        .tile-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 3; }
+
+        /* ---- camera wall ---- */
+        .wall { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+        @media (max-width: 900px) { .wall { grid-template-columns: 1fr; } }
+        .tile { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; overflow: hidden; }
+        .tile.dead { opacity: .75; }
+        .tile-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 12px; border-bottom: 1px solid #21262d; }
+        .tile-head .cam-name { font-weight: 600; }
+        .tile-head .cam-id { color: #6e7681; font-size: 10px; font-family: ui-monospace, SFMono-Regular, monospace; }
+        .tile-head .cam-frames { margin-left: auto; color: #6e7681; font-size: 10px; font-variant-numeric: tabular-nums; }
+        .tile-head .cam-url { max-width: 34%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #6e7681; font-size: 10px; font-family: ui-monospace, SFMono-Regular, monospace; }
+        .health { padding: 2px 8px; border-radius: 9px; font-size: 10px; font-weight: 700; letter-spacing: .3px; text-transform: uppercase; }
+        .health.fresh { background: rgba(63,185,80,.15); color: #3fb950; border: 1px solid rgba(63,185,80,.4); }
+        .health.stale { background: rgba(210,153,34,.15); color: #d29922; border: 1px solid rgba(210,153,34,.4); }
+        .health.silent { background: rgba(248,81,73,.15); color: #f85149; border: 1px solid rgba(248,81,73,.4); }
+        .health.blind { background: rgba(163,113,247,.15); color: #d2a8ff; border: 1px solid rgba(163,113,247,.5); }
+        .tile-reason { padding: 4px 10px; font-size: 10px; color: #8b949e; border-top: 1px solid #21262d; min-height: 18px; }
+        .tile-reason.degraded { color: #d29922; }
+        #briefPanel .row .kind { flex: 0 0 64px; color: #6e7681; font-size: 10px; text-transform: uppercase; }
+        .dump { background: #0d1117; border: 1px solid #21262d; border-radius: 6px; padding: 6px 8px; font-size: 10px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; max-height: 220px; overflow: auto; color: #8b949e; margin: 0; }
+        .tile-sim { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #6e7681; font-size: 12px; background: repeating-linear-gradient(45deg, #0d1117, #0d1117 10px, #10151c 10px, #10151c 20px); }
+        .embed-error {
+            position: absolute; inset: 0; display: none; flex-direction: column; gap: 8px;
+            align-items: center; justify-content: center; background: #0d1117; color: #8b949e;
+            font-size: 13px; text-align: center; padding: 20px; z-index: 1;
+        }
+        .tile .embed-error { font-size: 11px; }
+        .embed-error code { color: #f85149; }
+        .legend { display: flex; gap: 14px; margin-top: 8px; font-size: 11px; color: #8b949e; flex-wrap: wrap; }
+        .legend .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+
+        .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+        .stat { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 8px; text-align: center; }
+        .stat .v { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+        .stat .k { font-size: 10px; color: #8b949e; text-transform: uppercase; letter-spacing: .4px; margin-top: 2px; }
+        .stat.vehicle .v { color: #58a6ff; }
+        .stat.biological .v { color: #3fb950; }
+        .stat.other .v { color: #d29922; }
+        .stat.alert .v { color: #f85149; }
+
+        .feed { max-height: 300px; overflow-y: auto; font-size: 12px; }
+        .feed .row { display: flex; gap: 8px; align-items: center; padding: 4px 6px; border-bottom: 1px solid #21262d; }
+        .feed .row .t { color: #6e7681; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+        .chip { padding: 1px 7px; border-radius: 9px; font-size: 11px; font-weight: 500; white-space: nowrap; }
+        .chip.vehicle { background: rgba(88,166,255,.15); color: #58a6ff; border: 1px solid rgba(88,166,255,.4); }
+        .chip.biological { background: rgba(63,185,80,.15); color: #3fb950; border: 1px solid rgba(63,185,80,.4); }
+        .chip.other { background: rgba(210,153,34,.15); color: #d29922; border: 1px solid rgba(210,153,34,.4); }
+        .chip.stream { background: rgba(210,163,255,.15); color: #d2a8ff; border: 1px solid rgba(210,163,255,.4); }
+        .conf { color: #6e7681; font-size: 11px; margin-left: auto; font-variant-numeric: tabular-nums; }
+
+        .alert-row { animation: flash .6s ease-out; }
+        @keyframes flash { from { background: rgba(248,81,73,.35); } to { background: transparent; } }
+        .sev { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .sev.critical { background: #f85149; }
+        .sev.warning { background: #d29922; }
+        .sev.info { background: #58a6ff; }
+        .alert-row .msg { flex: 1; }
+        .alert-row .kind { font-size: 10px; color: #8b949e; text-transform: uppercase; }
+
+        .search-box { display: flex; gap: 8px; margin-bottom: 10px; }
+        .search-box input {
+            flex: 1; padding: 9px 12px; background: #0d1117; border: 1px solid #30363d;
+            border-radius: 6px; color: #e6edf3; font-size: 14px;
+        }
+        .search-box input:focus { outline: none; border-color: #58a6ff; }
+        .search-meta { font-size: 11px; color: #8b949e; margin-bottom: 8px; display: flex; justify-content: space-between; }
+        .result { border: 1px solid #21262d; border-radius: 6px; padding: 8px; margin-bottom: 6px; font-size: 12px; }
+        .result .head { display: flex; gap: 8px; align-items: center; margin-bottom: 5px; }
+        .result .when { color: #6e7681; font-variant-numeric: tabular-nums; }
+        .result .chips { display: flex; gap: 5px; flex-wrap: wrap; }
+        .empty { color: #6e7681; font-size: 12px; padding: 8px 0; }
+        .rules { font-size: 11px; color: #8b949e; margin-top: 8px; line-height: 1.6; }
+        .rules code { background: #0d1117; padding: 1px 5px; border-radius: 4px; color: #79c0ff; }
+
+        /* ---- autonomy layer ---- */
+        .truth { margin-top: 8px; font-size: 11px; color: #8b949e; }
+        .truth code { color: #d2a8ff; background: #0d1117; padding: 1px 5px; border-radius: 4px; }
+        .strip { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-bottom: 16px; }
+        @media (max-width: 1080px) { .strip { grid-template-columns: repeat(3, 1fr); } }
+        @media (max-width: 640px) { .strip { grid-template-columns: repeat(2, 1fr); } }
+        .kpi { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 8px 10px; }
+        .kpi .v { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+        .kpi .k { font-size: 10px; color: #8b949e; text-transform: uppercase; letter-spacing: .3px; margin-top: 2px; }
+        .kpi.good .v { color: #3fb950; } .kpi.bad .v { color: #f85149; } .kpi.warn .v { color: #d29922; }
+
+        .auto-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 700; letter-spacing: .4px; }
+        .auto-badge.auto { background: #21262d; color: #8b949e; border: 1px solid #30363d; }
+        .auto-badge.verifying { background: rgba(88,166,255,.15); color: #58a6ff; border: 1px solid rgba(88,166,255,.4); }
+        .auto-badge.escalating { background: rgba(248,81,73,.15); color: #f85149; border: 1px solid rgba(248,81,73,.5); }
+        .auto-badge.hold { background: rgba(210,153,34,.15); color: #d29922; border: 1px solid rgba(210,153,34,.5); }
+        .auto-badge .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+        .auto-badge.escalating .dot { animation: pulse 1s ease-in-out infinite; }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
+
+        .sitemap { position: relative; width: 100%; aspect-ratio: 16 / 9; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; overflow: hidden; }
+        .sitemap svg { display: block; width: 100%; height: 100%; }
+        .zone-restricted { fill: rgba(248,81,73,.14); stroke: rgba(248,81,73,.7); }
+        .zone-choke { fill: rgba(210,153,34,.12); stroke: rgba(210,153,34,.6); stroke-dasharray: 5 4; }
+        .zone-monitor { fill: rgba(88,166,255,.08); stroke: rgba(88,166,255,.4); stroke-dasharray: 5 4; }
+        .zone-asset { fill: rgba(63,185,80,.12); stroke: rgba(63,185,80,.5); }
+        .zone-label { fill: #8b949e; font-size: 10px; font-family: sans-serif; }
+        .cam-dot { fill: #58a6ff; }
+        .cam-dot.live { fill: #3fb950; }
+        .cam-dot.stale { fill: #d29922; }
+        .cam-dot.silent, .cam-dot.blind { fill: #f85149; }
+        .cam-dot.blind { stroke: #d2a8ff; stroke-width: 2; }
+        .cam-label { fill: #8b949e; font-size: 9px; font-family: sans-serif; }
+        .route-line { stroke: #a371f7; stroke-width: 2; fill: none; stroke-dasharray: 6 4; opacity: .8; }
+        .ent-dot { fill: #d29922; }
+        .sitemap-legend { display: flex; gap: 12px; margin-top: 6px; font-size: 10px; color: #8b949e; flex-wrap: wrap; }
+
+        .incident { border: 1px solid #30363d; border-radius: 6px; padding: 8px; margin-bottom: 6px; cursor: pointer; background: #0d1117; }
+        .incident:hover { border-color: #58a6ff; }
+        .incident.active { border-left: 3px solid #58a6ff; }
+        .incident.escalating { border-left: 3px solid #f85149; }
+        .incident.verifying { border-left: 3px solid #388bfd; }
+        .incident.resolved { opacity: .55; border-left: 3px solid #3fb950; }
+        .incident .row1 { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; flex-wrap: wrap; }
+        .incident .iid { font-size: 11px; color: #6e7681; font-family: ui-monospace, SFMono-Regular, monospace; }
+        .incident .score { font-weight: 700; font-variant-numeric: tabular-nums; }
+        .incident .s0 { color: #3fb950; } .incident .s1 { color: #d29922; } .incident .s2 { color: #f85149; }
+        .incident .cams { font-size: 10px; color: #6e7681; }
+        .incident .anoms { display: flex; gap: 4px; flex-wrap: wrap; }
+
+        .threatbar { height: 8px; border-radius: 4px; background: #21262d; overflow: hidden; margin: 6px 0; }
+        .threatbar .fill { height: 100%; border-radius: 4px; transition: width .3s ease; }
+        .reasonchain { margin-top: 8px; }
+        .reasonchain .step { display: flex; gap: 6px; align-items: baseline; font-size: 11px; padding: 3px 0; border-bottom: 1px solid #21262d; }
+        .reasonchain .key { font-family: ui-monospace, SFMono-Regular, monospace; color: #79c0ff; white-space: nowrap; }
+        .reasonchain .factor { margin-left: auto; color: #d29922; font-variant-numeric: tabular-nums; }
+        .reasonchain .why { margin-top: 6px; font-size: 11px; color: #8b949e; }
+        .action-badge { display: inline-block; padding: 2px 9px; border-radius: 10px; font-size: 10px; font-weight: 700; letter-spacing: .3px; }
+        .action-badge.observe { background: #21262d; color: #8b949e; }
+        .action-badge.verify { background: rgba(88,166,255,.15); color: #58a6ff; }
+        .action-badge.escalate { background: rgba(248,81,73,.15); color: #f85149; }
+        .action-badge.hold { background: rgba(210,153,34,.15); color: #d29922; }
+
+        .drawer-mask { position: fixed; inset: 0; background: rgba(1,4,9,.6); display: none; z-index: 40; }
+        .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(480px, 100%); background: #161b22; border-left: 1px solid #30363d; transform: translateX(100%); transition: transform .25s ease; z-index: 41; overflow-y: auto; padding: 16px; }
+        .drawer.open { transform: translateX(0); }
+        .drawer-mask.open { display: block; }
+        .drawer h2 { font-size: 14px; margin-bottom: 4px; }
+        .drawer section { margin-top: 14px; padding-top: 12px; border-top: 1px solid #21262d; }
+        .drawer section h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: #8b949e; margin-bottom: 6px; }
+        .drawer .kv { display: flex; gap: 8px; font-size: 11px; padding: 2px 0; }
+        .drawer .kv .k { color: #6e7681; min-width: 110px; }
+        .drawer .kv .v { color: #e6edf3; word-break: break-all; }
+        .drawer .mono { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 10px; color: #79c0ff; }
+        .timeline { margin-top: 4px; }
+        .timeline .tl-row { display: flex; gap: 8px; align-items: baseline; font-size: 11px; padding: 3px 0; }
+        .timeline .t { color: #6e7681; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+        .btn-override { background: #da3633; width: 100%; margin-top: 12px; }
+        .btn-override:hover { background: #f85149; }
+        .btn-close { background: #21262d; border: 1px solid #30363d; width: 100%; margin-top: 6px; }
+        .btn-close:hover { background: #30363d; }
+        .modal-mask { position: fixed; inset: 0; background: rgba(1,4,9,.75); display: none; align-items: center; justify-content: center; z-index: 50; padding: 16px; }
+        .modal-mask.open { display: flex; }
+        .modal { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px; width: min(420px, 100%); }
+        .modal h2 { font-size: 14px; margin-bottom: 8px; }
+        .modal textarea { width: 100%; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #e6edf3; padding: 8px; font-size: 13px; font-family: inherit; min-height: 72px; resize: vertical; }
+        .modal textarea:focus { outline: none; border-color: #f85149; }
+        .modal .modal-actions { display: flex; gap: 8px; margin-top: 10px; }
+        .modal .modal-actions button { flex: 1; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <header>
+        <h1>Autonomous VMS Operator — POC</h1>
+        <span class="badge dim" id="modeBadge">mode: –</span>
+        <span class="badge err" id="wsBadge">ws: connecting</span>
+        <span class="badge dim" id="streamBadge">stream: none</span>
+        <span class="badge dim" id="alarmBadge">alarms: –</span>
+        <span class="auto-badge auto" id="autonomyBadge"><span class="dot"></span><span id="autonomyLabel">AUTO</span></span>
+        <span class="subtitle" id="streamTitle"></span>
+        <div class="truth" style="flex-basis:100%">
+            push target: <code id="truthTarget">local simulator (xpsim)</code>. No real VMS was reachable.
+        </div>
+    </header>
+
+<div class="strip" id="kpiStrip">
+<div class="kpi"><div class="v" id="kpiHam">–</div><div class="k">HAM / 1000</div></div>
+<div class="kpi"><div class="v" id="kpiDecision">–</div><div class="k">time to decision (s)</div></div>
+<div class="kpi"><div class="v" id="kpiCorrelation">–</div><div class="k">correlation hit %</div></div>
+<div class="kpi"><div class="v" id="kpiOverride">–</div><div class="k">override %</div></div>
+<div class="kpi"><div class="v" id="kpiFalseEsc">–</div><div class="k">false escalation %</div></div>
+<div class="kpi"><div class="v" id="kpiZone">–</div><div class="k">zone context %</div></div>
+<div class="kpi"><div class="v" id="kpiIntegrity">100</div><div class="k">absence + audit %</div></div>
+    </div>
+
+    <div class="layout">
+        <div>
+            <div class="card">
+                <h2>Camera Wall <span class="hint" id="wallHint">every camera the fleet runs, each with its own overlay and health state</span></h2>
+                <div class="stream-row">
+                    <input id="streamUrl" placeholder="https://www.youtube.com/watch?v=…  (or a video id)"
+                           value="https://www.youtube.com/watch?v=VGnFLdQW39A">
+                    <button id="loadBtn">Load Stream</button>
+                </div>
+                <div class="wall" id="cameraWall"><div class="empty">Waiting for the fleet…</div></div>
+                <div class="legend">
+                    <span><span class="swatch" style="background:#58a6ff"></span>vehicle</span>
+                    <span><span class="swatch" style="background:#3fb950"></span>biological</span>
+                    <span><span class="swatch" style="background:#d29922"></span>other</span>
+                    <span><span class="swatch" style="background:rgba(248,81,73,.6)"></span>no-zone (entry)</span>
+                    <span><span class="swatch" style="background:rgba(210,153,34,.6)"></span>monitoring zone</span>
+                    <span><span class="swatch" style="background:#3fb950"></span>fresh</span>
+                    <span><span class="swatch" style="background:#d29922"></span>stale</span>
+                    <span><span class="swatch" style="background:#f85149"></span>silent</span>
+                    <span><span class="swatch" style="background:#d2a8ff"></span>blind</span>
+                    <span id="frameHint"></span>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Site Map <span class="hint" id="siteHint">topology from poc/sitemap.yaml</span></h2>
+                <div class="sitemap" id="siteMap"><div class="empty" style="padding:20px">Site model not enabled.</div></div>
+                <div class="sitemap-legend">
+                    <span><span class="swatch" style="background:#f85149"></span>restricted</span>
+                    <span><span class="swatch" style="background:#d29922"></span>choke</span>
+                    <span><span class="swatch" style="background:#58a6ff"></span>monitor</span>
+                    <span><span class="swatch" style="background:#3fb950"></span>asset</span>
+                    <span><span class="swatch" style="background:#58a6ff"></span>camera</span>
+                    <span><span class="swatch" style="background:#a371f7"></span>route</span>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Correlated Incidents <span class="hint" id="corrHint">click for proof + timeline</span></h2>
+                <div class="feed" id="incidentFeed"><div class="empty">No correlated incidents yet.</div></div>
+            </div>
+            <div class="card">
+                <h2>Live Smart Search <span class="hint">queries detections + stream metadata as they arrive</span></h2>
+                <div class="search-box">
+                    <input id="searchInput" placeholder='try: "red car" · "person" · "dog" · "restricted" · stream title'>
+                    <button id="searchBtn">Search</button>
+                </div>
+                <div class="search-meta">
+                    <span id="searchStatus">indexed: 0 frames</span>
+                    <span id="liveMatch">live matches now: –</span>
+                </div>
+                <div id="searchResults"><div class="empty">Type a query to search the live index.</div></div>
+            </div>
+
+            <div class="card">
+                <h2>Detections <span class="hint">newest first</span></h2>
+                <div class="feed" id="detectionFeed"><div class="empty">Waiting for frames…</div></div>
+            </div>
+        </div>
+
+        <div>
+            <div class="card">
+                <h2>Threat &amp; Autonomy</h2>
+                <div id="threatPanel">
+                    <div class="empty">Select a correlated incident to see its threat score and reason chain.</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Shift Hand-Over <span class="hint" id="briefHint">rendered from the duty log — same facts, same bytes</span></h2>
+                <div id="briefPanel">
+                    <div class="empty">No brief yet — one is rendered at the first decision of the shift.</div>
+                </div>
+                <h2 style="margin-top:12px">Duty Log <span class="hint" id="dutyHint">the artifact: hash-chained, one line per decision</span></h2>
+                <div id="dutyPanel">
+                    <div class="empty">No duty log.</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Investigator <span class="hint">one role, and it investigates: a reading of stored facts, cited — never a decision</span></h2>
+                <div class="stream-row">
+                    <input id="askInput" placeholder="Ask about this shift: which zones are under-observed? which cameras went dark?">
+                    <button id="askBtn">Ask</button>
+                </div>
+                <div id="askPanel">
+                    <div class="empty">No question asked yet. With no GPU bound the answer says why, and the box is never empty.</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Site Configurator <span class="hint">the artifact this fleet generates; `securityctl site-config plan` acts on it</span></h2>
+                <div id="siteConfigPanel">
+                    <div class="empty">Loading the configurator's view…</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Analytics Dashboard</h2>
+                <div class="stats">
+                    <div class="stat"><div class="v" id="stFrames">0</div><div class="k">frames</div></div>
+                    <div class="stat"><div class="v" id="stLive">0</div><div class="k">live objects</div></div>
+                    <div class="stat vehicle"><div class="v" id="stVehicle">0</div><div class="k">vehicles</div></div>
+                    <div class="stat biological"><div class="v" id="stBiological">0</div><div class="k">biological</div></div>
+                    <div class="stat other"><div class="v" id="stOther">0</div><div class="k">other</div></div>
+                    <div class="stat alert"><div class="v" id="stAlerts">0</div><div class="k">zone alerts</div></div>
+                    <div class="stat alert"><div class="v" id="stViolations">0</div><div class="k">violations</div></div>
+                    <div class="stat"><div class="v" id="stClients">0</div><div class="k">ws clients</div></div>
+                </div>
+                <div class="rules" id="rulesBox">loading zone rules…</div>
+            </div>
+
+            <div class="card">
+                <h2>Alerts &amp; Rule Violations <span class="hint" id="alertHint">no-zone + dwell rules</span></h2>
+                <div class="feed" id="alertFeed"><div class="empty">No alerts yet.</div></div>
+            </div>
+
+            <div class="card">
+                <h2>Patrol <span class="hint" id="patrolHint">route walks due and checked; both sides leave a duty-log line</span></h2>
+                <div class="stream-row" style="margin-bottom:8px">
+                    <input id="patrolRoute" placeholder="route id" value="route-01">
+                    <input id="patrolCamera" placeholder="camera id (optional)">
+                    <input id="patrolNote" placeholder="note (optional)">
+                    <button id="patrolCheckBtn">Log a check</button>
+                </div>
+                <div class="feed" id="patrolFeed"><div class="empty">No patrol activity yet.</div></div>
+            </div>
+
+            <div class="card">
+                <h2>Stream Metadata</h2>
+                <div id="metaBox" class="empty">Load a stream to ingest its metadata into the index.</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="drawer-mask" id="drawerMask"></div>
+<aside class="drawer" id="proofDrawer" aria-label="Incident proof">
+    <h2>Proof</h2>
+    <div class="subtite" id="drawerId" style="font-size:11px;color:#6e7681"></div>
+    <div id="drawerBody"></div>
+    <button class="btn-override" id="btnOverride">OVERRIDE</button>
+    <button class="btn-close" id="btnCloseDrawer">Close</button>
+</aside>
+
+<div class="modal-mask" id="overrideModal">
+    <div class="modal">
+        <h2>Override incident</h2>
+        <div style="font-size:12px;color:#8b949e;margin-bottom:8px">
+            Autonomy has decided; you are overriding it. The reason is written to the audit ledger with
+            <code>actor=operator</code>.
+        </div>
+        <textarea id="overrideReason" placeholder="Reason (at least 10 characters)"></textarea>
+        <div class="modal-actions">
+            <button class="secondary" id="btnCancelOverride">Cancel</button>
+            <button class="btn-override" id="btnSubmitOverride" style="margin-top:0">Submit override</button>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    'use strict';
+    const FRAME_W = 1280, FRAME_H = 720;
+    const CATEGORY_CLASS = { vehicle: 'vehicle', biological: 'biological', other: 'other' };
+
+    const $ = (id) => document.getElementById(id);
+
+    let ws = null, wsDown = true, retryMs = 1000;
+    let zones = [], rules = [];
+    let counts = { vehicle: 0, biological: 0, other: 0 };
+    let totals = { frames: 0, objects: 0, alerts: 0, violations: 0, index: 0, clients: 0 };
+    let searchQuery = '', searchTimer = null, searchRefreshTimer = null;
+
+    /* ---------- Camera wall ---------- */
+    // One tile per camera the fleet reports. Each tile owns its overlay
+    // canvas, its last frame's objects and (for real streams) its YouTube
+    // player, so detections are attributed to the camera that saw them.
+    const tiles = {}; // cameraID -> tile
+
+    function ensureTile(id, info) {
+        info = info || {};
+        let t = tiles[id];
+        if (t) return t;
+        const wall = $('cameraWall');
+        const empty = wall.querySelector('.empty');
+        if (empty) empty.remove();
+
+        const tile = document.createElement('div');
+        tile.className = 'tile';
+        tile.dataset.cam = id;
+        tile.innerHTML =
+            '<div class="tile-head">' +
+            '<span class="health fresh">fresh</span>' +
+            '<span class="cam-name"></span>' +
+            '<span class="cam-id"></span>' +
+            '<span class="cam-url" title=""></span>' +
+            '<span class="cam-frames">0 frames</span>' +
+            '</div>' +
+            '<div class="player-wrap">' +
+            '<div class="yt-slot" id="player-' + esc(id) + '"></div>' +
+            '<div class="tile-sim" style="display:none">demo simulator — this camera runs on synthetic actors</div>' +
+            '<canvas class="tile-overlay"></canvas>' +
+            '<div class="embed-error"><div class="embed-error-msg">This stream cannot be embedded (owner disabled embed, or the id is wrong).</div>' +
+            '<div>Detections keep flowing either way.</div></div>' +
+            '</div>' +
+            '<div class="tile-reason"></div>';
+        wall.appendChild(tile);
+
+        t = {
+            id: id,
+            el: tile,
+            canvas: tile.querySelector('.tile-overlay'),
+            healthEl: tile.querySelector('.health'),
+            nameEl: tile.querySelector('.cam-name'),
+            idEl: tile.querySelector('.cam-id'),
+            urlEl: tile.querySelector('.cam-url'),
+            framesEl: tile.querySelector('.cam-frames'),
+            reasonEl: tile.querySelector('.tile-reason'),
+            simEl: tile.querySelector('.tile-sim'),
+            slot: tile.querySelector('.yt-slot'),
+            embedErr: tile.querySelector('.embed-error'),
+            embedErrMsg: tile.querySelector('.embed-error-msg'),
+            player: null,
+            videoID: '',
+            objects: [],
+            matched: new Set(),
+            frame: 0,
+        };
+        t.ctx = t.canvas.getContext('2d');
+        tiles[id] = t;
+        return t;
+    }
+
+    // applyFleet reconciles the wall with the fleet's own status rows:
+    // new cameras appear, missing players are created, and each tile's
+    // health state and named reason come from the server rather than from
+    // anything the browser inferred.
+    function applyFleet(cams) {
+        if (!Array.isArray(cams)) return;
+        for (const c of cams) {
+            if (!c || !c.id) continue;
+            const t = ensureTile(c.id, c);
+            t.nameEl.textContent = c.name || c.id;
+            t.idEl.textContent = c.id;
+            const state = c.state || 'fresh';
+            t.healthEl.textContent = state;
+            t.healthEl.className = 'health ' + state;
+            t.el.classList.toggle('dead', state === 'silent' || state === 'blind');
+            if (typeof c.frames === 'number') {
+            // The frames count is the fleet's, and the achieved fps is the
+            // same counters read over time — the honest measure of whether a
+            // camera's configured rate is what the fleet is delivering, which
+            // the shared sidecar's serialized round trip can quietly halve.
+            var label = c.frames + ' frames';
+            if (typeof c.fps_avg === 'number' && c.fps_avg > 0) {
+                label += ' · ' + c.fps_avg.toFixed(2) + ' fps';
+            }
+            t.framesEl.textContent = label;
+        }
+        // The stream this tile reads, so a named camera has a named source
+        // beside it rather than an operator matching ids to URLs by hand.
+        if (c.url) {
+            t.urlEl.textContent = c.url;
+            t.urlEl.title = c.url;
+        }
+            const reason = c.reason || '';
+            t.reasonEl.textContent = reason;
+            t.reasonEl.classList.toggle('degraded', !!reason);
+            const isSim = c.kind === 'sim';
+            t.simEl.style.display = isSim ? 'flex' : 'none';
+            if (c.video_id && c.video_id !== t.videoID) {
+                t.videoID = c.video_id;
+                createPlayer(c.video_id, t);
+            }
+            drawTile(t);
+        }
+        refreshSiteMapHealth();
+    }
+
+    /* ---------- WebSocket ---------- */
+    function connect() {
+        const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+        ws = new WebSocket(proto + '://' + location.host + '/ws');
+        ws.onopen = () => {
+            wsDown = false; retryMs = 1000;
+            $('wsBadge').textContent = 'ws: connected';
+            $('wsBadge').className = 'badge ok';
+        };
+        ws.onclose = () => {
+            wsDown = true;
+            $('wsBadge').textContent = 'ws: reconnecting';
+            $('wsBadge').className = 'badge err';
+            setTimeout(connect, retryMs);
+            retryMs = Math.min(retryMs * 2, 8000);
+        };
+        ws.onerror = () => ws.close();
+        ws.onmessage = (ev) => {
+            let msg;
+            try { msg = JSON.parse(ev.data); } catch (e) { return; }
+            handle(msg);
+        };
+    }
+
+    function handle(msg) {
+        switch (msg.type) {
+            case 'detection': onDetection(msg); break;
+            case 'spatial': onSpatial(msg); break;
+            case 'violation': onViolation(msg); break;
+            case 'status': onStatus(msg); break;
+            case 'search_index': onIndexUpdate(msg); break;
+            case 'stream': onStreamInfo(msg.data); break;
+            case 'correlated': onCorrelated(msg); break;
+            case 'threat': onThreat(msg); break;
+            case 'autonomy': onAutonomy(msg); break;
+            case 'brief': onBrief(msg.data); break;
+            case 'patrol': onPatrol(msg); break;
+        }
+    }
+
+    /* ---------- Detections ---------- */
+    function onDetection(msg) {
+        const data = msg.data || {};
+        const camID = data.camera_id || 'unknown';
+        const t = ensureTile(camID);
+        t.objects = data.objects || [];
+        t.frame = data.frame || 0;
+        counts = data.counts || counts;
+        totals.frames = Math.max(totals.frames, t.frame);
+        totals.objects += t.objects.length;
+
+        let live = 0, vehicles = 0, biological = 0, other = 0;
+        for (const id in tiles) {
+            live += tiles[id].objects.length;
+            for (const o of tiles[id].objects) {
+                if (o.category === 'vehicle') vehicles++;
+                else if (o.category === 'biological') biological++;
+                else other++;
+            }
+        }
+
+        $('stFrames').textContent = totals.frames;
+        $('stLive').textContent = live;
+        $('stVehicle').textContent = vehicles;
+        $('stBiological').textContent = biological;
+        $('stOther').textContent = other;
+
+        appendDetectionRows(msg.timestamp, camID, t.objects);
+        computeLiveMatches();
+        drawTile(t);
+    }
+
+    function appendDetectionRows(ts, camID, objects) {
+        const feed = $('detectionFeed');
+        if (feed.querySelector('.empty')) feed.innerHTML = '';
+        const time = new Date(ts).toLocaleTimeString('en-GB', { hour12: false });
+        const camName = (tiles[camID] && tiles[camID].nameEl.textContent) || camID;
+        for (let i = objects.length - 1; i >= 0; i--) {
+            const o = objects[i];
+            const row = document.createElement('div');
+            row.className = 'row';
+            const t = document.createElement('span');
+            t.className = 't'; t.textContent = time;
+            const chip = document.createElement('span');
+            chip.className = 'chip ' + (CATEGORY_CLASS[o.category] || 'other');
+            chip.textContent = o.label + (o.sub_category && o.sub_category !== o.label ? ' · ' + o.sub_category : '');
+            const cam = document.createElement('span');
+            cam.className = 'chip stream'; cam.textContent = camName;
+            const conf = document.createElement('span');
+            conf.className = 'conf'; conf.textContent = (o.confidence || 0).toFixed(2);
+            row.append(t, chip, cam, conf);
+            feed.prepend(row);
+        }
+        while (feed.children.length > 40) feed.removeChild(feed.lastChild);
+    }
+
+    /* ---------- Alerts ---------- */
+    function onSpatial(msg) {
+        const alerts = (msg.data && msg.data.alerts) || [];
+        for (const a of alerts) {
+            totals.alerts++;
+            pushAlert({
+                severity: a.severity || 'info',
+                kind: a.alert_type === 'dwell' ? 'dwell' : 'zone entry',
+                text: (a.object_label || 'object') + ' → ' + a.zone_name + ' (' + a.alert_type + ')'
+            });
+        }
+        $('stAlerts').textContent = totals.alerts;
+    }
+
+    function onViolation(msg) {
+        const v = msg.data || {};
+        totals.violations++;
+        $('stViolations').textContent = totals.violations;
+        pushAlert({
+            severity: v.severity || 'critical',
+            kind: 'rule violated',
+            text: v.rule_id + ': ' + v.object_label + ' (' + v.object_category + ') in ' + v.zone_name
+        });
+    }
+
+    function pushAlert(a) {
+        const feed = $('alertFeed');
+        if (feed.querySelector('.empty')) feed.innerHTML = '';
+        const row = document.createElement('div');
+        row.className = 'row alert-row';
+        const sev = document.createElement('span');
+        sev.className = 'sev ' + a.severity;
+        const kind = document.createElement('span');
+        kind.className = 'kind'; kind.textContent = a.kind;
+        const msg = document.createElement('span');
+        msg.className = 'msg'; msg.textContent = a.text;
+        row.append(sev, kind, msg);
+        feed.prepend(row);
+        while (feed.children.length > 30) feed.removeChild(feed.lastChild);
+    }
+
+    function onStatus(msg) {
+        const d = msg.data || {};
+        if (d.mode) $('modeBadge').textContent = 'mode: ' + d.mode;
+        if (d.cameras) applyFleet(d.cameras);
+        if (typeof d.frames_processed === 'number' && d.frames_processed > totals.frames) {
+            totals.frames = d.frames_processed; $('stFrames').textContent = totals.frames;
+        }
+        if (typeof d.alerts_total === 'number') { totals.alerts = d.alerts_total; $('stAlerts').textContent = totals.alerts; }
+        if (typeof d.violations_total === 'number') { totals.violations = d.violations_total; $('stViolations').textContent = totals.violations; }
+        if (typeof d.connected_clients === 'number') $('stClients').textContent = d.connected_clients;
+        if (typeof d.index_size === 'number') {
+            totals.index = d.index_size;
+            if (!searchQuery) $('searchStatus').textContent = 'indexed: ' + totals.index + ' frames';
+        }
+        const badge = $('streamBadge');
+        if (badge && d.source) {
+            badge.textContent = 'fleet: ' + d.source + (d.source_reason ? ' — ' + d.source_reason : '');
+            badge.className = 'badge ' + (d.source === 'cameras' ? 'ok' : d.source === 'sim' ? 'warn' : 'dim');
+        }
+        // The alarm budget band is where this hour's escalations sit against
+        // the playbook's own hourly limit — the number that tells a shift it
+        // is burning a budget rather than discovering it afterwards.
+        if (d.alarm_budget) {
+            const b = $('alarmBadge');
+            if (b) {
+                b.textContent = 'alarms: ' + d.alarm_budget + ' (' + (d.escalations_last_hour || 0) + '/' + (d.escalation_budget_per_hour || 0) + ' per hour)';
+                b.className = 'badge ' + (d.alarm_budget === 'within_budget' ? 'dim' : d.alarm_budget === 'unbounded' ? 'dim' : d.alarm_budget === 'over_budget' ? 'err' : 'warn');
+            }
+        }
+    }
+
+    /* ---------- Overlay ---------- */
+    function drawTile(t) {
+        const wrap = t.canvas.parentElement;
+        const cw = wrap.clientWidth, ch = wrap.clientHeight;
+        if (t.canvas.width !== cw || t.canvas.height !== ch) { t.canvas.width = cw; t.canvas.height = ch; }
+        const ctx = t.ctx;
+        ctx.clearRect(0, 0, cw, ch);
+        const s = Math.min(cw / FRAME_W, ch / FRAME_H);
+        const ox = (cw - FRAME_W * s) / 2, oy = (ch - FRAME_H * s) / 2;
+        const X = (x) => ox + x * s, Y = (y) => oy + y * s;
+
+        // Zones
+        for (const z of zones) {
+            if (!z.polygon || !z.polygon.length) continue;
+            ctx.beginPath();
+            z.polygon.forEach((p, i) => i ? ctx.lineTo(X(p.x), Y(p.y)) : ctx.moveTo(X(p.x), Y(p.y)));
+            ctx.closePath();
+            const noZone = z.type === 'no-entry' || z.type === 'restricted';
+            ctx.fillStyle = noZone ? 'rgba(248,81,73,0.14)' : 'rgba(210,153,34,0.10)';
+            ctx.strokeStyle = noZone ? 'rgba(248,81,73,0.75)' : 'rgba(210,153,34,0.6)';
+            ctx.lineWidth = 1.5;
+            if (!noZone) ctx.setLineDash([6, 4]);
+            ctx.fill(); ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillStyle = noZone ? '#f85149' : '#d29922';
+            ctx.font = '11px sans-serif';
+            ctx.fillText(z.name + (noZone ? ' · NO-ZONE' : ''), X(z.polygon[0].x) + 4, Y(z.polygon[0].y) + 14);
+        }
+
+        // Detections
+        for (const o of t.objects) {
+            const b = o.bbox; if (!b) continue;
+            const color = o.category === 'vehicle' ? '#58a6ff' : o.category === 'biological' ? '#3fb950' : '#d29922';
+            const matched = t.matched.has(o.id);
+            ctx.strokeStyle = matched ? '#ffe066' : color;
+            ctx.lineWidth = matched ? 3 : 2;
+            ctx.strokeRect(X(b.x), Y(b.y), b.width * s, b.height * s);
+            const label = o.label + ' ' + (o.confidence || 0).toFixed(2);
+            ctx.font = '11px sans-serif';
+            const tw = ctx.measureText(label).width + 8;
+            const ly = Math.max(0, Y(b.y) - 16);
+            ctx.fillStyle = matched ? '#ffe066' : color;
+            ctx.fillRect(X(b.x), ly, tw, 15);
+            ctx.fillStyle = '#0d1117';
+            ctx.fillText(label, X(b.x) + 4, ly + 11);
+        }
+    }
+    function drawAllTiles() { for (const id in tiles) drawTile(tiles[id]); }
+    window.addEventListener('resize', drawAllTiles);
+
+    /* ---------- Zones + rules ---------- */
+    function loadZones() {
+        fetch('/api/zones').then(r => r.json()).then(z => {
+            zones = z.zones || [];
+            rules = z.rules || [];
+            $('frameHint').textContent = 'frame ' + (z.frame ? z.frame.width + '×' + z.frame.height : '');
+            if (rules.length) {
+                $('rulesBox').innerHTML = rules.map(r =>
+                    '<div><code>' + esc(r.id) + '</code> — ' + (r.categories || []).join('/') +
+                    ' must not enter <code>' + esc(r.zone_id) + '</code> (' + esc(r.severity || 'warning') + ')</div>'
+                ).join('');
+            } else {
+                $('rulesBox').textContent = 'no zone rules configured.';
+            }
+            drawAllTiles();
+        }).catch(() => {});
+    }
+
+    /* ---------- Search ---------- */
+    function tokens(q) { return q.toLowerCase().split(/\s+/).filter(Boolean); }
+    function objectMatches(o, toks) {
+        const hay = [o.label, o.category, o.sub_category]
+            .concat(Object.values(o.attributes || {}).map(v => String(v)))
+            .join(' ').toLowerCase();
+        return toks.every(t => hay.includes(t));
+    }
+    function computeLiveMatches() {
+        let total = 0;
+        for (const id in tiles) {
+            const t = tiles[id];
+            if (!searchQuery) { t.matched = new Set(); continue; }
+            const toks = tokens(searchQuery);
+            t.matched = new Set(t.objects.filter(o => objectMatches(o, toks)).map(o => o.id));
+            total += t.matched.size;
+        }
+        $('liveMatch').textContent = searchQuery ? ('live matches now: ' + total) : 'live matches now: –';
+    }
+    function runSearch() {
+        const q = $('searchInput').value.trim();
+        searchQuery = q;
+        computeLiveMatches();
+        drawAllTiles();
+        if (!q) {
+            $('searchResults').innerHTML = '<div class="empty">Type a query to search the live index.</div>';
+            $('searchStatus').textContent = 'indexed: ' + totals.index + ' frames';
+            return;
+        }
+        fetch('/api/search', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: q, limit: 25 })
+        }).then(r => r.json()).then(renderResults).catch(() => {});
+    }
+    function renderResults(res) {
+        const box = $('searchResults');
+        const entries = res.entries || [];
+        $('searchStatus').textContent = entries.length + ' / ' + res.total + ' frames matched · ' + res.query_time_ms + ' ms';
+        if (!entries.length) {
+            box.innerHTML = '<div class="empty">No indexed frames match “' + esc(searchQuery) + '” yet — the index fills as the stream runs.</div>';
+            return;
+        }
+        box.innerHTML = '';
+        for (const e of entries.slice().reverse()) {
+            const div = document.createElement('div');
+            div.className = 'result';
+            const head = document.createElement('div');
+            head.className = 'head';
+            const when = document.createElement('span');
+            when.className = 'when';
+            when.textContent = new Date(e.timestamp).toLocaleTimeString('en-GB', { hour12: false });
+            head.appendChild(when);
+            const chips = document.createElement('div');
+            chips.className = 'chips';
+            const seen = new Set();
+            for (const c of (e.categories || [])) {
+                const key = c.label + '|' + c.category;
+                if (seen.has(key)) continue;
+                seen.add(key);
+                const chip = document.createElement('span');
+                chip.className = 'chip ' + (CATEGORY_CLASS[c.category] || (c.category === 'stream' ? 'stream' : 'other'));
+                chip.textContent = c.label;
+                chips.appendChild(chip);
+            }
+            for (const a of (e.spatial_alerts || [])) {
+                const chip = document.createElement('span');
+                chip.className = 'chip other';
+                chip.textContent = '⚑ ' + a.zone_name;
+                chips.appendChild(chip);
+            }
+            div.append(head, chips);
+            box.appendChild(div);
+        }
+    }
+    $('searchInput').addEventListener('input', () => {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(runSearch, 300);
+    });
+    $('searchBtn').addEventListener('click', runSearch);
+
+    function onIndexUpdate(msg) {
+        totals.index = (msg.data && msg.data.total) || totals.index + 1;
+        if (!searchQuery) $('searchStatus').textContent = 'indexed: ' + totals.index + ' frames';
+        if (searchQuery && !searchRefreshTimer) {
+            // Re-run the active query at most every 2s while the index grows.
+            searchRefreshTimer = setTimeout(() => { searchRefreshTimer = null; runSearch(); }, 2000);
+        }
+    }
+
+    /* ---------- Stream / player ---------- */
+    $('loadBtn').addEventListener('click', loadStream);
+    $('streamUrl').addEventListener('keydown', (e) => { if (e.key === 'Enter') loadStream(); });
+
+    function onStreamInfo(info) {
+        if (!info || !info.video_id) return;
+        $('streamBadge').textContent = 'stream: ' + info.video_id;
+        $('streamBadge').className = info.source === 'metadata' ? 'badge ok' : 'badge warn';
+        $('streamTitle').textContent = (info.title || 'metadata unavailable') +
+            (info.author ? ' — ' + info.author : '');
+        const meta = $('metaBox');
+        meta.className = '';
+        meta.innerHTML =
+            '<div class="result"><div class="head"><span class="when">' + esc(info.set_at || '') + '</span>' +
+            '<span class="chip stream">' + esc(info.source || 'none') + '</span></div>' +
+            '<div class="chips"><span class="chip stream">' + esc(info.title || 'no title') + '</span>' +
+            (info.author ? '<span class="chip stream">' + esc(info.author) + '</span>' : '') + '</div></div>' +
+            '<div class="empty">video id ' + esc(info.video_id) + ' — indexed for smart search.</div>';
+    }
+
+    let ytReady = false;
+    const pendingPlayers = []; // [{videoID, tile}] waiting for the iframe API
+    window.onYouTubeIframeAPIReady = function () {
+        ytReady = true;
+        while (pendingPlayers.length) {
+            const p = pendingPlayers.shift();
+            spawnPlayer(p.videoID, p.tile);
+        }
+    };
+    const ytScript = document.createElement('script');
+    ytScript.src = 'https://www.youtube.com/iframe_api';
+    document.head.appendChild(ytScript);
+
+    // createPlayer gives one tile its own YouTube player. The fleet's tiles
+    // get theirs from the status rows; the manual stream gets its from the
+    // Load Stream button.
+    function createPlayer(videoId, t) {
+        t.embedErr.style.display = 'none';
+        if (!ytReady) { pendingPlayers.push({ videoID: videoId, tile: t }); return; }
+        spawnPlayer(videoId, t);
+    }
+
+    function spawnPlayer(videoId, t) {
+        if (t.player && t.player.loadVideoById) { t.player.loadVideoById(videoId); return; }
+        t.player = new YT.Player(t.slot.id, {
+            videoId: videoId,
+            playerVars: { autoplay: 1, mute: 1, playsinline: 1, rel: 0 },
+            events: {
+                onReady: (e) => { try { e.target.playVideo(); } catch (err) {} },
+                onError: (e) => {
+                    const code = e && e.data;
+                    const known = {
+                        2: 'invalid video id',
+                        5: 'the HTML5 player cannot play this codec in this browser',
+                        100: 'video not found (removed or private)',
+                        101: 'owner disabled embedded playback',
+                        150: 'owner disabled embedded playback',
+                        153: 'owner disabled embedded playback'
+                    };
+                    t.embedErrMsg.innerHTML = 'YouTube player error <code>' + esc(code) + '</code> — ' +
+                        esc(known[code] || 'unknown error');
+                    t.embedErr.style.display = 'flex';
+                }
+            }
+        });
+    }
+
+    function loadStream() {
+        const url = $('streamUrl').value.trim();
+        if (!url) return;
+        $('loadBtn').disabled = true;
+        fetch('/api/stream', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: url })
+        }).then(r => {
+            if (!r.ok) throw new Error('bad url');
+            return r.json();
+        }).then(info => {
+            $('loadBtn').disabled = false;
+            onStreamInfo(info);
+            // The manually loaded stream is the fleet's "manual" camera:
+            // its tile appears here and its frames arrive with that id.
+            const t = ensureTile('manual');
+            t.nameEl.textContent = info.title || 'Manual stream';
+            if (info.video_id) createPlayer(info.video_id, t);
+        }).catch(() => {
+            $('loadBtn').disabled = false;
+            const badge = $('streamBadge');
+            badge.textContent = 'stream: bad URL';
+            badge.className = 'badge err';
+        });
+    }
+
+    function esc(s) {
+        return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
+    /* ---------- Autonomy layer ---------- */
+    let site = null;
+    let incidents = [];
+    let selectedIncidentID = null;
+    let kpiTimer = null, incidentTimer = null;
+    // second-sight verdicts, per incident id, from the ws `autonomy` message.
+    let sightByIncident = {};
+
+    function onCorrelated(msg) {
+        const inc = msg.data && (msg.data.incident || msg.data);
+        if (!inc || !inc.ID) return;
+        const i = incidents.findIndex(x => x.ID === inc.ID);
+        if (i >= 0) incidents[i] = inc; else incidents.unshift(inc);
+        if (incidents.length > 20) incidents.pop();
+        renderIncidents();
+        renderAutonomy(inc);
+    }
+
+    function onThreat(msg) {
+        const inc = msg.data && msg.data;
+        if (!inc) return;
+        if (inc.AutonomyState || inc.autonomy_state) setAutonomyBadge(inc.AutonomyState || inc.autonomy_state);
+        if (selectedIncidentID && (inc.ID === selectedIncidentID)) renderThreat(inc);
+        renderIncidents();
+    }
+
+    /* ---------- Patrol ---------- */
+    // A patrol reminder and a patrol check are two halves of one record: the
+    // reminder says walk route-01 and which cameras to look at, the check
+    // says the operator did. Both are duty-log lines, so the hand-over shows
+    // the walk rather than an operator's memory of it.
+    function onPatrol(msg) {
+        const d = msg.data || {};
+        const feed = $('patrolFeed');
+        if (feed.querySelector('.empty')) feed.innerHTML = '';
+        const row = document.createElement('div');
+        row.className = 'alert-row patrol';
+        if (d.kind === 'due') {
+            row.innerHTML = '<span class="sev">due</span><span class="msg">walk ' + esc(d.route_id || '?') +
+                ' · ' + (d.points || 0) + ' points · cameras: ' + esc((d.cameras || []).join(', ') || 'none declared') +
+                '</span><span class="kind">' + esc(d.due || '') + '</span>';
+        } else if (d.kind === 'checked') {
+            row.innerHTML = '<span class="sev" style="color:#3fb950">checked</span><span class="msg">' + esc(d.route_id || '?') +
+                (d.camera_id ? ' · ' + esc(d.camera_id) : '') +
+                (d.note ? ' · ' + esc(d.note) : '') + '</span><span class="kind">' + esc(d.at || '') + '</span>';
+        } else {
+            return;
+        }
+        feed.prepend(row);
+        while (feed.children.length > 20) feed.removeChild(feed.lastChild);
+    }
+
+    $('patrolCheckBtn').addEventListener('click', () => {
+        const body = {
+            route_id: $('patrolRoute').value.trim(),
+            camera_id: $('patrolCamera').value.trim(),
+            note: $('patrolNote').value.trim(),
+        };
+        if (!body.route_id) return;
+        $('patrolCheckBtn').disabled = true;
+        fetch('/api/patrol', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        }).then(r => r.json()).then(info => {
+            $('patrolCheckBtn').disabled = false;
+            onPatrol({ data: { kind: 'checked', route_id: info.route_id, camera_id: info.camera_id,
+                note: body.note, at: new Date().toISOString() } });
+        }).catch(() => { $('patrolCheckBtn').disabled = false; });
+    });
+
+    /* ---------- Shift hand-over brief ---------- */
+    // The brief is the duty log rendered: the same facts the JSONL artifact
+    // holds, so this panel is a view of the log, never a second copy of it.
+    function onBrief(b) { renderBrief(b || {}); }
+    function renderBrief(b) {
+        const p = $('briefPanel');
+        if (!p) return;
+        if (b.error) { p.innerHTML = '<div class="empty">' + esc(b.error) + '.</div>'; return; }
+        if (!b.headline) { p.innerHTML = '<div class="empty">No brief yet — one is rendered at the first decision of the shift.</div>'; return; }
+        const counts = (b.incidents || []).length + ' incidents · ' + (b.actions || []).length + ' actions · ' +
+            (b.open_items || []).length + ' open';
+        let items = '';
+        for (const o of (b.open_items || []).slice(0, 12)) {
+            items += '<div class="row"><span class="kind">' + esc(o.Kind || o.kind || '') + '</span>' +
+                '<span class="msg">' + esc(o.Summary || o.summary || '') + '</span></div>';
+        }
+        if (!items) items = '<div class="empty">nothing open.</div>';
+        p.innerHTML =
+            '<div style="margin-bottom:4px">' + esc(b.headline) + '</div>' +
+            '<div style="font-size:11px;color:#8b949e;margin-bottom:6px">' + esc(counts) + ' · shift ' +
+            esc(b.shift || '–') + ' · generated ' + esc(fmtTime(b.generated_at || b.GeneratedAt)) + '</div>' +
+            '<div class="feed" style="max-height:180px;overflow:auto">' + items + '</div>';
+    }
+
+    function onAutonomy(msg) {
+        const d = msg.data || {};
+        if (d.state) setAutonomyBadge(d.state);
+        // The second-sight verdict is declaration-based corroboration: one
+        // camera's sighting never escalates on its own. Stored per incident so
+        // the threat panel and the feed can show what the autonomy layer knew.
+        if (d.second_sight && d.incident_id) {
+            sightByIncident[d.incident_id] = d.second_sight;
+        }
+        if (d.incident_id && d.incident_id === selectedIncidentID) openProof(d.incident_id);
+    }
+
+    function setAutonomyBadge(state) {
+        const el = $('autonomyBadge'), label = $('autonomyLabel');
+        if (!el) return;
+        const s = (state || 'AUTO').toUpperCase();
+        const cls = s === 'VERIFYING' ? 'verifying' : s === 'ESCALATING' ? 'escalating' : s === 'HOLD' ? 'hold' : 'auto';
+        el.className = 'auto-badge ' + cls;
+        label.textContent = s;
+    }
+    function renderAutonomy(inc) { setAutonomyBadge(inc.AutonomyState); }
+
+    function scoreClass(s) { return s >= 60 ? 's2' : s >= 30 ? 's1' : 's0'; }
+
+    function actionClass(a) {
+        const x = (a || 'observe').toUpperCase();
+        return x === 'ESCALATE' ? 'escalate' : x === 'VERIFY' ? 'verify' : x === 'HOLD' ? 'hold' : 'observe';
+    }
+
+    function renderIncidents() {
+        const feed = $('incidentFeed');
+        if (!feed) return;
+        if (!incidents.length) { feed.innerHTML = '<div class="empty">No correlated incidents yet.</div>'; return; }
+        if (feed.querySelector('.empty')) feed.innerHTML = '';
+        feed.innerHTML = '';
+        for (const inc of incidents) {
+            const st = (inc.AutonomyState || 'auto').toLowerCase();
+            const div = document.createElement('div');
+            div.className = 'incident ' + st + (inc.ID === selectedIncidentID ? ' selected' : '');
+            const cams = (inc.CameraIDs || []).map(esc).join(', ') || '–';
+            const anoms = (inc.Anomalies || []).map(a => '<span class="chip other">' + esc(a.type) + '</span>').join('');
+            const sight = sightByIncident[inc.ID];
+            const sightChip = sight
+                ? '<span class="chip stream" title="' + esc(sight.Reason || sight.reason || '') + '">second sight: ' + esc(sight.Verdict || sight.verdict || '') + '</span>'
+                : '';
+            div.innerHTML =
+                '<div class="row1"><span class="badge dim">' + esc(inc.State || 'ACTIVE') + '</span>' +
+                '<span class="score ' + scoreClass(inc.ThreatScore || 0) + '">' + (inc.ThreatScore || 0) + '</span>' +
+                '<span class="action-badge ' + actionClass(inc.Action) + '">' + esc(inc.Action || 'OBSERVE') + '</span>' +
+                '<span class="cams">' + cams + '</span>' + sightChip +
+                '<span class="iid">' + esc(inc.ID) + '</span></div>' +
+                '<div class="anoms">' + anoms + '</div>';
+            div.addEventListener('click', () => { selectedIncidentID = inc.ID; renderIncidents(); openProof(inc.ID); renderThreat(inc); });
+            feed.appendChild(div);
+        }
+    }
+
+    function renderThreat(inc) {
+        const p = $('threatPanel');
+        if (!p) return;
+        const score = inc.ThreatScore || 0;
+        const pct = Math.max(0, Math.min(100, score));
+        const color = score >= 60 ? '#f85149' : score >= 30 ? '#d29922' : '#3fb950';
+        let steps = '';
+        for (const s of ((inc.ReasonChain && inc.ReasonChain.Steps) || [])) {
+            steps += '<div class="step"><span class="key">' + esc(s.key) + '</span>' +
+                '<span>' + esc(s.rule) + '</span>' +
+                (s.evidence ? '<span style="color:#6e7681">· ' + esc(s.evidence) + '</span>' : '') +
+                '<span class="factor">+' + (s.factor || 0) + '</span></div>';
+        }
+        p.innerHTML =
+            '<div style="display:flex;gap:8px;align-items:baseline;margin-bottom:4px">' +
+            '<span style="font-size:24px;font-weight:700" class="' + scoreClass(score) + '">' + score + '</span>' +
+            '<span style="font-size:11px;color:#8b949e">threat score</span>' +
+            '<span style="margin-left:auto" class="action-badge ' + actionClass(inc.Action) + '">' + esc(inc.Action || 'OBSERVE') + '</span></div>' +
+            '<div class="threatbar"><div class="fill" style="width:' + pct + '%;background:' + color + '"></div></div>' +
+            sightHTML(inc.ID) +
+            '<div class="reasonchain">' + (steps || '<div class="empty">No reason steps recorded.</div>') +
+            '<div class="why">' + esc((inc.ReasonChain && inc.ReasonChain.Why) || 'no explanation') + '</div></div>';
+    }
+
+    // sightHTML renders the second-sight verdict: corroborated, single
+    // sighting, or cannot tell. It is the reason an escalation may be held at
+    // verify — one camera's sighting never escalates on its own.
+    function sightHTML(id) {
+        const s = sightByIncident[id];
+        if (!s) return '';
+        const verdict = s.Verdict || s.verdict || '';
+        const cls = verdict === 'corroborated' ? 'ok' : verdict === 'single_sighting' ? 'warn' : 'err';
+        return '<div style="margin:6px 0"><span class="badge ' + cls + '">second sight: ' + esc(verdict) + '</span>' +
+            '<div style="font-size:11px;color:#8b949e;margin-top:2px">' + esc(s.Reason || s.reason || '') + '</div></div>';
+    }
+
+    /* ---------- Duty log + configurator ---------- */
+    // Both panels are views of artifacts the server writes: the duty log is
+    // the hash-chained record and the configurator is the same artifact the
+    // CLI plans against. Neither is rendered from anything but the server's
+    // own state, so a page refresh cannot invent a fact.
+    function renderDuty(d) {
+        const p = $('dutyPanel');
+        if (!p) return;
+        if (!d || d.error) { p.innerHTML = '<div class="empty">' + esc((d && d.error) || 'no duty log') + '</div>'; return; }
+        const verified = d.verification === 'ok' ? '<span class="badge ok">chain verifies</span>' : '<span class="badge err">chain broken: ' + esc(d.verification || '') + '</span>';
+        let body = '<div style="font-size:11px;margin-bottom:4px">' + verified +
+            ' <span style="color:#6e7681">' + (d.lines || 0) + ' lines · head ' + esc(String(d.head_hash || '').slice(0, 16)) + '…</span></div>';
+        if (d.dump_note) { body += '<div style="font-size:10px;color:#8b949e;margin-bottom:2px">' + esc(d.dump_note) + '</div>'; }
+        body += '<pre class="dump">' + esc(d.dump || '') + '</pre>';
+        p.innerHTML = body;
+    }
+
+    function renderSiteConfig(d) {
+        const p = $('siteConfigPanel');
+        if (!p) return;
+        if (!d || d.error) { p.innerHTML = '<div class="empty">' + esc((d && d.error) || 'no artifact') + '</div>'; return; }
+        let body = '<div style="font-size:11px;color:#8b949e;margin-bottom:6px">digest ' + esc(d.digest || '') +
+            ' · capture ceiling ' + (d.capture_limits ? d.capture_limits.ceiling_fps : '–') + ' fps</div>';
+        body += '<pre class="dump">' + esc(d.summary || '') + '</pre>';
+        if (d.assumed_entries && d.assumed_entries.length) {
+            body += '<div style="font-size:11px;color:#d29922;margin:6px 0">assumed (needs a human): ' +
+                esc(d.assumed_entries.join('; ')) + '</div>';
+        }
+        if (d.learned_zones && d.learned_zones.length) {
+            body += '<div style="font-size:11px;color:#d29922;margin-bottom:6px">learned proposals (a human promotes): ' +
+                esc(d.learned_zones.join('; ')) + '</div>';
+        }
+        p.innerHTML = body;
+    }
+
+    function pollDutyAndConfig() {
+        fetch('/api/dutylog').then(r => r.json()).then(renderDuty).catch(() => {});
+        fetch('/api/site-config').then(r => r.json()).then(renderSiteConfig).catch(() => {});
+    }
+
+    /* ---------- The investigator ---------- */
+    // A reading of stored facts with its citations, or the named reason the
+    // plane could not answer. Both render; neither is an empty box.
+    $('askBtn').addEventListener('click', askQuestion);
+    $('askInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') askQuestion(); });
+
+    function askQuestion() {
+        const q = $('askInput').value.trim();
+        if (!q) return;
+        $('askBtn').disabled = true;
+        fetch('/api/investigate', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ question: q }),
+        }).then(r => r.json()).then(renderAnswer).catch(() => {
+            $('askPanel').innerHTML = '<div class="empty">the investigator could not be reached.</div>';
+            $('askBtn').disabled = false;
+        });
+    }
+
+    function renderAnswer(a) {
+        $('askBtn').disabled = false;
+        const p = $('askPanel');
+        if (!p) return;
+        if (!a || a.degraded) {
+            p.innerHTML = '<div class="empty">' + esc((a && a.degraded_detail) || 'the investigator could not answer') +
+                ' <span class="badge warn">' + esc((a && a.degraded_reason) || 'degraded') + '</span></div>';
+            return;
+        }
+        const cites = (a.citations || []).map(esc).join(', ');
+        p.innerHTML =
+            '<div style="font-size:13px;margin-bottom:6px">' + esc(a.answer) + '</div>' +
+            '<div style="font-size:11px;color:#8b949e">cited: ' + cites +
+            ' · facts considered: ' + (a.facts_considered || []).length +
+            (a.model ? ' · model ' + esc(a.model) : '') +
+            (a.latency_ms ? ' · ' + a.latency_ms + 'ms' : '') + '</div>';
+    }
+
+    function loadSite() {
+        fetch('/api/site').then(r => r.json()).then(renderSiteMap).catch(() => {});
+    }
+
+    function renderSiteMap(s) {
+        site = s;
+        const box = $('siteMap');
+        if (!box) return;
+        if (!s || !s.zones || !s.zones.length) { box.innerHTML = '<div class="empty" style="padding:20px">Site model not enabled.</div>'; return; }
+        const W = 1280, H = 720;
+        let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="xMidYMid meet">';
+        for (const r of s.routes || []) {
+            const pts = (r.points || r.Points || []).map(p => p.X + ',' + p.Y).join(' ');
+            if (pts) svg += '<polyline class="route-line" points="' + pts + '"/>';
+        }
+        for (const z of s.zones) {
+            const pts = (z.polygon || z.Polygon || []).map(p => p.X + ',' + p.Y).join(' ');
+            if (!pts) continue;
+            const t = (z.type || z.Type || 'monitor').toLowerCase();
+            svg += '<polygon class="zone-' + esc(t) + '" points="' + pts + '"/>';
+            const first = (z.polygon || z.Polygon || [])[0] || {};
+            svg += '<text class="zone-label" x="' + (first.X + 6) + '" y="' + (first.Y + 14) + '">' + esc(z.name || z.Name || z.ID || z.id || '') + '</text>';
+        }
+        for (const a of s.assets || []) {
+            const p = a.Position || a.position || {};
+            if (p.X == null) continue;
+            svg += '<rect x="' + (p.X - 5) + '" y="' + (p.Y - 5) + '" width="10" height="10" class="ent-dot"/>';
+        }
+        for (const c of s.cameras || []) {
+            const p = c.Position || c.position || {};
+            if (p.X == null) continue;
+            // The dot takes its colour from the fleet's own health state for
+            // that camera, so the aggregate view and the wall cannot disagree
+            // about whether a camera is watching.
+            const tile = tiles[c.ID || c.id];
+            const state = tile ? (tile.healthEl.textContent || '') : '';
+            svg += '<circle class="cam-dot ' + esc(state) + '" data-cam="' + esc(c.ID || c.id || '') +
+                '" cx="' + p.X + '" cy="' + p.Y + '" r="5"/>';
+            svg += '<text class="cam-label" x="' + (p.X + 8) + '" y="' + (p.Y + 3) + '">' + esc(c.ID || c.id || '') + '</text>';
+        }
+        svg += '</svg>';
+        box.innerHTML = svg;
+    }
+
+    // refreshSiteMapHealth repaints the sitemap's camera dots from the fleet
+    // rows whenever the status snapshot changes.
+    function refreshSiteMapHealth() {
+        document.querySelectorAll('#siteMap .cam-dot').forEach(dot => {
+            const t = tiles[dot.dataset.cam];
+            const state = t ? (t.healthEl.textContent || '') : '';
+            dot.setAttribute('class', 'cam-dot ' + state);
+        });
+    }
+
+    function openProof(id) {
+        const drawer = $('proofDrawer'), mask = $('drawerMask');
+        drawer.classList.add('open'); mask.classList.add('open');
+        $('drawerId').textContent = id;
+        const body = $('drawerBody');
+        const inc = incidents.find(i => i.ID === id);
+        body.innerHTML = '<div class="empty">Loading proof…</div>';
+        fetch('/api/incidents/' + encodeURIComponent(id) + '/proof').then(r => r.json()).then(proof => {
+            const p = proof.incident || inc || {};
+            const pv = proof.provenance || (inc && inc.Provenance) || {};
+            const rc = proof.reason_chain || (inc && inc.ReasonChain) || {};
+            let rows = [];
+            const kv = (k, v) => '<div class="kv"><span class="k">' + esc(k) + '</span><span class="v">' + esc(v == null ? '—' : v) + '</span></div>';
+            let section = '<section><h3>Decision</h3>' +
+                kv('state', p.State || p.state) + kv('action', p.Action || p.action) +
+                kv('autonomy', p.AutonomyState || p.autonomy_state) +
+                kv('threat score', p.ThreatScore != null ? p.ThreatScore : (p.threat_score || 0)) +
+                kv('site', pv.SiteID || pv.site_id) + kv('cameras', (p.CameraIDs || p.camera_ids || []).join(', ') || '—') +
+                '</section>';
+            let tl = '<section><h3>Timeline</h3><div class="timeline">' +
+                '<div class="tl-row"><span class="t">' + esc(fmtTime(p.FirstSeen || p.first_seen)) + '</span><span>first seen</span></div>' +
+                '<div class="tl-row"><span class="t">' + esc(fmtTime(p.LastSeen || p.last_seen)) + '</span><span>last seen</span></div>' +
+                (rc.Steps || rc.steps || []).map(s => '<div class="tl-row"><span class="t">' + esc(fmtTime(s.at || s.At)) + '</span><span>' + esc(s.key || s.Key) + ' · ' + esc(s.rule || s.Rule) + '</span></div>').join('') +
+                '</div></section>';
+            let prov = '<section><h3>Provenance</h3>' +
+                kv('correlation', pv.CorrelationID || pv.correlation_id || p.ID || p.id) +
+                kv('model', pv.ModelIdentity || pv.model_identity || 'synthetic') +
+                kv('contract', pv.ContractVer || pv.contract_ver || '—') +
+                kv('output hash', pv.OutputHash || pv.output_hash || '—') +
+                kv('evidence ref', pv.EvidenceRef || pv.evidence_ref || '—') +
+                '</section>';
+            let ev = '<section><h3>Evidence</h3>' +
+                (proof.evidence_refs || p.detection_ids || []).map(d => '<div class="kv"><span class="k">detection</span><span class="v mono">' + esc(d) + '</span></div>').join('') +
+                '<div class="empty" style="padding-top:6px">sha256 + clip clip read-back verified by the evidence store.</div></section>';
+            body.innerHTML = section + tl + prov + ev;
+        }).catch(() => {
+            body.innerHTML = '<div class="empty">Proof unavailable.</div>' + (inc ? renderThreatHTML(inc) : '');
+        });
+    }
+
+    function renderThreatHTML(inc) {
+        let steps = '';
+        for (const s of ((inc.ReasonChain && inc.ReasonChain.Steps) || [])) {
+            steps += '<div class="step"><span class="key">' + esc(s.key) + '</span><span class="factor">+' + (s.factor || 0) + '</span></div>';
+        }
+        return '<section><h3>Reason chain</h3><div class="reasonchain">' + steps + '</div></section>';
+    }
+
+    function fmtTime(t) {
+        if (!t) return '—';
+        const d = new Date(t);
+        if (isNaN(d)) return String(t);
+        return d.toLocaleTimeString('en-GB', { hour12: false });
+    }
+
+    function closeDrawer() {
+        $('proofDrawer').classList.remove('open');
+        $('drawerMask').classList.remove('open');
+        selectedIncidentID = null;
+        renderIncidents();
+    }
+
+    function submitOverride() {
+        const reason = $('overrideReason').value.trim();
+        if (!selectedIncidentID) return;
+        if (reason.length < 10) { $('overrideReason').focus(); return; }
+        fetch('/api/incidents/' + encodeURIComponent(selectedIncidentID) + '/override', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reason: reason })
+        }).then(r => r.json()).then(() => {
+            $('overrideModal').classList.remove('open');
+            $('overrideReason').value = '';
+            closeDrawer();
+        }).catch(() => {});
+    }
+
+    function pollTelemetry() {
+        fetch('/api/telemetry/live').then(r => r.json()).then(d => {
+            if (!d || d.error) return;
+            set('kpiHam', d.ham_per_1000, 1);
+            set('kpiDecision', d.time_to_decision_sec, 1);
+            set('kpiCorrelation', d.correlation_hit_rate_pct, 1);
+            set('kpiOverride', d.operator_override_rate_pct, 1);
+            set('kpiFalseEsc', d.false_escalation_rate_pct, 1);
+            set('kpiZone', d.zone_context_pct, 1);
+            const integ = Math.min(d.absence_integrity_pct == null ? 100 : d.absence_integrity_pct,
+                                   d.audit_integrity_pct == null ? 100 : d.audit_integrity_pct);
+            set('kpiIntegrity', integ, 0);
+            // Integrity is the one KPI that is only ever 100 or 0.
+            const el = $('kpiIntegrity').parentElement;
+            el.className = 'kpi ' + (integ >= 100 ? 'good' : 'bad');
+        }).catch(() => {});
+    }
+
+    function set(id, v, dp) {
+        const el = $(id);
+        if (!el) return;
+        el.textContent = (v == null) ? '–' : Number(v).toFixed(dp == null ? 0 : dp);
+    }
+
+    function pollIncidents() {
+        if (selectedIncidentID) return;
+        fetch('/api/incidents/active').then(r => r.json()).then(list => {
+            if (!Array.isArray(list) || !list.length) return;
+            let changed = false;
+            for (const inc of list) {
+                const i = incidents.findIndex(x => x.ID === inc.ID);
+                if (i < 0) { incidents.unshift(inc); changed = true; }
+                else if (JSON.stringify(incidents[i]) !== JSON.stringify(inc)) { incidents[i] = inc; changed = true; }
+            }
+            if (incidents.length > 20) incidents.length = 20;
+            if (changed) renderIncidents();
+        }).catch(() => {});
+    }
+
+    /* ---------- boot ---------- */
+    window.pocLoadStream = loadStream; // exposed for scripted demos/tests
+    loadZones();
+    loadSite();
+    connect();
+    pollTelemetry();
+    kpiTimer = setInterval(pollTelemetry, 3000);
+    incidentTimer = setInterval(pollIncidents, 2000);
+    fetch('/api/briefs/latest').then(r => r.json()).then(renderBrief).catch(() => {});
+    pollDutyAndConfig();
+    setInterval(pollDutyAndConfig, 10000);
+    $('drawerMask').addEventListener('click', closeDrawer);
+    $('btnCloseDrawer').addEventListener('click', closeDrawer);
+    $('btnOverride').addEventListener('click', () => $('overrideModal').classList.add('open'));
+    $('btnCancelOverride').addEventListener('click', () => $('overrideModal').classList.remove('open'));
+    $('btnSubmitOverride').addEventListener('click', submitOverride);
+    $('overrideModal').addEventListener('click', (e) => { if (e.target === $('overrideModal')) $('overrideModal').classList.remove('open'); });
+    fetch('/api/status').then(r => r.json()).then(d => onStatus({ data: d })).catch(() => {});
+    fetch('/api/stream').then(r => r.json()).then(info => {
+        if (info && info.video_id) {
+            onStreamInfo(info);
+            const t = ensureTile('manual');
+            t.nameEl.textContent = info.title || 'Manual stream';
+            createPlayer(info.video_id, t);
+        }
+        // With a fleet configured the wall is already populated from
+        // /api/status; with none, load the default stream so the demo opens
+        // playing rather than empty.
+        else if (!Object.keys(tiles).some(id => id !== 'manual')) { loadStream(); }
+    }).catch(() => {});
+    drawAllTiles();
+})();
+</script>
+</body>
+</html>

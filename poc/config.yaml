@@ -1,0 +1,146 @@
+youtube:
+  url: ""
+  quality: "720p"
+  hlslive_edge: 3
+
+# The camera fleet: one entry per camera the POC watches. Each entry is one
+# yt-dlp+ffmpeg pipe and one detection loop over the SHARED sidecar below,
+# and each one degrades by name — a camera whose stream is gone is a dark
+# tile with its reason on it, not a dead process, and the other tiles keep
+# watching.
+#
+# The camera→zone declaration does NOT live here: which zones a camera covers
+# is declared once, in the site model (site.file), and two declarations of it
+# would drift apart. Raise the fleet size only after measuring the CPU cost:
+# N ffmpeg pipes at capture_fps 1 plus one shared sidecar is the ceiling that
+# has actually been run, never an assertion.
+cameras:
+  - id: "cam-01"
+    name: "City Square"
+    youtube_url: "https://www.youtube.com/watch?v=VGnFLdQW39A"
+  - id: "cam-02"
+    name: "Harbour Road"
+    youtube_url: "https://www.youtube.com/watch?v=JQ_jwk_7OVE"
+  # Add a camera by adding an entry. A camera declared in the site model
+  # with no entry here never starts, and the coverage panel says so by name.
+
+# The real-detection path: frames are captured from the SAME stream the player
+# shows and decoded by the Python sidecar (the only decoder in this repository
+# that reads the anchored YOLOv4 export).
+live:
+  capture_fps: 1
+  sidecar_addr: "127.0.0.1:8099"
+  sidecar_script: "./poc/active-monitoring/pyworker/server.py"
+  model: "./poc/active-monitoring/models/yolov4n.onnx"
+  anchors: "./poc/active-monitoring/models/yolov4n.anchors.txt"
+  python: ""            # empty = auto: py -3, then python3, then python
+  min_score: 0.35       # overlay/report floor; the sidecar's emit floor is its own
+  deadline: "8s"        # per-frame sidecar round trip
+  index_every_frames: 3  # every Nth captured frame is added to the search index
+
+detector:
+  threshold: 0.5
+  pre_roll: "5s"
+  post_roll: "5s"
+  max_clip_time: "30s"
+  max_clip_bytes: 52428800
+  fps: 25
+
+categorization:
+  enabled: true
+  profile: "general-monitoring"
+  confidence_threshold: 0.6
+  request_interval: "10s"
+
+spatial:
+  zones:
+    - id: "restricted-1"
+      name: "Restricted Area 1"
+      polygon: [[100,100], [500,100], [500,400], [100,400]]
+      type: "no-entry"
+      alert_on_entry: true
+      alert_on_dwell: true
+      dwell_threshold: "10s"
+    - id: "restricted-2"
+      name: "Restricted Area 2"
+      polygon: [[600,100], [900,100], [900,400], [600,400]]
+      type: "no-entry"
+      alert_on_entry: true
+      alert_on_dwell: true
+      dwell_threshold: "10s"
+    - id: "entrance"
+      name: "Main Entrance"
+      polygon: [[200,300], [400,300], [400,500], [200,500]]
+      type: "monitoring"
+      alert_on_entry: false
+      alert_on_dwell: true
+      dwell_threshold: "30s"
+    - id: "parking"
+      name: "Parking Lot"
+      polygon: [[50,50], [1150,50], [1150,650], [50,650]]
+      type: "monitoring"
+      alert_on_entry: false
+      alert_on_dwell: false
+      
+  # Predefined rules: categories that may never be inside a no-zone.
+  rules:
+    - id: "no-person-in-restricted-1"
+      zone_id: "restricted-1"
+      categories: ["biological"]
+      violation_type: "entry"
+      severity: "critical"
+      cooldown: "10s"
+    - id: "no-vehicle-in-restricted-2"
+      zone_id: "restricted-2"
+      categories: ["vehicle"]
+      violation_type: "entry"
+      severity: "critical"
+      cooldown: "10s"
+
+search:
+  index_retention: "24h"
+  max_results: 50
+  debounce_ms: 300
+
+websocket:
+  port: 8081
+  heartbeat: "30s"
+  read_buffer: 1024
+  write_buffer: 1024
+
+ai_runtime:
+  endpoint: "http://127.0.0.1:8800"
+  timeout: "10s"
+  allow_remote: false
+
+evidence:
+  root: "./poc_data/evidence"
+  temp_dir: "./poc_data/tmp"
+
+web:
+  static_dir: "./poc/static"
+  port: 8082
+  # Loopback, deliberately: a listener bound to all interfaces is the shape of
+  # socket a firewall asks about for every newly built executable, and the
+  # prompt repeating is how an operator learns to click through it. The POC is
+  # a single-workstation demo. Set "0.0.0.0" only when the dashboard has to be
+  # reachable from another machine, and expect the prompt as the price.
+  host: "127.0.0.1"
+
+logging:
+  level: "info"
+  format: "json"
+
+# Site model for autonomy layer. Paths are relative to the repository root,
+# like every other path in this file.
+site:
+  enabled: true
+  file: "./poc/sitemap.yaml"
+  # Where the shift hand-over artifact is written: one append-only, hash-chained
+  # JSONL file per shift. Ignored by git (/data/), because it is a runtime
+  # artifact and a record, not a source file.
+  dutylog_dir: "data/dutylog"
+  # How often a route walk is due. Ninety seconds is a demo-sized interval —
+  # a real site walks its routes on its own schedule — and every reminder and
+  # every check is a line in the duty log.
+  patrol_interval: "90s"
