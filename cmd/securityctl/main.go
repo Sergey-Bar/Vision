@@ -74,6 +74,7 @@ or from the site configuration.`,
 		auditCommand(),
 		identityCommand(),
 		releaseKeyCommand(),
+		siteConfigCommand(),
 	)
 	// There is deliberately NO `demo` here, and its absence is the finding rather than
 	// a gap. It used to be registered as RESERVED: it printed what P6 would build and

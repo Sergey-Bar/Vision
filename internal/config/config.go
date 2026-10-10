@@ -101,6 +101,11 @@ type Config struct {
 	CheckpointDir     string
 	CheckpointKeyPath string
 
+	// HandoverDir is where the shift hand-over artifact lives, read by the
+	// console's hand-over page. Empty means the site keeps none, which the
+	// page reports by name.
+	HandoverDir string
+
 	DispatchDestinationsPath string
 
 	// PollInterval is how often the ingest loop asks the adapter for events.
@@ -215,6 +220,16 @@ func LoadFrom(get Lookup) (Config, error) {
 	c.EvidenceRoot = strings.TrimSpace(get("SP_EVIDENCE_ROOT"))
 	c.CheckpointDir = strings.TrimSpace(get("SP_CHECKPOINT_DIR"))
 	c.CheckpointKeyPath = strings.TrimSpace(get("SP_CHECKPOINT_KEY"))
+
+	// HandoverDir is where the shift hand-over artifact is written and read
+	// from: one append-only, hash-chained JSONL per shift, the console's
+	// hand-over page reading the same files.
+	//
+	// Absent means the site keeps no duty log, and the console page says so by
+	// name rather than rendering an empty hand-over, which would read as
+	// "nothing happened". It is a path and not the artifact, for the same
+	// reason DispatchDestinationsPath is one.
+	c.HandoverDir = strings.TrimSpace(get("SP_HANDOVER_DIR"))
 
 	// DispatchDestinationsPath is where `internal/dispatch` reads its destinations from.
 	//

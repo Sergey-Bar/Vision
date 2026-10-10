@@ -41,6 +41,11 @@ type Deps struct {
 	// state, observations, dead letters and drift -- four tables that are not
 	// incidents and that a reader looking at one of them should not need to know about.
 	Absence AbsenceReader
+	// Handover backs the shift hand-over page: the brief and the duty-log
+	// state, from the same packages the POC writes them with. Nil means the
+	// page says the artifact is not configured rather than rendering an empty
+	// hand-over, which would read as "nothing happened".
+	Handover HandoverReader
 	// InboxCounts backs the SLO alert thresholds.
 	InboxCounts func() (Backlog, error)
 	// Metrics is the observability registry. Nil means the route says the
@@ -267,6 +272,14 @@ func (s *Server) RegisterRoutes(d Deps) func(*http.ServeMux) {
 		mux.Handle("GET /coverage", s.requireCapability(identity.CapIncidentRead,
 			func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
 				s.handleConsoleAbsence(w, r, p, d)
+			}))
+		// The shift hand-over: the brief and the duty-log state, from the same
+		// packages the capture path writes them with. Gated exactly as the
+		// coverage panel is, and for the same reason: an operator who may read
+		// an incident may read the record of how it was handled.
+		mux.Handle("GET /handover", s.requireCapability(identity.CapIncidentRead,
+			func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleConsoleHandover(w, r, p, d)
 			}))
 		// The console's sign-out. Gated on a principal rather than on a capability,
 		// because the capability that would be right here does not exist: signing out

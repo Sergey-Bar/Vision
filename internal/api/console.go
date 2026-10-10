@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"crypto/subtle"
 	"embed"
 	"html/template"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Sergey-Bar/Ai-Captain/internal/brief"
 	"github.com/Sergey-Bar/Ai-Captain/internal/identity"
 	"github.com/Sergey-Bar/Ai-Captain/internal/incidents"
 )
@@ -80,9 +82,16 @@ type consoleData struct {
 	// with no scope is a number nobody can check, so the two are always together.
 	Absence      []AbsenceView
 	AbsenceSites []string
-	SiteID       string
-	Error        string
-	Message      string
+	// Brief and DutyLog are the shift hand-over page: the rendered brief and
+	// the artifact's own state, from the same packages the capture path writes
+	// them with. DutyLogErr names why one of them is absent — a hand-over page
+	// that renders empty is one that reads as "nothing happened".
+	Brief      *brief.Brief
+	DutyLog    *DutyLogState
+	DutyLogErr string
+	SiteID     string
+	Error      string
+	Message    string
 }
 
 // SiteTimezone renders a site's time, never the host's.
@@ -164,7 +173,20 @@ func (s *Server) handleConsoleRoot(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleConsoleLogin(w http.ResponseWriter, r *http.Request) {
-	data := consoleData{Title: "Sign in", RequestID: requestID(r), Now: time.Now().UTC()}
+	csrfRaw, _, err := identity.NewToken()
+	if err != nil {
+		s.render(w, http.StatusInternalServerError, "login.html", consoleData{Title: "Sign in", RequestID: requestID(r), Now: time.Now().UTC(), Error: "CSRF token generation failed"})
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     s.cookieName() + "_csrf",
+		Value:    csrfRaw,
+		Path:     "/",
+		Secure:   s.Secure,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   int((15 * time.Minute).Seconds()),
+	})
+	data := consoleData{Title: "Sign in", RequestID: requestID(r), Now: time.Now().UTC(), CSRF: csrfRaw}
 	if msg := r.URL.Query().Get("error"); msg != "" {
 		data.Error = msg
 	}
@@ -185,6 +207,18 @@ func (s *Server) handleConsoleLogin(w http.ResponseWriter, r *http.Request) {
 // bookmark, and in the `Referer` of whatever the operator clicks next. The lockout
 // 423 in particular is the one answer an operator needs to read twice.
 func (s *Server) handleConsoleLoginSubmit(w http.ResponseWriter, r *http.Request) {
+	// Verify pre-session CSRF token (double-submit cookie).
+	csrfCookie, err := r.Cookie(s.cookieName() + "_csrf")
+	if err != nil {
+		s.renderConsoleLoginError(w, r, http.StatusForbidden, "Missing CSRF token. Reload the page and try again.")
+		return
+	}
+	presented := r.PostFormValue("csrf_token")
+	if subtle.ConstantTimeCompare([]byte(presented), []byte(csrfCookie.Value)) != 1 {
+		s.renderConsoleLoginError(w, r, http.StatusForbidden, "Invalid CSRF token. Reload the page and try again.")
+		return
+	}
+
 	if err := r.ParseForm(); err != nil {
 		s.renderConsoleLoginError(w, r, http.StatusBadRequest, "The form could not be read.")
 		return

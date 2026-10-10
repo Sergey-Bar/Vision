@@ -1,0 +1,139 @@
+{{define "handover.html"}}
+{{template "head" .}}
+<main>
+  <h1>Shift hand-over</h1>
+  {{template "messages" .}}
+
+  <p class="hint">
+    The record an incoming operator reads. It is rendered from the shift's own
+    artifact and the fleet's own counters by the same packages the capture path
+    writes with, so a page refreshed now and a page refreshed in a minute differ
+    only by what actually changed.
+  </p>
+
+  {{if .DutyLogErr}}
+  <p class="hint breaking">
+    <strong>{{.DutyLogErr}}</strong> A hand-over that renders empty is a
+    hand-over that reads as &ldquo;nothing happened&rdquo;, so this page says
+    why it is empty instead.
+  </p>
+  {{end}}
+
+  {{if .DutyLog}}
+  <section class="dutylog">
+    <h2>The artifact</h2>
+    <table>
+      <tbody>
+        <tr>
+          <th>Shift</th>
+          <td><code>{{.DutyLog.Shift}}</code></td>
+        </tr>
+        <tr>
+          <th>Site</th>
+          <td><code>{{.DutyLog.SiteID}}</code> &middot; {{.DutyLog.Lines}} lines in the artifact</td>
+        </tr>
+        <tr>
+          <th>File</th>
+          <td><code>{{.DutyLog.Path}}</code></td>
+        </tr>
+        <tr>
+          <th>Chain head</th>
+          <td><code>{{.DutyLog.HeadHash}}</code></td>
+        </tr>
+        <tr>
+          <th>Verification</th>
+          <td>
+            {{if eq .DutyLog.Verification "ok"}}
+            <span class="ok">the chain verifies: every line hashes to its contents and links to its parent</span>
+            {{else}}
+            <span class="breaking">{{.DutyLog.Verification}}</span>
+            {{end}}
+          </td>
+        </tr>
+      </tbody>
+    </table>
+    {{if .DutyLog.DumpNote}}
+    <p class="hint breaking">{{.DutyLog.DumpNote}}</p>
+    {{end}}
+    {{if .DutyLog.Dump}}
+    <pre class="dump">{{.DutyLog.Dump}}</pre>
+    {{end}}
+  </section>
+  {{end}}
+
+  {{if .Brief}}
+  <section class="brief">
+    <h2>The brief</h2>
+    <p class="headline">{{.Brief.Headline}}</p>
+    <p class="hint">
+      Generated {{.Time .Brief.GeneratedAt}} &middot; schema
+      <code>{{.Brief.Schema}}</code> &middot; {{len .Brief.OpenItems}} open items
+    </p>
+
+    <h3>Cameras</h3>
+    <table>
+      <thead><tr><th>Camera</th><th>State</th><th>Reason</th></tr></thead>
+      <tbody>
+      {{range .Brief.Cameras}}
+        <tr class="{{if or (eq .State "silent") (eq .State "blind")}}breaking{{end}}">
+          <td><code>{{.ID}}</code></td>
+          <td>{{.State}}</td>
+          <td>{{if .Reason}}{{.Reason}}{{else}}&mdash;{{end}}</td>
+        </tr>
+      {{end}}
+      </tbody>
+    </table>
+
+    <h3>Coverage</h3>
+    <table>
+      <thead><tr><th>Zone</th><th>Declared cameras</th><th>Degraded</th><th>Verdict</th></tr></thead>
+      <tbody>
+      {{range .Brief.Coverage}}
+        <tr class="{{if or .UnderObserved .Unanswerable}}breaking{{end}}">
+          <td><code>{{.ZoneID}}</code></td>
+          <td>{{range $i, $c := .DeclaredCameras}}{{if $i}}, {{end}}<code>{{$c}}</code>{{end}}</td>
+          <td>{{range $i, $c := .DegradedCameras}}{{if $i}}, {{end}}<code>{{$c}}</code>{{end}}</td>
+          <td>{{if .UnderObserved}}under-observed{{else if .Unanswerable}}unanswerable{{else}}covered{{end}}</td>
+        </tr>
+      {{end}}
+      </tbody>
+    </table>
+
+    <h3>Incidents</h3>
+    <table>
+      <thead><tr><th>Incident</th><th>Score</th><th>Action</th><th>State</th><th>Cameras</th></tr></thead>
+      <tbody>
+      {{range .Brief.Incidents}}
+        <tr>
+          <td><code>{{.ID}}</code></td>
+          <td>{{.ThreatScore}}</td>
+          <td>{{.Action}}</td>
+          <td>{{.State}}</td>
+          <td>{{range $i, $c := .CameraIDs}}{{if $i}}, {{end}}<code>{{$c}}</code>{{end}}</td>
+        </tr>
+      {{end}}
+      </tbody>
+    </table>
+
+    <h3>Open items for the next shift</h3>
+    {{if .Brief.OpenItems}}
+    <ul class="openitems">
+    {{range .Brief.OpenItems}}
+      <li><span class="kind">{{.Kind}}</span> {{.Summary}}</li>
+    {{end}}
+    </ul>
+    {{else}}
+    <p class="hint">Nothing open. A quiet shift is still a shift this page shows.</p>
+    {{end}}
+  </section>
+  {{end}}
+
+  <p class="hint">
+    <strong>What this page is not.</strong> It is not a summary written by a
+    model. Every sentence in the brief is a field, and the artifact it is read
+    from is hash-chained: an edited line fails the next verification. That is
+    the difference between a hand-over and a recollection.
+  </p>
+</main>
+{{template "foot" .}}
+{{end}}

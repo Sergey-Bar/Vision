@@ -70,7 +70,20 @@ type Profile struct {
 	// a rule's aiObservation.field only if it is here, checked at bundle compile
 	// time.
 	Fields map[string]bool
+	// Required is the subset of Fields an answer must carry. It is the same
+	// list the plane's validator reads from the request's profileSchema, and it
+	// lives here so the registry the Go side reads and the schema the Go side
+	// sends are one declaration rather than two. Profiles with no Required are
+	// read as "the field set is all there is", which is right for the four
+	// observation profiles: a degraded observation legitimately carries less.
+	Required []string
 }
+
+// ProfileInvestigate is the AI plane's investigate role: the only profile that
+// answers a question rather than producing an observation. Its id is a single
+// exported constant the registry keys on and the POC's investigator sends, so a
+// rename is one edit rather than three.
+const ProfileInvestigate = "investigate/v1"
 
 // M1Profiles is the shipped profile set.
 var M1Profiles = map[string]Profile{
@@ -120,6 +133,35 @@ var M1Profiles = map[string]Profile{
 			"confidence": true, "abnormalEvent": true, "hazardVisible": true,
 			"entities": true, "recommendedAction": true,
 		},
+	},
+	// investigate/v1 is the investigator profile: the AI plane's one shipped
+	// role. It answers a question over stored facts and cites the fact ids it
+	// used, which is why its field set contains a citation list and nothing
+	// about who, what, or whether something was allowed — an investigate
+	// answer is a reading of the record, not a judgement about the site.
+	//
+	// Shadow, and it could not be anything else: it has never been measured
+	// against a labelled set, and a profile allowed to affect authoritative
+	// state before that is a profile whose answers are unchecked. The
+	// promotion path is the existing one — evaluation.ShadowGates to collect
+	// cases, DefaultGates for the decision, a human to make it. Nothing about
+	// the investigator changes a playbook decision either way; that is the
+	// design, not the current state of the profile.
+	//
+	// The published JSON Schema for this profile is a contracts/ change and is
+	// deliberately not written here: an agent may not edit a published
+	// contract, and a shadow profile needs none. The field set above is what
+	// the writer validates against today; the schema lands with the human
+	// review that promotes the profile out of shadow.
+	ProfileInvestigate: {
+		ID: ProfileInvestigate, Shadow: true, Version: 1,
+		Fields: map[string]bool{
+			"answer": true, "citations": true, "confidence": true,
+		},
+		// The two without which an answer is not checkable: a confidence with
+		// no citations is a guess, and an answer with no citations is one
+		// nobody can follow back to the bytes.
+		Required: []string{"answer", "citations"},
 	},
 }
 

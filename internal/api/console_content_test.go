@@ -347,6 +347,69 @@ func TestEveryConsoleFormSubmitsToARouteThatAcceptsItsMethod(t *testing.T) {
 // names are read out of the template rather than hard-coded here, so renaming
 // `username` in the template without changing the handler fails HERE rather than
 // producing a 200 that signed nobody in.
+// signInViaConsoleForm drives the console's own sign-in form the way a browser
+// does: GET the page first so the server issues its pre-session CSRF cookie,
+// then submit with the token from the rendered form.
+//
+// This is not a convenience. `handleConsoleLoginSubmit` verifies a double-submit
+// token before it looks at the password at all, so a POST without one answers
+// 403 and never reaches the credential check — which means a test that skipped
+// the GET was testing the CSRF refusal and calling it a sign-in.
+//
+// It is deliberately not named `signIn`: that name already belongs to the JSON
+// login route in handlers_test.go, and two helpers of the same name doing
+// different halves of the same auth surface is how one of them stops being
+// called.
+func signInViaConsoleForm(t *testing.T, s http.Handler, username, password string) *httptest.ResponseRecorder {
+	t.Helper()
+
+	get := httptest.NewRequest(http.MethodGet, "/login", nil)
+	getRec := httptest.NewRecorder()
+	s.ServeHTTP(getRec, get)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("GET /login answered %d, want 200: %s", getRec.Code, getRec.Body)
+	}
+
+	var csrfCookie *http.Cookie
+	for _, c := range getRec.Result().Cookies() {
+		if strings.Contains(c.Name, "csrf") {
+			csrfCookie = c
+		}
+	}
+	if csrfCookie == nil {
+		t.Fatal("GET /login set no CSRF cookie, so the form cannot be driven at all")
+	}
+
+	// The token the form carries and the token in the cookie are the same value
+	// under double-submit, so read it out of the rendered form and assert that
+	// it matches: a form whose token drifts from its cookie is a form every
+	// operator's browser will refuse to submit.
+	var formToken string
+	if re := regexp.MustCompile(`(?i)name="csrf_token"\s+value="([^"]*)"`); re.MatchString(getRec.Body.String()) {
+		formToken = re.FindStringSubmatch(getRec.Body.String())[1]
+	}
+	if formToken == "" {
+		t.Fatal("the rendered sign-in form carries no csrf_token value; the pre-session " +
+			"CSRF check would refuse every submission")
+	}
+	if formToken != csrfCookie.Value {
+		t.Error("the form's csrf_token does not match its cookie. The console would refuse " +
+			"every operator's sign-in, which is exactly the failure this pair exists to catch")
+	}
+
+	form := url.Values{
+		"username":   {username},
+		"password":   {password},
+		"csrf_token": {formToken},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(csrfCookie)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	return rec
+}
+
 func TestTheSignInFormActuallySignsAnOperatorIn(t *testing.T) {
 	s, _, _ := server(t)
 
@@ -362,16 +425,12 @@ func TestTheSignInFormActuallySignsAnOperatorIn(t *testing.T) {
 		}
 	}
 	if !strings.Contains(page, `name="csrf_token"`) {
-		t.Error("login.html carries no csrf_token field. The route is CSRF-exempt today, so " +
-			"this passes without one -- but a form that stops carrying it is one exemption " +
-			"away from being a CSRF hole, and nothing else would notice")
+		t.Error("login.html carries no csrf_token field. The route is CSRF-protected today, " +
+			"so this fails rather than passing silently -- but a form that stops carrying it " +
+			"is one exemption away from being a CSRF hole, and nothing else would notice")
 	}
 
-	form := url.Values{"username": {"admin"}, "password": {"a-long-bootstrap-passphrase"}}
-	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	rec := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rec, req)
+	rec := signInViaConsoleForm(t, s.Handler(), "admin", "a-long-bootstrap-passphrase")
 
 	if rec.Code != http.StatusFound {
 		t.Fatalf("the sign-in form answered %d, want 302 to the feed: %s", rec.Code, rec.Body)
@@ -399,11 +458,7 @@ func TestTheSignInFormActuallySignsAnOperatorIn(t *testing.T) {
 func TestTheSignInFormShowsWhyItFailed(t *testing.T) {
 	s, _, _ := server(t)
 
-	form := url.Values{"username": {"admin"}, "password": {"definitely-not-the-passphrase"}}
-	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	rec := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rec, req)
+	rec := signInViaConsoleForm(t, s.Handler(), "admin", "definitely-not-the-passphrase")
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("a wrong password answered %d, want 401: %s", rec.Code, rec.Body)
@@ -415,6 +470,63 @@ func TestTheSignInFormShowsWhyItFailed(t *testing.T) {
 	if !strings.Contains(body, `class="alert error"`) {
 		t.Error("the failure re-rendered the page with no error message in it, so the " +
 			"operator is told nothing about why they are still on the sign-in page")
+	}
+}
+
+// TestTheSignInFormRendersTheTokenWithNoEntityEscaping is the regression test for
+// a defect that was invisible for as long as the token was lucky.
+//
+// html/template escapes an `<input value="...">` as a URL attribute context, so a
+// `+` in the token is written to the page as `&#43;`. Every browser decodes the
+// entity before it submits, so the form posts the real token and the cookie holds
+// the real token — but they never compare equal, and the POST is refused as a CSRF
+// mismatch. A base64 alphabet containing `+` hits this on roughly one token in
+// sixteen, which is exactly often enough for the sign-in to work in a demo and
+// fail in the room.
+//
+// The fix is on the token's alphabet, in `identity.NewToken`: RawURLEncoding, whose
+// alphabet needs no escaping at all. This test asserts the property that the fix
+// guarantees, rather than asserting against one unlucky string, so it catches a
+// future change back to a `+`-bearing alphabet whether or not a `+` happens to be
+// in the sampled tokens.
+func TestTheSignInFormRendersTheTokenWithNoEntityEscaping(t *testing.T) {
+	s, _, _ := server(t)
+
+	// Many samples: the bug was probabilistic, so the test has to be too.
+	const samples = 40
+	for i := 0; i < samples; i++ {
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/login", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /login answered %d, want 200", rec.Code)
+		}
+
+		var csrfCookie *http.Cookie
+		for _, c := range rec.Result().Cookies() {
+			if strings.Contains(c.Name, "csrf") {
+				csrfCookie = c
+			}
+		}
+		if csrfCookie == nil {
+			t.Fatal("GET /login set no CSRF cookie")
+		}
+
+		body := rec.Body.String()
+		re := regexp.MustCompile(`(?i)name="csrf_token"\s+value="([^"]*)"`)
+		m := re.FindStringSubmatch(body)
+		if m == nil {
+			t.Fatal("the rendered sign-in form carries no csrf_token value")
+		}
+
+		if got := m[1]; got != csrfCookie.Value {
+			t.Fatalf("the form's csrf_token %q does not equal its cookie %q. The browser "+
+				"decodes HTML entities before it submits, so the server would refuse every "+
+				"sign-in whose token contains a character the attribute context escapes", got, csrfCookie.Value)
+		}
+		if strings.Contains(body, "&#") {
+			t.Fatal("the sign-in page carries an HTML entity in the csrf_token attribute, " +
+				"which means the token in the form is not the token that was generated")
+		}
 	}
 }
 

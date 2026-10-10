@@ -20,6 +20,7 @@ package identity
 import (
 	"crypto/rand"
 	"crypto/subtle"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
@@ -135,14 +136,27 @@ func VerifyPassword(encoded, password string) (bool, error) {
 // The raw token goes to the operator's cookie and is never stored. What is
 // stored is a SHA-256 of it, so a database dump does not yield sessions. The
 // comparison is constant-time for the same reason.
+//
+// It is `RawURLEncoding`, not the `b64` this file uses everywhere else, because
+// this token is rendered into an HTML `value="..."` attribute and html/template
+// escapes `value` as a URL context: a `+` from RawStdEncoding becomes `&#43;`,
+// the browser decodes the entity before it submits, and the comparison against
+// the raw cookie value fails for every token that happened to contain one. The
+// URL alphabet — `A-Za-z0-9-_` — needs no escaping at all.
+//
+// `b64` is deliberately NOT changed: it encodes password salt and hash, which
+// are stored, and a token alphabet is not worth a stored-format migration.
 func NewToken() (raw string, hash string, err error) {
 	buf := make([]byte, TokenLength)
 	if _, err := rand.Read(buf); err != nil {
 		return "", "", fmt.Errorf("identity: read token: %w", err)
 	}
-	raw = b64(buf)
+	raw = tokenB64(buf)
 	return raw, HashToken(raw), nil
 }
+
+// tokenB64 is the URL-safe alphabet, for tokens that are rendered into a page.
+func tokenB64(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
 
 // HashToken is what the sessions table stores.
 func HashToken(raw string) string { return sha256Hex(raw) }

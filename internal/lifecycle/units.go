@@ -324,6 +324,12 @@ SP_CHECKPOINT_DIR=/var/lib/security-platform/checkpoints
 # The Ed25519 key that signs ledger seals.
 SP_CHECKPOINT_KEY=
 
+# Where the shift hand-over artifact is written and read. Empty means the site
+# keeps none: the pipeline runs without the artifact and the console's hand-over
+# page says so by name, which is a better answer than a page that renders empty
+# and reads as "nothing happened".
+SP_HANDOVER_DIR=
+
 # --- Database. The password is not here; see SP_DATABASE_PASSWORD below. -------
 
 SP_DATABASE_URL=postgres://security@127.0.0.1:6000/security?sslmode=disable
@@ -385,6 +391,21 @@ SP_AI_LISTEN=127.0.0.1:8800
 SP_MODEL_BUNDLE=
 SP_MODEL_BUNDLE_SIGNATURE=
 SP_MODEL_BUNDLE_KEY=
+
+# The inference engine. A path to a Python module exposing describe() ->
+# {model, model_hash, hardware, prompt_template_id, prompt_version} and
+# investigate(request) -> {structured_output, insufficient_evidence}.
+#
+# Empty is supported and is the shipped state: the plane reports no engine
+# bound, every observation is recorded as degraded with that reason, and the
+# investigator answers with the named degradation rather than an answer.
+#
+# A path that is set but does not load is a STARTUP FAILURE, not a silent
+# absence: the plane prints one reason line naming this variable and exits 2,
+# because "the operator said a model is installed and the plane cannot load
+# it" is a defect to read rather than a state to absorb. systemd's
+# Restart=on-failure then restarts it until the file is fixed.
+SP_ENGINE_PATH=
 `
 }
 

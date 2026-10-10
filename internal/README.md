@@ -61,9 +61,11 @@ Only five do. Everything else reaches the ledger through its caller.
 |---|---|---|---|---|
 | 
 | `airuntime` | The Go client for `runtime.py` and the `QueueVLM` worker. Imports nothing from the deterministic core | observe | no (the caller audits `ai.observation.*`) | `airuntime.Client`, `Client.Do`, `airuntime.Result`, `VLMWorker` |
+| `anomaly` | The autonomy layer's behaviour rules: dwell, loiter, flow, tailgate. Pure functions over a linked incident and a site | evaluate | no | `anomaly.RuleSet`, `RuleSet.Evaluate`, `anomaly.DefaultRuleSet` |
 | `api` | Strict-JSON API and the server-rendered console, with CSRF, CSP and per-route capabilities | present | yes (denials and refusals) | `api.Server`, `Server.RegisterRoutes(Deps)`, `api.Deps` |
 | `audit` | Append-only, hash-chained ledger; owns the `Entry` shape, validation, verification and sealing | store | yes — it *is* the writer | `audit.Writer`, `Writer.Append`, `Writer.Verify`, `audit.Entry` |
 | `bundles` | Stores, activates and rolls back immutable rule bundles; activation is a pointer move | evaluate | yes (`rules.bundle.*`) | `bundles.Service`, `Service.Store`, `bundles.Meta` |
+| `camerahealth` | The camera state vocabulary and state machine (`fresh`/`stale`/`silent`/`blind`) plus the one `Degraded` predicate, read by the brief, the coverage rule, telemetry and the POC so they cannot disagree about whether a camera is watching. `frozen` is deliberately not a state | support | no | `camerahealth.State`, `camerahealth.Degraded`, `WindowsFor` |
 | `capability` | The capability-coverage gate: seven derived tables with refusal ledgers. Every declared effect has an executor, every metric a producer, every contract route an implementation | support | test only | `capability.Check`, `capability.Derive`, `capability.Refusal` |
 | `checkpoint` | Signs the ledger to a sink outside the database, so tamper is provable after the fact | store | no (the caller audits `audit.checkpoint.sealed`) | `checkpoint.Seal`, `checkpoint.Sealer`, `Sink`, `Signer`, `VerifySeal` |
 | `clock` | The time subsystem: sources, drift bands, per-site policy, normalized time, skew, lag. Pure, no DB | support | no | `clock.Policy`, `clock.Band`, `clock.Normalized`, `clock.Lag` |
@@ -72,6 +74,8 @@ Only five do. Everything else reaches the ledger through its caller.
 | `config` | Reads and validates the daemon's environment once. No field is a secret, and nothing whose absence would change behaviour gets a silent default | support | no | `config.Config`, `config.Load`, `config.LoadFrom` |
 | `contracts` | Generated protobuf (`securityv1`) plus a compatibility test. **No hand-written source** | support | no | `securityv1.Event`, `securityv1.Incident`, `securityv1.Observation` |
 | `correlator` | Assembles a rule's signals from stored canonical events, device clocks and stored observations. Imports rules but not the rule engine's inputs, so evaluation cannot acquire a database handle | evaluate | no | `correlator.Correlator`, `SignalsFor`, `correlator.Result` |
+| `brief` | The deterministic shift hand-over: renders one structured summary from the facts a shift produced — incidents, actions, camera health, coverage, patrol notes, open items. Never model prose: the same facts render the same bytes | present | no | `brief.Facts`, `brief.Brief`, `brief.Render`, `Brief.JSON`, `Brief.Text` |
+| `correlation` | The autonomy layer's cross-camera correlation: tracks entities in time, links them into a `CorrelatedIncident` with a deterministic identity | evaluate | no | `correlation.Tracker`, `Tracker.Update`, `correlation.Linker`, `Linker.Link`, `CorrelatedIncident`, `SecondSight`, `Sight` |
 | `covercheck` | The coverage-floor gate: enforces that test coverage baselines do not drift | support | test only | `covercheck.Check`, `covercheck.Floors` |
 | `dbx` | The Postgres pool, the tenant-context discipline, and the password-free DSN policy | support | no | `dbx.Pool`, `Pool.InTenant`, `Pool.InSystemTenant`, `dbx.Config` |
 | `deadexport` | The exported-symbol liveness gate: every exported symbol must be read outside its own package or have a documented exemption | support | test only | `deadexport.SymbolsDeclared`, `TestNoExportedSymbolIsDead` |
@@ -79,6 +83,7 @@ Only five do. Everything else reaches the ledger through its caller.
 | `dispatch` | The four dispatch executors and the destinations loader. Turns `then.dispatch` into outbox messages and HTTP calls | present | no (the caller audits) | `dispatch.Dispatcher`, `DispatchExecutors`, `Destinations`, `DecodeJobPayload` |
 | `dr` | The whole-recovery drill as a test: database gone, checkpoint material gone, decision still replayable | support | test only | `dr` (DoD item 9) |
 | `durability` | The durability test suite: dedupe across partitions, lease reclaim, normalize atomicity, outbox poison isolation | support | test only | `durability` (threat-model controls C23–C28) |
+| `dutylog` | The hand-over artifact: one append-only, hash-chained JSONL file per shift, fsynced before the decision it records is broadcast. Pure: a path and a clock in, a tamper-evident log out | present | no | `dutylog.Open`, `Writer.Append`, `Writer.Verify`, `dutylog.ReadAll`, `Extract`, `Event` |
 | `evaluation` | Scores a VLM profile against labelled cases and decides promotion, with the gates as code | observe | no | `evaluation.Evaluate`, `evaluation.Gates`, `Runner`, `Case` |
 | `evidence` | Content-addressed filesystem store. The only code that touches the evidence root | store | no (the API audits `evidence.fetched`) | `evidence.Store`, `New`, `ValidateRef`, `Store.Put`, `Store.Open` |
 | `evidencefetch` | The `QueueEvidenceFetch` worker: places Milestone bookmarks, fetches clips, stores receipts | observe | no (the worker audits `evidence.bookmark.*`) | `evidencefetch.Worker`, `Worker.Handle`, `evidencefetch.Receipt` |
@@ -103,20 +108,26 @@ Only five do. Everything else reaches the ledger through its caller.
 | `rlsrole` | The RLS role generator and the write-canary gate for site-scoped tables | support | test only | `rlsrole.WriteCanary`, `rlsrole.Generate`, `TestWriteCanariesCoverAllSiteScopedTables` |
 | `rtsp` | The RTSP client and the camera state machine. Currently unused by the core; a demo capture path | ingest (demo) | no | `rtsp.Client`, `rtsp.State`, `rtsp.UserAgent`, `rtsp.DefaultPort` |
 | `rules` | The rule DSL: bundle, JSON Schema, semantic validation, compiled AST, deterministic engine. Imports nothing internal | evaluate | no | `rules.Compiler`, `Compile`, `CompiledBundle`, `Engine`, `Decision`, `Tier`, `DegradeTo` |
+| `safename` | One file-name stem mapping from an id — no separator, no reserved character, no control character. The shared guard for `dutylog`'s shift files and `siteconfig`'s object files, so a hardening covers both rather than one copy | support | no | `safename.Safe` |
 | `schemalaws` | The schema-level invariant suite: RLS isolation, append-only, provenance, `storage_ref` CHECKs, no person model | support | test only | `schemalaws` (threat-model controls C1–C6, C11–C12, C18–C19, C32–C33, C35) |
+| `sitemodel` | The autonomy layer's site topology: cameras, zones, routes and assets loaded from YAML, plus the point-in-polygon test every behaviour rule uses | store | no | `sitemodel.Site`, `sitemodel.LoadFromFile`, `LoadFromBytes`, `Site.ZoneByID` |
 | `simulate` | Runs a bundle over the fixture set and diffs the outcome; the diff *digest* is the activation gate | evaluate | no | `simulate.Runner.Run`, `simulate.DigestFor` |
+| `siteconfig` | The autonomous configurator: an inventory seam with one method, declaration-based learned zones, capture/retention plans, and one reconcile engine with two targets behind one interface (that interface is the multi-VMS seam). Pure: sinks and targets are injected, no DB and no vendor | present | no (the injected sink audits) | `siteconfig.CameraInventory`, `Generate`, `Artifact`, `Reconcile`, `Apply`, `Target`, `AuditSink` |
 | `skipaudit` | The skipped-test auditor: fails a run when any database-backed test skips rather than runs | support | test only | `skipaudit.Check`, `TestNoPackageSkipsWhenDatabaseIsConfigured` |
 | `soak` | The load / chaos harness: failure rehearsals, cost accounting, criteria evaluation | support | test only | `soak.Runner`, `soak.Criteria`, `soak.Answer`, `soak.Event` |
 | `sqlguard` | The SQL guard: forbids inline DDL, DML outside migrations, and `tenant_id` in request bodies | support | test only | `sqlguard.Check`, `TestNoInlineDDL`, `TestNoTenantIdInRequestBody` |
 | `statuscheck` | Derives every countable claim in `docs/status.md` from the file that defines it and fails when the document disagrees | support | test only | `statuscheck.Check`, `statuscheck.Derive` |
+| `telemetry` | The autonomy layer's live KPIs: HAM per 1000 events, time to decision, correlation hit rate, override rate, and the two integrity figures that may only read 100 | support | no | `telemetry.MetricsCollector`, `GetLiveTelemetry`, `telemetry.LiveTelemetry` |
 | `testutil` | The shared database-backed test harness. Skips rather than fails when no database is configured | support | no | `testutil.Pool`, `testutil.Reset`, `testutil.NewTenant` |
+| `threat` | The autonomy layer's explainable scoring and autonomous playbook: a reason chain, a severity × likelihood matrix, and cooldown-bounded decisions | evaluate | no | `threat.Scorer`, `Scorer.Score`, `threat.Matrix`, `threat.Playbook`, `Playbook.Decide` |
 | `treestate` | The repository-state gate: no frozen merge, no applied red-check mutation, no declined branch without reason | support | test only | `treestate.Check`, `TestTheRealTreeHasNoRedCheckMutationApplied` |
+| `youtube` | Small YouTube URL helpers for the live POC. Extracts a video ID from common URL forms and a raw 11-char id | ingest (demo) | no | `youtube.ExtractVideoID` |
 
 ### Binaries and tools
 
 | Path | What it is |
 |---|---|
-| `cmd/securityctl` | The operator and installer CLI. One binary, two audiences (a developer running `rules lint`, an operator running `upgrade` at a site with no network). Registers `preflight`, `doctor`, `install`, `upgrade`, `rollback`, `backup`, `restore`, `verify-release`, `build-release`, `migrate`, `rules`, `incident`, `audit`, `identity`, `release-key`. |
+| `cmd/securityctl` | The operator and installer CLI. One binary, two audiences (a developer running `rules lint`, an operator running `upgrade` at a site with no network). Registers `preflight`, `doctor`, `install`, `upgrade`, `rollback`, `backup`, `restore`, `verify-release`, `build-release`, `migrate`, `rules`, `incident`, `audit`, `identity`, `release-key`, `site-config`. |
 | `cmd/security-migrate` | A separate binary on purpose: the migrator owns the schema, so the long-running core cannot reshape its own tables underneath itself. |
 | `tools/contractcheck` | Turns "a breaking protobuf change is a build failure" into a build failure. `-mode check` gates, `-mode write` re-baselines. |
 | `tools/fixturegen` | Authors the synthetic fixture set. The scenarios say `Source: synthetic` and a test asserts a scenario claiming to be a capture names a real one. |

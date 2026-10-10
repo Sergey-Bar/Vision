@@ -1079,6 +1079,9 @@ func explainRequirements(r rules.Rule) []string {
 	if r.Then.RequireAIObservation {
 		out = append(out, "an AI observation must have been recorded before the incident is raised")
 	}
+	if tierCRequired(r.When) {
+		out = append(out, "corroborates at tier C (an AI observation); a missing one is never a negative one, so the rule's declared fallback applies")
+	}
 	if r.Then.Escalate {
 		out = append(out, "escalates, which needs a step-up MFA verification from the operator")
 	}
@@ -1093,6 +1096,22 @@ func explainDegradation(r rules.Rule) []string {
 			"outage does not change its outcome")
 	}
 	return out
+}
+
+// tierCRequired reports whether the rule's corroboration requires a Tier C
+// signal, which is the tier an AI observation occupies. A missing Tier C
+// signal is never a negative one, so this is what `rules explain` has to
+// surface about the rule's declared fallback.
+func tierCRequired(c rules.Condition) bool {
+	if c.Corroborate != nil && c.Corroborate.MinEvidenceTier == rules.TierC {
+		return true
+	}
+	for _, sub := range append(append([]rules.Condition{}, c.All...), c.Any...) {
+		if tierCRequired(sub) {
+			return true
+		}
+	}
+	return false
 }
 
 func walkForDegradation(c rules.Condition, out *[]string) {

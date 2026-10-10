@@ -284,6 +284,12 @@ func run() error {
 		// because these tables belong to the packages that own them, and a COUNT over
 		// four of them inside the API package would be the second reader for each.
 		Absence: NewAbsenceReader(pool, cfg.Tenant),
+		// The console's hand-over page: the brief and the duty-log state, read
+		// from the same packages the capture path writes them with. A site with
+		// no SP_HANDOVER_DIR keeps no artifact and the page says so by name,
+		// which is why passing nil is not an option: the reader itself carries
+		// the configured-or-named-absent behaviour.
+		Handover: NewDutyLogReader(cfg.HandoverDir, cfg.SiteID, nil),
 		ClockDrift: api.ClockDrift{
 			Service: &clocksub.Service{
 				Pool:      pool,
