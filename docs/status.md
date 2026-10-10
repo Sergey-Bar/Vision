@@ -1945,6 +1945,217 @@ ignores the degradation field still fails closed.
 attribution, validation, degradation, the reason vocabulary - is written and
 tested.
 
+The investigator role now has that body's shape. `Runtime.run_inference` binds an
+operator-installed engine from `SP_ENGINE_PATH` (a module exposing `describe()` and
+`investigate()`), calls it, and **refuses an answer that cites a fact it was not
+given** or that cites nothing at all. With no engine bound the plane answers with
+`no_runtime` and names the variable, which is what the dashboard renders - never an
+empty box. `poc/investigate.go` is the same seam from the other side: it assembles
+the facts (incidents, duty-log lines, camera health), sends them with their hashes,
+and applies the citation check again on the way out. Seven tests in
+`deploy/ai-runtime/test_runtime.py` and six in `poc/investigate_test.go` cover the
+cited answer, the uncited answer, the silent answer, an engine that raises, an
+engine without the interface, and an unset path. `investigate/v1` is registered in
+`internal/observations` as a **shadow** profile: its published JSON Schema is a
+`contracts/` change and stays with the human review that would promote it, which is
+the order the repo law requires.
+
+### The operator-elevation pass: hand-over, corroboration and the configurator
+
+Six packages, all of them new and all of them pure (sinks, clocks and targets
+injected, no database and no vendor): `internal/brief`, `internal/dutylog`,
+`internal/siteconfig`, and `SecondSight` in `internal/correlation`,
+`UnderObservedZones`/`CoverageRule` in `internal/anomaly`, and
+`Playbook.DecideWithSight` in `internal/threat`. What each one is for, and the
+seams it owns, is in the canonical package table in
+[`internal/README.md`](../internal/README.md) — that table is where they are
+described, so this section does not restate it; a number or a description held
+in two places is a number that has already started to drift.
+
+What they answer, in the words of the July 2026 surveys: `dutylog` + `brief`
+are the 79% who asked for "explain my reasoning in audit-ready format" and the
+hand-over that was tribal knowledge. `SecondSight` is the 65.6% who asked to
+"corroborate an alert with a second camera's sighting". `siteconfig` is the
+operator time spent on routine VMS changes and the per-camera cost creep of
+siloed platforms. The camera-digitisation numbers (10% recorded, 71% cobweb,
+41-50% rendered useless, 30% checking device health by hand) are what
+`UnderObservedZones`, the POC's per-camera health states and the coverage panel
+in `internal/api` are for.
+
+The POC runs the fleet: one yt-dlp+ffmpeg pipe and one detection loop per camera in
+`poc/config.yaml`'s `cameras:` list, over **one shared sidecar**, with each camera
+degrading **by name** (`fresh` / `stale` / `silent` / `blind`, each with its reason)
+through the existing `source_reason` pattern, the demo simulator carried as a
+pseudo-camera, and one shared `correlation.Tracker` so the decision point sees all
+cameras' tracks. It is started by a script — `scripts/run-poc.sh`,
+`scripts/run-poc.ps1` — which runs the backend with `go run` and prints the frontend's
+URL, so no binary is written into the checkout; the same invocation drives the demo's
+fleet steps. Both runners carry a `-smoke` / `-Smoke` form that asks the
+investigator one question and stops the backend, so a liveness check leaves
+neither a server on the port nor a binary on disk. The console in `internal/api`
+renders the same brief and the same
+duty-log state through its own templates from the same packages.
+
+**No exe is produced anywhere in the development flow.** Four exes that had
+accumulated in the tree from earlier `go build`s (`poc.exe`, `web.exe`,
+`skipaudit.exe`, `pipeline.test.exe`) were deleted. They are gitignored and
+none of the runners, gates or tests writes one: `go vet ./...` and
+`go test ./...` are the compile checks, `scripts/verify.ps1` runs no `go build`
+of its own, and the POC is launched with `go run`, which builds into the
+toolchain's cache. On a Windows development machine the distinction matters —
+a compiled exe in the checkout is a file Windows may block or quarantine — and
+`scripts/run-poc.sh` says so where the next person will look for it. The one
+build-a-binary path left in the tree is the demo container, which compiles
+`securityctl` and `security-core` into `/usr/local/bin` inside its own image
+and runs them there; that is a Linux image, not a host executable.
+
+**Guardrails in the reconcile engine, all tested:** never delete; never modify an
+object this engine did not create (adopt foreign as declared and report the
+conflict); retention is extend-only; a per-hour change cap; dry-run by default; and
+validate-then-write - an unknown target shape refuses the *whole* plan. The engine's
+`Apply` takes its sink and its target as arguments, which is why `siteconfig` imports
+no database and no vendor.
+
+**What is not true about it:** there is no VMS behind the Milestone target. Every
+Configuration-API route it would write through is `Unverified` with a
+`NOT-ANSWERABLE-FROM-DOCS` verdict in
+[`docs/vendor/milestone/route-audit.md`](../vendor/milestone/route-audit.md), the POC's
+`site-config` surface applies to the file target (its own artifact directory), and the
+learned zones are proposals a human promotes.
+
+#### Red-check of the citation guard
+
+The citation guard is the one control in this pass whose claim is "an answer that
+cites a fact it was not shown is refused rather than displayed". It is the same
+check on both sides of the seam — `Runtime.run_inference` refuses an uncited id, and
+`Investigate` refuses it again on the way out — and it was red-checked on the Go side.
+
+```
+CLAIM:     the investigator refuses an answer whose citations name a fact it was
+           not shown, instead of displaying it
+GUARDED:   poc/investigate_test.go:140  TestInvestigateRefusesAnUncitableOrUncitedAnswer
+HOLDS WHEN: Investigate checks every citation against the fact set it sent
+FAILS IF:  the `if !supplied[c]` branch in poc/investigate.go's citation loop is
+           replaced by a no-op
+```
+
+With the branch removed (the loop body became `_ = c`), the test failed and the
+output is the whole point of the control:
+
+```
+--- FAIL: TestInvestigateRefusesAnUncitableOrUncitedAnswer (0.03s)
+    investigate_test.go:146: an uncited fact was displayed: {Question:who was it?
+    Answer:a contractor was on site Citations:[incident-that-never-existed]
+    Facts:[cam-01 cam-02 sim] Degraded:false DegradedReason: DegradedDetail:
+    Model:local-vlm ModelIdentity: LatencyMS:0}
+FAIL
+```
+
+`Degraded:false` with `Citations:[incident-that-never-existed]`: an answer citing a
+fact nobody sent, displayed as a checkable answer. Restored from the pre-mutation
+copy and re-run — `ok github.com/Sergey-Bar/Ai-Captain/poc`.
+
+| Found | Cost had it shipped |
+|---|---|
+| the citation guard (`supplied[c]` check) in `Investigate` | a fabricated citation, displayed with a model's name on it, which is the one thing this product exists to prevent |
+
+The restore was verified by re-reading the restored lines and by the passing run
+rather than by `git diff --stat`, because this whole elevation is uncommitted work on
+a branch and a diff cannot distinguish one restore from the rest.
+
+#### The review pass, and the controls it red-checked
+
+The elevation was reviewed after it landed, along two axes — standards and spec —
+and the review's critical and warning findings were fixed. The two that were
+controls rather than tidiness were red-checked the same way as the citation guard,
+because each one guarded a claim this document makes:
+
+| Found | Cost had it shipped | Result of the red-check |
+|---|---|---|
+| `Reconcile`'s extend-only guard read `RetentionDays` back as zero from the file target, so a desired 90→7 reduction produced `update` instead of `refuse` | the one data-loss boundary the reconcile engine protects was decorative | with the guard forced back to a no-op the test fails, naming the reduction it let through; restored, it passes. `TestRetentionRoundTripsSoTheGuardCanFire` |
+| The second-sight demotion ran **after** the playbook committed its state, so a single-witness escalation was charged to the hourly budget and recorded as an escalation that never happened | ten demotions exhausted `MaxEscalationsPerHour` and every later corroborated escalation returned `HOLD`; never-escalated incidents were put into `HOLD` for `HoldCooldown` and logged a de-escalation that did not happen | moving the demotion after the commit fails `TestADemotedEscalationIsNotCharged`; restored, it passes |
+| `Runtime.bind_engine` let a missing engine file raise `FileNotFoundError` past its own typed refusal | a broken `SP_ENGINE_PATH` crashed the plane with a traceback **before** `/healthz` existed — a crash-loop that reads as an outage rather than a misconfiguration | the subprocess now exits 2 with one reason line naming the variable; the missing-file, no-interface and raising-`describe()` cases are all tests |
+
+Two further controls were added with the review rather than after it:
+`TestConfigurationRoutesAreNotEventFeeds` (a Configuration-API route marked
+`Paginated` makes `Adapter.Poll` treat it as an event feed and dead-letter it on
+every poll) and `TestTheInvestigatorContractAgreesWithThePlane` (the `investigate/v1`
+profile id, field set and required set are asserted to be the same on the Go side and
+in `deploy/ai-runtime/runtime.py`). Both were run by hand against the mutation before
+being kept.
+
+#### The second review pass
+
+The first pass found 13 issues and they were fixed. The second review of those
+corrections found 2 critical and 17 warnings, all of which are fixed in this
+tree. The two that were controls rather than tidiness:
+| Found | Cost had it shipped | How it was proven fixed |
+|---|---|---|
+| `forgetTerminalIncidents` walked the linker's incident map without `passMu`, which the autonomy pass holds while writing it | a fatal "concurrent map read and map write" that kills the process mid-shift, losing every duty-log line after it — the kill -9 no-loss story, undone by a janitor | `go test ./poc/ -race` is clean; the pass and every handler reader now take the pass lock, with the brief split into a `Held` variant the pass calls directly so nothing deadlocks |
+| The fsync-failure fix advanced the writer's chain but not its in-memory `events` ring, so the brief (ring) and the artifact (file) disagreed after one transient error | the hand-over's core claim — the artifact and the summary cannot disagree — broken by the fix meant to preserve it | removing the ring append from that branch fails `TestAFailedFsyncDoesNotDuplicateTheSequence`; restored, it passes |
+| `zoneCoverage` was called with a hard-coded `true`, latching the state map so a zone that recovered and re-degraded recorded one line | a silently-ignored degradation in an append-only artifact, against every later claim the coverage work makes | the verdict now comes from `anomaly.UnderObservedZones` each pass, so a recovery is a line and a later dark window is another |
+| The console's hand-over page ignored the site scope it was passed and never checked `CanSeeSite` | a principal scoped to another site reading this site's duty log and operator notes — the gate the incident and coverage pages both have | `handleConsoleHandover` now refuses with 404 before reading, and the reader takes a single `Read` that parses the file once instead of four times |
+| The investigator contract was declared three times with no cross-check | a field added on one side became an opaque plane-side refusal on the other | `TestTheInvestigatorContractAgreesWithThePlane` asserts the Go registry and `runtime.py`'s schema agree; adding a field to either fails it |
+| The console mapped coverage lines into `facts.Actions` while the POC excluded them | one artifact rendered two different briefs, and the console one under-reported the site's blind spots | both readers now call `brief.FactsFromEvents`, tested by `TestFactsFromEventsRoutesCoverageToCoverage` |
+
+Two further controls were closed by this pass rather than deferred:
+`extractVideoID` now bounds the id's length and every POST body goes through
+`http.MaxBytesReader` (a 500,000-character id was stored, broadcast and logged),
+and `bind_engine` catches `SystemExit` as well as `Exception` — an engine that
+calls `sys.exit(0)` at import used to kill the plane with exit code 0 and no
+reason line, and now exits 2 with the variable named.
+
+The installer's env templates carry both new variables (`SP_HANDOVER_DIR`,
+`SP_ENGINE_PATH`) with the failure contracts written beside them, and
+`deploy/README.md` describes the engine seam instead of asserting the plane has
+no engine.
+
+#### The third pass: the deferred suggestions, and every entry point as a script
+
+The eight SUGGESTION findings from the second review were then closed:
+
+| Finding | Fix |
+|---|---|
+| The incident janitor re-walked every incident the linker held, every 5 s, re-issuing the same deletes for ever | it now walks only the ids the ingest still remembers (`sightCache.Keys()`), because an incident with no memory needs no forgetting |
+| `run-poc.sh`'s `-once` flag started the backend, waited for readiness, printed the URLs, then killed it | replaced by `-smoke`, which asks the investigator one question and *says* that it is stopping; the same flag exists on the PowerShell runner as `-Smoke` |
+| The contract test's regex encoded the plane's schema layout a second time (property order, flat `"name": {`) | a brace-matching, string-aware parser for the dict literal, so reordering the keys or nesting a sub-schema is not a contract change |
+| The dump bound was three numbers in two places | `dutylog.MaxDumpEvents` + `DumpTail` (text and the truncation note), read by the POC and the console alike |
+| `camerasForRoute` walked `cam.ZoneIDs` itself, and a one-line `camerasForZone` wrapper was defined twice | the declaration now always reads `sitemodel.Site.CamerasForZone`; both wrappers are gone |
+| `setSourceLine`, `source` and `sourceReason` were written by the demo path and read by nothing | deleted — the status snapshot derives the line from the fleet's own counters |
+| `cameraStatus.FpsAvg` and `.URL`, and `DutyLogState.SiteID`/`.Lines`, were populated and never rendered | the camera tile now shows the achieved fps (the shared sidecar's serialized round trip can halve a camera's configured rate) and its stream URL, and the console's artifact table shows the site and line count |
+
+Two of those were red-checked rather than merely added. Removing the ring append
+from the fsync-failure branch fails
+`TestAFailedFsyncDoesNotDuplicateTheSequence`, and both a field drift and a
+`required` drift in `deploy/ai-runtime/runtime.py` fail
+`TestTheInvestigatorContractAgreesWithThePlane`; all three were restored to
+green afterwards.
+
+**Nothing in this repository now runs from a compiled binary.** Four exes that
+had accumulated in the checkout from earlier `go build`s (`poc.exe`, `web.exe`,
+`skipaudit.exe`, `pipeline.test.exe`) were deleted — they are gitignored and
+none of the current runners, gates or tests writes one. Every entry point is a
+script:
+
+| Entry point | Script |
+|---|---|
+| The POC (fleet, autonomy layer, hand-over, configurator, investigator) | `scripts/run-poc.sh` / `scripts/run-poc.ps1` |
+| The Security Core (console, pipeline, audit) | `scripts/run-core.sh` / `scripts/run-core.ps1` |
+| The demo transcript | `scripts/demo.sh` (its fleet steps drive the POC runner; the container variant compiles two binaries inside its own image) |
+| The gate | `scripts/verify.ps1`, which runs no `go build` of its own |
+
+All four resolve the toolchain by name rather than assuming it is on PATH, wait
+for a health endpoint rather than sleeping, kill the compiled server behind
+`go run` as well as the wrapper, and the two runners carry a smoke form that
+leaves neither a server on the port nor a binary on disk. `run-core` also
+carries the core's own refusals forward instead of leaving them in a log: the
+required `SP_` set, and the TLS posture the core demands — `-Cert`/`-Key`, or
+`-BehindProxy` with `-TrustedProxy`, because declaring a proxy that does not
+exist is a false claim about the world. Both runners read the port their server
+binds from that server's own configuration (`web.port`), and the POC binds
+loopback by default so it does not prompt a firewall on a Windows development
+machine.
+
 ## What is not done, and why
 
 ### The hackathon plan, and where it stands

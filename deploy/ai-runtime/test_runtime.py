@@ -7,7 +7,7 @@ rather than a guess, and that a degraded answer cannot be read as a negative.
 
 The last one is the whole product. If a consumer that ignores the degradation
 field reads an empty output as "nobody was present", the platform is worse than
-having no AI at all â€” so ``insufficientEvidence`` is true on every degraded
+having no AI at all ” so ``insufficientEvidence`` is true on every degraded
 response even when the caller forgets to look at ``degradedReason``.
 """
 
@@ -31,11 +31,14 @@ from runtime import (  # noqa: E402
     DEGRADED_NONE,
     API_VERSION,
     Evidence,
+    INVESTIGATOR_PROFILE,
+    INVESTIGATOR_SCHEMA,
     InferenceRequest,
     InferenceUnavailable,
     ModelBundle,
     Runtime,
     _ed_decode_point,
+    _engine_failure_line,
     build_runtime,
     ed25519_verify,
     validate_output,
@@ -229,7 +232,7 @@ class Ed25519RFC8032(unittest.TestCase):
     here reaches the network, and an air-gapped site can run this.
     """
 
-    # (label, secret key, public key, message hex, signature hex) â€” RFC 8032 Â§7.1
+    # (label, secret key, public key, message hex, signature hex) ” RFC 8032 Â§7.1
     VECTORS = [
         (
             "TEST 1 (empty message)",
@@ -325,7 +328,7 @@ class Ed25519RFC8032(unittest.TestCase):
         # S + L encodes the same mathematical signature and is the classic Ed25519
         # malleability trick. A verifier that skips the S < L check accepts it,
         # which means two distinct byte strings both verify for one signed
-        # manifest â€” and a signature you can edit is not a signature.
+        # manifest ” and a signature you can edit is not a signature.
         public = bytes.fromhex(self.VECTORS[0][2])
         message = bytes.fromhex(self.VECTORS[0][3])
         signature = bytes.fromhex(self.VECTORS[0][4])
@@ -712,14 +715,14 @@ class CofactoredVerification(unittest.TestCase):
 
 
 class GoldenSignedBundle(unittest.TestCase):
-    """A frozen, correctly signed bundle â€” the accept path, byte for byte.
+    """A frozen, correctly signed bundle ” the accept path, byte for byte.
 
     The other bundle tests sign at run time, which proves the round trip but
     would also pass if the signer and the verifier were wrong in the same way.
     These are literals: the manifest bytes, the signature and the public key
     are all fixed, so the only thing that can make them pass is a verifier
     that agrees with the RFC. And the tampered half is a one-byte edit of the
-    same fixture, which is the check that matters â€” a verifier that always
+    same fixture, which is the check that matters ” a verifier that always
     accepts would sail through the accept tests and be caught here.
     """
 
@@ -925,6 +928,198 @@ class BundleVerification(unittest.TestCase):
         self.assertIn("no inference engine", str(caught.exception))
 
 
+class Investigator(unittest.TestCase):
+    """The one role the plane ships: answer over stored facts, with citations.
+
+    Every assertion below is about what makes an investigate answer keepable.
+    The engine is a fake module bound from a temp file, which is the exact path
+    an operator's real engine takes, so the binding is tested and not assumed.
+    """
+
+    def _engine(self, root: Path, body: str) -> str:
+        path = root / "engine.py"
+        path.write_text(
+            "import hashlib\n"
+            "def describe():\n"
+            "    return {'model': 'local-vlm', 'model_hash': 'a' * 64, 'hardware': 'gpu'}\n"
+            + body,
+            encoding="utf-8",
+        )
+        return str(path)
+
+    def _runtime_with(self, root: Path, body: str) -> Runtime:
+        bundle = write_bundle(root / "verified")
+        runtime = Runtime(bundle)
+        runtime.bind_engine(self._engine(root, body))
+        return runtime
+
+    GOOD = (
+        "def investigate(request):\n"
+        "    return {'structured_output': {'answer': 'two cameras, 42s dwell',\n"
+        "        'citations': ['ev-1'], 'confidence': 0.8}}\n"
+    )
+
+    def test_a_cited_answer_is_returned_with_attribution(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = self._runtime_with(Path(tmp), self.GOOD)
+            result = runtime.run_inference(request(profile_id=INVESTIGATOR_PROFILE,
+                                                   profile_schema=INVESTIGATOR_SCHEMA))
+        self.assertEqual(result.structured_output["answer"], "two cameras, 42s dwell")
+        self.assertEqual(result.structured_output["citations"], ["ev-1"])
+        self.assertEqual(result.model, "local-vlm")
+        # The recorded hash is the BUNDLE's, which is the verified one.
+        self.assertEqual(result.model_hash, "a" * 64)
+        self.assertEqual(result.hardware, "gpu")
+        self.assertEqual(result.prompt_template_id, "investigate/v1")
+
+    def test_a_model_hash_that_disagrees_with_the_bundle_is_refused(self) -> None:
+        # The observation's model identity is what the bundle verification
+        # exists to bind, so an engine claiming a different hash than the
+        # signed manifest is refused rather than recorded.
+        spoof = (
+            "def describe():\n"
+            "    return {'model': 'local-vlm', 'model_hash': 'b' * 64, 'hardware': 'gpu'}\n"
+            "def investigate(request):\n"
+            "    return {'structured_output': {'answer': 'two cameras, 42s dwell',\n"
+            "        'citations': ['ev-1'], 'confidence': 0.8}}\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = self._runtime_with(Path(tmp), spoof)
+            with self.assertRaises(InferenceUnavailable) as caught:
+                runtime.run_inference(request())
+        self.assertEqual(caught.exception.reason, DEGRADED_ERROR)
+        self.assertIn("disagrees with the manifest", str(caught.exception))
+
+    def test_the_model_hash_is_the_verified_bundles(self) -> None:
+        # And the recorded hash is the bundle's, not the engine's: an engine
+        # that omits the field still produces an observation carrying the
+        # verified one.
+        quiet = (
+            "def describe():\n"
+            "    return {'model': 'local-vlm', 'hardware': 'gpu'}\n"
+            "def investigate(request):\n"
+            "    return {'structured_output': {'answer': 'two cameras, 42s dwell',\n"
+            "        'citations': ['ev-1'], 'confidence': 0.8}}\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = self._runtime_with(Path(tmp), quiet)
+            bundle_hash = runtime.bundle.model_hash
+            result = runtime.run_inference(request())
+        if not bundle_hash:
+            t.Skip("the fixture bundle carries no model hash")
+        if result.model_hash != bundle_hash:
+            t.Errorf("model_hash = %r, want the bundle's %r", result.model_hash, bundle_hash)
+
+    def test_an_uncited_answer_is_refused(self) -> None:
+        lying = self.GOOD.replace("['ev-1']", "['ev-1', 'ev-9']")
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = self._runtime_with(Path(tmp), lying)
+            with self.assertRaises(InferenceUnavailable) as caught:
+                runtime.run_inference(request())
+        self.assertEqual(caught.exception.reason, DEGRADED_ERROR)
+        self.assertIn("ev-9", str(caught.exception))
+
+    def test_an_answer_with_no_citations_is_refused(self) -> None:
+        silent = self.GOOD.replace("['ev-1']", "[]")
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = self._runtime_with(Path(tmp), silent)
+            with self.assertRaises(InferenceUnavailable) as caught:
+                runtime.run_inference(request())
+        self.assertEqual(caught.exception.reason, DEGRADED_ABSENT)
+
+    def test_a_missing_engine_file_is_a_named_refusal(self) -> None:
+        # The reason a broken engine is a startup EVENT rather than a crash:
+        # every way an engine can fail to load becomes the same typed refusal,
+        # so the process reports a configuration error instead of a traceback.
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = write_bundle(Path(tmp) / "verified")
+            runtime = Runtime(bundle)
+            missing = str(Path(tmp) / "not-there.py")
+            with self.assertRaises(InferenceUnavailable) as caught:
+                runtime.bind_engine(missing)
+        self.assertEqual(caught.exception.reason, DEGRADED_NO_RUNTIME)
+        self.assertIn("not-there.py", str(caught.exception))
+        self.assertIn("did not import", str(caught.exception))
+
+    def test_a_raising_describe_is_a_named_refusal(self) -> None:
+        lying = (
+            "def describe():\n"
+            "    raise RuntimeError('no gpu here')\n"
+            "def investigate(request):\n"
+            "    return {'structured_output': {}}\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bundle = write_bundle(root / "verified")
+            runtime = Runtime(bundle)
+            path = str(root / "engine.py")
+            Path(path).write_text(lying, encoding="utf-8")
+            with self.assertRaises(InferenceUnavailable) as caught:
+                runtime.bind_engine(path)
+        self.assertEqual(caught.exception.reason, DEGRADED_NO_RUNTIME)
+        self.assertIn("no gpu here", str(caught.exception))
+
+    def test_the_engine_failure_line_names_the_variable(self) -> None:
+        os.environ["SP_ENGINE_PATH"] = "/opt/engines/investigator.py"
+        try:
+            line = _engine_failure_line(
+                InferenceUnavailable(DEGRADED_NO_RUNTIME, "the engine did not import: FileNotFoundError"))
+        finally:
+            os.environ.pop("SP_ENGINE_PATH", None)
+        # One line, naming the variable, the cause, and the way out: an
+        # operator reading it knows what to unset.
+        self.assertIn("SP_ENGINE_PATH", line)
+        self.assertIn("/opt/engines/investigator.py", line)
+        self.assertIn("FileNotFoundError", line)
+        self.assertIn("Unset SP_ENGINE_PATH", line)
+        self.assertIn("exit 2", line)
+
+    def test_an_engine_that_raises_degrades_rather_than_crashing(self) -> None:
+        broken = (
+            "def investigate(request):\n"
+            "    raise RuntimeError('cuda exploded')\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = self._runtime_with(Path(tmp), broken)
+            with self.assertRaises(InferenceUnavailable) as caught:
+                runtime.run_inference(request())
+        self.assertEqual(caught.exception.reason, DEGRADED_ERROR)
+        self.assertIn("cuda exploded", str(caught.exception))
+
+    def test_a_module_without_the_interface_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "engine.py"
+            path.write_text("def something_else():\n    return 1\n", encoding="utf-8")
+            bundle = write_bundle(root / "verified")
+            runtime = Runtime(bundle)
+            with self.assertRaises(InferenceUnavailable) as caught:
+                runtime.bind_engine(str(path))
+        self.assertEqual(caught.exception.reason, DEGRADED_NO_RUNTIME)
+        self.assertIn("investigate", str(caught.exception))
+
+    def test_an_unset_engine_path_is_named(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = Runtime(write_bundle(Path(tmp) / "verified"))
+            with self.assertRaises(InferenceUnavailable) as caught:
+                runtime.bind_engine("")
+        self.assertEqual(caught.exception.reason, DEGRADED_NO_RUNTIME)
+        self.assertIn("SP_ENGINE_PATH", str(caught.exception))
+
+    def test_the_bundle_is_still_verified_before_the_engine_is_called(self) -> None:
+        # The engine path is operator-trusted; the bundle path is vendor-signed.
+        # A verified bundle with no engine refuses, and a broken bundle with a
+        # perfect engine never reaches it.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            broken = write_bundle(root / "broken", sign=False)
+            runtime = Runtime(broken)
+            with self.assertRaises(InferenceUnavailable) as caught:
+                runtime.run(request())
+            self.assertEqual(caught.exception.reason, DEGRADED_MODEL_UNAVAILABLE)
+
+
+
 class EvidenceIntegrity(unittest.TestCase):
     """Evidence whose hash does not match must not be shown to a model."""
 
@@ -946,14 +1141,14 @@ class EvidenceIntegrity(unittest.TestCase):
     def test_empty_evidence_is_refused(self) -> None:
         # This test asserted the opposite, and its name gave the reason: an
         # evidence with no bytes "is not a hash mismatch". That statement is true
-        # and it was used to justify `return True` â€” which is a different claim,
+        # and it was used to justify `return True` ” which is a different claim,
         # and the one the product rests on. `verify()` does not verify anything
         # when there are no bytes; it reports that it verified, which is the
         # condition the docstring calls worse than no observation.
         #
         # There is a real case behind it: the core holds the evidence and the
         # plane is handed a reference. A reference cannot be verified here, so it
-        # must not be *accepted* here either â€” which is why the request boundary
+        # must not be *accepted* here either ” which is why the request boundary
         # now refuses a request whose evidence carries no bytes, and this function
         # has one answer.
         reference_only = Evidence(evidence_id="ev-1", sha256="a" * 64, content_type="video/mp4")

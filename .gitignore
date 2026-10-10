@@ -74,3 +74,32 @@ __pycache__/
 # Python bytecode from the AI runtime tests
 __pycache__/
 *.pyc
+
+# Model weights. 114 MB, over GitHub's 100 MB blob limit, and downloaded rather
+# than built: the download command is in the detector's own documentation, so a
+# committed .pt pins a binary that no build step reproduces and that every clone
+# pays for.
+/yolo11x.pt
+
+# The POC's local Python virtualenv. yt-dlp, NumPy and SciPy in site-packages
+# are a machine's install, not the product's source, and the whole tree is
+# megabytes of DLLs that differ per interpreter.
+/.venv-poc/
+
+# Runtime spill from a POC run, written at the repository root by the demos and
+# the live server: one incident artifact and one observation per detected event.
+# They are local state with a storage reference in them, not a fixture, and the
+# sanitised fixtures belong in internal/fixture.
+/inc_*.incident.json
+/inc_*.observation.json
+
+# A `go tool cover -func` invocation whose redirect was mistyped, which left its
+# output at the repository root instead of in a file it named.
+/$f
+
+# A vendor tool's own workspace state.
+/.freebuff/
+
+# A scratch copy of the POC config's Go type declarations, kept next to the code
+# it was copied from while that code was being rewritten.
+/poc/config_types_restore.txt

@@ -38,6 +38,7 @@ Five invariants that the rest of the code exists to protect.
 | `contracts/` | Protobuf `security/v1`, OpenAPI `v1`, JSON Schema. No language owns the schema. See [`contracts/README.md`](contracts/README.md). |
 | `cmd/securityctl` | Operator and installer CLI. |
 | `cmd/security-migrate` | Expand/contract migration runner. |
+| `poc/` | The operator-elevation demo: the camera fleet, the autonomy layer, the hand-over artifact and the configurator. Started by a script (`./scripts/run-poc.sh`, `.\scripts\run-poc.ps1`, both with a smoke form) that runs the backend with `go run` and prints the frontend's URL — nothing is built into the checkout. It binds loopback by default, so it does not prompt a firewall; `web.host: 0.0.0.0` in `poc/config.yaml` exposes it and is the deliberate price. Architecture: [`poc/ARCHITECTURE.md`](poc/ARCHITECTURE.md); its packages are in `internal/` like everything else. |
 | `internal/` | Core: adapters, durability, graph, rules, verification, audit, identity, API, console. Start at [`internal/README.md`](internal/README.md). |
 | `migrations/` | Ordered SQL. `expand` steps ship separately from `contract` steps. See [`migrations/README.md`](migrations/README.md). |
 | `rules/builtin/` | The built-in bundle, shipped in the release archive. |

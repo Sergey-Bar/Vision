@@ -85,15 +85,29 @@ core keeps ingesting and verifying. Invariant 3 is a boundary, not a code path.
 
 ### What is missing
 
-A `run_inference` body. No model, no weights, no inference engine, no GPU. Line
-336 is the whole of it:
+A model. No weights, no GPU, no vendored engine. What is **present** is the
+engine seam and the investigator role that binds to it: `Runtime.bind_engine`
+loads an operator-supplied module from `SP_ENGINE_PATH`, and
+`Runtime.run_inference` calls its `investigate()` and refuses an answer that
+cites a fact it was not given. With no engine bound, the same path produces
+the typed refusal that used to be the whole of it:
 
 ```python
 raise InferenceUnavailable(
     DEGRADED_NO_RUNTIME,
-    "a signed bundle is present but this build has no inference engine bound. ...",
+    "a signed bundle is present but no inference engine is bound (SP_ENGINE_PATH). ...",
 )
 ```
+
+The engine contract is small and documented where it is implemented:
+`describe()` returns `{model, model_hash, hardware, prompt_template_id,
+prompt_version}` and `investigate(request)` returns `{structured_output,
+insufficient_evidence}`. A module that verifies but does not expose them, one
+that fails to import, and one whose `model_hash` disagrees with the signed
+bundle are all refusals — and a `SP_ENGINE_PATH` that is set but loads to
+nothing is a **startup failure**: one reason line naming the variable, exit 2.
+systemd's `Restart=on-failure` then restarts until the file is fixed, which is
+the honest outcome for "the operator said a model is installed".
 
 `Runtime.run()` returns typed refusals on every other path too: no evidence
 supplied is `DEGRADED_ABSENT` ("absence, not a negative"), an evidence hash
@@ -161,6 +175,8 @@ check, the input hash, the output hash. What a model adds is one function.
 | `SP_MODEL_BUNDLE` | unset | Directory holding `manifest.json` and `manifest.sig`. Unset means no model, which is a supported configuration. |
 | `SP_MODEL_BUNDLE_SIGNATURE` | unset | Passed to `ModelBundle` as `signature`. |
 | `SP_MODEL_BUNDLE_KEY` | unset | The vendor public key. **Never used beyond a non-empty check** — see below. |
+| `SP_ENGINE_PATH` | unset | A Python module exposing `describe()` and `investigate()`. Unset means no engine, which is a supported production configuration: every observation degrades with `no_runtime` and the investigator answers with that named reason. Set but unloadable is a startup failure — one reason line, exit 2. **On an upgrade of an existing install the env file is preserved verbatim (`keepExisting` in `internal/lifecycle`), so this line is NOT added for you: add it by hand.** |
+| `SP_HANDOVER_DIR` | unset (core) | Where the shift hand-over artifact is written and read. Unset means no artifact: the pipeline runs without it and the console's `/handover` page says so by name. **Same `keepExisting` rule applies on an upgrade.** |
 
 `Handler.log_message` is overridden to return nothing, so the default
 request-line logging (which can include a query string) never happens. Every
@@ -226,6 +242,16 @@ and `AGENTS.md` requires the ADR before the change.
 Both files are reference artefacts. **No code in the tree reads either of them**,
 and `securityctl install` does not consume them — the installer verifies the
 archive, creates the program directory and applies the migrations.
+
+**An upgrade preserves the env files verbatim.** `internal/lifecycle` marks both
+env templates `keepExisting: true`, and `securityctl upgrade` never rewrites
+them, so a variable added to the template in a later release is **not** present
+on an upgraded site until an operator adds it by hand. That is the deliberate
+trade — a rewritten env file would silently undo a site's own settings — but it
+means the two variables this release added (`SP_ENGINE_PATH`,
+`SP_HANDOVER_DIR`) must be added by hand on an upgrade, while a fresh install
+gets them from the template. `securityctl preflight` says which of the required
+variables are absent.
 
 ### `systemd/security-core.service`
 
@@ -504,7 +530,7 @@ recorded one, then refuses to restore.
 ### 10. The AI runtime, if you are running one
 
 ```sh
-cd deploy/ai-runtime && py -m unittest discover    # 21 tests, standard library only
+cd deploy/ai-runtime && py -m unittest discover    # 73 tests, standard library only
 
 SP_AI_LISTEN=127.0.0.1:8800 python3 deploy/ai-runtime/runtime.py
 curl -s http://127.0.0.1:8800/healthz

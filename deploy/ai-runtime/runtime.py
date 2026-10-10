@@ -26,6 +26,7 @@ import binascii
 import hashlib
 import json
 import os
+import sys
 import time
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -247,6 +248,25 @@ def degraded_response(observation_id: str, profile_id: str, reason: str, detail:
 
 
 RUNTIME_VERSION = "ai-runtime/1"
+
+
+# --- The investigator profile -------------------------------------------
+#
+# One role, and it answers questions over stored facts. The profile is the
+# contract between the plane and the engine: three fields, of which the second
+# is the one that makes the answer checkable. The Go side sends exactly this
+# field set as `profileSchema`, and `validate_output` refuses an answer that
+# names a field the schema does not declare.
+INVESTIGATOR_PROFILE = "investigate/v1"
+
+INVESTIGATOR_SCHEMA: dict[str, Any] = {
+    "properties": {
+        "answer": {"type": "string"},
+        "citations": {"type": "array"},
+        "confidence": {"type": "number"},
+    },
+    "required": ["answer", "citations"],
+}
 
 
 # --- Ed25519 verification (RFC 8032), verify only -----------------------
@@ -590,19 +610,28 @@ class ModelBundle:
 
 
 class Runtime:
-    """Loads the bundle and runs inference.
+    """Loads the bundle, binds the operator's engine, and runs inference.
 
-    The inference body is the part a model would fill. It is not written, and
-    saying so is more useful than a placeholder that returns a plausible answer:
-    a placeholder that returns ``{"restrictedZoneBreach": false}`` would produce
-    a CORROBORATED incident on a fabricated negative, which is the single worst
-    failure this product can have.
+    The engine is bound from ``SP_ENGINE_PATH``: a Python module an operator
+    installs on the GPU workstation, which exposes ``describe()`` and
+    ``investigate(request)``. That indirection is the whole design — this
+    service is dependency-free by contract, so the model lives outside it and
+    arrives through a path rather than a requirement.
+
+    **One role, and it is investigate.** The engine answers questions over the
+    stored facts it is handed and cites the ids it used; every other capability
+    waits for that one to be shadow-measured. An answer that cites a fact it was
+    not given is refused below, because a citation that can be checked is the
+    only thing that distinguishes an answer from a story.
     """
 
     def __init__(self, bundle: ModelBundle | None) -> None:
         self.bundle = bundle
         self._load_error: str | None = None
         self._load_reason: str = DEGRADED_NONE
+        self._engine: Any = None
+        self._engine_error: str | None = None
+        self._engine_description: dict[str, Any] | None = None
         if bundle is None:
             self._load_error = "no model bundle is configured at SP_MODEL_BUNDLE"
             self._load_reason = DEGRADED_MODEL_UNAVAILABLE
@@ -615,6 +644,185 @@ class Runtime:
 
     def available(self) -> bool:
         return self.bundle is not None and self.bundle.loaded
+
+    def bind_engine(self, path: str) -> dict[str, Any]:
+        """Bind the operator's engine module and return its description.
+
+        The binding is explicit rather than lazy so that a broken engine is a
+        startup event an operator reads, not a per-request surprise. A module
+        that verifies but does not expose the interface is refused here.
+        """
+        import importlib.util
+
+        if not path:
+            raise InferenceUnavailable(
+                DEGRADED_NO_RUNTIME,
+                "SP_ENGINE_PATH is unset: this build has no inference engine bound. Binding "
+                "one is a deployment step; until then every observation is recorded as degraded, "
+                "which is the behaviour the product promises when the AI plane is unavailable",
+            )
+        spec = importlib.util.spec_from_file_location("sp_investigator", path)
+        if spec is None or spec.loader is None:
+            raise InferenceUnavailable(DEGRADED_NO_RUNTIME, f"SP_ENGINE_PATH {path!r} is not a module")
+        module = importlib.util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(module)
+        except InferenceUnavailable:
+            raise
+        except SystemExit as exc:
+            # An engine that calls sys.exit at import is as unbindable as one
+            # that raises, and it used to escape this conversion entirely:
+            # `except Exception` does not catch SystemExit, so the process
+            # exited with the operator- or attacker-chosen code and no reason
+            # line. A code of 0 reads to a supervisor as a clean stop.
+            code = exc.code if isinstance(exc.code, int) else None
+            raise InferenceUnavailable(
+                DEGRADED_NO_RUNTIME,
+                f"the engine at {path!r} called sys.exit at import (code {code if code is not None else exc.code!r})",
+            ) from exc
+        except BaseException as exc:  # noqa: BLE001
+            # Whatever else the reason the module will not load — a missing
+            # file, a syntax error, an import of a library that is not
+            # installed — the plane names it and refuses. Only a missing path
+            # took the unguarded route before, and that one produced a
+            # FileNotFoundError traceback, which is the crash-loop-style
+            # failure this whole engine-binding design exists to avoid.
+            raise InferenceUnavailable(
+                DEGRADED_NO_RUNTIME,
+                f"the engine at {path!r} did not import: {type(exc).__name__}: {exc}",
+            ) from exc
+        for name in ("describe", "investigate"):
+            if not callable(getattr(module, name, None)):
+                raise InferenceUnavailable(
+                    DEGRADED_NO_RUNTIME,
+                    f"the engine at {path!r} does not expose {name}(); the interface is "
+                    f"describe() -> dict and investigate(request) -> dict",
+                )
+        try:
+            self._engine_description = dict(module.describe())
+        except SystemExit as exc:
+            code = exc.code if isinstance(exc.code, int) else None
+            raise InferenceUnavailable(
+                DEGRADED_NO_RUNTIME,
+                f"the engine at {path!r} called sys.exit from describe() (code {code if code is not None else exc.code!r})",
+            ) from exc
+        except BaseException as exc:  # noqa: BLE001
+            # A describe() that raises or exits is as unbindable as one that
+            # is absent, and it fails at the same point: before any answer can
+            # cite anything.
+            raise InferenceUnavailable(
+                DEGRADED_NO_RUNTIME,
+                f"the engine at {path!r} raised from describe(): {type(exc).__name__}: {exc}",
+            ) from exc
+        self._engine = module
+        self._engine_error = None
+        return self._engine_description
+
+    def run_inference(self, request: InferenceRequest) -> InferenceResult:
+        """Run the investigate role over one fact set.
+
+        The citations check runs before anything is returned. An engine answer
+        that cites a fact id which was not in the request is refused with a
+        reason naming it: an unchecked citation is a fabrication wearing the
+        costume of evidence, and this product's whole claim is that its answers
+        can be followed back to the bytes.
+        """
+        if not self.available():
+            raise InferenceUnavailable(self._load_reason, self._load_error or "the runtime has no model")
+        if self._engine is None:
+            raise InferenceUnavailable(
+                DEGRADED_NO_RUNTIME,
+                "a signed bundle is present but no inference engine is bound (SP_ENGINE_PATH). Binding "
+                "one is a deployment step; until then every observation is recorded as degraded, "
+                "which is the behaviour the product promises when the AI plane is unavailable",
+            )
+        started = time.monotonic()
+        description = self._engine_description or {}
+        try:
+            answer = self._engine.investigate(request)
+        except InferenceUnavailable:
+            raise
+        except SystemExit as exc:
+            # The same hole bind_engine has: an engine that calls sys.exit at
+            # answer time used to kill the process with a chosen code, which a
+            # supervisor reads as a clean stop.
+            code = exc.code if isinstance(exc.code, int) else None
+            raise InferenceUnavailable(
+                DEGRADED_ERROR,
+                f"the engine called sys.exit while answering (code {code if code is not None else exc.code!r})",
+            ) from exc
+        except BaseException as exc:  # noqa: BLE001
+            # An engine failure is a degradation, not a crash: the plane
+            # answers that it could not answer and says why.
+            raise InferenceUnavailable(DEGRADED_ERROR, f"the engine raised: {type(exc).__name__}: {exc}") from exc
+
+        structured = answer.get("structured_output") if isinstance(answer, dict) else None
+        if not isinstance(structured, dict):
+            raise InferenceUnavailable(
+                DEGRADED_ERROR,
+                f"the engine at {description.get('model', 'unknown model')!r} returned no structured output",
+            )
+        supplied = {item.evidence_id for item in request.evidence}
+        citations = structured.get("citations") or []
+        if not isinstance(citations, list):
+            raise InferenceUnavailable(DEGRADED_ERROR, "the engine's citations are not a list")
+        uncited = [c for c in citations if c not in supplied]
+        if uncited:
+            raise InferenceUnavailable(
+                DEGRADED_ERROR,
+                f"the engine cited {sorted(uncited)} which was not in the request; a citation "
+                f"that cannot be followed back to the bytes is refused",
+            )
+        if not citations:
+            # An answer with no citations is not an answer this product keeps:
+            # the investigate role exists to be checkable, and the check is the
+            # citation list.
+            raise InferenceUnavailable(
+                DEGRADED_ABSENT,
+                "the engine answered without citing any fact; an investigate answer with no "
+                "citations is indistinguishable from a guess",
+            )
+
+        # The deadline, over the same window latency_ms reports. A slow engine
+        # that still produces a cited answer is refused here, and the refusal's
+        # elapsed and the result's latency would agree — a caller reconciling
+        # the two numbers cannot be shown an impossible pair.
+        elapsed_ms = int((time.monotonic() - started) * 1000)
+        if request.deadline_seconds and elapsed_ms > request.deadline_seconds * 1000:
+            raise InferenceUnavailable(
+                DEGRADED_TIMEOUT,
+                f"the engine took {elapsed_ms}ms, past the {request.deadline_seconds}s deadline",
+            )
+
+        # The model hash is the BUNDLE's, which is the one that was verified.
+        # An engine's self-described hash is a field the engine fills in, and
+        # the observation's model identity is exactly what the bundle
+        # verification exists to bind — so a claim that disagrees with the
+        # signed manifest is refused rather than recorded.
+        bundle_hash = self.bundle.model_hash if self.bundle else ""
+        claimed = str(description.get("model_hash") or "")
+        if claimed and bundle_hash and claimed != bundle_hash:
+            raise InferenceUnavailable(
+                DEGRADED_ERROR,
+                f"the engine describes model hash {claimed} but the signed bundle's is "
+                f"{bundle_hash}; an identity that disagrees with the manifest is not recorded",
+            )
+        return InferenceResult(
+            observation_id=request.observation_id,
+            profile_id=request.profile_id,
+            structured_output=structured,
+            insufficient_evidence=bool(answer.get("insufficient_evidence", False)),
+            model=str(description.get("model") or "unknown"),
+            model_hash=bundle_hash or claimed,
+            runtime_version=RUNTIME_VERSION,
+            prompt_template_id=str(description.get("prompt_template_id") or "investigate/v1"),
+            prompt_version=str(description.get("prompt_version") or "1"),
+            model_bundle_signature=self.bundle.signature if self.bundle else "",
+            input_evidence_hashes=[item.sha256 for item in request.evidence],
+            output_schema_version=1,
+            latency_ms=elapsed_ms,
+            hardware=str(description.get("hardware") or "unknown"),
+        )
 
     def run(self, request: InferenceRequest) -> InferenceResult:
         """Run inference, or raise with the reason it cannot.
@@ -636,25 +844,29 @@ class Runtime:
         if not self.available():
             raise InferenceUnavailable(self._load_reason, self._load_error or "the runtime has no model")
 
-        # The inference body. There is no model, so there is nothing to call, and
-        # this raises rather than inventing an answer.
-        raise InferenceUnavailable(
-            DEGRADED_NO_RUNTIME,
-            "a signed bundle is present but this build has no inference engine bound. Binding "
-            "one is a deployment step; until then every observation is recorded as degraded, "
-            "which is the behaviour the product promises when the AI plane is unavailable",
-        )
+        # Verify-then-answer. The evidence was checked above; the answer's
+        # citations and the deadline are checked inside run_inference, which is
+        # where the investigate role's guarantees live. The deadline lives
+        # there rather than here because it must measure the same window
+        # latency_ms does: a check over the whole of run() (evidence
+        # verification included) refused answers reporting 0.1s on a 2s budget,
+        # which is a pair of numbers a caller cannot reconcile.
+        return self.run_inference(request)
 
     def health(self) -> dict[str, Any]:
-        return {
+        out = {
             "status": "ok",
             "apiVersion": API_VERSION,
             "runtimeVersion": RUNTIME_VERSION,
             "modelAvailable": self.available(),
             "reason": self._load_reason,
             "detail": self._load_error,
+            "engineBound": self._engine is not None,
             "uptimeSeconds": time.monotonic(),
         }
+        if self._engine_description:
+            out["engine"] = self._engine_description
+        return out
 
 
 def validate_output(structured: dict[str, Any], profile_schema: dict[str, Any]) -> None:
@@ -779,9 +991,16 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, degraded_response(request.observation_id, request.profile_id,
                                               exc.reason, exc.detail))
             return
-        except Exception as exc:  # noqa: BLE001
+        except BaseException as exc:  # noqa: BLE001
+            # The last net catches SystemExit and KeyboardInterrupt too, because
+            # a request path must never end in a process exit: a handler that
+            # dies takes the plane with it and the caller can only see a dead
+            # socket rather than a reason.
+            reason = DEGRADED_ERROR
+            if isinstance(exc, InferenceUnavailable):
+                reason = exc.reason
             self._send(200, degraded_response(request.observation_id, request.profile_id,
-                                              DEGRADED_ERROR, str(exc)))
+                                              reason, f"{type(exc).__name__}: {exc}"))
             return
 
         try:
@@ -800,17 +1019,43 @@ def build_runtime() -> Runtime:
     A missing bundle is not an error at startup. The plane starts, reports
     itself unavailable, and the core records a degraded observation — which is
     exactly what a site running without a model should see.
+
+    ``SP_ENGINE_PATH`` binds the operator's GPU engine when it is set. An
+    engine that will not load is a *startup* failure rather than a degraded
+    steady state, because the operator has said a model is installed and the
+    plane disagreeing is a defect to read, not to absorb.
     """
     root = os.environ.get("SP_MODEL_BUNDLE", "").strip()
     signature = os.environ.get("SP_MODEL_BUNDLE_SIGNATURE", "").strip()
     public_key = os.environ.get("SP_MODEL_BUNDLE_KEY", "").strip()
-    if not root:
-        return Runtime(None)
-    return Runtime(ModelBundle(Path(root), signature, public_key))
+    runtime = Runtime(None) if not root else Runtime(ModelBundle(Path(root), signature, public_key))
+    engine_path = os.environ.get("SP_ENGINE_PATH", "").strip()
+    if engine_path:
+        # The InferenceUnavailable propagates to main(), which turns it into
+        # exit 2 with one reason line. Raising SystemExit here instead would
+        # exit 1 and print a bare message, which reads as a crash rather than
+        # the configuration error it is.
+        runtime.bind_engine(engine_path)
+    return runtime
 
 
 def serve(host: str, port: int) -> None:
-    Handler.runtime = build_runtime()
+    # A configured engine that will not load is a configuration error, and it is
+    # reported as one: exit 2 with a single reason line, the same class of
+    # failure as a malformed SP_AI_LISTEN below. An unhandled traceback here
+    # would read as a plane outage, and it happens before the HTTP server
+    # exists, so /healthz could not even tell "engine broken" from "not
+    # running".
+    try:
+        Handler.runtime = build_runtime()
+    except InferenceUnavailable as exc:
+        # One reason line and exit 2 — a configuration error, the same class of
+        # failure as a malformed SP_AI_LISTEN below. An unhandled traceback
+        # here would read as a plane outage, and it happens before the HTTP
+        # server exists, so /healthz could not even tell "engine broken" from
+        # "not running".
+        print(_engine_failure_line(exc), file=sys.stderr)
+        raise SystemExit(2) from None
     server = ThreadingHTTPServer((host, port), Handler)
     try:
         server.serve_forever()
@@ -818,6 +1063,14 @@ def serve(host: str, port: int) -> None:
         pass
     finally:
         server.server_close()
+
+
+def _engine_failure_line(exc: InferenceUnavailable) -> str:
+    engine_path = os.environ.get("SP_ENGINE_PATH", "").strip() or "(unset)"
+    return (
+        f"SP_ENGINE_PATH is {engine_path!r} but the engine did not load: {exc.detail or exc}. "
+        f"Unset SP_ENGINE_PATH to run without an engine, or fix the path. (exit 2)"
+    )
 
 
 def main() -> int:
