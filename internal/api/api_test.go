@@ -460,9 +460,9 @@ func TestShutdownWithoutAListenerIsANoOp(t *testing.T) {
 // once and removes the capacity that would have drained the backlog.
 func TestHealthReportsWhichSLOsAreBreachedAndStaysUp(t *testing.T) {
 	s := &api.Server{Metrics: observability.NewRegistry()}
-	s.Metrics.RecordSLOs(observability.SLOState{
-		Evaluated: 8, Breached: []string{"ingest_backlog", "ingest_availability"},
-	})
+	r := s.Metrics
+	r.Gauges.Set(observability.GaugeBacklogDepth, 90000) // above the hard limit
+	r.RecordSLOs(observability.Breaches(r, observability.ReadingsFrom(r)))
 
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/health", nil))
@@ -481,8 +481,14 @@ func TestHealthReportsWhichSLOsAreBreachedAndStaysUp(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode health: %v", err)
 	}
-	if body.SLO.Status != "breached" || len(body.SLO.Breached) != 2 {
+	if body.SLO.Status != "breached" || len(body.SLO.Breached) != 1 {
 		t.Errorf("the endpoint reports %q for %v", body.SLO.Status, body.SLO.Breached)
+	}
+	if body.SLO.Evaluated == 0 {
+		t.Error("the endpoint reports nothing evaluated")
+	}
+	if body.SLO.Breached[0] != "ingest_backlog" {
+		t.Errorf("reported %q, want ingest_backlog", body.SLO.Breached[0])
 	}
 	// Names only. This endpoint is unauthenticated, and a measured disk percentage
 	// or a dead-letter count is not something to hand to whoever asked.
@@ -534,12 +540,16 @@ func TestHealthSaysNotEvaluatedRatherThanMet(t *testing.T) {
 	}
 
 	// And the evaluated-and-clean case says met, so the word means something.
-	s := &api.Server{Metrics: observability.NewRegistry()}
-	s.Metrics.RecordSLOs(observability.SLOState{Evaluated: 8})
+	// A bare registry satisfies every objective, which is the clean verdict, and
+	// the point is that "met" comes from an evaluation rather than from a
+	// constructor.
+	r := observability.NewRegistry()
+	r.RecordSLOs(observability.Breaches(r, observability.ReadingsFrom(r)))
+	s := &api.Server{Metrics: r}
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/health", nil))
 	if !strings.Contains(rec.Body.String(), `"status":"met"`) {
-		t.Errorf("eight evaluated objectives with no breach do not read as met:\n%s", rec.Body.String())
+		t.Errorf("evaluated objectives with no breach do not read as met:\n%s", rec.Body.String())
 	}
 }
 

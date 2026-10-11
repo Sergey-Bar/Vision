@@ -318,34 +318,50 @@ type Registry struct {
 	// objectives and the surface an operator reads them on share one record
 	// without either knowing about the other.
 	//
-	// It is not a gauge. An objective's name is not a number, and adding eight
-	// 0/1 gauge names to the exposition would publish eight series that say
-	// nothing a single list does not, on a surface a metrics client scrapes.
-	sloMu sync.Mutex
-	slo   SLOState
+	// Neither half is a gauge. An objective's name is not a number, and eight
+	// gauge names for eight objectives would be eight series nobody soft of
+	// matched against anything. What the scrape gets is one series carrying the
+	// name as a label, which is the same statement eight gauges would make in a
+	// form a dashboard can actually select on — see writeSLOs.
+	//
+	// The two halves are one writer and two projections, not two writers of one
+	// fact: sloDetail is what the evaluator produced, and slo is the names-only
+	// summary derived from it, so the unauthenticated endpoint cannot be handed
+	// more than the names even by mistake.
+	sloMu     sync.Mutex
+	slo       SLOState
+	sloDetail []SLO
 }
 
 // SLOState is which objectives were last evaluated as not being met.
 //
-// Names only. The reading that breached, and the remedy, are in the log line the
-// evaluator writes — an operator acts on those, and the endpoint that also reports
-// this is unauthenticated, so a disk percentage or a dead-letter count does not
-// belong in it.
+// Names only, and that is a disclosure boundary rather than a detail: the endpoint
+// that reads this is /v1/health, which is unauthenticated, and a measured disk
+// percentage or a dead-letter count is not something to hand to whoever asked.
+// The reading and the remedy live on the objectives themselves, reachable through
+// SLOsDetail, and the only route that serves those is /v1/metrics, which requires
+// audit.read.
 type SLOState struct {
 	Evaluated int
 	Breached  []string
 }
 
-// RecordSLOs stores the verdict of one evaluation.
-func (r *Registry) RecordSLOs(state SLOState) {
+// RecordSLOs stores the verdict of one evaluation, which is the whole evaluated
+// set rather than a summary of it.
+//
+// The argument is the set and not a SLOState because the two would drift: a
+// summary recorded beside its own detail is two writers of one fact, and the one
+// that goes stale is whichever the last caller forgot.
+func (r *Registry) RecordSLOs(all []SLO) {
 	r.sloMu.Lock()
 	defer r.sloMu.Unlock()
-	r.slo.Evaluated = state.Evaluated
-	r.slo.Breached = append([]string(nil), state.Breached...)
+	r.slo.Evaluated = len(all)
+	r.slo.Breached = breachedNames(all)
+	r.sloDetail = copySLOs(all)
 }
 
-// SLOs reports the last evaluation's verdict, as a copy so a caller cannot mutate
-// what the next reader sees.
+// SLOs reports the last evaluation's names-only verdict, as a copy so a caller
+// cannot mutate what the next reader sees.
 func (r *Registry) SLOs() SLOState {
 	r.sloMu.Lock()
 	defer r.sloMu.Unlock()
@@ -353,6 +369,46 @@ func (r *Registry) SLOs() SLOState {
 		Evaluated: r.slo.Evaluated,
 		Breached:  append([]string(nil), r.slo.Breached...),
 	}
+}
+
+// SLOsDetail reports the last evaluation in full: every objective with its
+// target, its reading and its remedy, sorted by name.
+//
+// This is what a scrape reads. /v1/metrics is capability-gated, so unlike
+// /v1/health it can carry the number without it becoming public, and a scrape is
+// exactly where an operator wants it — nobody greps a log at 02:00 for an
+// objective name. An empty result means no evaluation has run yet, which is a
+// different statement from "nothing is breached" and is deliberately not rendered
+// as a flat zero.
+func (r *Registry) SLOsDetail() []SLO {
+	r.sloMu.Lock()
+	defer r.sloMu.Unlock()
+	return copySLOs(r.sloDetail)
+}
+
+// breachedNames is the sorted subset that is not being met, so the names-only
+// projection and the detail can never disagree about what is breached.
+func breachedNames(all []SLO) []string {
+	names := make([]string, 0, len(all))
+	for _, s := range all {
+		if s.Breached {
+			names = append(names, s.Name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// copySLOs detaches a set from the caller's slice, so a reader cannot mutate what
+// the next reader sees. Breached is the last field the evaluator fills in and the
+// one a copy is most likely to drop.
+func copySLOs(in []SLO) []SLO {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]SLO, len(in))
+	copy(out, in)
+	return out
 }
 
 // NewRegistry builds a registry.
@@ -385,7 +441,59 @@ func (r *Registry) Render() string {
 	if vis := r.IncidentVisibility.QuantileSeconds(0.95); vis >= 0 {
 		fmtGauge(&b, GaugeIncidentVisibility, vis)
 	}
+	r.writeSLOs(&b)
 	return b.String()
+}
+
+// sloObjectiveSeries is the name the objectives are exported under.
+//
+// Unexported because it is an exposition detail and not a name a call site records
+// against: the values come from the evaluator's verdict, not from a gauge anybody
+// sets. Putting it in counterMetrics or gaugeMetrics would invite a second writer
+// for a fact that already has one.
+const sloObjectiveSeries = "slo_objective"
+
+// writeSLOs exports the objectives, one series each, valued 1 while the objective
+// is not being met.
+//
+// Every objective is exported whether it is breached or not, and that is the
+// whole reason this is a series and not an alarm: a metric that appears only when
+// something is wrong reads, on the morning after a quiet night, as "this has never
+// happened". A series that has been 0 since the install is the baseline a
+// dashboard needs before it can say "3" means anything.
+//
+// The labels carry the target, the reading and the remedy, which is the part an
+// operator acts on. They are safe here and unsafe on /v1/health only because this
+// exposition is served from the audit.read-gated route.
+//
+// An unset verdict exports nothing rather than a flat zero. A core that has never
+// evaluated its objectives has measured nothing, and "0 breached" from it would be
+// the one lie this could tell.
+func (r *Registry) writeSLOs(b *strings.Builder) {
+	all := r.SLOsDetail()
+	if len(all) == 0 {
+		return
+	}
+	byName := make(map[string]SLO, len(all))
+	names := make([]string, 0, len(all))
+	for _, s := range all {
+		byName[s.Name] = s
+		names = append(names, s.Name)
+	}
+	sort.Strings(names)
+
+	fmt.Fprintf(b, "# TYPE %s gauge\n", sloObjectiveSeries)
+	fmt.Fprintf(b, "# HELP %s 1 while the objective is not being met. The labels carry "+
+		"its target, the reading that breached it and the remedy.\n", sloObjectiveSeries)
+	for _, name := range names {
+		s := byName[name]
+		value := 0
+		if s.Breached {
+			value = 1
+		}
+		fmt.Fprintf(b, "%s{objective=%q,measured=%q,remedy=%q,target=%q} %d\n",
+			sloObjectiveSeries, s.Name, s.Measured, s.Remedy, s.Target, value)
+	}
 }
 
 func fmtGauge(b *strings.Builder, name string, value float64) {

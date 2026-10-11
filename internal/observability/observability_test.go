@@ -1,6 +1,7 @@
 package observability_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -184,6 +185,82 @@ func TestRenderProducesValidExposition(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("the exposition is missing %q:\n%s", want, out)
 		}
+	}
+}
+
+// The objectives are exported from the registry rather than from a gauge anybody
+// sets, so the series is the evaluator's own verdict and cannot be written by a
+// second hand.
+//
+// Three properties. Every objective is exported whether or not it is breached, so
+// a dashboard has a baseline before it can say what a 1 means. The breached one
+// carries its reading and its remedy, because a scrape is where an operator looks
+// and nobody greps a log at 02:00 for an objective name. And an unset verdict
+// exports nothing rather than a flat zero — "0 breached" from a process that has
+// measured nothing is the one lie this surface could tell.
+func TestRenderExportsTheObjectivesWithTheirReadingAndRemedy(t *testing.T) {
+	r := observability.NewRegistry()
+	r.Gauges.Set(observability.GaugeBacklogDepth, 90000) // above the hard limit
+	r.RecordSLOs(observability.Breaches(r, observability.ReadingsFrom(r)))
+
+	out := r.Render()
+
+	want := `slo_objective{objective="ingest_backlog",measured="inbox 90000, outbox 0, jobs 0",` +
+		`remedy="above the hard limit the platform is refusing to accept rather than dropping. ` +
+		`Check the source feed first, then the normalizer.",target="soft 5000, hard 50000"} 1`
+	if !strings.Contains(out, want) {
+		t.Errorf("the breached objective is not exported with its reading and remedy:\n%s", out)
+	}
+	if !strings.Contains(out, "# TYPE slo_objective gauge") {
+		t.Errorf("the objectivies are exported with no type declaration:\n%s", out)
+	}
+
+	// One that is being met is exported at 0, so the series has a baseline.
+	met := []string{}
+	for _, line := range strings.Split(out, "\n") {
+		if !strings.HasPrefix(line, "slo_objective{") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		value := fields[len(fields)-1]
+		switch value {
+		case "0":
+			met = append(met, fields[0])
+		case "1":
+		default:
+			t.Errorf("an objective series is valued %q, which is neither 1 nor 0:\n%s", value, line)
+		}
+	}
+	if len(met) == 0 {
+		t.Error("no objective is being met, so nothing establishes the baseline a 1 is read against")
+	}
+
+	// Deterministic: two evaluations of the same readings are byte-identical, and
+	// a scrape is a golden artefact only if it is.
+	again := observability.NewRegistry()
+	again.Gauges.Set(observability.GaugeBacklogDepth, 90000)
+	again.RecordSLOs(observability.Breaches(again, observability.ReadingsFrom(again)))
+	if again.Render() != out {
+		t.Errorf("two identical evaluations rendered differently:\n%s\n---\n%s", out, again.Render())
+	}
+
+	// And the type is declared exactly once. A duplicate declaration is a scrape
+	// the parser rejects, which is how the whole page stopped parsing once before.
+	if n := strings.Count(out, "# TYPE slo_objective gauge"); n != 1 {
+		t.Errorf("the exposition declares slo_objective %d times:\n%s", n, out)
+	}
+}
+
+// An install that has not run its pipeline yet exports nothing for the objectives.
+// "0 breached" from a process that has measured nothing would read as a clean
+// bill of health, and it is the one response a fresh install gets most often.
+func TestRenderExportsNoObjectiveBeforeTheFirstEvaluation(t *testing.T) {
+	r := observability.NewRegistry()
+	if out := r.Render(); strings.Contains(out, "slo_objective") {
+		t.Errorf("an unevaluated registry exported an objective series:\n%s", out)
 	}
 }
 
@@ -417,15 +494,69 @@ func TestAnEmptyRegistryIsNotAHealthyRegistryAndNotAFailedOne(t *testing.T) {
 // otherwise be editing the record.
 func TestTheRecordedVerdictIsACopy(t *testing.T) {
 	r := observability.NewRegistry()
-	r.RecordSLOs(observability.SLOState{Evaluated: 8, Breached: []string{"ingest_backlog"}})
+	all := observability.Breaches(r, observability.ReadingsFrom(r))
+	if len(all) < 8 {
+		t.Fatalf("only %d objectives evaluated", len(all))
+	}
+	// The first one is the zero-loss objective, which a bare registry satisfies.
+	// Breached it is not, so this records a set whose names-only summary is empty
+	// and whose detail is not — which is the pair that has to agree.
+	r.RecordSLOs(all)
 
 	read := r.SLOs()
-	if read.Evaluated != 8 || len(read.Breached) != 1 {
+	if read.Evaluated != len(all) {
 		t.Fatalf("recorded %+v", read)
 	}
-	read.Breached[0] = "evidence_disk"
-	if again := r.SLOs(); again.Breached[0] != "ingest_backlog" {
-		t.Error("mutating what a reader was handed changed the recorded verdict")
+	detail := r.SLOsDetail()
+	if len(detail) != len(all) {
+		t.Fatalf("recorded %d of %d objectives", len(detail), len(all))
+	}
+	detail[0].Name = "evidence_disk"
+	if again := r.SLOsDetail(); again[0].Name == "evidence_disk" {
+		t.Error("mutating what a reader was handed changed the recorded detail")
+	}
+	if names := r.SLOs(); names.Evaluated != len(all) {
+		t.Error("the names-only summary moved when the detail was read")
+	}
+}
+
+// Every objective the evaluator produced must reach the detail, and the names-only
+// summary must be exactly the subset that is breached. One writer feeds both, and
+// this is the test that says they cannot disagree.
+func TestTheNamesSummaryIsTheBreachedSubsetOfTheDetail(t *testing.T) {
+	r := observability.NewRegistry()
+	r.Gauges.Set(observability.GaugeBacklogDepth, 90000) // above the hard limit
+	r.Gauges.Set(observability.GaugeEvidenceDiskFree, 3) // below 10%
+
+	all := observability.Breaches(r, observability.ReadingsFrom(r))
+	if len(all) == 0 {
+		t.Fatal("no objectives were evaluated")
+	}
+	r.RecordSLOs(all)
+
+	want := map[string]bool{}
+	for _, s := range all {
+		if s.Breached {
+			want[s.Name] = true
+		}
+	}
+	got := map[string]bool{}
+	for _, n := range r.SLOs().Breached {
+		got[n] = true
+	}
+	if len(want) == 0 {
+		t.Fatal("a registry above the backlog hard limit and under 10% free breached nothing, " +
+			"so this test is not testing anything")
+	}
+	if fmt.Sprint(want) != fmt.Sprint(got) {
+		t.Errorf("names %v, breached in the detail %v", got, want)
+	}
+	// Sorted, so a scrape's output is byte-stable between two identical evaluations.
+	names := r.SLOs().Breached
+	for i := 1; i < len(names); i++ {
+		if names[i-1] > names[i] {
+			t.Errorf("names are unsorted: %v", names)
+		}
 	}
 }
 

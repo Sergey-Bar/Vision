@@ -119,12 +119,32 @@ wrong". The two worth fixing first:
 
 Also open, and unchanged by the runnable core work: nothing in this section is
 open any more. `slo.go`'s `Breaches` had no caller when this was written; it is now
-called from `internal/pipeline`'s `evaluateSLOs` on every gauge sample, which logs
-each breached objective by name with its remedy. The metrics are emitted and the SLO
-thresholds are evaluated in-process, so **gate 3 is closed** — but the remediation is a
-log line, not an endpoint, and a gate that can only be seen in the daemon's own output
-is not finished. That is the remaining part, and it is a surface decision rather than a
-correctness one.
+called from `internal/pipeline`'s `evaluateSLOs` on every gauge sample. The
+metrics are emitted and the SLO thresholds are evaluated in-process, so **gate 3 is
+closed**.
+
+That last sentence used to end "— but the remediation is a log line, not an
+endpoint, and a gate that can only be seen in the daemon's own output is not
+finished." It was a stale claim in two parts, and both are now wrong.
+
+`/v1/health` already reported the **names** of breached objectives before this was
+written, unauthenticated by design: it says which objectives are not being met and
+nothing else, because a measured disk percentage or a dead-letter count is not
+something to hand to whoever asked. What it did not do — and what no endpoint did —
+was carry the number and the remedy to the surface an operator actually looks at.
+`registry.RecordSLOs` kept only the names, so a scrape saw nothing at all.
+
+Now the evaluator records the whole evaluated set, and `GET /v1/metrics` exports it
+as one `slo_objective` series per objective, valued 1 while the objective is not
+being met, with the reading and the remedy as labels. That route is `audit.read`
+gated, which is the only reason those labels are allowed there. Every objective is
+exported whether breached or not: a metric that appears only when something is
+wrong reads, after a quiet night, as "this has never happened". A registry that has
+never evaluated exports nothing rather than a flat zero, so a fresh install is not
+told it is clean.
+
+The log line stays, repeated only when the set changes, because a permanently
+breached objective should not become a line every poll for ever.
 
 The other two items this section used to list are now done. The known-event-type
 table is derived from the normalizer's own output and both directions are

@@ -116,7 +116,15 @@ func TestDutyLogReaderDumpIsBounded(t *testing.T) {
 			t.Fatalf("append %d: %v", i, err)
 		}
 	}
-	view, err := NewDutyLogReader(dir, "site-1", nil).Read(t.Context(), "t", "s")
+	// The clock is injected rather than left nil. This test passed a nil clock at
+	// first, and for one day only: the writer's shift label is 2026-10-10 and the
+	// reader's `shift()` fell back to time.Now(), so the glob prefix was
+	// `dutylog-site-1-2026-10-11-` and the file it had just written was not
+	// there. It went green on 2026-10-10 and red on the day of the rebuild, which
+	// is the one property a test about a bound does not get to have.
+	view, err := NewDutyLogReader(dir, "site-1", func() time.Time {
+		return time.Date(2026, 10, 10, 23, 30, 0, 0, time.UTC)
+	}).Read(t.Context(), "t", "s")
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}

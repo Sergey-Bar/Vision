@@ -534,16 +534,16 @@ func (l *Loops) sampleEvidenceDisk() {
 // M1 gate 3, and an objective that is only ever evaluated by a test is a
 // description of an intention rather than a thing the product checks.
 //
-// The log line is the surface, deliberately. `SLO` carries a `Remedy` on every
-// entry precisely so that an alert is actionable, and a remedy in a log line
-// attached to the reading that breached it is something an operator acts on
-// without a new endpoint to trust. The names are also surfaced on
-// `GET /v1/health`, which reports *which* objectives are breached and nothing
-// else, because that endpoint is unauthenticated and a measured disk percentage
-// or a dead-letter count is not something to hand to whoever asked.
+// It says so in two places, and the split is the design. The log line carries the
+// reading and the remedy, repeated only when the set changes, so a permanently
+// breached objective does not become a line every poll for ever. The scrape
+// carries the same thing as `slo_objective` series with labels, which is where an
+// operator actually looks — nobody greps a log at 02:00 for an objective name.
 //
-// Every line is repeated only when the set changes, so a permanently breached
-// objective does not turn into a log line every poll for ever.
+// `/v1/health` reports the *names* only, because that endpoint is unauthenticated
+// and a measured disk percentage or a dead-letter count is not something to hand
+// to whoever asked. `/v1/metrics` is audit.read-gated, so it can carry the number,
+// and `SLOsDetail` is the reader that serves it.
 func (l *Loops) evaluateSLOs() {
 	if l.Deps.Metrics == nil {
 		return
@@ -557,7 +557,7 @@ func (l *Loops) evaluateSLOs() {
 	}
 	sort.Strings(names)
 
-	l.Deps.Metrics.RecordSLOs(observability.SLOState{Evaluated: len(all), Breached: names})
+	l.Deps.Metrics.RecordSLOs(all)
 	if !l.sloChanged(names) {
 		return
 	}
