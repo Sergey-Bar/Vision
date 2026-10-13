@@ -1,0 +1,4408 @@
+{
+  "contractVersion": "security.io/evaluation-corpus/v1",
+  "profileId": "restricted-person",
+  "cases": [
+    {
+      "ID": "rpf-0",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-1",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-2",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-3",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-4",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-5",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-6",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-7",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-8",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-9",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-10",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-11",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-12",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-13",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-14",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-15",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-16",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-17",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-18",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-19",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-20",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-21",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-22",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-23",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-24",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-25",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-26",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-27",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-28",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-29",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-30",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-31",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-32",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-33",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-34",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-35",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-36",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-37",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-38",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-39",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-40",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-41",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-42",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-43",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-44",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-45",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-46",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-47",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-48",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-49",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-50",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-51",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-52",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-53",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-54",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-55",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-56",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-57",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-58",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-59",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-60",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-61",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-62",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-63",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-64",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-65",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-66",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-67",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-68",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-69",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-70",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-71",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-72",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-73",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-74",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-75",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-76",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-77",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-78",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-79",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-80",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-81",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-82",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-83",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-84",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-85",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-86",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-87",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-88",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-89",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-90",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-91",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-92",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-93",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-94",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-95",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-96",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-97",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-98",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-99",
+      "ProfileID": "restricted-person",
+      "Outcome": "true_positive",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-100",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-101",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-102",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-103",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-104",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-105",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-106",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-107",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-108",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-109",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-110",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-111",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-112",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-113",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-114",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-115",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-116",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-117",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-118",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-119",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-120",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-121",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-122",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-123",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-124",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-125",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-126",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-127",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-128",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-129",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-130",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-131",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-132",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-133",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-134",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-135",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-136",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-137",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-138",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-139",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-140",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-141",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-142",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-143",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-144",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-145",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-146",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-147",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-148",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-149",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-150",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-151",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-152",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-153",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-154",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-155",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-156",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-157",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-158",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-159",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-160",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-161",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-162",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-163",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-164",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-165",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-166",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-167",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-168",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-169",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-170",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-171",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-172",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-173",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-174",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-175",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-176",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-177",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-178",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-179",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-180",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-181",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-182",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-183",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-184",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-185",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-186",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-187",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-188",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-189",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-190",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-191",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-192",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-193",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-194",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-195",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-196",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-197",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-198",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": true,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    },
+    {
+      "ID": "rpf-199",
+      "ProfileID": "restricted-person",
+      "Outcome": "benign",
+      "PredictedRestricted": false,
+      "InSufficientEvidence": false,
+      "Degraded": false,
+      "HoursToDisposition": 0.5
+    }
+  ],
+  "observations": [
+    {
+      "ID": "rpf-0",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-1",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-2",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-3",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-4",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-5",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-6",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-7",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-8",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-9",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-10",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-11",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-12",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-13",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-14",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-15",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-16",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-17",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-18",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-19",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-20",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-21",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-22",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-23",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-24",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-25",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-26",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-27",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-28",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-29",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-30",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-31",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-32",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-33",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-34",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-35",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-36",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-37",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-38",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-39",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-40",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-41",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-42",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-43",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-44",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-45",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-46",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-47",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-48",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-49",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-50",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-51",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-52",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-53",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-54",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-55",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-56",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-57",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-58",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-59",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-60",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-61",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-62",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-63",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-64",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-65",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-66",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-67",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-68",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-69",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-70",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-71",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-72",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-73",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-74",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-75",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-76",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-77",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-78",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-79",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-80",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-81",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-82",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-83",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-84",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-85",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-86",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-87",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-88",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-89",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-90",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-91",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-92",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-93",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-94",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-95",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-96",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-97",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-98",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-99",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-100",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-101",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-102",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-103",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-104",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-105",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-106",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-107",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-108",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-109",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-110",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-111",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-112",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-113",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-114",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-115",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-116",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-117",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-118",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-119",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-120",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-121",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-122",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-123",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-124",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-125",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-126",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-127",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-128",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-129",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-130",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-131",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-132",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-133",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-134",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-135",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-136",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-137",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-138",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-139",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-140",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-141",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-142",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-143",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-144",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-145",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-146",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-147",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-148",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-149",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-150",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-151",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-152",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-153",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-154",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-155",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-156",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-157",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-158",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-159",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-160",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-161",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-162",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-163",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-164",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-165",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-166",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-167",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-168",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-169",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-170",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-171",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-172",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-173",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-174",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-175",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-176",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-177",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-178",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-179",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-180",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-181",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-182",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-183",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-184",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-185",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-186",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-187",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-188",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-189",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-190",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-191",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-192",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-193",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-194",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-195",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-196",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-197",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    },
+    {
+      "ID": "rpf-198",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": true,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": true
+    },
+    {
+      "ID": "rpf-199",
+      "ProfileID": "restricted-person",
+      "LatencyMS": 3000,
+      "Degraded": false,
+      "DegradedReason": "",
+      "InsufficientEvidence": false,
+      "Structured": {
+        "restrictedZoneBreach": false,
+        "summary": "corpus row"
+      },
+      "OperatorAgreed": false
+    }
+  ]
+}
