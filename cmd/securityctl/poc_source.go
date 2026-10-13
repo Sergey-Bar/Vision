@@ -272,6 +272,15 @@ func openRTSPSource(ctx context.Context, o pocOptions) (*rtspSource, error) {
 		return nil, err
 	}
 	desc := c.Description()
+	// PLAY is not optional and not implied. A client that reads without it gets
+	// nothing back: the transport is happy to hand over an empty session, the
+	// server never begins interleaving, and the run reports "0 picture(s) read"
+	// with no error anywhere - which is a completed run that captured nothing, the
+	// quietest failure shape this product has. The diagnostic that found this read
+	// 51,647 NAL units over the same socket in ten seconds once PLAY was added.
+	if err = c.Play(ctx); err != nil {
+		return nil, fmt.Errorf("securityctl: PLAY the camera stream: %w", err)
+	}
 	s.src = pocSource{
 		Kind: "rtsp", Endpoint: c.URL().String(), Transport: rtsp.TransportTCPInterleaved + " interleaved",
 		FrameRate: desc.FPS, ClockRate: desc.ClockRate, DeclaredGeometry: desc.FPS > 0,
