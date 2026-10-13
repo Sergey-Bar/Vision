@@ -33,6 +33,11 @@
       "why": "This is not a test; it is the child process of the kill -9 fault-injection drill at TestKilledMidStore, and it is a Test function only so it can reuse the test binary rather than being a second program. It is gated on an environment variable so an ordinary run does nothing. It appears in every run's skip list, which is noise with a name on it; renaming it would require a separate main package for no other gain, and this entry is what makes the noise accounted for."
     },
     {
+      "test": "internal/evidencefetch.TestKilledMidFetch_Helper",
+      "when": "windows,linux,darwin",
+      "why": "The same shape as internal/evidence's helper above, for the C1 drill at TestKilledMidFetchLeavesNoClipNoRowAndAReclaimableJob: it is the child process the parent kills mid-fetch, it is a Test function only to reuse the test binary, and it is gated on an environment variable. It appears in every run's skip list. The two entries are separate because the gate names one test per entry, and a declaration for a package would exempt whatever got named there next."
+    },
+    {
       "test": "internal/lifecycle.TestTheEnvironmentFileIsNotWorldReadable",
       "when": "windows",
       "why": "Entirely mode assertions. Windows has a read-only flag and nothing else: os.Chmod cannot express 0640 and os.Stat reports a synthesised mode, so running this on Windows would be testing NTFS. Unlike the installer's equivalent, the whole test IS the mode assertion, so a conditional rather than a skip would be an empty test."
