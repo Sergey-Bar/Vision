@@ -58,6 +58,20 @@ var (
 		"internal/audit.Actor":              {Prefix: "internal/audit.Actor", Why: "the audit ledger's actor vocabulary. Same reasoning as the actions: the values are stored and read back as data"},
 		"internal/audit.ErrIncompleteEntry": {Symbol: "internal/audit.ErrIncompleteEntry", Why: "sentinel: the hash-chain verifier returns it and the reason reaches the operator in the checkpoint failure row, so the identity is published even though nothing calls errors.Is on it"},
 
+		// The binding vocabulary. `policy.Change*` is a closed set whose members
+		// are written into the decision-ledger row a binding records, and read
+		// back by `securityctl policy explain` and by whoever reconstructs what
+		// a decision was made under. The recorder that writes them lives in
+		// `cmd/security-core`, reached through `policy.Recorder`, so none of the
+		// four has a Go caller in this package — which is the point of the seam.
+		"internal/policy.Change": {Prefix: "internal/policy.Change", Why: "the binding-change vocabulary: which of produced, activated, unloaded or superseded a recorded binding row holds. Written into the decision ledger and read back as data, like audit's own action vocabulary"},
+
+		// The refusal sentinel. A caller catching it by identity would be a
+		// caller that re-implements the message; the reason an operator reads is
+		// in the text, and the identity is published so `errors.Is` is possible
+		// the day something does want it.
+		"internal/policy.ErrUnboundPart": {Symbol: "internal/policy.ErrUnboundPart", Why: "sentinel: a binding that omits a part's digest is refused, and the refusal names the part. The identity is published for a caller that would branch on it; today the message is the answer"},
+
 		// Clock-gap vocabulary. `clock.Gap*` is a closed set the corroboration
 		// path switches over, and a gap kind is written into the exclusion reason
 		// an operator reads when a window is not counted.

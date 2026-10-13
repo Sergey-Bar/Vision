@@ -181,7 +181,7 @@ func jsonNumberArrayIn(lines []string) bool {
 		if !strings.Contains(line, `"type": "array"`) {
 			continue
 		}
-		for _, near := range lines[i:min(i+5, len(lines))] {
+		for _, near := range lines[i:minInt(i+5, len(lines))] {
 			if strings.Contains(near, `"items"`) && jsonNumberType.MatchString(near) {
 				return true
 			}
@@ -190,7 +190,11 @@ func jsonNumberArrayIn(lines []string) bool {
 	return false
 }
 
-func min(a, b int) int {
+// minInt is `min` for two ints, named for what it is rather than shadowing the
+// builtin that arrived in Go 1.21. Shadowing it here would compile — and
+// golangci-lint's revive `redefines-builtin-id` correctly calls it out, because a
+// local `min` that shadows the builtin is a trap for the next reader.
+func minInt(a, b int) int {
 	if a < b {
 		return a
 	}

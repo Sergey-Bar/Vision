@@ -162,11 +162,12 @@ goes in `docs/status.md` with both transcripts. "Not red-checked, and here is wh
 would ship" is an acceptable answer; an unlabelled control is not. Where a control
 is red-checkable by removing one line, it belongs in the `red-check` table in
 `scripts/verify.ps1`, which is the part that keeps running. That table holds
-twenty-two entries — three observations, two evidence, three rules, four
+twenty-three entries — three observations, two evidence, three rules, four
 connection-string, one ingest-scope, one evaluation, one rendering, one
 attention-producer, two tenant-scope, the priority function's forbidden
-anomaly input, one roadmap package count, one console product name, and the
-ingest privacy bound on `analyticData` — against eighty-one in the POC
+anomaly input, one roadmap package count, one console product name, the ingest
+privacy bound on `analyticData`, and the M3 binding digest — against
+eighty-one in the POC
 module. Entries are added only after being run by hand
 and watched go red, because a table seeded with plausible mutations nobody has run
 reports thirty guarded controls and proves none of them. **That rule has teeth: the
@@ -265,10 +266,16 @@ written world-readable and a backoff expression that raised on its own failure
 path. A gate listed in a document and not run is worse than one that is not
 listed, because the document says the code was checked.
 
-**`make verify` is the same list** and is what the `Makefile` and the roadmap
-documents name, but **`make` is not installed here** — not on `PATH`, not in Git
-Bash, not in WSL. The PowerShell script is the one that runs; the Makefile is
-the portable description. If you install `make` they are equivalent.
+**`make verify` runs `scripts/verify.ps1`**, and is what the `Makefile` and the
+roadmap documents name, but **`make` is not installed here** — not on `PATH`, not
+in Git Bash, not in WSL. The PowerShell script is the one that runs. The Makefile
+used to carry a second, hand-written list of the same checks; it drifted twice,
+both times towards running less, and the second time it dropped `statuscheck` —
+the gate that fails when a number in `docs/status.md` is stale. So the list is
+written once, in the script, and `make verify` invokes it.
+`internal/contracts/verify_script_test.go` fails the build if `verify` ever stops
+running the script or if `ci` stops delegating to `verify`. A second list of a
+gate list is a defect even when it is currently correct.
 
 Not covered here, and still required before a release: `golangci-lint`, and
 regenerating the contracts with `protoc` and committing the result.

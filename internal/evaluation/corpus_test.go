@@ -16,6 +16,7 @@ package evaluation_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Sergey-Bar/vision/internal/evaluation"
@@ -115,6 +116,110 @@ func TestTheCorpusIsReproducible(t *testing.T) {
 	if string(first) != string(second) {
 		t.Error("the corpus is not round-stable: writing what was read produced " +
 			"different bytes. Run with -update and commit the result")
+	}
+}
+
+// TestACorpusThatCannotBeLoadedIsRefusedWithAReason covers the loader's refusal
+// paths.
+//
+// These were the floor's finding, not a guess about what might be worth testing:
+// the corpus landed in C4 with the loader's error paths unexercised, and the
+// cover-floor gate failed on `internal/evaluation` at 93.3% against a floor of
+// 96.5% recorded the day before. The gap was real and this test closes it rather
+// than lowering the floor to sit under it.
+//
+// A corpus is the thing the promotion bar is measured against, so a loader that
+// accepts a corpus which is not the corpus it was asked for is a gate that can be
+// passed by formatting.
+func TestACorpusThatCannotBeLoadedIsRefusedWithAReason(t *testing.T) {
+	dir := t.TempDir()
+
+	noSuchFile := filepath.Join(dir, "absent.corpus.json")
+	if _, err := evaluation.LoadCorpus(noSuchFile); err == nil {
+		t.Error("a corpus path that does not exist loaded without an error")
+	} else if !strings.Contains(err.Error(), noSuchFile) {
+		t.Errorf("the refusal does not name the path it could not read: %v", err)
+	}
+
+	notJSON := filepath.Join(dir, "not-json.corpus.json")
+	if err := os.WriteFile(notJSON, []byte("{ this is not json"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if _, err := evaluation.LoadCorpus(notJSON); err == nil {
+		t.Error("a file that is not JSON loaded without an error")
+	}
+
+	empty := filepath.Join(dir, "empty.corpus.json")
+	if err := evaluation.WriteCorpus(empty, evaluation.Corpus{
+		ProfileID: "does-not-matter",
+	}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if _, err := evaluation.LoadCorpus(empty); err == nil {
+		t.Error("a corpus holding no cases loaded; a gate measured against no cases is a gate that passes")
+	}
+
+	// A case naming another profile is the loader's most specific refusal: the
+	// gates are per-profile, so a mixed corpus measures neither.
+	mixed := filepath.Join(dir, "mixed.corpus.json")
+	body := `{"profileId":"restricted-person","contractVersion":"security.io/evaluation-corpus/v1",
+"cases":[{"profileId":"another-profile"}]}`
+	if err := os.WriteFile(mixed, []byte(body), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if _, err := evaluation.LoadCorpus(mixed); err == nil {
+		t.Error("a corpus whose case names another profile loaded")
+	} else if !strings.Contains(err.Error(), "another-profile") {
+		t.Errorf("the refusal does not name the profile that should not be there: %v", err)
+	}
+
+	// And the write side: a path that is a directory is refused rather than
+	// reported as success. It is the error path a rounding of the file perms
+	// would hide.
+	dirPath := filepath.Join(dir, "a-directory")
+	if err := os.Mkdir(dirPath, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := evaluation.WriteCorpus(dirPath, evaluation.Corpus{
+		ProfileID: "restricted-person",
+		Cases:     []evaluation.Case{{ProfileID: "restricted-person"}},
+	}); err == nil {
+		t.Error("writing the corpus onto a directory succeeded")
+	}
+}
+
+// TestACorpusWithNoLatencyReportsAStatedZero covers the "no data at all" paths
+// the floor gate found, and they are properties rather than coverage figures.
+//
+// The gate drove finding them: the uncovered lines were `median` of an empty
+// slice, `mean` of an empty one, and the branch for a case with no observation.
+// What they mean together: a corpus holding one labelled case and no answers has
+// a median latency of zero and a disposition time of zero — stated zeros, never
+// leftovers, never an un-normalised integer read as milliseconds — and its single
+// case is an absence, which is neither a miss nor a false positive. The same rule
+// `rate` states about zero denominators.
+func TestACorpusWithNoLatencyReportsAStatedZero(t *testing.T) {
+	dir := corpusDir(t)
+	c, err := evaluation.LoadCorpus(filepath.Join(dir, evaluation.CorpusFileName))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	tiny := evaluation.Corpus{
+		ContractVersion: c.ContractVersion,
+		ProfileID:       c.ProfileID,
+		Cases:           []evaluation.Case{{ProfileID: c.ProfileID}},
+	}
+	got := tiny.Score(evaluation.DefaultGates())
+	for _, pr := range got.Reports {
+		if pr.MedianLatencyMS != 0 {
+			t.Errorf("the median latency of a corpus with no latencies is %d, want 0", pr.MedianLatencyMS)
+		}
+		if pr.HoursToDisposition != 0 {
+			t.Errorf("the disposition time of a corpus with no dispositions is %v, want 0", pr.HoursToDisposition)
+		}
+		if pr.Undispositioned != 1 {
+			t.Errorf("a case with no observation is not an absence: %d undispositioned, want 1", pr.Undispositioned)
+		}
 	}
 }
 

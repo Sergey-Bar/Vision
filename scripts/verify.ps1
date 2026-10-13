@@ -11,66 +11,88 @@
     The checks, in order, and why each is here:
 
       contract-check-* the wire has not changed incompatibly, across all three
-                       published contract surfaces: protobuf messages and enums,
-                       the JSON Schemas' properties and required sets, and the
-                       OpenAPI path/method set
-      contract-sync    every schema with a Go-side embedded copy is byte-identical
-                       to the published one
+                        published contract surfaces: protobuf messages and enums,
+                        the JSON Schemas' properties and required sets, and the
+                        OpenAPI path/method set
+      statuscheck       docs/status.md's counts are derived from the tree, so a
+                        stale claim there is a defect and this is the gate that
+                        says so
+      roadmap-check     the roadmap documents state package, migration and
+                        contract counts in prose, and all three are derived here
+      nl-hits-resolve   any hit that does not resolve to an incident or an
+                        evidence reference fails the build
+      nl-replays-without-model
+                        the same stored template over the same record produces
+                        byte-identical hits with and without a narrator
+      video-embed-audit no person/plate/face-crop/credential VECTOR column can
+                        exist in the schema, which is C7's buildable half
+      policy-package    the M3 binding digest covers every part, which is red-checked
       vet              Go's own static checks
       gofmt            formatting, without rewriting files
-      lint             golangci-lint, including gosec. Skipped with a visible
-                       warning where the binary is absent — never a quiet pass
-      test              the full suite with the race detector, -p 8, with the
-                       run's own JSON stream kept for skip-audit
-      skip-audit       no suite skipped anything it was supposed to run; every
-                       skip is declared with a reason in a committed file
-      no-silent-skips    the run was ABLE to test what it reported. A
-                       database-backed suite that declined to start is a
-                       red gate, not a green line -- this is the difference
-                       between "green" and "green and empty"
+      lint             golangci-lint, including gosec
+      test             the full suite with the race detector, -p 8, with the
+                        run's own JSON stream kept for the audit gates and a
+                        coverage profile kept for the floor
+      skip-audit       every suite that skipped declared it, with a reason, in a
+                        committed file. A skip is a suite whose assertions did
+                        not run, so the default answer is that it is a failure
+      no-silent-skips  the run was ABLE to test what it reported. A
+                        database-backed suite that declined to start is a
+                        red gate, not a green line -- this is the difference
+                        between "green" and "green and empty"
       cover-floor      no package's committed coverage floor moved, in either
-                       direction. Upwards asks for the floor to be raised
+                        direction. Upwards asks for the floor to be raised
       dead-export      no exported function, var, const or method exists that
-                       nothing outside its own package's tests reads
+                        nothing outside its own package's tests reads
+      capability       every deferred product choice is reported, not marketed
       predicate-cov    no time-window predicate reads a source-clock column, and
-                       the canonical-event window query still bounds
-                       normalized_at
+                        the canonical-event window query still bounds
+                        normalized_at
+      red-check        the controls, removed, each of which must turn the suite
+                        red. This is the falsification of every claim the
+                        documents make about a guard
       migration-phases every migration declares a phase and no expand ships
-                       with its contract step
-      generated-code  the checked-in .pb.go is what protoc produces from the
-                       published .proto. Skipped with a visible warning where
-                       protoc is absent
-      rules-lint       the built-in bundle compiles as untrusted input
-      recovery-drill   the whole-recovery drill: database gone, checkpoint
-                       material gone, decision still replayable
+                        with its contract step
+      generated-code   the checked-in .pb.go is what protoc produces from the
+                        published .proto
       sql-guard        every SQL statement this repository writes, checked
-                       against the schema: a mutation of a tenant-scoped table
-                       names its tenant, a write to a leased table names its
-                       lease owner, and an append-only table is only inserted
-                       into. Exemptions are allowed but must carry a reason on
-                       the statement and are printed on every run
-      rls-canary       the row-level-security canary, which connects as the
-                       production role rather than as the test database's
-                       owner, because a superuser suite cannot see a missing
-                       tenant context
-      ai-runtime       the AI runtime's contract in Python
-      flake            the four packages with concurrency, leases and timers, three
-                       runs each with the test order shuffled -- a test that
-                       passes once is a sample
+                        against the schema: a mutation of a tenant-scoped table
+                        names its tenant, a write to a leased table names its
+                        lease owner, and an append-only table is only inserted
+                        into. Exemptions are allowed but must carry a reason on
+                        the statement and are printed on every run
+      skills-audit     the agent skills installed on the development machine are
+                        untrusted input, and this gate asserts a scan record
+                        exists and postdates the corpus
+      rules-lint       the built-in bundle compiles as untrusted input
       tree-state       the tree's own state, which no compiler and no test asks
-                       about: no worktree frozen mid-merge, no red-check
-                       mutation left applied, no branch whose work a merge
-                       dropped, and no red-check control without a record of it
-                       being watched fail
-      fuzz            a camera is an untrusted network peer, so the two packages
-                       that parse its bytes are fuzzed with their committed
-                       corpora replayed. Bounded, not exhaustive
+                        about: no worktree frozen mid-merge, no red-check
+                        mutation left applied, no branch whose work a merge
+                        dropped, and no red-check control without a record of it
+                        being watched fail
+      flake            the four packages with concurrency, leases and timers, three
+                        runs each with the test order shuffled -- a test that
+                        passes once is a sample
+      fuzz             a camera is an untrusted network peer, so the two packages
+                        that parse its bytes are fuzzed with their committed
+                        corpora replayed. Bounded, not exhaustive
+      rls-canary       the row-level-security canary, which connects as the
+                        production role rather than as the test database's owner,
+                        because a superuser suite cannot see a missing tenant
+                        context
+      ai-runtime       the AI runtime's contract in Python
 
-    Deliberately absent: golangci-lint (not installed, and `make ci` covers it
-    before a release) and the protoc regeneration check.
+    Two of these are absent where a tool is missing rather than absent by
+    decision: `lint` without golangci-lint and `generated-code` without protoc. Both
+    print a visible SKIPPED that says "this is not a pass", and the record keeps it.
+
+    This list is the same one `make verify` runs. The Makefile no longer carries a
+    second copy of it -- it had drifted twice, both times towards running less, and
+    the second time it dropped `statuscheck`. It invokes this script instead, and
+    internal/contracts fails the build if that stops being true.
 
     SonarQube is not here because it cannot be: the analysis has to be uploaded
-    somewhere that holds the history, and GitHub Actions cannot start a job on
+    somewhere that holds the history, and GitHub Actions cannot start a job for
     this account. Run `scripts/sonar.ps1` when a server is reachable. See
     .github/dependabot.yml for the measured reason.
 
@@ -325,6 +347,13 @@ Invoke-Gate 'roadmap-check' { & $go test -p 1 -count=1 ./internal/roadmapcheck/.
 # attached. The model narrates the answer; it cannot be part of it.
 Invoke-Gate 'nl-hits-resolve' { & $go test -p 1 -count=1 ./internal/investigate/... }
 Invoke-Gate 'nl-replays-without-model' { & $go test -p 1 -count=1 ./internal/investigate/... }
+
+# M3's unlock: the binding digest covers all five inputs. A digest that ignored
+# one of them would still look like a digest, would still be printed by
+# `securityctl policy explain`, and would still be quoted in a decision row -
+# which is precisely the failure the red-check at RC-23 mutates: drop a part from
+# the encoding and watch the table of five go red on that part, named.
+Invoke-Gate 'policy-package' { & $go test -p 1 -count=1 ./internal/policy/... }
 
 # C7's buildable half: the schema-level assertion that no person/plate/
 # face-crop/credential vector can exist. The ADR and the compliance ruling
@@ -1054,10 +1083,20 @@ Invoke-Gate 'red-check' {
             # TestRoadmapMatchesTheTree go red naming the file, the line and both
             # numbers; restored; watched it go green. Both transcripts are in
             # docs/status.md.
+            #
+            # The `from` had to be moved to 86 when the M2 pass added three packages
+            # and the roadmap's own count caught up, and to 87 when E1 landed
+            # `internal/policy` and gave the M3 unlock's owner a package. This is
+            # the control working as designed in the other direction: the mutation
+            # had no line to remove, so the gate reported a SKIPPED naming the
+            # string it looked for, which is what turned up in the record's skip
+            # list and kept `verified` false until the target was re-pointed. A
+            # control whose target moves and which nobody notices is how a table
+            # becomes decorative; this one moved in public.
             name = 'a stale package count in the roadmap is refused'
             file = 'ROADMAP.md'
-            from = '83 Go'
-            to   = '84 Go'
+            from = '87 Go'
+            to   = '88 Go'
             test = 'TestRoadmapMatchesTheTree'
             pkg  = './internal/roadmapcheck'
             why  = 'the milestone plan is where scope is locked, and a number in it that the tree contradicts reads as checked. Three documents carried three different stale counts of the same tree at once, and the migration count had been wrong for thirteen migrations'
@@ -1111,9 +1150,71 @@ Invoke-Gate 'red-check' {
             pkg  = './internal/milestone'
             why  = 'a plate is personal data, the envelope is stored verbatim, and LPR is an M3 item routed to the compliance track before any code — so M2 ingesting plates is a privacy ruling made by an omission'
         }
+        @{
+            # The M3 unlock's own control: a binding digest that covers four of
+            # its five inputs. The failure mode is specific and quiet — a digest
+            # is a digest whether it hashed one part or five, so a binding whose
+            # model part was dropped would still be printed by
+            # `securityctl policy explain`, still quoted in a decision row, and
+            # still tell an operator that two different worlds were the same
+            # world. The test that catches it is the table of five, one flip per
+            # part, and it goes red naming the part that was dropped.
+            #
+            # Hand-run before it was entered: the mutation `continue`d past the
+            # model part's own id, version and digest, and watched
+            # TestEveryPartIsCoveredByTheDigest fail on `model` and only on
+            # `model`; restored; watched it go green.
+            name = 'the binding digest covers every part'
+            file = 'internal/policy/policy.go'
+            from = '		writeField(h, p.ID)'
+            to   = '		_ = p.ID // REDCHECK RC-23: the model part left the digest'
+            test = 'TestEveryPartIsCoveredByTheDigest'
+            pkg  = './internal/policy'
+            why  = 'a digest that ignores one input is still a digest, still printed by securityctl policy explain and still quoted in a decision row, so the one thing that would make it wrong is also the one thing that would keep it looking right'
+        }
     )
 
-    $proved = 0
+# A file the red-check writes, which something else on this machine may be
+# holding open for a moment: an editor's file watcher, an antivirus indexer, the
+# IDE this script is normally run from. `[System.IO.File]::WriteAllText` opens
+# without FILE_SHARE_WRITE and fails with IOException, which under
+# $ErrorActionPreference='Stop' is terminating - so a transient lock aborted the
+# red-check mid-table, and did so between the mutation and the restore, leaving
+# a tree with a control removed for every later gate to trip over. It happened
+# twice in one session. Retrying is not elegance here; it is the difference
+# between a gate that reports and a gate that leaves a landmine.
+#
+# Not a solved problem, and stated rather than hidden: a lock that does not clear
+# in a second is not a transient one, and these helpers throw rather than
+# continuing past a real failure. The restore in the red-check's `finally` reads
+# the same way - it retries, and records the failure loudly instead of throwing
+# out of the table.
+function Read-GateFile {
+    param([string]$LiteralPath)
+    for ($i = 1; ; $i++) {
+        try {
+            return [System.IO.File]::ReadAllText($LiteralPath)
+        } catch [System.IO.IOException] {
+            if ($i -ge 8) { throw }
+            Start-Sleep -Milliseconds (20 * $i)
+        }
+    }
+}
+
+function Write-GateFile {
+    param([string]$LiteralPath, [string]$Text)
+    for ($i = 1; ; $i++) {
+        try {
+            [System.IO.File]::WriteAllText($LiteralPath, $Text)
+            return
+        } catch [System.IO.IOException] {
+            if ($i -ge 8) { throw }
+            Start-Sleep -Milliseconds (20 * $i)
+        }
+    }
+}
+
+$proved = 0
     foreach ($c in $controls) {
         $full = Join-Path $repo $c.file
         if (-not (Test-Path -LiteralPath $full)) {
@@ -1121,7 +1222,7 @@ Invoke-Gate 'red-check' {
             $script:skips.Add([ordered]@{ name = 'red-check'; reason = "$($c.name): $($c.file) does not exist" })
             continue
         }
-        $original = [System.IO.File]::ReadAllText($full)
+        $original = Read-GateFile -LiteralPath $full
         if (-not $original.Contains($c.from)) {
             Write-Host "    SKIPPED: $($c.name) - the control line is not in the file in the form this gate expects, so the control could not be removed. Not a pass. Look for: $($c.from)"
             $script:skips.Add([ordered]@{ name = 'red-check'; reason = "$($c.name): control line not found in $($c.file)" })
@@ -1134,7 +1235,7 @@ Invoke-Gate 'red-check' {
             continue
         }
         try {
-            [System.IO.File]::WriteAllText($full, $mutated)
+            Write-GateFile -LiteralPath $full -Text $mutated
             # Relaxed for the same reason the POC's gate relaxes it: a control whose
             # removal produces a compile error makes go test write to stderr, which
             # on this shell is a terminating NativeCommandError that would abort the
@@ -1182,7 +1283,24 @@ Invoke-Gate 'red-check' {
                 $proved++
             }
         } finally {
-            [System.IO.File]::WriteAllText($full, $original)
+            # A restore that cannot be written is the one failure this gate must
+            # not survive silently, and it is also the one it must not die of.
+            # Throwing out of a `finally` aborts the table with the mutation
+            # still applied and every later gate measuring a tree with a control
+            # removed - which is exactly what happened twice in one session when
+            # the write hit an IOException. So it retries, and if the retries are
+            # exhausted it is recorded as a failed control and the table
+            # continues, because a gate that reports twenty-two controls proved
+            # and one tree left mutated is more useful than a gate that never got
+            # to the second control.
+            try {
+                Write-GateFile -LiteralPath $full -Text $original
+            } catch {
+                $script:redCheckFailures.Add("restore $($c.file)")
+                Write-Host "    FAILED: could not restore $($c.file): $($_.Exception.Message)" -ForegroundColor Red
+                Write-Host "      The control is still removed from that file. Every later gate runs against a" -ForegroundColor Red
+                Write-Host "      mutated tree until it is restored by hand; `git checkout -- $($c.file)` does it." -ForegroundColor Red
+            }
         }
     }
 

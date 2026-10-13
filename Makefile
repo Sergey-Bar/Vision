@@ -20,6 +20,37 @@ MIGRATIONS_DIR := migrations
         recovery-drill sql-guard ci \
         verify clean
 
+# The gate, and the one to trust: scripts/verify.ps1.
+#
+# This target used to be a hand-maintained list of the checks that script runs,
+# and it drifted - twice, both times quietly, both times towards running LESS
+# than the document claimed. The second time it was missing `statuscheck`, the
+# gate that fails when a number in docs/status.md is stale, so the one place a
+# stale count was guaranteed to be caught was the place not running.
+#
+# A hand-maintained second list cannot be kept. So the list is not written twice
+# any more: `make verify` runs the script, and every target below it stays what
+# it always was - a developer's way to run one thing without the other thirty.
+# `make verify` and `scripts/verify.ps1` are now the same run rather than two runs
+# described as the same, which is what AGENTS.md claims and what the repo keeps
+# having to correct.
+#
+# It needs PowerShell: `pwsh` on any platform, `powershell` on Windows. That is
+# not a new dependency - the script is what the verify container runs, on Debian,
+# and what AGENTS.md names as the thing to trust.
+PWSH ?= $(shell command -v pwsh 2>/dev/null || command -v powershell 2>/dev/null || echo pwsh)
+
+verify:
+	@command -v $(PWSH) >/dev/null 2>&1 || \
+	  { echo "$(PWSH) not found. The gate is scripts/verify.ps1; install PowerShell, or"; \
+	    echo "run 'pwsh -File scripts/verify.ps1' (Linux) or 'powershell -File ...' (Windows)."; \
+	    exit 127; }
+	@$(PWSH) -NoProfile -ExecutionPolicy Bypass -File scripts/verify.ps1
+
+# `ci` was a different list from `verify` for months... and it is the same list
+# now in the strongest way available: it is the same run.
+ci: verify
+
 all: build test
 
 bootstrap:
@@ -62,15 +93,21 @@ contract-baseline:
 build:
 	$(GO) build -trimpath -o bin/ ./cmd/...
 
-# -p 1: the database-backed suites share one database and rebuild the schema, so
-# package test binaries must not run concurrently. Without it, one suite's
-# DROP SCHEMA lands in the middle of another's test and produces failures that
-# look like product bugs.
+# The suite, and NOT the gate: the tests with nothing around them - no race
+# detector, no JSON stream for the audit gates, no record. The gate is `verify`
+# above, which runs the script's `test` gate with all of that. These two targets
+# are the inner loop: they answer "is my package broken" in seconds rather than
+# in the ten minutes the gate takes, and calling either of them a pass is what
+# the AGENTS.md database paragraph is about.
+#
+# `-p 1` is no longer required: each database-backed package now gets its own
+# database, derived from its own directory, so package binaries run concurrently
+# without one suite's DROP SCHEMA landing inside another's test. See AGENTS.md.
 test:
-	$(GO) test -p 1 ./...
+	$(GO) test -p 8 ./...
 
 test-race:
-	$(GO) test -p 1 -race -count=1 ./...
+	$(GO) test -p 8 -race -count=1 ./...
 
 lint:
 	golangci-lint run ./...
@@ -114,25 +151,6 @@ contract-sync: contract-check-schema
 		|| (echo "an embedded schema copy has drifted from contracts/json-schema;"; \
 		    echo "copy the published contract over internal/contracts/schemasync/"; exit 1)
 
-ci: contract-check contract-check-schema contract-check-openapi contract-sync vet lint test-race migration-phases rules-lint recovery-drill sql-guard
-
-# The gate that runs, and the one to trust.
-#
-# `ci` is the same list. They were different for months: this target left lint
-# and the generated-code check out because the tools were not installed, and the
-# exclusion was described rather than fixed. golangci-lint is now a real gate —
-# it found an environment file written world-readable and a backoff expression
-# that raised on its own failure path — so leaving it out of the gate a developer
-# actually runs was leaving the useful half out.
-#
-# What is still absent is the generated-code check, which needs protoc. It is
-# named here rather than quietly dropped, and `generate` is the target that
-# satisfies it.
-#
-# The database-backed suites skip rather than fail without SP_TEST_DATABASE_URL,
-# so a green run here can be a run that tested nothing. See AGENTS.md.
-verify: contract-check contract-check-schema contract-check-openapi contract-sync vet fmt-check lint test-race migration-phases rules-lint recovery-drill sql-guard
-
 # The demo, end to end, and a transcript of it at dist/demo/transcript.md.
 #
 # A judge gets ninety seconds and a URL, so the demo has to be one command and the
@@ -151,9 +169,11 @@ verify: contract-check contract-check-schema contract-check-openapi contract-syn
 demo:
 	docker compose --profile demo up --exit-code-from demo demo
 
+# The demo, end to end, and a transcript of it at dist/demo/transcript.md.
+
 # The gate, in a container, against the working tree rather than a snapshot of it.
-# `make verify` is the same list of checks; this is the one that runs where the
-# product runs.
+# The same script under the same `verify` target above, running where the product
+# runs — which is the point, and the reason the gate was ported rather than forked.
 verify-container:
 	docker compose --profile verify run --rm verify
 
@@ -171,8 +191,9 @@ sql-guard:
 recovery-drill:
 	$(GO) test -p 1 -count=1 -timeout 900s -v -run TestRecoveryDrill ./internal/dr/...
 
-# Fails if anything is unformatted. Same intent as the CI fmt job, phrased so it
-# does not depend on a shell pipeline.
+# Fails if anything is unformatted. Same intent as the script's `gofmt` gate,
+# phrased as a target so a developer can ask without running the gate. It is a
+# convenience now, not a gate: the gate list is `verify` above.
 fmt-check:
 	@out=$$($(GO) fmt ./... 2>&1); \
 	if [ -n "$$out" ]; then echo "gofmt reformatted these; commit the result:"; echo "$$out"; exit 1; fi
