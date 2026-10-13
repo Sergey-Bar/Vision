@@ -11,15 +11,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/ai"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/config"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/recorder"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/soak"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/source"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/vlm"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/xprotect"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/xpsim"
+	"github.com/Sergey-Bar/vision-poc/internal/ai"
+	"github.com/Sergey-Bar/vision-poc/internal/config"
+	"github.com/Sergey-Bar/vision-poc/internal/recorder"
+	"github.com/Sergey-Bar/vision-poc/internal/soak"
+	"github.com/Sergey-Bar/vision-poc/internal/source"
+	"github.com/Sergey-Bar/vision-poc/internal/store"
+	"github.com/Sergey-Bar/vision-poc/internal/vlm"
+	"github.com/Sergey-Bar/vision-poc/internal/xprotect"
+	"github.com/Sergey-Bar/vision-poc/internal/xpsim"
 )
 
 // httpServer is the simulator's listener. It is here so `pocctl sim` and the demo
@@ -451,7 +451,7 @@ func cmdReport(args []string) error {
 			return err
 		}
 		if run == nil {
-			return fmt.Errorf("report: %s holds no run, so there is nothing to report. 'pocctl demo' produces one in about three minutes", filepath.Join(root, "poc.db"))
+			return fmt.Errorf("report: %s holds no run, so there is nothing to report. 'pocctl demo --clip <clip>' produces one in about three minutes", filepath.Join(root, "poc.db"))
 		}
 		id = run.ID
 	}

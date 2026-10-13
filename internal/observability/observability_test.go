@@ -304,6 +304,180 @@ func TestReservoirQuantiles(t *testing.T) {
 	}
 }
 
+// The plan's finding, as a test: a reservoir bounded only by count has a window
+// that depends on the load.
+//
+// Both reservoirs hold 1024 samples. At 5 events a second that is 3.4 minutes; at
+// 1 event a minute it is 17 hours. The same p95 target then means two different
+// things on two different sites, and neither reading is wrong on its own terms.
+// The window bound is what makes "recent" a stated span, and the span is what
+// makes the reading checkable without trusting the operator's idea of load.
+func TestTheReservoirWindowIsAStatedSpanOfTime(t *testing.T) {
+	start := time.Now()
+	r := observability.NewWindowedReservoir(64, 15*time.Minute)
+	for i := 0; i < 10; i++ {
+		// Backdated deliberately: a test that observes with time.Now cannot
+		// reach a sample old enough to expire without sleeping.
+		r.Observe(float64(i))
+	}
+	oldest, newest, n := r.Span()
+	if n != 10 {
+		t.Fatalf("span reports %d samples, want 10", n)
+	}
+	if oldest.After(newest) {
+		t.Errorf("span is backwards: oldest %v after newest %v", oldest, newest)
+	}
+
+	// Nothing to prune: all ten samples are inside the window.
+	if dropped := r.Prune(time.Now()); dropped != 0 {
+		t.Errorf("prune dropped %d samples inside the window, want 0", dropped)
+	}
+
+	// An unbounded reservoir never prunes, which is what keeps the count-bounded
+	// behaviour for a caller that has no clock opinion.
+	unbounded := observability.NewReservoir(8)
+	for i := 0; i < 100; i++ {
+		unbounded.Observe(float64(i))
+	}
+	if dropped := unbounded.Prune(start.AddDate(10, 0, 0)); dropped != 0 {
+		t.Errorf("an unbounded reservoir pruned %d samples ten years later, want 0", dropped)
+	}
+
+	// A window long past expires everything, and an empty span reports zero
+	// rather than inventing a span of the current instant.
+	w := observability.NewWindowedReservoir(8, time.Minute)
+	w.Observe(1)
+	if dropped := w.Prune(time.Now().Add(time.Hour)); dropped != 1 {
+		t.Errorf("prune dropped %d samples, want 1", dropped)
+	}
+	if _, _, n := w.Span(); n != 0 {
+		t.Errorf("an emptied reservoir reports %d samples, want 0", n)
+	}
+	if got := w.QuantileSeconds(0.95); got != -1 {
+		t.Errorf("a p95 over an empty reservoir is %v, want -1: a p95 over nothing is unknown, not zero", got)
+	}
+}
+
+// A reservoir smaller than one sample is refused by being made usable. A size of
+// zero is a configuration mistake, not a reservoir that silently holds nothing —
+// a quantile over a reservoir that can store no sample is a p95 that is always
+// "unknown", which reads identically to a system with no traffic.
+func TestAReservoirThatCannotHoldAnythingRefusesTheSize(t *testing.T) {
+	for _, make := range []func() *observability.Reservoir{
+		func() *observability.Reservoir { return observability.NewReservoir(0) },
+		func() *observability.Reservoir { return observability.NewReservoir(-5) },
+		func() *observability.Reservoir {
+			return observability.NewWindowedReservoir(0, time.Minute)
+		},
+	} {
+		r := make()
+		for i := 0; i < 10; i++ {
+			r.Observe(float64(i))
+		}
+		if _, _, n := r.Span(); n == 0 {
+			t.Error("a reservoir built with a size of zero or less holds no samples at all")
+		}
+		if got := r.QuantileSeconds(0.95); got < 0 {
+			t.Errorf("a p95 over that reservoir is %v, want a real number", got)
+		}
+	}
+}
+
+// A wrapped ring's span is computed from its oldest RETAINED sample, not from
+// wherever the head happens to sit. A ring that has wrapped holds its oldest
+// sample at `next`, so a span that read from index 0 would claim a window that
+// starts mid-history on a long-running process.
+//
+// The ordering half is asserted as `not before` rather than `after`, because
+// `Observe` stamps with the host clock and five samples can land inside one tick:
+// a span of zero width is then the truth, and asserting otherwise would make this
+// a test of the machine's timer.
+func TestTheSpanOfAWrappedRingRunsFromOldestToNewest(t *testing.T) {
+	r := observability.NewWindowedReservoir(3, time.Hour)
+	for i := 0; i < 5; i++ {
+		r.Observe(float64(i))
+	}
+	oldest, newest, n := r.Span()
+	if n != 3 {
+		t.Fatalf("a reservoir of 3 wrapped over 5 samples reports %d samples, want 3: the "+
+			"oldest samples were not discarded, so the window is longer than it claims", n)
+	}
+	if newest.Before(oldest) {
+		t.Errorf("the span is %v..%v, newest before oldest: the walk started at the head "+
+			"of the ring rather than at its oldest sample", oldest, newest)
+	}
+}
+
+// The newline matters as much as the labels: a `# TYPE` line glued to the series
+// following it is not a scrape failure, it is a silently mis-parsed metric, which
+// is worse.
+func TestRenderReportsTheSpanBesideEveryP95(t *testing.T) {
+	r := observability.NewRegistry()
+	r.IngestLag.Observe(1.5)
+	r.IngestLag.Observe(2.5)
+	r.IncidentVisibility.Observe(3.5)
+
+	out := r.Render()
+	if want := "incident_visibility_seconds 3.5 span_start=\""; !strings.Contains(out, want) {
+		t.Errorf("the p95 series is not followed by its span:\n%s", out)
+	}
+	if want := "incident_visibility_seconds 3.5 span_start=\"\" ; span_end=\"\" ; span_samples=0"; strings.Contains(out, want) {
+		t.Errorf("a span with no samples was written as though it had one:\n%s", out)
+	}
+	// The two p95 lines both carry a span, so one reader cannot rely on the other
+	// having it.
+	if strings.Count(out, "span_samples=") != 2 {
+		t.Errorf("expected a span on both reservoir gauges:\n%s", out)
+	}
+	// And the TYPE header is still its own line, so a collector parses the series.
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "# TYPE") && !strings.HasSuffix(line, "gauge") && !strings.HasSuffix(line, "counter") {
+			t.Errorf("a TYPE header is glued to the series after it: %q", line)
+		}
+	}
+}
+
+// An empty reservoir writes the bare series, not a labelled one with an invented
+// span. A p95 over nothing is not 0 seconds and it is not the current instant
+// either: it is unknown, and the exposition format has to say so without lying.
+func TestAnEmptyReservoirWritesTheBareSeriesNotASpan(t *testing.T) {
+	r := observability.NewRegistry()
+	if got := r.Render(); strings.Contains(got, "span_start=") {
+		t.Errorf("a registry with no reservoir samples rendered a span:\n%s", got)
+	}
+
+	// And the same on a reservoir that HAS been observed and then pruned away:
+	// the samples left, so the span must go with them.
+	r.IngestLag.Observe(2)
+	r.IngestLag.Prune(time.Now().Add(time.Hour))
+	if got := r.Render(); strings.Contains(got, "ingest_lag_seconds") {
+		t.Errorf("a pruned-empty reservoir still rendered a p95:\n%s", got)
+	}
+}
+
+// Prune is called by the gauge sampler, which is the one place in the product that
+// already runs on a timer. A window nobody prunes never expires, which is the
+// defect this whole change exists to remove, so the entry point is exercised here
+// rather than left to a caller that does not exist yet.
+func TestPruneReservoirsExpiresBothReservoirs(t *testing.T) {
+	r := observability.NewRegistry()
+	r.IngestLag.Observe(1)
+	r.IncidentVisibility.Observe(2)
+
+	if lag, vis := r.PruneReservoirs(time.Now()); lag != 0 || vis != 0 {
+		t.Errorf("a fresh prune dropped %d lag and %d visibility samples, want 0/0", lag, vis)
+	}
+	// Both windows are 15 minutes, so a prune an hour later empties both.
+	lag, vis := r.PruneReservoirs(time.Now().Add(time.Hour))
+	if lag != 1 || vis != 1 {
+		t.Errorf("a prune an hour later dropped %d/%d samples, want 1/1: the two reservoirs "+
+			"have their own windows and one of them stopped expiring", lag, vis)
+	}
+	if _, _, n := r.IngestLag.Span(); n != 0 {
+		t.Errorf("the lag reservoir still reports %d samples after they expired", n)
+	}
+}
+
 // Every SLO carries a remedy. An alert with no remedy is an alert everybody
 // learns to ignore, and this is the difference between an SLO and a decoration.
 func TestEverySLOBriefCarriesARemedy(t *testing.T) {

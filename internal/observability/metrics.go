@@ -33,6 +33,17 @@ const (
 	CounterVLMErrors         = "vlm_errors_total"
 	CounterEvidenceFetched   = "evidence_fetched_total"
 	CounterEvidenceFailed    = "evidence_fetch_failed_total"
+	// CounterDuplicate and CounterSuppressed are the two verification states that
+	// mean "this event produced no incident on purpose".
+	//
+	// They were declared in the metrics doc since July and produced by nothing, so
+	// "how often does the system deliberately stay quiet" had no live number at
+	// all - and the two states are the ones an operator asks about when they
+	// suspect the rules are eating incidents. A suppressed event is a rule working;
+	// a duplicate is ingest working. Both need a number, and both need it to be
+	// monotonic because both are counted over a window on a dashboard.
+	CounterDuplicate  = "duplicate_total"
+	CounterSuppressed = "suppressed_total"
 	// OutboxMessagesDelivered, not actions_dispatched_total.
 	//
 	// The old name said "actions dispatched", and the thing being counted is the
@@ -80,6 +91,7 @@ var counterMetrics = map[string]bool{
 	CounterContradicted: true, CounterUnverified: true,
 	CounterVLMInvocations: true, CounterVLMErrors: true,
 	CounterEvidenceFetched: true, CounterEvidenceFailed: true,
+	CounterDuplicate: true, CounterSuppressed: true,
 	CounterOutboxDelivered:     true,
 	CounterRuleBundleActivated: true, CounterCheckpointsSealed: true,
 	CounterAuditAppends: true,
@@ -411,14 +423,59 @@ func copySLOs(in []SLO) []SLO {
 	return out
 }
 
+// The declared reservoir windows, per objective.
+//
+// Both are the plan's own numbers: SLO 2 is a 5-second ingest-lag target and SLO 3
+// is a 15-second incident-visibility target. The reservoir window is the span a
+// p95 covers, so it is derived from the objective rather than invented, and it is
+// a named constant so a dashboard and the code cannot disagree about what
+// "recent" meant.
+//
+// Fifteen minutes, not fifteen seconds. A p95 over fewer than a few hundred
+// samples is a number with no confidence in it, and at a quiet site 15 seconds of
+// incident visibility is one sample. The objective is what the span must be at
+// least long enough to evaluate; the reported span says how long it really was.
+const (
+	reservoirIngestLagWindow  = 15 * time.Minute
+	reservoirVisibilityWindow = 15 * time.Minute
+)
+
 // NewRegistry builds a registry.
 func NewRegistry() *Registry {
 	return &Registry{
 		Counters:           NewCounters(),
 		Gauges:             NewGauges(),
-		IngestLag:          NewReservoir(1024),
-		IncidentVisibility: NewReservoir(1024),
+		IngestLag:          NewWindowedReservoir(1024, reservoirIngestLagWindow),
+		IncidentVisibility: NewWindowedReservoir(1024, reservoirVisibilityWindow),
 	}
+}
+
+// PruneReservoirs expires samples outside each reservoir's window and returns
+// how many were dropped.
+//
+// Called from the SLO evaluation loop, which is the one place in the product that
+// runs on a timer already. It is not called from Render: a scrape is a read, and
+// a read that mutates what it reads turns two collectors scraping concurrently
+// into two different windows.
+func (r *Registry) PruneReservoirs(now time.Time) (ingestLagDropped, visibilityDropped int) {
+	return r.IngestLag.Prune(now), r.IncidentVisibility.Prune(now)
+}
+
+// fmtGaugeSpan writes a gauge with the wall-clock span of the reservoir it came
+// from, as labels.
+//
+// The labels are the point of the whole change. A p95 on its own is a number
+// whose window nobody can see; with span_start and span_end beside it, the same
+// number says what it covered, and a p95 measured over three samples is
+// distinguishable from one measured over three thousand without asking anybody.
+func fmtGaugeSpan(b *strings.Builder, name string, value float64, oldest, newest time.Time, samples int) {
+	if samples == 0 || oldest.IsZero() || newest.IsZero() {
+		fmtGauge(b, name, value)
+		return
+	}
+	fmt.Fprintf(b, "# TYPE %s gauge\n%s %g span_start=%q span_end=%q span_samples=%d\n",
+		name, name, value,
+		oldest.UTC().Format(time.RFC3339), newest.UTC().Format(time.RFC3339), samples)
 }
 
 // Render writes the exposition format.
@@ -436,10 +493,12 @@ func (r *Registry) Render() string {
 		}
 	}
 	if lag := r.IngestLag.QuantileSeconds(0.95); lag >= 0 {
-		fmtGauge(&b, GaugeIngestLagSeconds, lag)
+		l, n, s := r.IngestLag.Span()
+		fmtGaugeSpan(&b, GaugeIngestLagSeconds, lag, l, n, s)
 	}
 	if vis := r.IncidentVisibility.QuantileSeconds(0.95); vis >= 0 {
-		fmtGauge(&b, GaugeIncidentVisibility, vis)
+		l, n, s := r.IncidentVisibility.Span()
+		fmtGaugeSpan(&b, GaugeIncidentVisibility, vis, l, n, s)
 	}
 	r.writeSLOs(&b)
 	return b.String()
@@ -518,32 +577,140 @@ func writeSorted[T any](m map[string]T, write func(string, T)) {
 // Reservoir is a bounded sample of recent values, for a quantile without
 // unbounded memory.
 //
-// A fixed window is what the SLO means by "recent", and a bounded reservoir is
-// how a long-running process on a site that never restarts can keep one.
+// It is bounded TWICE, and the second bound is the one that was missing.
+//
+// A size bound alone makes the window a count: 1024 samples of ingest lag is 3.4
+// minutes at 5 events a second and 17 hours at 1 event a minute, so the same
+// p95 target is evaluated against a window whose length depends on the load. A
+// quiet site is then measured against yesterday's lag and looks fine; a busy one
+// against three minutes and looks bad. Neither number is wrong on its own terms
+// and both are wrong as "recent".
+//
+// The plan's finding was exactly this, and the fix has two halves, because
+// "make the window 15 minutes" silently changes every existing p95 reading:
+//
+//   - the window is DECLARED, so a p95 means a stated span of time;
+//   - the span is REPORTED next to every p95, so a reader who cannot see the
+//     window can still see what the number covered.
+//
+// A window of zero keeps the size-bounded behaviour, which is what the unit
+// tests that assert specific quantiles want and what a caller that has no clock
+// preference should get.
 type Reservoir struct {
 	mu     sync.Mutex
 	values []float64
+	at     []time.Time
 	next   int
+	window time.Duration
 }
 
-// NewReservoir builds a reservoir of the given size.
+// NewReservoir builds a reservoir of the given size, bounded by count only.
 func NewReservoir(size int) *Reservoir {
+	return newReservoir(size, 0)
+}
+
+// NewWindowedReservoir builds a reservoir bounded by count AND by wall-clock
+// span: samples older than the window are dropped by Prune, and Span reports
+// what remained.
+//
+// The window is per-reservoir rather than a registry-wide constant because the
+// two reservoirs answer different questions: ingest lag is SLO 2's 5-second
+// target and incident visibility is SLO 3's 15-second target, and a single
+// window would make one of them a lie.
+func NewWindowedReservoir(size int, window time.Duration) *Reservoir {
+	return newReservoir(size, window)
+}
+
+func newReservoir(size int, window time.Duration) *Reservoir {
 	if size <= 0 {
 		size = 256
 	}
-	return &Reservoir{values: make([]float64, 0, size)}
+	return &Reservoir{
+		values: make([]float64, 0, size),
+		at:     make([]time.Time, 0, size),
+		window: window,
+	}
 }
 
-// Observe adds a sample, overwriting the oldest once full.
+// Observe adds a sample, overwriting the oldest once full. The timestamp is
+// taken here rather than passed in, so a caller cannot backdate a sample into a
+// p95 it wants to influence.
 func (r *Reservoir) Observe(v float64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if len(r.values) < cap(r.values) {
 		r.values = append(r.values, v)
+		r.at = append(r.at, time.Now().UTC())
 		return
 	}
 	r.values[r.next] = v
+	r.at[r.next] = time.Now().UTC()
 	r.next = (r.next + 1) % len(r.values)
+}
+
+// Prune drops samples older than the window. It is a separate call rather than
+// part of Observe because a quantile is read far more often than it is written,
+// and doing the expiry work on the write path would put the window's arithmetic
+// between an event and its measurement.
+//
+// It returns how many samples were dropped, which is zero for an unbounded
+// reservoir and is a useful number on its own: a reservoir that drops every
+// sample on every prune has a window nobody is writing to.
+func (r *Reservoir) Prune(now time.Time) int {
+	if r.window <= 0 {
+		return 0
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	cutoff := now.Add(-r.window)
+	kept := 0
+	for i, at := range r.at {
+		if i < len(r.values) && !at.Before(cutoff) {
+			kept++
+		}
+	}
+	if kept == len(r.values) {
+		return 0
+	}
+	values := make([]float64, 0, kept)
+	at := make([]time.Time, 0, kept)
+	for i := range r.values {
+		if !r.at[i].Before(cutoff) {
+			values = append(values, r.values[i])
+			at = append(at, r.at[i])
+		}
+	}
+	dropped := len(r.values) - len(values)
+	r.values = values
+	r.at = at
+	r.next = 0
+	return dropped
+}
+
+// Span is the wall-clock window the samples in this reservoir actually cover:
+// the oldest and newest sample held, and how many.
+//
+// It exists because the plan's finding was not only that the window was a count
+// rather than a time, but that a reader of a p95 could not tell which it was.
+// An empty reservoir reports a zero span and zero samples, which is the honest
+// answer and not a span of the current instant: a p95 over nothing is not 0
+// seconds, it is unknown, and QuantileSeconds already returns -1 for that.
+func (r *Reservoir) Span() (oldest, newest time.Time, samples int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.values) == 0 {
+		return time.Time{}, time.Time{}, 0
+	}
+	oldest, newest = r.at[0], r.at[0]
+	for _, at := range r.at[:len(r.values)] {
+		if at.Before(oldest) {
+			oldest = at
+		}
+		if at.After(newest) {
+			newest = at
+		}
+	}
+	return oldest, newest, len(r.values)
 }
 
 // QuantileSeconds returns an approximate quantile in seconds, or -1 when nothing

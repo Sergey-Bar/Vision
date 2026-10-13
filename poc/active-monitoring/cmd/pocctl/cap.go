@@ -7,18 +7,17 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"text/tabwriter"
 	"time"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/ai"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/config"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/recorder"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/soak"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/source"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/xprotect"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/xpsim"
+	"github.com/Sergey-Bar/vision-poc/internal/ai"
+	"github.com/Sergey-Bar/vision-poc/internal/config"
+	"github.com/Sergey-Bar/vision-poc/internal/recorder"
+	"github.com/Sergey-Bar/vision-poc/internal/soak"
+	"github.com/Sergey-Bar/vision-poc/internal/source"
+	"github.com/Sergey-Bar/vision-poc/internal/xprotect"
+	"github.com/Sergey-Bar/vision-poc/internal/xpsim"
 )
 
 // cmdCap is the §5 capability table. It measures, it does not quote.
@@ -409,21 +408,80 @@ func cmdSim(args []string) error {
 	select {}
 }
 
+// defaultModelURL is where `fetch-model` goes when the operator names neither
+// --url nor SP_POC_MODEL_URL.
+//
+// It is a MEASURED default, and the measurement is what earns it the place. The
+// weights this repository measured its contract against hash, on this machine, to
+// defaultModelSHA256 (257,470,589 bytes). The ONNX Model Zoo's yolov4 asset was
+// downloaded on 2026-10-11 and hashed to the SAME value: two independent byte
+// streams, one digest. Before that, this repository had no record of where its
+// weights came from at all — `pyworker/fixtures/yolov4n.licence.json` said so in
+// as many words — and a fetch command with no default pointed a judge at a wall.
+//
+// The URL is safe to default to BECAUSE it was checked, not because it is
+// plausible. Two independent corroborations of the same identity are recorded in
+// the licence file: the zoo's published input/output shapes for this asset
+// ((1, 416, 416, 3) in, (1, 52, 52, 3, 85) out, three strides) are what
+// `pyworker/fixtures/yolov4n.contract.json` already recorded from these bytes,
+// and the anchors file beside the weights is the `[anchors]` section of
+// `yolov4-416.cfg`.
+const defaultModelURL = "https://github.com/onnx/models/raw/main/validated/vision/object_detection_segmentation/yolov4/model/yolov4.onnx"
+
+// defaultModelSHA256 is what those bytes must hash to, lowercase hex.
+//
+// A pinned digest is the only provenance a 257 MB download can carry: a URL can
+// be re-pointed, a release can be re-cut, and neither announces itself. A test
+// asserts this constant and the `sha256` recorded in the licence file say the
+// same thing, because two records of one fact drift the moment one of them is
+// edited alone.
+const defaultModelSHA256 = "1881fe9c506c970d7866cb4bfc33bda791ce46951a3c39c45ace2ff2b9daf369"
+
 func cmdFetchModel(args []string) error {
-	flags, err := flagSet("fetch-model", map[string]string{"url": "", "out": "models/yolov4n.onnx"}, args)
+	flags, err := flagSet("fetch-model", map[string]string{
+		"url": "", "out": "models/yolov4n.onnx", "sha256": "",
+	}, args)
 	if err != nil {
 		return err
 	}
-	url := flags["url"]
-	out := flags["out"]
-	if url == "" {
-		url = os.Getenv("SP_POC_MODEL_URL")
+	url := firstNonEmpty(flags["url"], os.Getenv("SP_POC_MODEL_URL"))
+	fromDefault := url == ""
+	if fromDefault {
+		url = defaultModelURL
 	}
-	if url == "" {
-		return fmt.Errorf("fetch-model: no URL. Pass --url or set SP_POC_MODEL_URL. The model is not in git, and a model whose provenance is a hardcoded URL in this file would be a model nobody checked")
+	expected := strings.ToLower(strings.TrimSpace(firstNonEmpty(flags["sha256"], os.Getenv("SP_POC_MODEL_SHA256"))))
+	pinnedByOperator := expected != ""
+	if !pinnedByOperator {
+		expected = defaultModelSHA256
 	}
+	return fetchModelTo(url, flags["out"], expected, pinnedByOperator, fromDefault)
+}
+
+// fetchModelTo downloads the weights and checks what arrived against a digest.
+//
+// The two digest paths are deliberately different strengths, and the difference
+// is the whole design:
+//
+//   - the operator passed --sha256 (or SP_POC_MODEL_SHA256): a mismatch REFUSES
+//     and the file is removed. Somebody pinned a value on purpose, and honouring
+//     a wall they built is the point of building it.
+//   - nobody pinned anything, so the default's digest is the check: a mismatch
+//     WARNS in full and the file is kept. This is the plan's B3, in its own
+//     words — "make skipping it a printed warning rather than a wall". A judge
+//     whose download arrives different from the pin must be told exactly what
+//     arrived and how to record it, not met with a dead end; and a default that
+//     hard-refuses on drift is a default that stops working the day the upstream
+//     release is re-cut, which turns a label problem into a broken demo.
+func fetchModelTo(url, out, expected string, pinnedByOperator, fromDefault bool) error {
 	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
 		return err
+	}
+	if fromDefault {
+		fmt.Printf("fetch-model: no --url and no SP_POC_MODEL_URL, so the pinned default is used.\n"+
+			"  %s\n"+
+			"  It is pinned because its bytes were MEASURED against this repository's weights on\n"+
+			"  2026-10-11 (same SHA-256, 257,470,589 bytes) — see pyworker/fixtures/yolov4n.licence.json.\n"+
+			"  The download is checked against that digest below.\n", url)
 	}
 	fmt.Printf("downloading %s -> %s\n", url, out)
 	if err := download(url, out); err != nil {
@@ -438,8 +496,39 @@ func cmdFetchModel(args []string) error {
 		_ = os.Remove(out)
 		return fmt.Errorf("fetch-model: %s is zero bytes; a download that produced an empty file is not a model", out)
 	}
-	fmt.Printf("wrote %s (%s). Record where it came from and under what licence next to it; a\nmodel with no provenance is as unaccountable as a video with no provenance.\n",
-		out, soak.Bytes(info.Size()))
+	sum, size, err := hashFile(out)
+	if err != nil {
+		return err
+	}
+	switch {
+	case sum == expected:
+		fmt.Printf("fetch-model: digest MATCHES the expected %s\n", sum[:16])
+		if fromDefault {
+			fmt.Println("  These are the bytes every number in this repository's model records was")
+			fmt.Println("  measured against. The provenance chain is complete: weights, digest, origin.")
+		}
+	case pinnedByOperator:
+		_ = os.Remove(out)
+		return fmt.Errorf("fetch-model: the DOWNLOAD does not match the digest you pinned.\n"+
+			"  expected %s\n  actual   %s (%s)\n  from     %s\n"+
+			"  Nothing was written to %s. You passed --sha256, so this is a refusal and not a\n"+
+			"  warning: a digest somebody pinned on purpose is a decision, and it is honoured.\n"+
+			"  Re-point --url at the build you meant, or record what arrived deliberately.",
+			expected, sum, soak.Bytes(size), url, out)
+	default:
+		fmt.Printf("fetch-model: WARNING — the download does NOT match the pinned default digest.\n"+
+			"  expected %s\n  actual   %s (%s)\n  from     %s\n"+
+			"  The file was KEPT at %s and the run may proceed, because a default that hard-refused\n"+
+			"  on drift would turn a label problem into a broken demo. But its numbers are NOT the\n"+
+			"  numbers the committed contract was measured against, and every artefact that names the\n"+
+			"  model now names a file nobody has checked. Record the digest above beside the weights\n"+
+			"  and say where they came from, or re-run with --sha256=<the digest you meant>.\n",
+			expected, sum, soak.Bytes(size), url, out)
+	}
+	fmt.Printf("wrote %s (%s). Record where it came from and under what licence next to it; a\nmodel with no provenance is as unaccountable as a video with no provenance.\n"+
+		"  For the model this repository ships, that record is pyworker/fixtures/yolov4n.licence.json\n"+
+		"  and it now names the origin and the page's stated licence (MIT) beside this digest.\n",
+		out, soak.Bytes(size))
 	return nil
 }
 
@@ -448,10 +537,7 @@ func runForeground(args []string) error {
 	if err != nil {
 		return err
 	}
-	watch := filepath.Join(filepath.Dir(exe), "watch.exe")
-	if runtime.GOOS != "windows" {
-		watch = filepath.Join(filepath.Dir(exe), "watch")
-	}
+	watch := filepath.Join(filepath.Dir(exe), binName("watch"))
 	if _, err := os.Stat(watch); err != nil {
 		return fmt.Errorf("run: %s is not next to this binary. Build both with 'go build ./cmd/...', or run 'go run ./cmd/watch' instead", watch)
 	}

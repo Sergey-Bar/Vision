@@ -75,6 +75,9 @@ or from the site configuration.`,
 		identityCommand(),
 		releaseKeyCommand(),
 		siteConfigCommand(),
+		// The report comes from Postgres rather than from /v1/metrics, because a
+		// number in a gate artefact cannot be a reading of a process's memory.
+		efficiencyCommand(),
 		// The C3 adjacency table's backfill and read: the table is a projection
 		// of the site model, and this is how an operator says "recompute it".
 		cameraAdjacencyCommand(),

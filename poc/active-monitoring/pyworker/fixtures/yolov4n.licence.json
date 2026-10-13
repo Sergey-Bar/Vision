@@ -15,9 +15,20 @@
 
   "file": "models/yolov4n.onnx",
   "bytes": 257470589,
-  "sha256": "NOT RECORDED - compute it with `certutil -hashfile models\\yolov4n.onnx SHA256` and put it here before this weights file is shown to anyone outside this machine",
+  "sha256": "1881fe9c506c970d7866cb4bfc33bda791ce46951a3c39c45ace2ff2b9daf369",
   "shape_measured_by": "pyworker/probe_model.py",
   "shape_record": "pyworker/fixtures/yolov4n.contract.json",
+
+  "origin": {
+    "established": "2026-10-11",
+    "how": "MEASURED, not guessed. The weights on this machine were hashed (SHA-256, 257,470,589 bytes) and the ONNX Model Zoo's yolov4 asset was downloaded and hashed: identical. Two byte streams, one digest. Nothing in this repository had to be believed for that to be true.",
+    "url": "https://github.com/onnx/models/raw/main/validated/vision/object_detection_segmentation/yolov4/model/yolov4.onnx",
+    "asset_page": "https://github.com/onnx/models/tree/main/validated/vision/object_detection_segmentation/yolov4",
+    "upstream_name": "yolov4.onnx. The upstream asset is NOT called yolov4n - there is no nano variant in the zoo's validated set. The `n` in this repository's filename is the remaining false statement in it; see decisions.filename below.",
+    "second_check_on_the_identity": "The zoo's own page publishes this asset's input as (1, 416, 416, 3) NHWC and its output as (1, 52, 52, 3, 85) - three strides, 85 fields per anchor, objectness at column 4. That is exactly what pyworker/fixtures/yolov4n.contract.json recorded from these bytes before anything was known about where they came from, so the shape and the origin corroborate each other.",
+    "retrieved_from_the_zoo": "2026-10-11 (the identity was established this date; the file itself has been on this machine since before then, which is the whole point - a file whose origin nobody recorded is unaccounted no matter how long it has sat there)",
+    "reverified": "2026-10-11, independently and again: the URL above was fetched as a fresh download, arrived at 257,470,589 bytes and hashed to the sha256 in this file, and `pocctl bootstrap` hashed the weights already on disk to the same value. Three byte streams, one digest. The measurement is repeatable by anybody with the URL and this record, which is what makes the fetch-model default a provenance rather than a plausible guess."
+  },
 
   "filename_says": "yolov4n",
   "filename_used_to_say": "yolov8n",
@@ -39,7 +50,12 @@
     "the configuration file this model was trained with. That is a recorded",
     "provenance chain from the weights to a named configuration file, not a guess",
     "from the tensor shape. The shape alone cannot separate v4 from v5, because both",
-    "are anchored at three scales; the .cfg can, and it says v4."
+    "are anchored at three scales; the .cfg can, and it says v4.",
+    "",
+    "AND NOW ALSO: the origin. The zoo's asset is the standard YOLOv4 (not tiny, not",
+    "nano) at 416, converted from tensorflow-yolov4-tflite. The anchors recorded from",
+    "this file are the FULL yolov4-416 anchors, which is a third independent check on",
+    "the same identity."
   ],
   "why_the_old_filename_was_wrong": [
     "The measured export has 85 fields per detection, which means there is an",
@@ -47,7 +63,7 @@
     "objectness column at all.",
     "It publishes THREE outputs at strides 52, 26 and 13 over a 416x416 NHWC",
     "input. That is one output per stride, i.e. anchored. A YOLOv8 export is",
-    "fused: one output, no anchor boxes.",
+    "fused, one output, no anchors.",
     "decoder_family is `anchored` in the contract and the file needs",
     "`models/yolov4n.anchors.txt`, which lives in the model's .cfg and is not in",
     "the ONNX file. A YOLOv8 needs no anchors at all.",
@@ -55,31 +71,49 @@
     "decoder falls back to the COCO-80 vocabulary by index."
   ],
 
-  "licence": "NOT RECORDED. This is the open item, and it is the one that matters. The rename below does NOT change it and was never expected to.",
+  "licence": "MIT, AS STATED BY THE MODEL'S OWN PAGE. The page at origin.asset_page carries the SPDX header `SPDX-License-Identifier: MIT` and a License section reading `MIT License`. That is recorded here verbatim in substance, with the URL and the date, because that is what a licence record is: what the rights holder's own page says, not what a reader infers. Nothing in this repository interprets it further - see licence_consequence for what that does and does not settle.",
+  "licence_source": "https://github.com/onnx/models/tree/main/validated/vision/object_detection_segmentation/yolov4 (SPDX-License-Identifier: MIT; License: MIT License)",
+  "licence_recorded_on": "2026-10-11",
+  "attribution_the_page_names": [
+    "YOLOv4: Optimal Speed and Accuracy of Object Detection - Alexey Bochkovskiy, Chien-Yao Wang, Hong-Yuan Mark Liao (https://arxiv.org/abs/2004.10934)",
+    "Original models from the Darknet GitHub repository (https://github.com/AlexeyAB/darknet)",
+    "This model is directly converted from hunglc007/tensorflow-yolov4-tflite (https://github.com/hunglc007/tensorflow-yolov4-tflite)",
+    "ONNX Model Zoo page contributor: Jennifer Wang"
+  ],
   "licence_consequence": [
-    "The weights were NOT obtained through Ultralytics' published download page,",
-    "and this repository has no record of where they came from at all. Nothing in",
-    "the commit history or in `pocctl fetch-model`'s default URL names an origin.",
+    "WHAT IS SETTLED, and it is more than was settled yesterday. The origin is now",
+    "NAMED and MEASURED: the weights are the ONNX Model Zoo's validated yolov4 asset,",
+    "byte for byte. The page that publishes them states MIT. The two open questions",
+    "this record previously carried - `IF the weights are Ultralytics', the licence is",
+    "AGPL-3.0` and `IF the weights are from the ONNX Model Zoo under a permissive",
+    "licence` - are no longer both live. The second is what is true, and the",
+    "AGPL-3.0 branch does not apply to these bytes.",
     "",
-    "IF the weights are Ultralytics', the licence is AGPL-3.0, and Ultralytics'",
-    "own licensing page states that commercial use and internal use require an",
-    "Enterprise licence. That would put a licence obligation on the DEMONSTRATION",
-    "and a much larger one on anything derived from it.",
+    "WHAT THAT OBLIGES: an MIT notice. The attribution section above is carried",
+    "verbatim from the page for exactly that reason - a licence whose notice",
+    "requirement is satisfied by copying four lines is a licence this repository can",
+    "comply with, and the lines are recorded here so the copy is not a search.",
     "",
-    "IF the weights are from the ONNX Model Zoo under a permissive licence, the",
-    "obligation is an attribution notice.",
+    "WHAT IS NOT SETTLED, and the record will not pretend otherwise. The zoo page is",
+    "the publisher of the ONNX EXPORT, and it names what the export was converted",
+    "from. A legal reading of what a demonstration built on these weights owes is a",
+    "decision for a person, not for this file. The attribution lines above are the",
+    "material such a person needs and they are now in the repository.",
     "",
-    "The two are not distinguishable from anything in this repository, so no claim",
-    "is made either way. The record says NOT RECORDED because NOT RECORDED is",
-    "what is true."
+    "WHAT DOES NOT CHANGE: the rest of this record. The filename question, the",
+    "measured contract and every number taken with these weights are the same facts",
+    "they were before the origin was known. A provenance record that improved only",
+    "the licence and quietly kept a wrong filename would be the same mistake in a",
+    "new place."
   ],
 
   "cleared_for": [
-    "measurement, on this machine, for the POC's own evaluation"
+    "measurement, on this machine, for the POC's own evaluation",
+    "the MIT notice is recorded above and the origin is named, so a show outside this machine has a basis to argue from - the DECISION to rely on it is a person's, not this file's"
   ],
   "NOT_cleared_for": [
     "sale",
-    "any distribution outside this machine",
+    "any distribution outside this machine WITHOUT the attribution lines above carried with it",
     "any product derived from these weights",
     "a claim that the POC may be shipped commercially"
   ],
@@ -93,15 +127,21 @@
   },
 
   "decisions": {
-    "rename": "YES. The file was renamed from yolov4n.onnx to yolov4n.onnx on 2026-10-03, together with the anchors file and both fixture records. An earlier revision of this file said NO, on the grounds that 'a rename without a licence change moves the problem'. That argument was about the LICENCE and the reasoning does not transfer to the FILENAME, which is a separate claim about a separate fact. A licence obligation does not become invisible because the weights are called something accurate, and equally a false name does not become true because the licence is still unknown: before the rename this repository shipped a file whose name asserted an architecture its own committed probe had disproved, and the licence was NOT RECORDED then exactly as it is now. The rename removes one false statement and leaves the true one standing. The licence below is unchanged by it and is still the open item. The honest summary for a judge is 'YOLOv4-416, on-premise, licence NOT RECORDED' and it has to be said out loud, because 'NOT RECORDED' is the part that would otherwise be laundered.",
+    "rename": "YES. The file was renamed from yolov4n.onnx to yolov4n.onnx on 2026-10-03, together with the anchors file and both fixture records. An earlier revision of this file said NO, on the grounds that 'a rename without a licence change moves the problem'. That argument was about the LICENCE and the reasoning does not transfer to the FILENAME, which is a separate claim about a separate fact. A licence obligation does not become invisible because the weights are called something accurate, and equally a false name does not become true because the licence is still unknown: before the rename this repository shipped a file whose name asserted an architecture its own committed probe had disproved, and the licence was NOT RECORDED then exactly as it is now. The rename removes one false statement and leaves the true one standing. The licence is NOT unchanged by it - it was unknown when that paragraph was written and it is recorded now, with its origin and the date - and the paragraph is kept because the reasoning about the filename transferred even though the licence it deferred to has since been measured. The honest summary for a judge today is 'YOLOv4 at 416, from the ONNX Model Zoo's validated set, MIT as the publisher states it, byte-identified by the digest above'.",
     "rename_proved_by": "the [anchors] section of yolov4-416.cfg, recorded in models/yolov4n.anchors.txt, which is part of the model rather than of the decoder",
-    "replacement_model": "a separate, named decision, once the licence of what ships today is known"
+    "filename": "The remaining false statement is the `n`. The zoo's asset is `yolov4.onnx` - the full YOLOv4 at 416, 257,470,589 bytes, whose anchors are the full v4-416 anchors. There is no `yolov4n` in the zoo's validated set and there never was: the `n` is this repository's invention, from the earlier yolov8n spelling it corrected away from. The file on disk is still called `yolov4n.onnx` because renaming a path that SP_POC_DET_MODEL, fetch-model's --out, the sidecar fixtures and the gate script all name is a change with its own blast radius, and it is recorded HERE rather than done quietly. What is now true and was not before: every place that names the file can be pointed at this record and learn exactly which bytes it is talking about, by digest.",
+    "replacement_model": "a separate, named decision. With the origin named and the licence recorded as MIT, that decision is now 'do we want a different export' rather than 'do we know what we have'"
+  },
+
+  "fetch_default": {
+    "note": "`pocctl fetch-model` now defaults to origin.url and checks the download against the sha256 above, so a judge on a clean clone obtains THESE bytes and is told so. The default exists because it was MEASURED (see origin.how), not because it is plausible; the check is what makes the default honest rather than a guess that happens to be right.",
+    "mismatch_is": "a refused wall when the operator passes --sha256 explicitly, and a printed WARNING when nobody pinned a value and the default's bytes have drifted. The plan's B3 asks for the warning rather than the wall on the default path: a judge whose download arrives different must be told what arrived and how to record it, not met with a dead end."
   },
 
   "actions_before_this_weight_is_used_outside_this_machine": [
-    "record the sha256 above, so the file is identified by its content and not by a name",
-    "record the true origin URL and the retrieval date",
-    "record the licence, verbatim, from the licence file or page the weights came with",
-    "if it is Ultralytics, either obtain an Enterprise licence or replace the weights"
+    "DONE 2026-10-11: record the sha256 above, so the file is identified by its content and not by a name",
+    "DONE 2026-10-11: record the true origin URL and the retrieval date (origin.url, origin.established)",
+    "DONE 2026-10-11: record the licence, verbatim, from the licence file or page the weights came with (licence, licence_source)",
+    "OPEN, and it is a person's: the attribution lines above travel with any use outside this machine, and somebody decides in writing that the MIT notice is the obligation being discharged"
   ]
 }

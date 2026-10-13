@@ -13,20 +13,20 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/ai"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/aistate"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/classify"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/config"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/detect"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/evidence"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/novelty"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/ortdetect"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/recorder"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/source"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/supervisor"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/vlm"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/xprotect"
+	"github.com/Sergey-Bar/vision-poc/internal/ai"
+	"github.com/Sergey-Bar/vision-poc/internal/aistate"
+	"github.com/Sergey-Bar/vision-poc/internal/classify"
+	"github.com/Sergey-Bar/vision-poc/internal/config"
+	"github.com/Sergey-Bar/vision-poc/internal/detect"
+	"github.com/Sergey-Bar/vision-poc/internal/evidence"
+	"github.com/Sergey-Bar/vision-poc/internal/novelty"
+	"github.com/Sergey-Bar/vision-poc/internal/ortdetect"
+	"github.com/Sergey-Bar/vision-poc/internal/recorder"
+	"github.com/Sergey-Bar/vision-poc/internal/source"
+	"github.com/Sergey-Bar/vision-poc/internal/store"
+	"github.com/Sergey-Bar/vision-poc/internal/supervisor"
+	"github.com/Sergey-Bar/vision-poc/internal/vlm"
+	"github.com/Sergey-Bar/vision-poc/internal/xprotect"
 )
 
 // FrameSource is what the run loop needs from the recorder: the next frame, the
@@ -323,6 +323,124 @@ func (r *Runner) DetectorTally() DetectorTally {
 		t.ApprovedByFamily, t.BoxesRejectedBy = r.opt.engineBreakdown()
 	}
 	return t
+}
+
+// CropTally is the run's crop-gate arithmetic, as the report needs it.
+//
+// It exists because `r.crops` was accumulated under a lock on every frame and read
+// by nothing at all. The gate's own comment says `GatedOut` is "the counter that
+// says whether the rate is too low", and a counter nobody prints is a comment about
+// a measurement rather than a measurement — so the one number that says whether the
+// camera is looking often enough was in memory and nowhere else for the whole life
+// of this code.
+//
+// It is reported beside the detector's tally rather than inside it, because the two
+// answer different questions: the detector's is "what did the model see", this one
+// is "when did we decide not to look, and how often". Folding them together would
+// let one hide the other, and the second is the one an operator has never had a
+// number for.
+func (r *Runner) CropTally() CropTally {
+	r.cropsMu.Lock()
+	defer r.cropsMu.Unlock()
+	c := r.crops
+	// Seen is DERIVED and not defaulted, and this is the difference between the
+	// section telling the truth about a run and printing NOT RUN over one that
+	// ran.
+	//
+	// The first version of this accessor left Seen at its zero value and the demo
+	// printed "**NOT RUN.** The crop pass was never offered a frame" over a run in
+	// which the crop pass had been offered eight frames and the detector had
+	// refused eight crops. That is the specific defect this whole pass exists to
+	// remove, reproduced by its own new code: a counter that read as measured and
+	// was not. A struct field defaults to false; a claim like this one has to be
+	// computed from the thing it is a claim about.
+	seen := c.Proposed+c.SkippedOverlap+c.SkippedSmall+c.SkippedCap+c.GatedOut+c.Inferred+c.Refusals > 0
+	// OfferedFrames is the frame count to report: the crop pass's own frame
+	// count, which is the number of frames it was CALLED on. The runner calls it
+	// once per frame the detector answered, so it is that and not the sum of
+	// outcomes — a frame that produced nothing is still a frame it looked at.
+	offeredFrames := c.Proposed + c.SkippedOverlap + c.SkippedSmall + c.SkippedCap + c.GatedOut
+	if offeredFrames == 0 && c.Refusals > 0 {
+		// The detector refused every crop the pass proposed, which is what a
+		// degraded detector looks like from here: the pass ran, proposed, and was
+		// refused. Counting it as zero frames would print NOT RUN over a run that
+		// ran — see the Seen comment above for what that costs.
+		offeredFrames = c.Refusals
+	}
+	t := CropTally{
+		Seen:           seen,
+		Frames:         offeredFrames,
+		Proposed:       c.Proposed,
+		Inferred:       c.Inferred,
+		SkippedOverlap: c.SkippedOverlap,
+		SkippedSmall:   c.SkippedSmall,
+		SkippedCap:     c.SkippedCap,
+		GatedOut:       c.GatedOut,
+		ViewChanges:    c.ViewChanges,
+		ViewSettling:   c.ViewSettling,
+		BoxesFound:     c.BoxesFound,
+		BoxesKept:      c.BoxesKept,
+		Refusals:       c.Refusals,
+		DedupedAway:    c.DedupedAway,
+	}
+	// The share is over what the GATE was offered, not over the frame count: a
+	// frame refused by the detector before the gate is not a frame the gate
+	// declined, and counting it would understate the share.
+	if offered := c.Proposed + c.GatedOut; offered > 0 {
+		t.GatedOutFrac, t.ShareMeasured = float64(c.GatedOut)/float64(offered), true
+	}
+	// The frames the crop pass was actually OFFERED, which is what the gated-out
+	// share is over. A frame refused before the gate is not a frame the gate
+	// declined, so folding the refusals into the denominator would understate it.
+	if offered := c.Proposed + c.GatedOut; offered > 0 {
+		t.GatedOutFrac, t.ShareMeasured = float64(c.GatedOut)/float64(offered), true
+	}
+	// The share is the number a reader acts on and the one a count cannot give
+	// them: 40 gated-out frames means nothing on its own, and 40 out of 42 is a
+	// camera that is not looking most of the time.
+	if offered := c.Proposed + c.GatedOut; offered > 0 {
+		t.GatedOutFrac, t.ShareMeasured = float64(c.GatedOut)/float64(offered), true
+	}
+	if c.Proposed > 0 {
+		t.SmallShareFrac, t.SmallMeasured = float64(c.SkippedSmall)/float64(c.Proposed), true
+	}
+	if c.BoxesFound > 0 {
+		t.KeptShareFrac, t.KeptMeasured = float64(c.BoxesKept)/float64(c.BoxesFound), true
+	}
+	return t
+}
+
+// CropTally is the crop gate's arithmetic over a run. See Runner.CropTally.
+type CropTally struct {
+	Seen bool
+	// Frames is every frame the crop pass was offered, however it ended.
+	Frames int
+	// Proposed, SkippedOverlap, SkippedSmall and SkippedCap are the four ways a
+	// proposed crop can fail to be taken, and their sum is the total offered
+	// minus the ones the gate had already refused.
+	Proposed       int
+	Inferred       int
+	SkippedOverlap int
+	SkippedSmall   int
+	SkippedCap     int
+	// GatedOut is how many frames the novelty RATE gate did not run the pass on.
+	// See CropCounters.GatedOut for why this is the counter that matters.
+	GatedOut int
+	// GatedOutFrac is GatedOut over (Proposed + GatedOut), the frames that were
+	// actually offered. Measured is false when nothing was offered, and a
+	// report must print NOT RUN for that rather than 0.
+	GatedOutFrac   float64
+	ShareMeasured  bool
+	ViewChanges    int
+	ViewSettling   int
+	BoxesFound     int
+	BoxesKept      int
+	Refusals       int
+	DedupedAway    int
+	SmallShareFrac float64
+	SmallMeasured  bool
+	KeptShareFrac  float64
+	KeptMeasured   bool
 }
 
 // EngineTally is a nil-safe read of the engine's own per-family tally, so

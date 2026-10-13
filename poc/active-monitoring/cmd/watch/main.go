@@ -22,21 +22,21 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/ai"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/config"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/detect"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/evidence"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/novelty"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/ortdetect"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/recorder"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/soak"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/source"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/supervisor"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/ui"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/vlm"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/xprotect"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/xpsim"
+	"github.com/Sergey-Bar/vision-poc/internal/ai"
+	"github.com/Sergey-Bar/vision-poc/internal/config"
+	"github.com/Sergey-Bar/vision-poc/internal/detect"
+	"github.com/Sergey-Bar/vision-poc/internal/evidence"
+	"github.com/Sergey-Bar/vision-poc/internal/novelty"
+	"github.com/Sergey-Bar/vision-poc/internal/ortdetect"
+	"github.com/Sergey-Bar/vision-poc/internal/recorder"
+	"github.com/Sergey-Bar/vision-poc/internal/soak"
+	"github.com/Sergey-Bar/vision-poc/internal/source"
+	"github.com/Sergey-Bar/vision-poc/internal/store"
+	"github.com/Sergey-Bar/vision-poc/internal/supervisor"
+	"github.com/Sergey-Bar/vision-poc/internal/ui"
+	"github.com/Sergey-Bar/vision-poc/internal/vlm"
+	"github.com/Sergey-Bar/vision-poc/internal/xprotect"
+	"github.com/Sergey-Bar/vision-poc/internal/xpsim"
 )
 
 func main() {
@@ -650,6 +650,14 @@ func run() error {
 	if err := st.SaveDetectorTally(context.Background(), runID, runner.DetectorTally()); err != nil {
 		logf("could not record the detector's tally, so this report cannot say WHY the run produced the number of detections it did: %v", err)
 	}
+	// The crop gate's arithmetic, persisted for the same reason and to the same
+	// blob-shaped place. `r.crops` was accumulated on every frame and read by
+	// nothing, so the one number saying whether the camera looked often enough —
+	// and the one saying how many proposed crops were refused as too small —
+	// existed nowhere a report could reach.
+	if err := st.SaveCropTally(context.Background(), runID, runner.CropTally()); err != nil {
+		logf("could not record the crop gate's tally, so this report cannot say how much of the run the gate declined to look at: %v", err)
+	}
 	rep, err := buildReport(st, runID, cfg, spec, end.Sub(runStart), endReason, aiCounters)
 	if err != nil {
 		logf("could not build the report: %v", err)
@@ -1149,6 +1157,26 @@ func loadDetectorTally(st *store.Store, runID string) soak.DetectorTally {
 	return t
 }
 
+// loadCropTally reads the crop gate's arithmetic back out of the store, for the
+// reason its sibling gives: the report is rebuilt from the store alone, and a tally
+// kept in memory only would explain the live report and not the regenerated one.
+//
+// It closes the gap the sibling did not. `Runner.crops` was accumulated under a lock
+// on every frame and read by nothing at all, so the one number saying whether the
+// camera looked often enough existed nowhere a report could reach — the specific
+// defect where a field name reads like a measurement and nothing measures it.
+func loadCropTally(st *store.Store, runID string) soak.CropTally {
+	raw, found, err := st.CropTally(context.Background(), runID)
+	if err != nil || !found {
+		return soak.CropTally{}
+	}
+	var t soak.CropTally
+	if err := json.Unmarshal(raw, &t); err != nil {
+		return soak.CropTally{}
+	}
+	return t
+}
+
 func loadRehearsals(st *store.Store, _ string) []soak.Rehearsal {
 	faults, err := st.FaultsByReasonPrefix(context.Background(), "rehearsal:")
 	if err != nil {
@@ -1180,6 +1208,7 @@ func buildReport(st *store.Store, runID string, cfg config.Config, spec source.S
 	push, _ := st.Stats(ctx, runID)
 	rehearsals := loadRehearsals(st, runID)
 	detectorTally := loadDetectorTally(st, runID)
+	cropTally := loadCropTally(st, runID)
 
 	evidenceStats := store.EvidenceStats{}
 	if ev, err := evidence.Open(filepath.Join(cfg.DataRoot, "evidence")); err == nil {
@@ -1243,7 +1272,8 @@ func buildReport(st *store.Store, runID string, cfg config.Config, spec source.S
 			DeclaredAIMs: float64(cfg.AIBudget.Milliseconds()), Samples: peaks.Samples},
 		Counters: soak.Counters{Detections: in.TotalDetections, ByStatus: counts,
 			Evidence: evidenceStats.Stored, PushAttempts: push.Total, DeadLettered: push.DeadLetter,
-			Heartbeats: beats, Faults: len(faults), Detector: detectorTally},
+			Heartbeats: beats, Faults: len(faults), Detector: detectorTally,
+			CropGate: cropTally},
 		FalsePositives: soak.NewFalsePositiveRow(in.FalsePositives),
 		Truth:          soak.BuildTruth(spec.Label(), cfg.XProtectBaseURL, pushTargetName(cfg), cfg.IsLiveVMS(), provenanceFor(cfg, spec)).WithProof(st, ctx, runID, verifierLabelFromEnv(cfg)),
 		NotProven:      soak.NotProven(in, summary),

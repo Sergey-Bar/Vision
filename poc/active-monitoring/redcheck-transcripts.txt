@@ -1,9 +1,9 @@
 ﻿# Red-check transcript
 
-Produced by scripts\redcheck-transcript.ps1 on 2026-10-03 23:13.
+Produced by scripts\redcheck-transcript.ps1 on 2026-10-12 08:11.
 Go: go version go1.27.0 windows/amd64
 
-Controls in the table: 77
+Controls in the table: 82
 
 Every control below was applied to the file on disk, the named test was run,
 the failure was recorded, the file was restored, and the restore was confirmed.
@@ -14,17 +14,17 @@ mutation is only evidence if the same command was green before it.
 ## Baseline
 
     go test -count=1 ./cmd/pocctl ./internal/bench ./internal/config ./internal/detect ./internal/evidence ./internal/novelty ./internal/ortdetect ./internal/soak ./internal/store ./internal/vlm ./internal/xprotect
-    ok  	github.com/Sergey-Bar/ai-captain-poc/cmd/pocctl	10.734s
-    ok  	github.com/Sergey-Bar/ai-captain-poc/internal/bench	0.360s
-    ok  	github.com/Sergey-Bar/ai-captain-poc/internal/config	0.767s
-    ok  	github.com/Sergey-Bar/ai-captain-poc/internal/detect	0.714s
-    ok  	github.com/Sergey-Bar/ai-captain-poc/internal/evidence	0.558s
-    ok  	github.com/Sergey-Bar/ai-captain-poc/internal/novelty	24.409s
-    ok  	github.com/Sergey-Bar/ai-captain-poc/internal/ortdetect	0.595s
-    ok  	github.com/Sergey-Bar/ai-captain-poc/internal/soak	43.266s
-    ok  	github.com/Sergey-Bar/ai-captain-poc/internal/store	15.666s
-    ok  	github.com/Sergey-Bar/ai-captain-poc/internal/vlm	1.199s
-    ok  	github.com/Sergey-Bar/ai-captain-poc/internal/xprotect	9.097s
+    ok  	github.com/Sergey-Bar/ai-captain-poc/cmd/pocctl	10.965s
+    ok  	github.com/Sergey-Bar/ai-captain-poc/internal/bench	0.278s
+    ok  	github.com/Sergey-Bar/ai-captain-poc/internal/config	0.571s
+    ok  	github.com/Sergey-Bar/ai-captain-poc/internal/detect	0.457s
+    ok  	github.com/Sergey-Bar/ai-captain-poc/internal/evidence	0.416s
+    ok  	github.com/Sergey-Bar/ai-captain-poc/internal/novelty	22.468s
+    ok  	github.com/Sergey-Bar/ai-captain-poc/internal/ortdetect	0.552s
+    ok  	github.com/Sergey-Bar/ai-captain-poc/internal/soak	42.377s
+    ok  	github.com/Sergey-Bar/ai-captain-poc/internal/store	16.475s
+    ok  	github.com/Sergey-Bar/ai-captain-poc/internal/vlm	0.814s
+    ok  	github.com/Sergey-Bar/ai-captain-poc/internal/xprotect	8.576s
 
     baseline exit=0  (must be 0)
 
@@ -36,7 +36,7 @@ mutation is only evidence if the same command was green before it.
     go test -count=1 ./internal/evidence
     --- FAIL: TestRefRejectsEveryBadName (0.00s)
         --- FAIL: TestRefRejectsEveryBadName/too_short (0.00s)
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/evidence	0.295s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/evidence	0.248s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -47,10 +47,10 @@ mutation is only evidence if the same command was green before it.
     from: WHERE id=? AND status NOT IN ('done')
     to  : WHERE id=? -- REDCHECK: the terminal-state guard was removed
     go test -count=1 ./internal/store
-    --- FAIL: TestTerminalDetectionsCannotBeMovedAgain (0.12s)
+    --- FAIL: TestTerminalDetectionsCannotBeMovedAgain (0.13s)
         store_test.go:132: a terminal detection was moved again
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/store	11.936s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/store	13.146s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -78,7 +78,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestPresenceAndCrossingDoNotBothRun (0.00s)
         presence_test.go:476: a zone with a line produced no crossing at all: the presence branch must not have replaced the crossing machine, it must be a different machine for a different zone
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/detect	0.382s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/detect	0.455s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -94,7 +94,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestSetStateIsTheOnlyDoorToAVerdict (0.00s)
         parse_test.go:122: SetState(degraded) kept the verdict "confirmed"
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/vlm	1.087s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/vlm	0.916s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -108,7 +108,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestTheStoreRefusesAVerdictOnAnUnansweredAsk (0.11s)
         observations_test.go:51: the store recorded a false_positive against the ask state "degraded"
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/store	12.369s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/store	12.003s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -119,14 +119,14 @@ mutation is only evidence if the same command was green before it.
     from: func hashMatches(a, b string) bool { return len(a) == 64 && a == b }
     to  : func hashMatches(a, b string) bool { return len(a) == 64 } // REDCHECK RC-2: the comparison was reduced to a length test
     go test -count=1 ./internal/store
-    --- FAIL: TestTheChainLinksAndVerificationFindsAnEditedRow (0.14s)
+    --- FAIL: TestTheChainLinksAndVerificationFindsAnEditedRow (0.13s)
         ledger_test.go:86: an edited row still verifies; a chain that cannot detect an edit is a comment
-    --- FAIL: TestARowWithAMovedFieldBoundaryDoesNotRehash (0.12s)
+    --- FAIL: TestARowWithAMovedFieldBoundaryDoesNotRehash (0.11s)
         ledger_test.go:226: a row whose field boundary was moved still verifies; the hash is not length-prefixed
     --- FAIL: TestASealOverABrokenChainIsRefused (0.12s)
         ledger_test.go:314: a broken chain was sealed
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/store	12.422s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/store	13.065s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -140,7 +140,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestTheLedgerIsAppendOnly (0.11s)
         ledger_test.go:183: "UPDATE ledger SET payload='{\"tampered\":true}' WHERE seq=?" was accepted on the ledger
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/store	12.465s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/store	14.311s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -151,10 +151,10 @@ mutation is only evidence if the same command was green before it.
     from: if rep.ProviderCalls > 0 {
     to  : if rep.ProviderCalls > 0 && false { // REDCHECK RC-4: the zero-call assertion was removed
     go test -count=1 ./internal/soak
-    --- FAIL: TestAReplayFailsWhenTheProviderCounterMoves (0.13s)
+    --- FAIL: TestAReplayFailsWhenTheProviderCounterMoves (0.12s)
         replay_test.go:190: the replay reports "PASS (UNSEALED)" while the provider counter moved; this is RC-4
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/soak	39.575s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/soak	39.416s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -179,7 +179,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestAnAllZeroBoxIsRefused (0.00s)
         box_test.go:38: an event with an all-zero bounding box was accepted; the VMS would draw nothing on the operator timeline
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/xprotect	8.781s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/xprotect	8.848s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -193,7 +193,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestRegionPinningIsRefusedInAllThreeDirections (0.00s)
         vlm_test.go:365: a eu client accepted the us host api.us.hafnia.milestonesys.com: <nil>
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/vlm	1.076s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/vlm	0.931s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -204,7 +204,7 @@ mutation is only evidence if the same command was green before it.
     from: unsearchable := s.NotAsked + s.Degraded
     to  : unsearchable := 0 // REDCHECK RC-9: the unsearchable-window refusal was removed
     go test -count=1 ./cmd/pocctl
-    --- FAIL: TestTheScreenAndTheCommandSayTheSameThingsAboutTheSameWindow (0.19s)
+    --- FAIL: TestTheScreenAndTheCommandSayTheSameThingsAboutTheSameWindow (0.18s)
         absence_surface_test.go:78: pocctl search no longer prints "NOT FULLY SEARCHABLE", and the screen quotes it:
             search: "magpie", run run-search-1
             
@@ -227,6 +227,8 @@ mutation is only evidence if the same command was green before it.
                 aistate asked_answered, reason 
                 reproduce: pocctl prove d-unasked
             
+        pocctl demo --clip testdata/<your-clip>.mp4
+        pocctl demo --clip testdata\youtube\sTF-6_xinUU.mp4
     --- FAIL: TestSearchRefusesToSayNoMatchesForAnUnaskedWindow (0.13s)
         search_test.go:34: RC-9: an unsearchable window printed no qualification on its absence:
             search: "a magpie on the fence", run run-search-1
@@ -242,7 +244,7 @@ mutation is only evidence if the same command was green before it.
             no matches.
             
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/cmd/pocctl	7.370s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/cmd/pocctl	7.543s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -269,7 +271,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestTheFixtureExercisesBothNMSPasses (0.00s)
         parity_test.go:168: post_nms_class (6) is not above post_nms (6): the class-agnostic pass collapsed nothing, so the fixture does not contain a cross-class pair
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/ortdetect	0.652s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/ortdetect	0.604s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -283,7 +285,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestTheScoreChainMustReadTheRightWay (0.00s)
         detector_test.go:41: an inverted score chain was accepted: an emit floor above the ghost floor means the picture shows objects the model scored below its own floor and omits the ones it did not
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/config	0.647s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/config	0.546s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -299,7 +301,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestADegenerateBoxIsNeverEmitted (0.00s)
         decode_test.go:776: dropped degenerate = 0, want 2
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/ortdetect	0.620s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/ortdetect	0.573s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -322,16 +324,16 @@ mutation is only evidence if the same command was green before it.
     to  : if false { // REDCHECK RC-18: the provenance refusal on the write path was removed
     go test -count=1 ./internal/store
     --- FAIL: TestADetectorDecisionMustNameItsModel (0.13s)
+        --- FAIL: TestADetectorDecisionMustNameItsModel/no_identity (0.00s)
+            observations_detector_test.go:100: a detector-mode decision that names no model was recorded
         --- FAIL: TestADetectorDecisionMustNameItsModel/an_empty_identity (0.00s)
             observations_detector_test.go:100: a detector-mode decision that names no model was recorded
         --- FAIL: TestADetectorDecisionMustNameItsModel/no_hash_at_all (0.00s)
             observations_detector_test.go:100: a detector-mode decision that names no model was recorded
         --- FAIL: TestADetectorDecisionMustNameItsModel/an_empty_hash (0.00s)
             observations_detector_test.go:100: a detector-mode decision that names no model was recorded
-        --- FAIL: TestADetectorDecisionMustNameItsModel/no_identity (0.00s)
-            observations_detector_test.go:100: a detector-mode decision that names no model was recorded
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/store	11.534s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/store	15.853s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -345,7 +347,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestAGhostCannotResumeATrackThatHasNotAged (0.00s)
         kalman_test.go:346: track 1 is aged after 2 of 3 required frames
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/detect	0.416s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/detect	0.437s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -359,7 +361,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestTheMeasuredFlagIsTheDifferenceTheTableExistsFor (0.00s)
         boxlog_test.go:162: a frame the pipeline never asked about is recorded as MEASURED. This is the defect the column exists to prevent: a recall computed from it would be a recall over frames nobody looked at
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/soak	39.408s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/soak	39.265s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -370,10 +372,10 @@ mutation is only evidence if the same command was green before it.
     from: to = s.lastSeq(ctx)
     to  : to = to // REDCHECK RC-21: the open-ended range was removed
     go test -count=1 ./internal/store
-    --- FAIL: TestAnOpenEndedLedgerRangeMeansTheWholeChain (0.12s)
+    --- FAIL: TestAnOpenEndedLedgerRangeMeansTheWholeChain (0.11s)
         ledger_test.go:121: Ledger(0,0) returned 0 row(s) for a ledger of 5; an open-ended range means to the end
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/store	11.893s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/store	13.684s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -387,7 +389,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestAnEventWithNoAIStateIsRefused (0.00s)
         provenance_test.go:52: the refusal does not say "no AI state": xprotect: refusing to push an event with no attribution: the event names the AI state "", which is not one of asked_answered, no_objects, degraded, not_asked, cannot_tell. An unknown state is a protocol error, not a new answer
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/xprotect	8.797s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/xprotect	8.713s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -403,7 +405,7 @@ mutation is only evidence if the same command was green before it.
             provenance_test.go:92: an answered event with no model identity was pushed
         provenance_test.go:109: the refusal does not name "model_identity": xprotect: refusing to push an event with no attribution: the event carries the AI state "asked_answered" and an attributed sentence, but no contract_version, output_hash. R8 requires every rendered claim to name the model that produced it, the contract version it was produced under and the hash of the validated output; an event with the sentence and none of those is a caption this repository cannot check
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/xprotect	8.806s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/xprotect	8.743s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -417,7 +419,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestTheWindowTagIsMintedOnceAndReused (0.15s)
         absence_test.go:427: the window's tag is "aicap-blind-not-asked-27fd30ea06442e93|state=not_asked|n=5", want "aicap-blind-not-asked-29ee700b98d9dfbe|state=not_asked|n=5". The window's key must be the FIRST proposal's, so a retry of that proposal finds the event that is already there
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/soak	38.950s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/soak	38.757s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -428,10 +430,12 @@ mutation is only evidence if the same command was green before it.
     from: UPDATE outbox SET payload=?, tag=?, detail=?, updated_at=?
     to  : UPDATE outbox SET payload=?, detail=?, updated_at=? -- REDCHECK RC-25: the key was left behind
     go test -count=1 ./internal/store
-    --- FAIL: TestARefreshMovesTheKeyWithThePayload (0.12s)
+    --- FAIL: TestARefreshMovesTheKeyWithThePayload (0.11s)
         absence_test.go:61: the refresh reported the row as spent; it has no result
+    --- FAIL: TestTheTrustedKeyIsRefusedWhenItIsAPublicKeyUsedForSigning (0.00s)
+        ledger_test.go:469: a raw 32-byte public key was not read: store: the trusted key is neither PEM, base64 nor a raw 32-byte key. Print the fingerprint with `pocctl audit verify-seals --print-key` and compare it by eye if the file is in doubt
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/store	11.679s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/store	13.072s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -451,7 +455,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestABadEntryIsRefusedAtLoadNotAtTheFirstFrame (0.00s)
         eventtypes_test.go:203: a bad map was accepted at startup
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/config	0.650s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/config	0.571s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -467,7 +471,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestAnEmptyMapIsUsableAndSaysWhatIsMissing (0.00s)
         eventtypes_test.go:186: an empty map resolved an absence state
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/config	0.631s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/config	0.560s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -481,7 +485,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestTheEmptyProviderIsTheCPUAndSaysSo (0.00s)
         execution_provider_test.go:46: NormalizeEP(" gpu ") = "cpu", want "cuda"
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/ortdetect	0.628s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/ortdetect	0.560s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -495,7 +499,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestADynamicAxisExportIsRunWithRuntimeAllocatedOutputs (0.00s)
         session_layout_test.go:36: a dynamic-axis export was pre-allocated. A -1 has no size, so this is not a case where pre-allocating happens to work — it is the committed detector refusing to run
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/ortdetect	0.636s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/ortdetect	0.559s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -509,7 +513,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestTheInputTensorIsLaidOutTheWayTheModelDeclares (0.00s)
         session_layout_test.go:118: layout "nhwc" gave [1 3 416 416], want [1 416 416 3]
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/ortdetect	0.627s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/ortdetect	0.605s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -537,7 +541,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestInvalidateAllDropsEveryTrackAndReturnsTheCount (0.00s)
         presence_test.go:419: the setup emitted 0 event(s), want 3. The invalidation assertions below are about tracks that existed
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/detect	0.388s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/detect	0.439s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -557,7 +561,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestInvalidateAllDropsEveryTrackAndReturnsTheCount (0.00s)
         presence_test.go:419: the setup emitted 6 event(s), want 3. The invalidation assertions below are about tracks that existed
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/detect	0.466s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/detect	0.399s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -571,7 +575,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestASmallObjectInACropIsFoundWhereTheWholeFramePassMissesIt (0.00s)
         presence_test.go:198: a bird found in a magnified crop on TWO sightings produced 0 events, want 1. A bird at 30 m is on screen for about a second and a half, which at the detection rate is two or three samples, so a crop-sourced track held to the whole-frame bar of 3 is erased by the anti-jitter rule and the headline case quietly stops working
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/detect	0.432s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/detect	0.428s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -585,7 +589,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestACropSourcedMinimumAboveTheWholeFrameOneIsRefused (0.00s)
         presence_test.go:240: a crop minimum above the whole-frame minimum was accepted: <nil>
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/detect	0.427s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/detect	0.412s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -599,7 +603,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestACropOverlappingAWholeFrameDetectionIsNotInferredTwice (0.00s)
         crop_test.go:70: proposed 2 crop(s), want 1. The region over the car must be refused: the whole-frame pass already answered those pixels at the model's own resolution over the whole scene, and a crop of them costs a full inference to find the same car
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/soak	39.580s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/soak	38.908s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -613,7 +617,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestOverlapsExcludesTouching (0.00s)
         crop_test.go:249: boxes sharing only an edge are treated as overlapping, so a crop beside a detection is skipped, and it shares no pixels with that detection, so it still has something to be measured on
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/ortdetect	0.630s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/ortdetect	0.620s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -627,7 +631,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestTheSameObjectIsReportedOnceWhenBothPassesFindIt (0.00s)
         crop_test.go:130: the union has 3 box(es), want 2: the car once and the bird once
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/soak	39.655s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/soak	40.020s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -641,7 +645,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestRegionSourceForIsTheOnePlaceACutBoxBecomesCut (0.00s)
         crop_test.go:467: a crop-sourced box recorded region_source "measured", want "cut"
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/soak	40.426s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/soak	39.061s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -655,7 +659,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestUncropIsTheInverseOfTheCropsPlacement (0.00s)
         crop_test.go:178: a box filling the crop came back {Class: Score:0 X1:0 Y1:0.5 X2:0.6041666666666666 Y2:0.6388888888888888}, want [0.5 0.5 0.6041666666666666 0.6388888888888888]. The crop's own offset is the half of the mapping that is easiest to forget, and forgetting it puts every box at the origin with plausible coordinates
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/ortdetect	0.672s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/ortdetect	0.592s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -669,7 +673,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestExtractCopiesTheRightPixels (0.00s)
         crop_test.go:151: crop pixel (1,0) channel 0 = 30, want 54. The crop's stride must be its OWN width; using the frame's reads each row at the wrong offset and produces a sheared picture, which a detector answers about confidently
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/ortdetect	0.674s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/ortdetect	0.568s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -760,7 +764,7 @@ mutation is only evidence if the same command was green before it.
               If the clip does not answer the question, say so with insufficient_evidence and verdict needs_review. Never guess, and never return an empty object.
              Class:a ObservedClass:bird}
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/vlm	1.085s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/vlm	0.830s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -774,7 +778,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestASecondPlaceholderIsRefusedAtLoadTime (0.00s)
         prompt_param_test.go:188: a prompt carrying a second placeholder loaded. The literal token would be sent to the provider, the model would read it, and nothing in the attribution record accounts for it
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/vlm	1.094s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/vlm	0.975s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -788,7 +792,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestTheMinimumCanNeverExceedTheSamplesADwellTimeProduces (0.00s)
         presence_test.go:85: a minimum of 9 samples at 2 inferences per second was accepted. A crossing-sized object is on screen for about two seconds, which is four samples, so every object this run exists to report is silently dropped and nothing anywhere says so
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/config	0.639s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/config	0.563s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -802,7 +806,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestTheSourceAwareMinimumMayNotBeStricterThanTheGlobalOne (0.00s)
         presence_test.go:168: a crop-sourced minimum of 5 against a whole-frame minimum of 2 was accepted. That holds a MAGNIFIED sighting to the stricter bar, so the crop pass costs a whole extra inference per sighting and buys nothing
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/config	0.702s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/config	0.558s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -820,7 +824,7 @@ mutation is only evidence if the same command was green before it.
         presence_test.go:67: the refusal does not name the variable that is missing: 1 configuration value(s) are unusable:
               - SP_POC_ZONES: not set; without it the run is in PRESENCE MODE: there is no line, so every tracked object that is seen often enough is reported once, with its class and its measured box, and nothing has to be drawn or configured first. Set SP_POC_ZONES to a zone file to switch to line-crossing mode, where only objects that cross a named line are reported; set it with leave SP_POC_ZONES unset for presence mode, or set SP_POC_ZONES=testdata\zones.json for line-crossing mode. Setting it back is the whole of the rollback: one variable, no state to unwind
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/config	0.661s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/config	0.544s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -834,7 +838,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestTheCropPassOnOffSwitchIsRequiredAndNamed (0.00s)
         presence_test.go:133: a detector run with no statement about the crop pass was accepted. A detector that cannot see a bird at 30 m and a report claiming to report everything that passes are the same run, and nothing in its output says otherwise
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/config	0.692s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/config	0.545s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -859,15 +863,15 @@ mutation is only evidence if the same command was green before it.
     to  : if frames := (g.intervalNS / frameNS) + 1; frames >= 1 { // REDCHECK: rounded UP
     go test -count=1 ./internal/novelty
     --- FAIL: TestTheGateRunsTheNumberOfPassesItsRateSaysItDoes (0.00s)
-        benchmark_test.go:192: at rate 5 the gate ran 4.200 passes per second over 10.0 s, which is BELOW the request by more than one pass of counting resolution (0.100). A gate that runs slower than it says narrows the set of regions that get cropped
-        benchmark_test.go:192: at rate 10 the gate ran 8.400 passes per second over 10.0 s, which is BELOW the request by more than one pass of counting resolution (0.100). A gate that runs slower than it says narrows the set of regions that get cropped
+        benchmark_test.go:208: at rate 5 the gate ran 4.200 passes per second over 10.0 s, which is BELOW the request by more than one pass of counting resolution (0.100). A gate that runs slower than it says narrows the set of regions that get cropped
+        benchmark_test.go:208: at rate 10 the gate ran 8.400 passes per second over 10.0 s, which is BELOW the request by more than one pass of counting resolution (0.100). A gate that runs slower than it says narrows the set of regions that get cropped
     --- FAIL: TestAQuantisedGateSaysItCouldNotMeetTheRequest (0.00s)
-        benchmark_test.go:311: at rate 5 over 25 fps Clamped() = true, want false (achieved 4.17/s)
-        benchmark_test.go:319: at rate 5 the description claims a shortfall that did not happen: "novelty: 0 run, 0 skipped (0.0%) over a 25 fps source, asked for 5 pass(es)/s, ACHIEVED 4.2/s: a gate can only fire on a frame boundary, so a rate above 12/s over 25 fps cannot be met"
-        benchmark_test.go:311: at rate 25 over 25 fps Clamped() = true, want false (achieved 12.50/s)
-        benchmark_test.go:319: at rate 25 the description claims a shortfall that did not happen: "novelty: 0 run, 0 skipped (0.0%) over a 25 fps source, asked for 25 pass(es)/s, ACHIEVED 12.5/s: a gate can only fire on a frame boundary, so a rate above 12/s over 25 fps cannot be met"
+        benchmark_test.go:327: at rate 5 over 25 fps Clamped() = true, want false (achieved 4.17/s)
+        benchmark_test.go:335: at rate 5 the description claims a shortfall that did not happen: "novelty: 0 run, 0 skipped (0.0%) over a 25 fps source, asked for 5 pass(es)/s, ACHIEVED 4.2/s: a gate can only fire on a frame boundary, so a rate above 12/s over 25 fps cannot be met"
+        benchmark_test.go:327: at rate 25 over 25 fps Clamped() = true, want false (achieved 12.50/s)
+        benchmark_test.go:335: at rate 25 the description claims a shortfall that did not happen: "novelty: 0 run, 0 skipped (0.0%) over a 25 fps source, asked for 25 pass(es)/s, ACHIEVED 12.5/s: a gate can only fire on a frame boundary, so a rate above 12/s over 25 fps cannot be met"
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/novelty	24.180s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/novelty	21.531s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -879,10 +883,10 @@ mutation is only evidence if the same command was green before it.
     to  : if false { // REDCHECK: the shortfall is absorbed silently
     go test -count=1 ./internal/novelty
     --- FAIL: TestAQuantisedGateSaysItCouldNotMeetTheRequest (0.00s)
-        benchmark_test.go:316: at rate 10 the description does not say the request was not met: "novelty: 0 run, 0 skipped (0.0%) over a 25 fps source, asked for 10 pass(es)/s, met exactly"
-        benchmark_test.go:316: at rate 50 the description does not say the request was not met: "novelty: 0 run, 0 skipped (0.0%) over a 25 fps source, asked for 50 pass(es)/s, met exactly"
+        benchmark_test.go:332: at rate 10 the description does not say the request was not met: "novelty: 0 run, 0 skipped (0.0%) over a 25 fps source, asked for 10 pass(es)/s, met exactly"
+        benchmark_test.go:332: at rate 50 the description does not say the request was not met: "novelty: 0 run, 0 skipped (0.0%) over a 25 fps source, asked for 50 pass(es)/s, met exactly"
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/novelty	23.766s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/novelty	21.516s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -911,7 +915,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestAFrameWithNoMeasurementDecidesNothing (0.00s)
         viewchange_test.go:231: a real move after an unmeasurable frame reported view settling. The gap reset the agreement counter, so the next two frames would start again -- correct, but only if the reset is what happens
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/novelty	38.801s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/novelty	21.566s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -925,7 +929,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestABrightButLocalChangeIsNotACameraMove (0.00s)
         viewchange_test.go:107: a global brightness change with a narrow residual reported view changed. A light being switched on looks exactly like that, and suppressing every presence event for the duration of a cloud would be worse than the flood it prevents
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/novelty	24.596s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/novelty	21.497s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -950,7 +954,7 @@ mutation is only evidence if the same command was green before it.
         viewchange_test.go:340: the description does not name the change count: "view integrity: 0 change(s) declared, 0 frame(s) suppressed, stable"
         viewchange_test.go:343: the description does not say presence is suppressed: "view integrity: 0 change(s) declared, 0 frame(s) suppressed, stable"
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/novelty	24.509s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/novelty	21.500s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -964,7 +968,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestAFrameWithNoMeasurementDecidesNothing (0.00s)
         viewchange_test.go:221: a frame whose reason is "first_frame" reported view changed
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/novelty	25.262s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/novelty	21.488s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -1009,7 +1013,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestInvalidateAllDropsEveryTrackAndReturnsTheCount (0.00s)
         presence_test.go:432: 3 track(s) survived the invalidation
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/detect	0.489s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/detect	0.413s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -1020,12 +1024,12 @@ mutation is only evidence if the same command was green before it.
     from: if !cp.Gate.Due(f.Seq, f.AtNS) {
     to  : if false { // REDCHECK: novelty is paid on every frame and the answer discarded
     go test -count=1 ./internal/soak
-    --- FAIL: TestTheRateGateSkipsTheProposerEntirely (0.04s)
+    --- FAIL: TestTheRateGateSkipsTheProposerEntirely (0.01s)
         crop_test.go:173: the novelty proposer was called 25 time(s) over 25 frames while the gate ran 0 pass(es) and skipped 0. The gate has to come BEFORE the proposer or the rate saves nothing
     --- FAIL: TestAGatedFrameProducesNothingAndCountsIt (0.00s)
         crop_test.go:205: frame 1 counted 0 gated-out, want 1
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/soak	46.019s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/soak	38.802s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -1039,7 +1043,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestAGatedFrameProducesNothingAndCountsIt (0.00s)
         crop_test.go:205: frame 1 counted 0 gated-out, want 1
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/soak	39.329s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/soak	38.422s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -1055,7 +1059,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestAViewChangeSuppressesPresenceAndSaysHowManyFramesItCost (0.00s)
         crop_test.go:256: a frame that declared a view change kept its regions. A crop taken from a frame whose camera is mid-pan describes a position the camera was pointing at for one frame
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/soak	45.478s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/soak	38.759s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -1077,7 +1081,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestTheScopeIsASetAndAnExplicitRunWins (0.00s)
         searchcards_test.go:493: an empty query scoped to [], want no runs at all
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/store	12.119s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/store	13.021s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -1088,10 +1092,10 @@ mutation is only evidence if the same command was green before it.
     from: h.RunID, h.RunLabel, h.SourceArg = runID.String, runLabel.String, sourceArg.String
     to  : h.RunLabel = runLabel.String // REDCHECK: the run id is blanked
     go test -count=1 ./internal/store
-    --- FAIL: TestSearchAcrossRunsNamesTheRunOnEveryCard (0.14s)
+    --- FAIL: TestSearchAcrossRunsNamesTheRunOnEveryCard (0.13s)
         searchcards_test.go:117: a card carries no run: {DetectionID:d1 At:2026-10-01 12:00:00 +0000 UTC Class:car Summary:a vehicle is stopped at the barrier Verdict:confirmed AIState:asked_answered ReasonCode:none PromptID:alarm ModelIdentity:hafnia-8b ContractVersion:alarm/v3 Temperature:0 OutputHash:hash-d1 StorageRef: SHA256: TimeBegin:0001-01-01 00:00:00 +0000 UTC TimeEnd:0001-01-01 00:00:00 +0000 UTC Confidence:0.91 HasConfidence:true RunID: RunLabel:car park north SourceArg: GroundTruth: GroundTruthTag: GroundTruthBy: GroundTruthNote: GroundTruthAt:0001-01-01 00:00:00 +0000 UTC HasGroundTruth:false MarkedFalsePositive:false}
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/store	12.325s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/store	13.145s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -1102,10 +1106,12 @@ mutation is only evidence if the same command was green before it.
     from: OR lower(g.note) LIKE ?
     to  : OR 1=0 -- REDCHECK: the judgement of the reviewer is unretrievable
     go test -count=1 ./internal/store
-    --- FAIL: TestAGroundTruthNoteIsFindable (0.18s)
+    --- FAIL: TestTheTrustedKeyIsRefusedWhenItIsAPublicKeyUsedForSigning (0.00s)
+        ledger_test.go:469: a raw 32-byte public key was not read: store: the trusted key is neither PEM, base64 nor a raw 32-byte key. Print the fingerprint with `pocctl audit verify-seals --print-key` and compare it by eye if the file is in doubt
+    --- FAIL: TestAGroundTruthNoteIsFindable (0.13s)
         searchcards_test.go:311: SearchCards: store: cannot search cards: SQL logic error: near "LIMIT": syntax error (1)
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/store	12.804s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/store	13.647s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -1161,7 +1167,7 @@ mutation is only evidence if the same command was green before it.
         perclass_test.go:108: car is &{Class:car TruePositives:2 FalsePositives:1 FalseNegatives:0 Misread:0 GroundTruth:2 Detected:1}, want 2 found of 2 labelled with 1 false positive over 3 detections
         perclass_test.go:111: car's precision is 2.000, want about 0.667
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/bench	0.277s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/bench	0.291s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -1193,7 +1199,7 @@ mutation is only evidence if the same command was green before it.
         perclass_test.go:195: folded car is &{Class:car TruePositives:4 FalsePositives:0 FalseNegatives:0 Misread:0 GroundTruth:2 Detected:2}, want 2 found of 2. The fold is a SUM of the frames and not a recomputation, so two identical frames must double
         perclass_test.go:201: the report's own per-class table is [{Class:car TruePositives:4 FalsePositives:0 FalseNegatives:0 Misread:0 GroundTruth:2 Detected:2}], want 2 true positives
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/bench	0.275s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/bench	0.314s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -1211,7 +1217,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestEachClassGetsItsOwnDenominator (0.00s)
         perclass_test.go:124: bird's precision computed over zero detections. That is undefined, not zero, and printing a number there is a claim about nobody's work
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/bench	0.290s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/bench	0.253s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -1225,7 +1231,7 @@ mutation is only evidence if the same command was green before it.
     --- FAIL: TestAnUnexpressibleClassIsDroppedAndNotCountedAsAMiss (0.00s)
         perclass_test.go:166: an inexpressible class got a per-class row with denominator 1
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/bench	0.283s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/bench	0.294s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -1238,8 +1244,10 @@ mutation is only evidence if the same command was green before it.
     go test -count=1 ./cmd/pocctl
     --- FAIL: TestTheCropVerdictNeedsBothHalves (0.00s)
         cropselftest_test.go:47: the failure does not say the frame size is not a demonstration: a 40 px object arrives at 24.0 px through the whole-frame pass and 60.0 px through the crop, a factor of 2.5. A factor of 2.5 is not the margin the cost argument rests on; a change of one number in the crop size destroys it
+        pocctl demo --clip testdata/<your-clip>.mp4
+        pocctl demo --clip testdata\youtube\sTF-6_xinUU.mp4
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/cmd/pocctl	9.516s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/cmd/pocctl	8.239s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -1252,8 +1260,10 @@ mutation is only evidence if the same command was green before it.
     go test -count=1 ./cmd/pocctl
     --- FAIL: TestTheCropVerdictNeedsBothHalves (0.00s)
         cropselftest_test.go:57: the failure does not say the crop is too large: a 40 px object arrives at 4.0 px through the whole-frame pass and 12.0 px through the crop, a factor of 3.0. A factor of 3.0 is not the margin the cost argument rests on; a change of one number in the crop size destroys it
+        pocctl demo --clip testdata/<your-clip>.mp4
+        pocctl demo --clip testdata\youtube\sTF-6_xinUU.mp4
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/cmd/pocctl	8.689s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/cmd/pocctl	8.895s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -1266,8 +1276,10 @@ mutation is only evidence if the same command was green before it.
     go test -count=1 ./cmd/pocctl
     --- FAIL: TestTheCropVerdictNeedsBothHalves (0.00s)
         cropselftest_test.go:63: a factor of 2.5 reported PASS. The argument needs the order of magnitude, not an improvement: a 40 px object arrives at 8.0 px through the whole-frame pass and 20.0 px through the crop, a factor of 2.5
+        pocctl demo --clip testdata/<your-clip>.mp4
+        pocctl demo --clip testdata\youtube\sTF-6_xinUU.mp4
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/cmd/pocctl	8.667s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/cmd/pocctl	8.996s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -1280,8 +1292,10 @@ mutation is only evidence if the same command was green before it.
     go test -count=1 ./cmd/pocctl
     --- FAIL: TestTheCropCoordinateRowCatchesAnUnmappedBox (0.00s)
         cropselftest_test.go:101: an unmapped box passed the containment test. It sits at the frame's origin while the crop is in the middle, which is exactly the letterbox divisor defect and nothing notices it
+        pocctl demo --clip testdata/<your-clip>.mp4
+        pocctl demo --clip testdata\youtube\sTF-6_xinUU.mp4
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/cmd/pocctl	8.955s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/cmd/pocctl	7.591s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -1292,6 +1306,8 @@ mutation is only evidence if the same command was green before it.
     from: "SP_POC_DET_MODEL=" + model,
     to  : "SP_POC_DET_MODEL_RENAMED_BY_REDCHECK=" + model,
     go test -count=1 ./cmd/pocctl
+        pocctl demo --clip testdata/<your-clip>.mp4
+        pocctl demo --clip testdata\youtube\sTF-6_xinUU.mp4
     --- FAIL: TestTheDemoEnvironmentIsOneTheDemoOwnChildWouldAccept (0.00s)
         demoenv_test.go:92: SP_POC_DET_MODEL is required by the schema and `pocctl demo` does not set it, so `watch` refuses to start at step 6 of 7 with a name this file could have printed instead
         demoenv_test.go:96: 1 required variable(s) missing from demoEnv; the slice is a literal and nothing in the schema knows it exists, which is why only running the command found it
@@ -1299,7 +1315,7 @@ mutation is only evidence if the same command was green before it.
         demoenv_test.go:129: the demo's own environment does not load: 1 configuration value(s) are unusable:
               - SP_POC_DET_MODEL: not set; without it the run has no detector. `detector` mode without a model is a run that decodes frames, draws nothing, and reports a zero detection rate with no error — which is what the previous build did for two real runs; set it with set SP_POC_DET_MODEL=models\yolov4n.onnx, and record its licence and SHA-256 with `pocctl fetch-runtime`
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/cmd/pocctl	8.536s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/cmd/pocctl	7.627s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -1310,6 +1326,8 @@ mutation is only evidence if the same command was green before it.
     from: "SP_POC_DET_SCORE=0.005",
     to  : "SP_POC_DET_SCORE=0.5",
     go test -count=1 ./cmd/pocctl
+        pocctl demo --clip testdata/<your-clip>.mp4
+        pocctl demo --clip testdata\youtube\sTF-6_xinUU.mp4
     --- FAIL: TestTheDemoEnvironmentIsOneTheDemoOwnChildWouldAccept (0.00s)
         demoenv_test.go:102: the environment `pocctl demo` builds is one its own child refuses: 1 configuration value(s) are unusable:
               - SP_POC_DET_SCORE: 0.5 is above SP_POC_GHOST_MIN_SCORE (0.02), so the score chain is inverted: candidates the model scored below its own emit floor would still be drawn as ghosts, and candidates above it would be refused. The chain must read DET_SCORE (0.5) <= GHOST_MIN_SCORE (0.02) <= SCORE_THRESHOLD (0.05)
@@ -1319,7 +1337,7 @@ mutation is only evidence if the same command was green before it.
         demoenv_test.go:129: the demo's own environment does not load: 1 configuration value(s) are unusable:
               - SP_POC_DET_SCORE: 0.5 is above SP_POC_GHOST_MIN_SCORE (0.02), so the score chain is inverted: candidates the model scored below its own emit floor would still be drawn as ghosts, and candidates above it would be refused. The chain must read DET_SCORE (0.5) <= GHOST_MIN_SCORE (0.02) <= SCORE_THRESHOLD (0.05)
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/cmd/pocctl	8.636s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/cmd/pocctl	7.547s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -1330,11 +1348,111 @@ mutation is only evidence if the same command was green before it.
     from: case soak.TriggerDetector:
     to  : case "not-a-mode":
     go test -count=1 ./cmd/pocctl
+        pocctl demo --clip testdata/<your-clip>.mp4
+        pocctl demo --clip testdata\youtube\sTF-6_xinUU.mp4
     --- FAIL: TestTheBannerNamesTheShippedTrigger (0.00s)
         demoenv_test.go:203: banner for "detector" does not name that mode; it says "trigger: \"detector\" — not a mode this build operates. The run will refuse by name.\n  approved classes car", want it to mention "ONNX detector"
         demoenv_test.go:207: banner for "detector" says the build does not operate it, which is a statement about a run that does not happen
     FAIL
-    FAIL	github.com/Sergey-Bar/ai-captain-poc/cmd/pocctl	8.256s
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/cmd/pocctl	8.169s
+    FAIL
+    exit=1
+    proved: the control is removed and the suite went red, as it must.
+
+## the model download matches the digest the contract was measured against
+
+    file: cmd\pocctl\cap.go
+    from: case sum == expected:
+    to  : case false && sum == expected: // REDCHECK: the pinned model digest check was removed
+    go test -count=1 ./cmd/pocctl
+        pocctl demo --clip testdata/<your-clip>.mp4
+        pocctl demo --clip testdata\youtube\sTF-6_xinUU.mp4
+    --- FAIL: TestAMatchingDigestIsConfirmed (0.01s)
+        fetch_model_test.go:96: a download matching the expected digest was refused: fetch-model: the DOWNLOAD does not match the digest you pinned.
+              expected aa03f47fa876495d3fc6f1d354acd67943483fdcbf2bc720fe349749572dbcb8
+              actual   aa03f47fa876495d3fc6f1d354acd67943483fdcbf2bc720fe349749572dbcb8 (61 B)
+              from     http://127.0.0.1:7892/yolov4.onnx
+              Nothing was written to C:\Users\Sergey\AppData\Local\Temp\TestAMatchingDigestIsConfirmed1617408247\001\models\yolov4n.onnx. You passed --sha256, so this is a refusal and not a
+              warning: a digest somebody pinned on purpose is a decision, and it is honoured.
+              Re-point --url at the build you meant, or record what arrived deliberately.
+    FAIL
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/cmd/pocctl	10.443s
+    FAIL
+    exit=1
+    proved: the control is removed and the suite went red, as it must.
+
+## the demo refuses rather than choosing footage on the operator
+
+    file: cmd\pocctl\demo.go
+    from: if clip == "" {
+			return noClipGiven(root)
+		}
+    to  : if false { // REDCHECK: the no-default-clip refusal was removed
+			return noClipGiven(root)
+		}
+    go test -count=1 ./cmd/pocctl
+    --- FAIL: TestADemoWithNoClipIsRefusedThroughTheCommand (0.04s)
+        demo_material_test.go:72: the refusal is not the material-table one: demo: no --zones and  has no sibling zone file. The zones file is the authority for the line, and a guessed line produces zero events and no error at all. Draw one with `pocctl zone --pick `, or pass --zones.
+    FAIL
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/cmd/pocctl	7.795s
+    FAIL
+    exit=1
+    proved: the control is removed and the suite went red, as it must.
+
+## a release asset in the other archive format is still read
+
+    file: cmd\pocctl\runtime.go
+    from: case strings.HasSuffix(name, ".tgz"), strings.HasSuffix(name, ".tar.gz"):
+    to  : case false && strings.HasSuffix(name, ".tgz"): // REDCHECK: the tarball release format was removed
+    go test -count=1 ./cmd/pocctl
+        pocctl demo --clip testdata/<your-clip>.mp4
+        pocctl demo --clip testdata\youtube\sTF-6_xinUU.mp4
+    --- FAIL: TestTheLinuxAndMacOSAssetFormatIsRead (0.00s)
+        runtime_test.go:420: the tarball's library was not found: the download is not a release archive this build can read: zip: not a valid zip file
+              Windows and macOS assets are ZIPs and Linux assets are .tgz. If the URL pointed straight at the library rather than at the release archive, pass that URL instead — this command expects the archive and picks the library out of it
+    --- FAIL: TestTheProvidersComeOutOfATarGzToo (0.00s)
+        runtime_test.go:461: the provider pass refused a tarball: fetch-runtime: cannot read the archive to look for provider libraries: zip: not a valid zip file
+    --- FAIL: TestADirectoryEntryIsNotAMember (0.00s)
+        runtime_test.go:499: the tarball could not be indexed: zip: not a valid zip file
+    --- FAIL: TestAFormatTheBuildCannotReadNamesTheOtherWayOut (0.00s)
+        runtime_test.go:522: a ZIP named as a tarball was read as a tarball
+    FAIL
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/cmd/pocctl	7.307s
+    FAIL
+    exit=1
+    proved: the control is removed and the suite went red, as it must.
+
+## the demo prints the two sections that answer why the run stayed quiet
+
+    file: cmd\pocctl\demo.go
+    from: for sc.Scan() && n < 160 {
+    to  : for sc.Scan() && n < 40 { // REDCHECK: the demo's report window no longer reaches either quiet-run section
+    go test -count=1 -run TestTheDemoReportWindow ./internal/soak
+    --- FAIL: TestTheDemoReportWindowCoversTheCropGateSection (0.01s)
+        crop_gate_test.go:260: ## Where this run stayed quiet, per site and class starts at line 91 and the demo prints 40, so no judge running the demo would ever see it. Either move the section up or raise the window
+        crop_gate_test.go:265: ## Where this run stayed quiet, per site and class runs from line 91 to 119 and the demo prints 40, so the excerpt cuts it off part-way through
+        crop_gate_test.go:260: ## When the run decided not to look starts at line 120 and the demo prints 40, so no judge running the demo would ever see it. Either move the section up or raise the window
+        crop_gate_test.go:265: ## When the run decided not to look runs from line 120 to 153 and the demo prints 40, so the excerpt cuts it off part-way through
+    --- FAIL: TestTheDemoReportWindowIsStillAnExcerpt (0.00s)
+        crop_gate_test.go:288: the window is 40 of 186 lines, which is the report rather than an excerpt of it
+    FAIL
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/soak	0.994s
+    FAIL
+    exit=1
+    proved: the control is removed and the suite went red, as it must.
+
+## verification slice: a state nobody answered for is not an answer
+
+    file: internal\soak\verification_slice.go
+    from: if aistate.IsAnswered(k) {
+    to  : if true { // REDCHECK: a state nobody answered for is counted as an answer
+    go test -count=1 -run TestABlindState|TestAStateOutside|TestTheShareIsPrinted|TestAnUnmeasured ./internal/soak
+    --- FAIL: TestABlindStateIsNeverCountedAsAnAnswer (0.00s)
+        verification_slice_test.go:63: answered = 64, want 50 (20+6+10+14 across the four answered cells)
+    --- FAIL: TestTheShareIsPrintedOverItsOwnDenominator (0.00s)
+        verification_slice_test.go:90: the unanswered share is 0.0000, want 0.2188 (14 of 64)
+    FAIL
+    FAIL	github.com/Sergey-Bar/ai-captain-poc/internal/soak	1.054s
     FAIL
     exit=1
     proved: the control is removed and the suite went red, as it must.
@@ -1345,23 +1463,23 @@ mutation is only evidence if the same command was green before it.
 
     Every package the table mutated, after every mutation was reverted.
 
-    ok  	github.com/Sergey-Bar/ai-captain-poc/cmd/pocctl	23.332s
-    ok  	github.com/Sergey-Bar/ai-captain-poc/internal/bench	0.581s
-    ok  	github.com/Sergey-Bar/ai-captain-poc/internal/config	1.885s
-    ok  	github.com/Sergey-Bar/ai-captain-poc/internal/detect	1.242s
-    ok  	github.com/Sergey-Bar/ai-captain-poc/internal/evidence	1.090s
-    ok  	github.com/Sergey-Bar/ai-captain-poc/internal/novelty	42.545s
-    ok  	github.com/Sergey-Bar/ai-captain-poc/internal/ortdetect	1.571s
-    ok  	github.com/Sergey-Bar/ai-captain-poc/internal/soak	52.793s
-    ok  	github.com/Sergey-Bar/ai-captain-poc/internal/store	28.301s
-    ok  	github.com/Sergey-Bar/ai-captain-poc/internal/vlm	1.635s
-    ok  	github.com/Sergey-Bar/ai-captain-poc/internal/xprotect	9.611s
+    ok  	github.com/Sergey-Bar/ai-captain-poc/cmd/pocctl	11.403s
+    ok  	github.com/Sergey-Bar/ai-captain-poc/internal/bench	0.222s
+    ok  	github.com/Sergey-Bar/ai-captain-poc/internal/config	0.488s
+    ok  	github.com/Sergey-Bar/ai-captain-poc/internal/detect	0.345s
+    ok  	github.com/Sergey-Bar/ai-captain-poc/internal/evidence	0.345s
+    ok  	github.com/Sergey-Bar/ai-captain-poc/internal/novelty	21.847s
+    ok  	github.com/Sergey-Bar/ai-captain-poc/internal/ortdetect	0.493s
+    ok  	github.com/Sergey-Bar/ai-captain-poc/internal/soak	45.351s
+    ok  	github.com/Sergey-Bar/ai-captain-poc/internal/store	17.128s
+    ok  	github.com/Sergey-Bar/ai-captain-poc/internal/vlm	0.910s
+    ok  	github.com/Sergey-Bar/ai-captain-poc/internal/xprotect	8.836s
 
     restore exit=0  (must be 0)
 
 ## Result
 
-    proved:  77
+    proved:  82
     skipped: 0
-    total:   77
+    total:   82
 

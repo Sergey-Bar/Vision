@@ -71,6 +71,15 @@ These were two different problems and closing one did not close the other:
 | **licence** on the YouTube clip | permission from a public body | the camera operator. Not the uploader, not us, not an agent | **open**, and not recoverable from this file |
 | **real motion** | there is no real footage at all | record `testdata/street.mp4`: 60–90 s, **daylight**, phone fixed or on a tripod, one real car or pedestrian crossing a horizontal line, 1080p | **open** — a person with a phone |
 
+**And, since 2026-10-11, no clip is a *default*. `pocctl demo` used to open with
+`testdata\youtube\sTF-6_xinUU.mp4` when `--clip` was absent — material this
+README says may not be shown to anyone. A demonstration is shown to people, so
+the default was the wrongest of the three states, and the fix is not a different
+default: the demo now refuses by name and prints this table. Name a clip with
+`--clip`; the zones file is derived beside it. The YouTube row stays in
+`labels.json` as the record of why, and the footage, the geometry files next to
+it and its licence are unchanged.**
+
 **Do not lower the threshold to make this footage detect.** If a daytime street
 recording produces nothing, the recording is wrong — too dark, nothing on the line,
 the camera too far up — and the remedy is a new recording. A threshold lowered far

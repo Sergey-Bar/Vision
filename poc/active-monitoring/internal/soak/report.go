@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
+	"github.com/Sergey-Bar/vision-poc/internal/store"
 )
 
 // Report is the whole thing: the numbers, the criteria, the faults, the peaks,
@@ -123,6 +123,24 @@ type Counters struct {
 	// that cannot distinguish them is the most expensive silence there is: it
 	// reads as a quiet road when it may be a threshold that is wrong.
 	Detector DetectorTally `json:"detector"`
+
+	// CropGate is the crop gate's own arithmetic, carried here for the same
+	// reason as Detector and closing the gap it did not.
+	//
+	// Detector answers "what did the model see". CropGate answers "when did we
+	// decide not to look, and how often" — and the second question was
+	// unanswerable, because `Runner.crops` was accumulated on every frame and
+	// read by nothing. The rate gate's whole comment says its GatedOut counter
+	// "is the counter that says whether the rate is too low", so a counter
+	// nobody printed made the claim a comment about a measurement.
+	CropGate CropTally `json:"crop_gate"`
+
+	// Verification is the per-site, per-class slice of where the run stayed
+	// quiet because the AI plane did not answer. It is the other half of the
+	// question CropGate asks: CropGate is when WE chose not to look, this is
+	// when we asked and were not answered. Printed side by side, because either
+	// one alone reads as a quiet road when what happened was a gap.
+	Verification VerificationSlice `json:"verification"`
 }
 
 // DetectorTally is `internal/detect.Counters`, as the report needs it.
@@ -222,6 +240,102 @@ func detectorSection(d DetectorTally, totalDetections int) string {
 		b.WriteString("Boxes were approved and tracked, and nothing crossed the line. A line in the\n")
 		b.WriteString("wrong place produces zero events with no error at all, so this is the result a\n")
 		b.WriteString("wrong zone file produces — check the line against a still of THIS source.\n\n")
+	}
+	return b.String()
+}
+
+// CropGateSectionForTest renders the crop gate section for callers that cannot
+// reach the unexported one. It exists because the section's honesty is the part
+// worth testing — a share, a NOT RUN for an unmeasured run, and the number to
+// change when the share is high — and none of that is reachable through a struct
+// field. It is the same function the report calls.
+func CropGateSectionForTest(c CropTally) string { return cropGateSection(c) }
+
+// MarkdownForTest renders the whole report, for the same reason: a caller that
+// cannot reach the renderer has no way to assert where a section lands in it, and
+// "the section exists in the file" is a weaker claim than "the demo shows it".
+func MarkdownForTest(r Report) string { return r.Markdown() }
+
+// cropGateSection is the second half of the question the detector section asks.
+//
+// `detectorSection` says what the model was ASKED and what it answered. This one
+// says how often the run decided not to ask — and it exists because
+// `Runner.crops` was accumulated under a lock on every frame and read by nothing
+// at all, for the whole life of this code. The rate gate's own comment says its
+// gated-out counter "is the counter that says whether the rate is too low", so the
+// number that answers whether the camera is looking often enough was a field
+// nobody printed.
+//
+// A share and not a count, for the same reason every other section here uses one:
+// 40 gated-out frames means nothing on its own, and 40 out of 42 is a camera that
+// is not looking most of the time. Both facts reach this function; only the second
+// one is actionable.
+func cropGateSection(c CropTally) string {
+	var b strings.Builder
+	b.WriteString("## When the run decided not to look\n\n")
+	if !c.Seen || c.Frames == 0 {
+		b.WriteString("**NOT RUN.** The crop pass was never offered a frame, so nothing here says\n")
+		b.WriteString("anything about the rate. A run that gated every frame and a run that\n")
+		b.WriteString("never ran the pass print the same silence, and only one of them is a\n")
+		b.WriteString("configuration problem.\n\n")
+		return b.String()
+	}
+	if c.ShareMeasured {
+		fmt.Fprintf(&b, "The novelty RATE gate declined to run the crop pass on **%d** of **%d**\n",
+			c.GatedOut, c.Proposed+c.GatedOut)
+		fmt.Fprintf(&b, "offered frame(s) — **%.1f%%** of the run.\n\n", 100*c.GatedOutFrac)
+		if c.GatedOutFrac > 0.5 {
+			b.WriteString("**More than half the frames were gated out.** That is the number that says\n")
+			b.WriteString("whether the rate is too low: a gate skipping most of the frames cannot\n")
+			b.WriteString("propose regions often enough for the 1.5 s dwell the crop policy needs, and\n")
+			b.WriteString("the only other symptom is the smallest objects quietly going missing —\n")
+			b.WriteString("which is invisible in every other number in this report. `--ai-fps 1` is the\n")
+			b.WriteString("known-good value on this machine; anything under it hits the dwell floor.\n\n")
+		}
+	} else {
+		fmt.Fprintf(&b, "The crop pass ran on **%d** frame(s) and nothing was gated out, so there is\n", c.Proposed)
+		b.WriteString("no share to report — every frame offered was taken.\n\n")
+	}
+	fmt.Fprintf(&b, "| | count |\n|---|---|\n")
+	fmt.Fprintf(&b, "| crops proposed and taken | %d |\n", c.Proposed)
+	fmt.Fprintf(&b, "| proposed and refused: overlap | %d |\n", c.SkippedOverlap)
+	fmt.Fprintf(&b, "| proposed and refused: below the minimum area | %d |\n", c.SkippedSmall)
+	fmt.Fprintf(&b, "| proposed and refused: the cap was reached | %d |\n", c.SkippedCap)
+	fmt.Fprintf(&b, "| regions inferred from boxes | %d |\n", c.Inferred)
+	fmt.Fprintf(&b, "| frames declaring a view change | %d |\n", c.ViewChanges)
+	fmt.Fprintf(&b, "| frames inside the settling window | %d |\n", c.ViewSettling)
+	fmt.Fprintf(&b, "| the detector refused a crop | %d |\n", c.Refusals)
+	b.WriteString("\n")
+	if c.SmallMeasured && c.SmallShareFrac > 0.25 {
+		fmt.Fprintf(&b, "**%.1f%% of proposed crops were refused as below the minimum area.** A large\n", 100*c.SmallShareFrac)
+		b.WriteString("number here is a fact about the material and not about the camera: the\n")
+		b.WriteString("policy will not take a region that small, and the regions that size are\n")
+		b.WriteString("the whole point of a crop pass. `detector.crop_min_area` is the number to\n")
+		b.WriteString("change, and the calibration script that derives it is in `scripts/`.\n\n")
+	}
+	if c.KeptMeasured && c.KeptShareFrac < 0.5 && c.BoxesFound > 4 {
+		fmt.Fprintf(&b, "Only **%.1f%%** of crop boxes survived deduplication against the whole-frame\n", 100*c.KeptShareFrac)
+		b.WriteString("boxes, which means the two passes disagree about the same object. That is\n")
+		b.WriteString("not a failure — it is the fact a crop pass is supposed to find — and the\n")
+		b.WriteString("share is what says how much of it there is.\n\n")
+	}
+	if c.Seen && c.Proposed == 0 && c.GatedOut == 0 {
+		b.WriteString("**The crop pass ran and proposed nothing.** Either the novelty engine\n")
+		b.WriteString("never fired, or it fired and the zone has no boxes to build regions from.\n")
+		b.WriteString("The novelty engine's own numbers are on the screen and in its section.\n\n")
+	}
+	// The pairing that makes this section worth having.
+	//
+	// Both of these are true at once on a run with a degraded detector, and before
+	// this section existed the crop pass looked idle while the reason sat in a
+	// different section of the same report. A crop refused by the detector is not a
+	// crop the gate declined: the pass proposed, and the model could not answer.
+	if c.Refusals > 0 && c.Refusals >= c.Proposed {
+		fmt.Fprintf(&b, "**The detector refused all %d crop(s) the pass proposed.** That is not the\n", c.Refusals)
+		b.WriteString("rate gate declining to look — it is the pass proposing and the model being\n")
+		b.WriteString("unable to answer, which on this pipeline is what a degraded detector looks\n")
+		b.WriteString("like from here. The detector section above says how many frames it could\n")
+		b.WriteString("not answer at all; the two numbers are the same fact seen from two places.\n\n")
 	}
 	return b.String()
 }
@@ -457,6 +571,14 @@ func (r Report) Markdown() string {
 	w("| rolling segments on disk | %d |\n", r.Counters.SegmentsOnDisk)
 	w("\n")
 	w("%s", detectorSection(r.Counters.Detector, r.Counters.Detections))
+	// The verification slice comes BEFORE the crop gate, and the order is the
+	// reading order: the detector section says what the model saw, this says
+	// which of those sightings the plane was asked about and answered, and the
+	// crop gate says how often we chose not to look at all. A reader who stops
+	// after the crop gate has missed nothing, because the two sections it sits
+	// between are the ones that make it mean something.
+	w("%s", verificationSliceSection(r.Counters.Verification))
+	w("%s", cropGateSection(r.Counters.CropGate))
 
 	w("## Faults\n\n")
 	if len(r.Faults) == 0 {

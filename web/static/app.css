@@ -1,0 +1,363 @@
+/* ==========================================================================
+   VISION design system.
+   --------------------------------------------------------------------------
+   One file, shared by every page of the console. Before this existed there were
+   two dark themes in the repository: index.html carried GitHub's #0d1117 and
+   fleet.css carried Tailwind slate's #0f172a, so the two pages were both dark
+   and neither looked like the same product. A console with two palettes is a
+   console that has been designed twice, which is the thing a design system
+   exists to prevent.
+
+   The rules here are the three that make the difference between a developer
+   console and an operator surface:
+
+     1. ONE accent. Green is the primary action and nothing else. Red is never
+        a button colour, only a state. A page with three bright colours has no
+        hierarchy, and a reader has to guess which one to click.
+     2. Every state has a NAME and a COLOUR, and the five verification states
+        are spelled out rather than counted. `duplicate` and `suppressed` are
+        the two an operator asks about when they suspect the rules are eating
+        incidents; they are not a footnote.
+     3. Numbers that are not measurements say so. "No incident in this window
+        has both an opened row and a disposition" is a sentence, and it is
+        rendered as one wherever the data is absent rather than as a 0 that
+        reads as a clean week.
+
+   Nothing here is decorative: motion is 120ms and only on state changes, and
+   focus is always visible because the console is operated by keyboard.
+   ========================================================================== */
+
+:root {
+  /* Surfaces, from behind the content to in front of it. Four is enough; a
+     fifth is a surface nobody can name. */
+  --surface-0: #0b1220;
+  --surface-1: #111a2b;
+  --surface-2: #16233a;
+  --surface-3: #1d2d49;
+
+  /* Text, three levels. A fourth level is text nobody can read. */
+  --ink-1: #eaf0f8;
+  --ink-2: #9fb0c7;
+  --ink-3: #6b7f9a;
+
+  /* One accent, and the one place the product name appears. */
+  --accent: #2f9e5c;
+  --accent-strong: #3bb56c;
+  --accent-ink: #04140a;
+
+  /* The line. Used for every boundary, and for nothing else. */
+  --line: #24344f;
+  --line-strong: #31456a;
+
+  /* State colours. A state is a fact about the data, never an action. */
+  --ok: #3ba55d;
+  --warn: #d9a13b;
+  --bad: #d2553f;
+  --unknown: #7d8ca3;
+
+  --radius: 10px;
+  --radius-sm: 6px;
+  --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 8px 24px rgb(0 0 0 / 24%);
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  /* Motion, one duration. A console that animates at three speeds feels like
+     three consoles. */
+  --fast: 120ms;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { color-scheme: dark; }
+
+body {
+  font-family: var(--font);
+  background: var(--surface-0);
+  color: var(--ink-1);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* ---------- the shell ---------------------------------------------------- */
+
+.shell { max-width: 1180px; margin: 0 auto; padding: 32px 24px 96px; }
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 24px;
+}
+
+.mark {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: 9px;
+  background: linear-gradient(160deg, var(--accent) 0%, #1f7a45 100%);
+  display: grid;
+  place-items: center;
+  box-shadow: 0 2px 10px rgb(47 158 92 / 35%);
+}
+
+.mark svg { width: 20px; height: 20px; display: block; }
+
+.title { font-size: 19px; font-weight: 650; letter-spacing: -0.01em; }
+
+.subtitle { color: var(--ink-2); font-size: 13px; margin-top: 1px; }
+
+/* Tabs are a navigation, not a control: quiet until hovered, and the current
+   one is marked by a colour and a weight, not by a box. */
+.tabs { display: flex; gap: 4px; margin-bottom: 28px; }
+
+.tab {
+  appearance: none;
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--ink-2);
+  font: inherit;
+  font-weight: 550;
+  padding: 8px 14px;
+  cursor: pointer;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  transition: color var(--fast) ease, background var(--fast) ease, border-color var(--fast) ease;
+}
+
+.tab:hover { color: var(--ink-1); background: var(--surface-1); }
+
+.tab[aria-selected="true"] {
+  color: var(--ink-1);
+  border-bottom-color: var(--accent);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* ---------- panels ------------------------------------------------------- */
+
+.panel {
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 22px 24px;
+  margin-bottom: 20px;
+}
+
+.panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 4px; }
+
+.panel h2 { font-size: 15px; font-weight: 650; letter-spacing: -0.005em; }
+
+.panel .hint { color: var(--ink-2); font-size: 13px; margin-bottom: 18px; max-width: 68ch; }
+
+.eyebrow {
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+/* ---------- controls ----------------------------------------------------- */
+
+.btn {
+  appearance: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-weight: 600;
+  padding: 9px 16px;
+  cursor: pointer;
+  transition: background var(--fast) ease, border-color var(--fast) ease, transform var(--fast) ease;
+}
+
+.btn:active { transform: translateY(1px); }
+
+.btn.primary { background: var(--accent); color: var(--accent-ink); }
+.btn.primary:hover { background: var(--accent-strong); }
+
+.btn.secondary {
+  background: var(--surface-2);
+  border-color: var(--line-strong);
+  color: var(--ink-1);
+}
+.btn.secondary:hover { background: var(--surface-3); }
+
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.field {
+  background: var(--surface-0);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  color: var(--ink-1);
+  font: inherit;
+  padding: 9px 12px;
+  width: 100%;
+}
+
+.field:focus { border-color: var(--accent); }
+
+.row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+
+.row > .grow { flex: 1 1 auto; min-width: 200px; }
+
+select.field { width: auto; min-width: 160px; }
+
+/* ---------- numbers ------------------------------------------------------ */
+
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+
+.kpi {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+}
+
+.kpi .label { font-size: 11px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); }
+
+.kpi .value { font-size: 24px; font-weight: 650; font-variant-numeric: tabular-nums; margin-top: 4px; letter-spacing: -0.02em; }
+
+.kpi .sub { font-size: 12px; color: var(--ink-2); margin-top: 2px; }
+
+/* ---------- tables ------------------------------------------------------- */
+
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+
+th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+td { padding: 10px 12px; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+
+tbody tr:last-child td { border-bottom: 0; }
+
+tr.is-loud { background: rgb(210 85 63 / 10%); }
+
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+td.site { font-weight: 550; }
+
+td .muted { color: var(--ink-3); }
+
+/* A share bar, because a percentage alone does not say how full it is. */
+.bar { display: flex; align-items: center; gap: 8px; min-width: 120px; }
+
+.bar .track { flex: 1; height: 6px; border-radius: 3px; background: var(--surface-3); overflow: hidden; }
+
+.bar .fill { height: 100%; border-radius: 3px; background: var(--warn); }
+
+.bar.is-ok .fill { background: var(--ok); }
+
+/* ---------- state chips -------------------------------------------------- */
+
+/* The five verification states, each with a colour, and the two silent ones
+   marked so a reader knows which two they are without a legend. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-2);
+  white-space: nowrap;
+}
+
+.chip::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+.chip.answered { color: #7fd3a1; }
+.chip.no_objects { color: #a8c6e8; }
+.chip.degraded { color: #e8c47a; }
+.chip.not_asked { color: #e8a87a; }
+.chip.cannot_tell { color: #e88a8a; }
+.chip.silent { color: #e8c47a; background: rgb(217 161 59 / 12%); }
+.chip.unmeasured { color: var(--ink-3); background: var(--surface-2); }
+
+/* ---------- states and empty places -------------------------------------- */
+
+.empty {
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 28px 20px;
+  text-align: center;
+  color: var(--ink-2);
+}
+
+.empty strong { display: block; color: var(--ink-1); font-size: 14px; margin-bottom: 4px; }
+
+.banner {
+  border-radius: var(--radius-sm);
+  padding: 11px 14px;
+  font-size: 13px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-2);
+  margin-bottom: 16px;
+}
+
+.banner.bad { border-color: rgb(210 85 63 / 45%); background: rgb(210 85 63 / 12%); }
+.banner.warn { border-color: rgb(217 161 59 / 45%); background: rgb(217 161 59 / 12%); }
+
+/* A spinner that appears on the button whose action is running, so one busy
+   action is legible from across a room. */
+.btn[data-busy="true"] { pointer-events: none; opacity: 0.75; }
+
+.btn[data-busy="true"] .label::after {
+  content: "";
+  display: inline-block;
+  width: 9px; height: 9px;
+  margin-left: 8px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 700ms linear infinite;
+  vertical-align: -1px;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 0ms !important; transition-duration: 0ms !important; }
+}
+
+/* ---------- output ------------------------------------------------------- */
+
+pre.out {
+  background: var(--surface-0);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.55;
+  max-height: 340px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--ink-2);
+}
+
+.split { display: grid; grid-template-columns: 1.1fr 1fr; gap: 20px; align-items: start; }
+
+@media (max-width: 900px) { .split { grid-template-columns: 1fr; } }
+
+.legend { display: flex; gap: 14px; flex-wrap: wrap; margin: 14px 0 4px; font-size: 12px; color: var(--ink-2); }
+
+.legend .key { display: inline-flex; align-items: center; gap: 6px; }

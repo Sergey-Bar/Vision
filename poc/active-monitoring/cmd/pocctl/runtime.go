@@ -28,7 +28,9 @@ package main
 // what it is about to record so a wrong default is visible in the same breath.
 
 import (
+	"archive/tar"
 	"archive/zip"
+	"compress/gzip"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -40,7 +42,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/soak"
+	"github.com/Sergey-Bar/vision-poc/internal/soak"
 )
 
 // runtimeManifest is what fetch-runtime writes and what a later run verifies
@@ -315,20 +317,20 @@ func fetchProviderDLLs(zipPath, destDir string, flags map[string]string, url str
 	if flags["provider"] == "drop" {
 		return nil, nil
 	}
-	zr, err := zip.OpenReader(zipPath)
+	archive, closeArchive, err := openRelease(zipPath)
 	if err != nil {
-		return nil, fmt.Errorf("fetch-runtime: cannot reopen the archive to look for provider libraries: %w", err)
+		return nil, fmt.Errorf("fetch-runtime: cannot read the archive to look for provider libraries: %w", err)
 	}
-	defer func() { _ = zr.Close() }()
+	defer closeArchive()
 
 	suffix := sharedLibrarySuffix()
-	index := map[string]*zip.File{}
-	for _, f := range zr.File {
-		index[f.Name] = f
+	names := make([]string, 0, len(archive))
+	for name := range archive {
+		names = append(names, name)
 	}
 	var out []runtimeRecord
-	for _, name := range providerCandidates(index, suffix) {
-		target, xerr := extractMember(index[name], destDir)
+	for _, name := range providerCandidates(names, suffix) {
+		target, xerr := extractArchiveMember(archive, name, destDir)
 		if xerr != nil {
 			return nil, fmt.Errorf("fetch-runtime: cannot extract the provider library %s: %w",
 				filepath.ToSlash(name), xerr)
@@ -376,16 +378,13 @@ func providerName(base string) string {
 
 // providerCandidates names the provider libraries in the archive's library directory.
 //
-// It takes the archive index rather than a name slice so that it can be tested without
-// building a ZIP, and it matches on the directory DEPTH as well as the name, because a
-// `training/onnxruntime.dll` from a provider-shaped package is the wrong library and
-// there is no way to tell from the name.
-func providerCandidates(index map[string]*zip.File, suffix string) []string {
+// It takes the member NAMES rather than an opened archive so that it can be
+// tested without building one, and it matches on the directory DEPTH as well as
+// the name, because a `training/onnxruntime.dll` from a provider-shaped package is
+// the wrong library and there is no way to tell from the name.
+func providerCandidates(names []string, suffix string) []string {
 	var out []string
-	for name := range index {
-		if info := index[name]; info != nil && info.FileInfo().IsDir() {
-			continue
-		}
+	for _, name := range names {
 		slashed := filepath.ToSlash(name)
 		base := strings.ToLower(filepath.Base(slashed))
 		if !strings.HasSuffix(base, suffix) {
@@ -548,7 +547,151 @@ func libraryCandidates(names []string, suffix string) []string {
 	return out
 }
 
-// extractLibrary finds the ONNX Runtime library inside a release ZIP.
+// releaseArchive is one downloaded release asset, indexed by member name.
+//
+// It exists because the two archive formats are a PLATFORM fact and the code that
+// chooses a library out of a release is not. ONNX Runtime ships a ZIP on Windows
+// and a `.tgz` everywhere else, so a fetch written against `archive/zip` alone is
+// a fetch that works on one platform and refuses the other two with a message
+// about a format — the same shape as the demo's old GOOS refusal, one layer down.
+// The index hides the format: the selection rules, the depth rule and the
+// refusals are written once against names and an opener.
+//
+// The closer is part of the contract for a reason the first version of this type
+// learned the hard way: a ZIP member reader reads through the archive's own open
+// handle, so an index whose opener was not paired with a close left the file
+// locked and the temporary directory undeletable — a leak whose only symptom is a
+// test cleanup failure on somebody else's disk.
+type releaseArchive map[string]func() (io.ReadCloser, error)
+
+// openRelease reads a release asset's member index and returns the function that
+// releases it.
+//
+// The format is chosen by the file NAME, not by sniffing the bytes: the URL names
+// the asset, and an operator who downloads the wrong one gets a message about
+// the wrong asset rather than a parser's complaint about bytes that were never
+// claimed to be that format.
+func openRelease(path string) (releaseArchive, func(), error) {
+	name := strings.ToLower(filepath.Base(path))
+	switch {
+	case strings.HasSuffix(name, ".tgz"), strings.HasSuffix(name, ".tar.gz"):
+		a, err := openTarGz(path)
+		if err != nil {
+			return nil, nil, err
+		}
+		// A tarball holds nothing open: every member is opened, read and closed by
+		// the code that extracted it. Returning a no-op close keeps the caller's
+		// `defer` in one shape instead of two.
+		return a, func() {}, nil
+	default:
+		return openZip(path)
+	}
+}
+
+func openZip(path string) (releaseArchive, func(), error) {
+	zr, err := zip.OpenReader(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	out := make(releaseArchive, len(zr.File))
+	for _, f := range zr.File {
+		if f.FileInfo().IsDir() {
+			continue
+		}
+		out[f.Name] = f.Open
+	}
+	return out, func() { _ = zr.Close() }, nil
+}
+
+// openTarGz reads a gzipped tar's member index.
+//
+// The readers cannot be closed by this function — a tar entry is read from the
+// one shared stream — so each opener opens the archive ANEW and walks to its
+// member. That is a cost the library members can afford: they are read once, and
+// the alternative is holding a stream open per member for the archive's lifetime.
+func openTarGz(path string) (releaseArchive, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	zr, err := gzip.NewReader(f)
+	if err != nil {
+		return nil, err
+	}
+	out := releaseArchive{}
+	tr := tar.NewReader(zr)
+	for {
+		h, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		if h.Typeflag != tar.TypeReg {
+			continue
+		}
+		name := h.Name
+		out[name] = func() (io.ReadCloser, error) {
+			af, aerr := os.Open(path)
+			if aerr != nil {
+				return nil, aerr
+			}
+			zr2, zerr := gzip.NewReader(af)
+			if zerr != nil {
+				_ = af.Close()
+				return nil, zerr
+			}
+			tr2 := tar.NewReader(zr2)
+			for {
+				h2, herr := tr2.Next()
+				if errors.Is(herr, io.EOF) {
+					break
+				}
+				if herr != nil {
+					_ = zr2.Close()
+					_ = af.Close()
+					return nil, herr
+				}
+				if h2.Name == name {
+					// The tar reader is a VIEW over the one shared stream, so it
+					// has no Close of its own: closing this member closes the
+					// stream underneath, after a full io.Copy. Leaving the
+					// handles open would accumulate one pair per extraction, and
+					// a GPU package extracts five members.
+					return &closerChain{Reader: tr2, closers: []io.Closer{zr2, af}}, nil
+				}
+			}
+			_ = zr2.Close()
+			_ = af.Close()
+			return nil, fmt.Errorf("%s is not in %s", name, path)
+		}
+	}
+	return out, nil
+}
+
+// closerChain closes several handles in order when the member is done.
+//
+// The member itself is the tar reader, which has no Close of its own — a
+// tar.Reader is a view over the stream — so closing it means closing the stream
+// underneath, and doing that from inside the reader's own Read path would dead-end.
+type closerChain struct {
+	io.Reader
+	closers []io.Closer
+}
+
+func (c *closerChain) Close() error {
+	var err error
+	for _, cl := range c.closers {
+		if cerr := cl.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}
+	return err
+}
+
+// extractLibrary finds the ONNX Runtime library inside a release archive.
 //
 // The member is chosen by NAME SUFFIX rather than by a hardcoded path, because the
 // path moved between releases (`onnxruntime/bin/...` became `onnxruntime/lib/...`)
@@ -556,21 +699,18 @@ func libraryCandidates(names []string, suffix string) []string {
 // archive holds more than one candidate the refusal says so and lists them, because
 // guessing which of two DLLs a run should load is the decision this command exists
 // to avoid.
-func extractLibrary(zipPath, dest string) (string, error) {
-	zr, err := zip.OpenReader(zipPath)
+func extractLibrary(archivePath, dest string) (string, error) {
+	archive, closeArchive, err := openRelease(archivePath)
 	if err != nil {
-		return "", fmt.Errorf("the download is not a ZIP archive: %w\n"+
-			"  If the URL pointed straight at the library rather than at the release ZIP, "+
-			"pass that URL instead — this command expects the archive and picks the "+
-			"library out of it", err)
+		return "", fmt.Errorf("the download is not a release archive this build can read: %w\n"+
+			"  Windows and macOS assets are ZIPs and Linux assets are .tgz. If the URL pointed straight at "+
+			"the library rather than at the release archive, pass that URL instead — this command expects "+
+			"the archive and picks the library out of it", err)
 	}
-	defer func() { _ = zr.Close() }()
-
-	names := make([]string, 0, len(zr.File))
-	index := make(map[string]*zip.File, len(zr.File))
-	for _, f := range zr.File {
-		names = append(names, f.Name)
-		index[f.Name] = f
+	defer closeArchive()
+	names := make([]string, 0, len(archive))
+	for name := range archive {
+		names = append(names, name)
 	}
 	candidates := libraryCandidates(names, sharedLibrarySuffix())
 
@@ -591,18 +731,27 @@ func extractLibrary(zipPath, dest string) (string, error) {
 			"--url at an asset that holds exactly one", len(candidates), b.String())
 	}
 
-	return extractMember(index[candidates[0]], dest)
+	return extractArchiveMember(archive, candidates[0], dest)
 }
 
-// extractMember writes one archive member into `dest` under its base name and returns
-// where it landed.
-func extractMember(f *zip.File, dest string) (string, error) {
-	rc, err := f.Open()
+// extractArchiveMember writes one archive member into `dest` under its base name
+// and returns where it landed.
+//
+// It is one function for both formats because the member it writes is the same
+// kind of thing: a shared library that will be loaded into this process's address
+// space, so the path it lands on and the bytes that land there are the whole
+// point, and two implementations would be two answers.
+func extractArchiveMember(archive releaseArchive, name, dest string) (string, error) {
+	open, ok := archive[name]
+	if !ok {
+		return "", fmt.Errorf("%s is not in the archive", name)
+	}
+	rc, err := open()
 	if err != nil {
-		return "", fmt.Errorf("cannot open %s in the archive: %w", filepath.ToSlash(f.Name), err)
+		return "", fmt.Errorf("cannot open %s in the archive: %w", filepath.ToSlash(name), err)
 	}
 	defer func() { _ = rc.Close() }()
-	target := filepath.Join(dest, filepath.Base(filepath.FromSlash(f.Name)))
+	target := filepath.Join(dest, filepath.Base(filepath.FromSlash(name)))
 	out, err := os.Create(target)
 	if err != nil {
 		return "", err

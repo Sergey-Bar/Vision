@@ -16,6 +16,8 @@ import (
 	"fmt"
 	"sort"
 	"time"
+
+	"github.com/Sergey-Bar/vision/internal/observations"
 )
 
 // Outcome is the label a case carries, from the operator's disposition.
@@ -379,16 +381,31 @@ func evaluateGates(pr ProfileReport, g Gates) []string {
 	return failures
 }
 
-// predictedRestricted reads the structured field the production profile emits.
+// predictedRestricted reads the structured field the profile being scored
+// declares.
 //
-// A missing field, a degraded observation and an insufficient-evidence
-// observation all yield nil, which the caller counts as an absence rather than as
-// a negative. That is the invariant, expressed once.
+// It used to name a field. `obs.Structured["restrictedZoneBreach"]` is the
+// claim ONE profile makes, so for every other profile this returned nil, no
+// case was ever answered, `DetectedRestricted` stayed 0 against a non-zero
+// `TruePositives`, and recall failed every gate: no profile other than
+// `restricted-person` could ever pass Evaluate. The roadmap row that said the
+// field "now comes from the profile being scored" was describing this function
+// and was false when it was written.
+//
+// The field now comes from the profile the observation says it is, which is the
+// registry the rest of the plane reads. A missing field, an unknown profile, a
+// profile with no scalar claim, a degraded observation and an
+// insufficient-evidence observation all yield nil, which the caller counts as
+// an absence rather than as a false. That is the invariant, expressed once.
 func predictedRestricted(obs Observation) *bool {
 	if obs.Degraded || obs.InsufficientEvidence {
 		return nil
 	}
-	raw, ok := obs.Structured["restrictedZoneBreach"]
+	field, known := observations.ProfileScoreField(obs.ProfileID)
+	if !known || field == "" {
+		return nil
+	}
+	raw, ok := obs.Structured[field]
 	if !ok {
 		return nil
 	}

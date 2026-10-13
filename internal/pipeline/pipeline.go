@@ -548,6 +548,21 @@ func (l *Loops) evaluateSLOs() {
 	if l.Deps.Metrics == nil {
 		return
 	}
+	// Expire the reservoirs BEFORE reading them, and read them here rather than at
+	// the write site. A p95 is read far more often than it is written, and doing the
+	// expiry on the write path would put the window's arithmetic between an event
+	// and its measurement. It is a prune and not a scrape-time mutation because
+	// `Render` is a read: two collectors scraping concurrently would otherwise get
+	// two different windows, and the second reader would see a span the samples no
+	// longer support.
+	//
+	// The clock is the host's, which is the one honest answer available here: the
+	// gauge sampler is a ticker, not an injected clock, so injecting one would mean
+	// threading it through four layers for a single `Now()`. The alternative — pruning
+	// inside `PruneReservoirs`'s caller-free sibling `Render` — is worse, for the
+	// reason above. What the span labels make visible is which instant the window
+	// was cut at, and the host's is the one a reader can compare against the scrape.
+	l.Deps.Metrics.PruneReservoirs(time.Now().UTC())
 	all := observability.Breaches(l.Deps.Metrics, observability.ReadingsFrom(l.Deps.Metrics))
 	breached := observability.Breached(all)
 
@@ -1153,6 +1168,10 @@ func (l *Loops) decide(ctx context.Context, item inbox.Lease, result normalize.R
 		l.inc(observability.CounterContradicted)
 	case rules.StateUnverified:
 		l.inc(observability.CounterUnverified)
+	case rules.StateDuplicate:
+		l.inc(observability.CounterDuplicate)
+	case rules.StateSuppressed:
+		l.inc(observability.CounterSuppressed)
 	}
 
 	if decision.RuleID == "" {

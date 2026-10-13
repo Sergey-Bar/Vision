@@ -26,9 +26,53 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 )
+
+// binName is a built binary's file name on THIS platform.
+//
+// Windows carries the .exe suffix and the other two platforms do not, and the
+// demo used to spell `pocctl.exe` as a literal — which meant the headline
+// command of the module built `bin/pocctl.exe` on Linux, into a directory whose
+// binary nobody could then find, and reported a missing file. One function, so
+// the spelling exists once.
+func binName(base string) string {
+	if runtime.GOOS == "windows" {
+		return base + ".exe"
+	}
+	return base
+}
+
+// findModuleRoot walks up from the working directory to the directory holding
+// go.mod.
+//
+// Every documented invocation runs from the module root, and `repoRoot()`
+// checks that and WARNS when it is not true — a warning is the right answer for
+// a command that builds binaries. But a command that READS a provenance record
+// must not refuse because it was launched from a subdirectory or, as tests do,
+// from inside its own package directory, and the answer is to find the root
+// rather than to be handed it.
+//
+// It returns "" when there is no go.mod above here, and every caller has a
+// fallback for that: a refusal naming what it could not read, never a zero.
+func findModuleRoot() string {
+	dir, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
+}
 
 // sameFile reports whether two paths name the same file.
 //

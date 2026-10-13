@@ -59,6 +59,8 @@ func main() {
 		err = soakFaults(os.Args[2:])
 	case "demo":
 		err = cmdDemo(os.Args[2:])
+	case "bootstrap":
+		err = cmdBootstrap(os.Args[2:])
 	case "zone":
 		err = cmdZone(os.Args[2:])
 	case "run":
@@ -111,6 +113,8 @@ func usage() {
   report [--run <id>]      re-read the store and print the report
   demo                     the three-minute demonstration against xpsim
   demo --live             the same, against the LIVE XProtect instance and the live source
+  bootstrap                one command from a clean clone to a runnable demo: toolchain, model,
+                           runtime, the material table, and what a run does not prove
   prove <detection>        recompute this decision from stored facts, with zero provider calls
   audit ledger             recompute the hash-chained decision ledger
   audit ledger --tamper    change one byte of one row, watch the chain fail, restore it
@@ -121,7 +125,13 @@ func usage() {
   zone --pick <source>     print a still with a coordinate grid, to draw a line on
   run                      run the pipeline in the foreground
   sim                      run the xpsim simulator on loopback
-  fetch-model              download the ONNX model into models/
+  fetch-model              download the ONNX model into models/ from the pinned URL and
+                           check it against the recorded digest. --url points elsewhere,
+                           --sha256 pins a value you supply: against THOSE a mismatch is a
+                           refused wall and the file is removed. Against the pin's own
+                           default it is a printed WARNING and the file is kept, because a
+                           default that hard-refused on drift would turn a label problem
+                           into a broken demo.
   fetch-runtime            download the ONNX Runtime library, record its sha256 and licence,
                            and refuse a digest that does not match. --verify re-checks what
                            is already on disk against models/runtime.json, offline.

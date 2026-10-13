@@ -16,7 +16,8 @@ provisional_line=""
 
 if [ ! -f "$REPORT" ]; then
   echo "make-one-pager: $REPORT does not exist." >&2
-  echo "  Produce a report first: 'pocctl demo' takes about three minutes, and" >&2
+  echo "  Produce a report first: 'pocctl demo --clip testdata/car-crossing.mp4' takes about three" >&2
+  echo "  minutes (the clip is NAMED, never defaulted - see testdata/README.md), and" >&2
   echo "  'pocctl report --data-root <root>' regenerates one from the store." >&2
   exit 1
 fi
@@ -125,10 +126,11 @@ shape that the record beside it does not.
 
 | | measured | limit |
 |---|---|---|
-| **model shape** | 85 fields, anchored, 416×416 NHWC, CPU only | a YOLOv4-shaped export named \`yolov8n.onnx\`. \`pyworker/fixtures/yolov8n.contract.json\` |
+| **model shape** | 85 fields, anchored, 416×416 NHWC, CPU only | a YOLOv4-416 export still named \`yolov4n.onnx\`. \`pyworker/fixtures/yolov4n.contract.json\` |
 | **decode** | \`identical_geometry\` 0, \`median_box_area\` 0.0015 | the collapsed-decode fix, on one real frame + 40+ unit cases |
-| **model licence** | **NOT RECORDED** | not cleared for sale, distribution, or anything derived. \`pyworker/fixtures/yolov8n.licence.json\` |
-| **footage licence** | **NOT RECORDED** (\`testdata/labels.json\`, three \`REPLACE-ME\`) | the demo footage may be read here and **may not be shown outside this machine** |
+| **model origin** | byte-identical to the ONNX Model Zoo's \`yolov4.onnx\` (same SHA-256, measured 2026-10-11) | the origin is named and checkable; the decision to rely on the MIT notice is a person's |
+| **model licence** | **MIT, as the model's own page states it** (SPDX header + License section, recorded with the URL and the date) | a notice obligation with four attribution lines; not cleared for sale or a derived product. \`pyworker/fixtures/yolov4n.licence.json\` |
+| **footage licence** | the COMMITTED clips are \`synthetic\` with licences recorded (\`testdata/labels.json\`); the demo NAMES a clip with \`--clip\` and defaults to none | the YouTube clip's licence is still NOT RECORDED and may not be shown outside this machine; over the synthetic clip the model returns zero boxes, so AC2/AC3/AC4 are \`NOT RUN\` |
 | **bounding box** | every pushed event carries the real box in 0–1000 thousandths | asserted by a comparison against \`detections.box_*\`, not by eye |
 | **rtsp** | relay of recorded material, \`pocctl demo --rtsp\` | proves the TRANSPORT. **No camera has ever been connected** |
 

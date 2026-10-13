@@ -48,8 +48,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/classify"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/ortdetect"
+	"github.com/Sergey-Bar/vision-poc/internal/classify"
+	"github.com/Sergey-Bar/vision-poc/internal/ortdetect"
 )
 
 // contractFile is where the probe writes the machine-readable record.
@@ -503,31 +503,104 @@ func licenceOrUnrecorded(l string) string {
 
 // licenceOf reads a model's licence from the provenance record beside the weights.
 //
-// It reads `testdata/labels.json`, which is where every other material's licence
-// lives, and it reports a MISSING licence rather than a default. A model whose terms
-// nobody wrote down is a fact about the answer — a demo whose output somebody else
-// sees inherits them.
+// It reads `pyworker/fixtures/yolov4n.licence.json`, which is the committed half of
+// the model's record and where the licence actually lives, and it reports a MISSING
+// licence rather than a default. A model whose terms nobody wrote down is a fact
+// about the answer — a demo whose output somebody else sees inherits them.
+//
+// It used to read `testdata/labels.json` for an `entries[]` structure with a
+// `licence` per entry. That structure does not exist in the table: the real field is
+// `bytes`, not `licence`, and a clip's licence is not a model's licence either. So
+// the function returned "" for every model on every machine, and `-detector` printed
+// "the model's licence is NOT RECORDED" while a recorded licence sat in the
+// repository — a check that never fired is worse than no check, because it is read as
+// a control. The record's own `file` field names the weights it describes, so the
+// lookup is by the model the operator named rather than by a hardcoded filename.
 func licenceOf(modelPath string) string {
-	raw, err := os.ReadFile(filepath.Join("testdata", "labels.json"))
+	records, err := modelLicenceRecords()
 	if err != nil {
 		return ""
 	}
-	var doc struct {
-		Entries []struct {
-			Path    string `json:"path"`
-			Licence string `json:"licence"`
-		} `json:"entries"`
-	}
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		return ""
-	}
 	base := filepath.ToSlash(filepath.Clean(modelPath))
-	for _, e := range doc.Entries {
-		if filepath.ToSlash(filepath.Clean(e.Path)) == base {
-			return e.Licence
+	if lic, ok := records["models/"+base]; ok {
+		return lic
+	}
+	return records[base]
+}
+
+// modelLicenceRecords indexes the committed model-provenance records by the file
+// path each one declares.
+//
+// The whole directory is read rather than one file, because `models/` holds more
+// than one set of weights on a machine that has fetched a second export, and a
+// lookup that only ever answers for one of them silently answers for none of the
+// others.
+//
+// The path is tried relative to the module root FIRST and then from a package
+// directory, because `-detector` is run from the root and its tests run from
+// `cmd/fixtureprobe`. The same three-candidate pattern `pocctl footage` uses,
+// for the same reason: a record that cannot be read from where the tool is
+// invoked is a record that reports NOT RECORDED while sitting in the tree.
+func modelLicenceRecords() (map[string]string, error) {
+	var dir string
+	for _, candidate := range []string{
+		filepath.Join("pyworker", "fixtures"),
+		filepath.Join("..", "..", "pyworker", "fixtures"),
+		filepath.Join("..", "pyworker", "fixtures"),
+	} {
+		if entries, err := os.ReadDir(candidate); err == nil {
+			found := false
+			for _, e := range entries {
+				if strings.HasSuffix(e.Name(), ".licence.json") {
+					found = true
+					break
+				}
+			}
+			if found {
+				dir = candidate
+				break
+			}
 		}
 	}
-	return ""
+	if dir == "" {
+		return nil, fmt.Errorf("no *.licence.json record under pyworker/fixtures, so no model "+
+			"provenance can be read from here (cwd %s)", mustCWD())
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasSuffix(name, ".licence.json") {
+			continue
+		}
+		raw, rerr := os.ReadFile(filepath.Join(dir, name))
+		if rerr != nil {
+			continue
+		}
+		var rec struct {
+			File    string `json:"file"`
+			Licence string `json:"licence"`
+		}
+		if jerr := json.Unmarshal(raw, &rec); jerr != nil || rec.File == "" {
+			continue
+		}
+		out[filepath.ToSlash(filepath.Clean(rec.File))] = rec.Licence
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no *.licence.json record in %s", dir)
+	}
+	return out, nil
+}
+
+func mustCWD() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return "(unknown)"
+	}
+	return wd
 }
 
 // writeContract records what the model IS, and it refuses to overwrite a record
@@ -563,8 +636,9 @@ func writeContract(path string, r *ContractRecord) {
 	}
 	fmt.Printf("\nwrote %s\n", path)
 	if !r.LicenceRecorded {
-		fmt.Println("  the model's licence is NOT RECORDED. Add it to testdata/labels.json: a run whose")
-		fmt.Println("  output is shown to somebody else depends on a term nobody has written down.")
+		fmt.Println("  the model's licence is NOT RECORDED. Add it to the model's licence record in")
+		fmt.Println("  pyworker/fixtures/*.licence.json: a run whose output is shown to somebody else")
+		fmt.Println("  depends on a term nobody has written down.")
 	}
 }
 

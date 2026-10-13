@@ -64,7 +64,24 @@ const (
 	ActionRoleRevoked         = "identity.role.revoked"
 	ActionDispositionRecorded = "incident.disposition.recorded"
 	ActionIncidentCreated     = "incident.created"
-	ActionEvidenceFetched     = "evidence.fetched"
+	// ActionIncidentOpened is the row that makes attention_minutes measurable.
+	//
+	// It was absent, and the absence was not a small one: nothing in the product
+	// recorded when an operator STARTED paying attention. The dispositions table
+	// records when they finished and the incidents table records when the
+	// incident appeared, so the interval a human was responsible for an incident
+	// — the North Star numerator — existed in no table anywhere.
+	//
+	// The row is written once per session per incident, on the first
+	// authenticated read of the detail page. Once per session rather than once
+	// per read, because a page refresh is not a new bout of attention and a
+	// metric that counts refreshes is a metric that rewards spamming F5.
+	//
+	// It is a LEDGER row rather than a counter, and that is the whole point: a
+	// counter would reset with the process, and the number the North Star is
+	// built on cannot be one a restart can move.
+	ActionIncidentOpened  = "incident.opened"
+	ActionEvidenceFetched = "evidence.fetched"
 	// ActionEvidenceExported used to be declared here as "evidence.exported" and
 	// was appended to by nothing, ever. Its capability (evidence.export) was
 	// granted to two roles and enforced by no route, so there was no code path

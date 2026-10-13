@@ -29,6 +29,7 @@ func shiftFacts() Facts {
 			{TS: time.Date(2026, 10, 10, 23, 5, 0, 0, time.UTC), Actor: "autonomy", Subject: "inc-bbb", Action: "VERIFY", Reason: "score 62, one anomaly"},
 			{TS: time.Date(2026, 10, 10, 23, 40, 0, 0, time.UTC), Actor: "operator:sam", Subject: "inc-bbb", Action: "HOLD", Reason: "contractor on site, verified"},
 			{TS: time.Date(2026, 10, 10, 23, 41, 0, 0, time.UTC), Actor: "operator:sam", Subject: "inc-bbb", Action: "HOLD", Reason: "another line at the same instant"},
+			{TS: time.Date(2026, 10, 10, 23, 41, 0, 0, time.UTC), Actor: "operator:sam", Subject: "inc-aaa", Action: "OBSERVE", Reason: "and a third, on a different incident, still at the same instant"},
 		},
 		Notes: []Note{
 			{TS: time.Date(2026, 10, 11, 0, 10, 0, 0, time.UTC), Actor: "operator:sam", Text: "lens smeared on cam-02", Camera: "cam-02"},
@@ -89,11 +90,29 @@ func TestRenderSortsEverySection(t *testing.T) {
 	}
 	// The tie at 23:41 breaks deterministically on subject, never on the
 	// order the caller built.
-	if !b.Actions[1].TS.Equal(b.Actions[2].TS) {
-		t.Skip("no same-timestamp pair to order")
+	//
+	// Found by value, not at fixtures' indices [1] and [2]. It was written as
+	// `b.Actions[1].TS.Equal(b.Actions[2].TS)` and the fixture carried only ONE
+	// action at 23:41, so the guard skipped on every single run and the
+	// subject-ordering half of the sort was never asserted by anything — a
+	// control that existed as two lines of comment. The fixture now carries the
+	// pair its own comment describes, and the assertion finds the pair rather
+	// than trusting where it sits.
+	tieA, tieB := -1, -1
+	for k := 1; k < len(b.Actions); k++ {
+		if b.Actions[k].TS.Equal(b.Actions[k-1].TS) {
+			tieA, tieB = k-1, k
+			break
+		}
 	}
-	if b.Actions[1].Subject > b.Actions[2].Subject {
-		t.Error("same-timestamp actions are not ordered by subject")
+	if tieA < 0 {
+		t.Fatal("no same-timestamp pair to order. The fixture carries two actions at 23:41 " +
+			"on different incidents precisely so the secondary sort key has something to break, " +
+			"and its absence means the assertion below has nothing to measure")
+	}
+	if b.Actions[tieA].Subject > b.Actions[tieB].Subject {
+		t.Errorf("same-timestamp actions are not ordered by subject: %s before %s",
+			b.Actions[tieA].Subject, b.Actions[tieB].Subject)
 	}
 }
 
@@ -143,6 +162,7 @@ func TestGoldenTextAndJSON(t *testing.T) {
 		`"Reason":"42s dwell in restricted-1, one camera","State":"ACTIVE"}],` +
 		`"actions":[{"TS":"2026-10-10T23:05:00Z","Actor":"autonomy","Subject":"inc-bbb","Action":"VERIFY","Reason":"score 62, one anomaly"},` +
 		`{"TS":"2026-10-10T23:40:00Z","Actor":"operator:sam","Subject":"inc-bbb","Action":"HOLD","Reason":"contractor on site, verified"},` +
+		`{"TS":"2026-10-10T23:41:00Z","Actor":"operator:sam","Subject":"inc-aaa","Action":"OBSERVE","Reason":"and a third, on a different incident, still at the same instant"},` +
 		`{"TS":"2026-10-10T23:41:00Z","Actor":"operator:sam","Subject":"inc-bbb","Action":"HOLD","Reason":"another line at the same instant"}],` +
 		`"cameras":[{"ID":"cam-01","State":"fresh","Reason":""},` +
 		`{"ID":"cam-02","State":"blind","Reason":"near-uniform frame (lens covered, blackout or white-out)"}],` +
@@ -186,6 +206,8 @@ ACTIONS
       why: score 62, one anomaly
   2026-10-10T23:40:00Z  operator:sam inc-bbb        HOLD
       why: contractor on site, verified
+  2026-10-10T23:41:00Z  operator:sam inc-aaa        OBSERVE
+      why: and a third, on a different incident, still at the same instant
   2026-10-10T23:41:00Z  operator:sam inc-bbb        HOLD
       why: another line at the same instant
 

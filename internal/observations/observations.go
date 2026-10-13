@@ -77,6 +77,27 @@ type Profile struct {
 	// read as "the field set is all there is", which is right for the four
 	// observation profiles: a degraded observation legitimately carries less.
 	Required []string
+	// ScoreField is the boolean field the evaluation harness scores this
+	// profile against: the one structured claim that is either true or false,
+	// which is what a recall and a false-positive rate are rates OF.
+	//
+	// It lives HERE rather than in internal/evaluation because this registry is
+	// already the one place that declares what each profile's output contains,
+	// and a second copy in the harness is exactly how the harness came to score
+	// only ONE profile: `predictedRestricted` read the field
+	// `restrictedZoneBreach` as a constant, so every other profile's answer was
+	// invisible to it, no profile other than `restricted-person` could ever
+	// pass `Evaluate`, and a roadmap row claimed the field "now comes from the
+	// profile being scored" while the code still named one. A profile's
+	// measurable claim is part of the profile, not part of the harness reading
+	// it.
+	//
+	// A profile that declares no scalar answer leaves this empty.
+	// `investigate/v1` answers a question with a sentence and a citation list,
+	// neither of which is a boolean, and the harness then records its cases as
+	// ABSENCES - which is the honest answer: a metric that cannot be computed
+	// is not computed, and it is not zero either.
+	ScoreField string
 }
 
 // ProfileInvestigate is the AI plane's investigate role: the only profile that
@@ -94,6 +115,7 @@ var M1Profiles = map[string]Profile{
 			"restrictedZoneBreach": true, "afterHours": true, "summary": true,
 			"confidence": true,
 		},
+		ScoreField: "restrictedZoneBreach",
 	},
 	"door-forced": {
 		ID: "door-forced", Shadow: true, Version: 1,
@@ -102,6 +124,7 @@ var M1Profiles = map[string]Profile{
 			"obstruction": true, "openDurationSeconds": true, "summary": true,
 			"confidence": true,
 		},
+		ScoreField: "personPresent",
 	},
 	"vehicle-at-gate": {
 		ID: "vehicle-at-gate", Shadow: true, Version: 1,
@@ -110,6 +133,7 @@ var M1Profiles = map[string]Profile{
 			"plateLegible": true, "plateText": true, "gateState": true,
 			"summary": true, "confidence": true,
 		},
+		ScoreField: "plateLegible",
 	},
 	// general-monitoring is the profile the plan's "no rules to write per
 	// scenario" claim rests on: one profile whose only structured claims are
@@ -133,6 +157,7 @@ var M1Profiles = map[string]Profile{
 			"confidence": true, "abnormalEvent": true, "hazardVisible": true,
 			"entities": true, "recommendedAction": true,
 		},
+		ScoreField: "abnormalEvent",
 	},
 	// investigate/v1 is the investigator profile: the AI plane's one shipped
 	// role. It answers a question over stored facts and cites the fact ids it
@@ -169,6 +194,27 @@ var M1Profiles = map[string]Profile{
 func IsProductionProfile(id string) bool {
 	p, ok := M1Profiles[id]
 	return ok && !p.Shadow
+}
+
+// ProfileScoreField returns the boolean field the evaluation harness scores for
+// a profile, and whether the profile is one this registry knows at all.
+//
+// The second return is the part that matters. An unknown profile has no
+// declared field, and inventing one would score a profile against a claim it
+// never emits — the same defect as reading a constant, in a place where nothing
+// would notice. So the caller is told which of the two it has, and a harness
+// that cannot score a profile records an absence rather than a negative, which
+// is the invariant this package exists to hold at the observation layer.
+//
+// A known profile that declares no scalar answer (ProfileInvestigate) returns
+// an empty field with known=true: its cases are absences for the harness, not a
+// refusal.
+func ProfileScoreField(id string) (field string, known bool) {
+	p, ok := M1Profiles[id]
+	if !ok {
+		return "", false
+	}
+	return p.ScoreField, true
 }
 
 // Observation is one record to persist.

@@ -20,6 +20,21 @@ func main() {
 		}
 	}()
 	repoRoot := findRepoRoot()
+	if repoRoot == "" {
+		// Refused rather than guessed. This function used to return a hardcoded
+		// absolute path — "C:\VS-Code-Projects\Github\AI AI CAPTAIN", which is
+		// not where the repository is and not where it ever was — so a console
+		// started from an unexpected directory went looking for its binary two
+		// levels away under a name that does not exist, and the failure it then
+		// printed was about a path nobody recognises.
+		//
+		// log.Print and a return, rather than log.Fatal: main has a deferred
+		// recover at its head, and log.Fatal would exit past it. gocritic says
+		// so, and it is right that a nil-root exit is not worth taking the
+		// panic handler with it.
+		log.Print("cannot find the repository: no securityctl.exe above the working directory. Start the console from the repository root, or build it with `go build -o securityctl.exe ./cmd/securityctl`")
+		return
+	}
 	log.Printf("Repo root: %s", repoRoot)
 
 	securityctlPath := mustSecurityctl(repoRoot)
@@ -32,11 +47,28 @@ func main() {
 	http.HandleFunc("/api/acceptance", handleAcceptance(securityctlPath, repoRoot))
 	http.HandleFunc("/api/rules/lint", handleRulesLint(securityctlPath, repoRoot))
 	http.HandleFunc("/api/rules/simulate", handleRulesSimulate(securityctlPath, repoRoot))
+
+	// The operator surface. These three are the product's claims, reachable by
+	// clicking rather than by knowing which command to run.
+	http.HandleFunc("/api/efficiency", handleEfficiency(securityctlPath, repoRoot))
+	http.HandleFunc("/api/incident", handleIncident(securityctlPath, repoRoot))
+	http.HandleFunc("/api/explain", handleExplain(securityctlPath, repoRoot))
 	registerLiveRoutes(repoRoot)
 
 	// Main page
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" && r.URL.Path != "/index.html" {
+			http.NotFound(w, r)
+			return
+		}
 		http.ServeFile(w, r, filepath.Join(repoRoot, "web", "static", "index.html"))
+	})
+
+	// The operator surface. It is a page, not a tab on the console, because the
+	// console answers "run this and show me the output" and this answers "where
+	// does my system stay quiet" — different questions, different readers.
+	http.HandleFunc("/operations", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, filepath.Join(repoRoot, "web", "static", "operations.html"))
 	})
 
 	port := "8080"
@@ -75,7 +107,7 @@ func findRepoRoot() string {
 		}
 		dir = parent
 	}
-	return "C:\\VS-Code-Projects\\Github\\AI AI CAPTAIN"
+	return ""
 }
 
 func handlePOC(securityctlPath, repoRoot string) http.HandlerFunc {

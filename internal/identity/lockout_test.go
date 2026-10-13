@@ -11,9 +11,77 @@ import (
 	"github.com/Sergey-Bar/vision/internal/testutil"
 )
 
-// The lockout is the named control for the CSRF-exempt login route, and it
-// bounded nothing under parallelism.
+// TestTheLockoutSurvivesAGoroutineThatSawAnOldCount is the interleaving the
+// count-only test cannot see.
 //
+// `TestConcurrentWrongPasswordsAreAllCounted` above asserts the COUNT is right,
+// and it is: the increment happens in SQL. What it did not assert is that the
+// LOCK survives. `registerFailure` is reached by every concurrent failure and
+// each call has its own view of the counter — the goroutine whose increment
+// returned 8 sees a lock, and the one whose returned 3 does not — so a direct
+// `SET locked_until = $3` makes both of them the last writer sometimes, and the
+// NULL from the low-count goroutine CLEARS the lock the high-count one set.
+// That is a lockout that bounds nothing, sitting behind a correct-looking
+// counter.
+//
+// The reason it was not caught for so long is that the interleaving it needs is
+// rare with eight attempts: only the writers below the threshold write NULL, and
+// the deadline writer has to be beaten by one of them. With 64 attempts the odds
+// invert — most writers are below the threshold, so the naive statement fails
+// almost every run — and the test asserts the property that matters rather than
+// the count that already held.
+//
+// RED-CHECK CONTROL: this is the test `registerFailure`'s lock write could not
+// pass, and the hand-run transcript is in docs/status.md.
+func TestTheLockoutSurvivesAGoroutineThatSawAnOldCount(t *testing.T) {
+	svc, tenant, site := service(t)
+	ctx := context.Background()
+
+	if _, err := svc.BootstrapAdmin(ctx, tenant, "admin", "a-long-bootstrap-passphrase", site); err != nil {
+		t.Fatalf("BootstrapAdmin: %v", err)
+	}
+
+	const attempts = 64
+	var wg sync.WaitGroup
+	wg.Add(attempts)
+	for i := 0; i < attempts; i++ {
+		go func() {
+			defer wg.Done()
+			_, _ = svc.PasswordStep(ctx, tenant, "admin", "wrong-password", "10.0.0.1")
+		}()
+	}
+	wg.Wait()
+
+	// The account must be locked, and the deadline must be in the FUTURE. A
+	// cleared lock and a zero-length deadline are the same answer to an
+	// attacker; both print as "no lock" to the assertion below.
+	var counted int
+	var lockedUntil *string
+	if err := testutil.Pool(t).QueryRow(ctx,
+		`SELECT failed_attempts, locked_until::text FROM users
+		  WHERE tenant_id = $1 AND user_id LIKE 'admin-%'`, tenant).
+		Scan(&counted, &lockedUntil); err != nil {
+		t.Fatalf("read the counter: %v", err)
+	}
+	if counted != attempts {
+		t.Errorf("the counter says %d after %d concurrent wrong passwords", counted, attempts)
+	}
+	if lockedUntil == nil {
+		t.Fatalf("the account is NOT LOCKED after %d wrong passwords. The count is right, so the "+
+			"failure is the second write: a goroutine whose counter read was below the threshold "+
+			"wrote NULL over the lock a higher-count goroutine had set, and the account is usable", attempts)
+	}
+
+	// And the deadline the SERVICE would compute for that count must match the
+	// row's. A lock present in the row and not enforced by the lookup is a lock
+	// nobody enforces, and a deadline the policy would not produce is a deadline
+	// nobody can explain.
+	if lock, _ := identity.ShouldLock(identity.Lockout{FailedAttempts: counted}, svc.MaxFailedAttempts, svc.LockoutBase); !lock {
+		t.Fatalf("the row is locked until %s but the policy for %d failures says not to lock. "+
+			"A lock the policy disagrees with is a lock the lookup path will not check", *lockedUntil, counted)
+	}
+}
+
 // `PasswordStep` takes `FOR UPDATE` in a transaction that COMMITS — the argon2
 // verification has to happen outside it, because holding a row lock across a
 // deliberately slow hash would serialise every login on the site - and

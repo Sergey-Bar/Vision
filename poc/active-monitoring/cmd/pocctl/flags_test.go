@@ -44,8 +44,8 @@ func TestEverySubcommandFlagSpecParsesItsOwnFlags(t *testing.T) {
 			[]string{"--source-kind", "loop", "--source-arg", "c.mp4", "--days", "7"}},
 		{"sim", map[string]string{"addr": "127.0.0.1:8098"},
 			[]string{"--addr", "127.0.0.1:8188"}},
-		{"fetch-model", map[string]string{"url": "", "out": "models/yolov4n.onnx"},
-			[]string{"--url", "https://example/m.onnx"}},
+		{"fetch-model", map[string]string{"url": "", "out": "models/yolov4n.onnx", "sha256": ""},
+			[]string{"--url", "https://example/m.onnx", "--sha256", "1881FE9C506C970D7866CB4BFC33BDA791CE46951A3C39C45ACE2FF2B9DAF369"}},
 	}
 
 	for _, tc := range cases {

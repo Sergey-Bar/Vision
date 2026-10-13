@@ -534,7 +534,67 @@ func (s *Server) handleIncidentGet(w http.ResponseWriter, r *http.Request, p ide
 			"No such incident, or you are not assigned to its site.", requestID(r))
 		return
 	}
+	// The attention producer, BEFORE the body: the same ordering and the same
+	// failure answer `auditEvidenceFetched` uses. A read that answers and then
+	// fails to record that it was read is the invisible gap this row exists to
+	// close — attention_minutes is the North Star numerator, and a producer that
+	// can fail silently under-counts it with nothing anywhere saying so.
+	//
+	// The site is deliberately not a parameter: the row is about the incident and
+	// the session, and the site check above has already refused the ones the
+	// caller may not see. Carrying a site id this function ignores would be the
+	// sort of parameter a later change fills in with the wrong value.
+	if err := s.auditIncidentOpened(r, p, id); err != nil {
+		WriteError(w, http.StatusInternalServerError, "audit_failed", err.Error(), requestID(r))
+		return
+	}
 	WriteJSON(w, http.StatusOK, detail)
+}
+
+// auditIncidentOpened records the first authenticated read of an incident by this
+// session.
+//
+// This row is the producer for `attention_minutes`, which had none: nothing in
+// the product recorded when an operator STARTED paying attention, so the interval
+// a human was responsible for an incident existed in no table anywhere. The
+// dispositions table records when they finished; this records when they began.
+//
+// Once per session per incident, not once per read. A page refresh is not a new
+// bout of attention, and a metric that counts refreshes rewards an operator for
+// spamming them. The check is a read and the write is append-only, so two
+// concurrent first-reads from one session can both find no row and both write
+// one; attention then starts at the earlier of the two, which is the correct
+// answer to a race between two tabs.
+//
+// A server with no audit writer is left alone rather than failing the read, for
+// the reason `auditEvidenceFetched` gives: a deployment that has not wired the
+// ledger is already broken, and turning every incident read into a 500 hides that
+// behind a different symptom. A deployment WITH one gets the row, or an error it
+// can see.
+func (s *Server) auditIncidentOpened(r *http.Request, p identity.Principal, incidentID string) error {
+	if s.Audit == nil || s.Pool == nil {
+		return nil
+	}
+	var seen int
+	err := s.Pool.For(p.TenantID, "audit_ledger").QueryRow(r.Context(), `
+		SELECT count(*) FROM audit_ledger
+		 WHERE action = $1 AND target_id = $2 AND session_id = $3`,
+		audit.ActionIncidentOpened, incidentID, p.SessionID).Scan(&seen)
+	if err != nil {
+		return err
+	}
+	if seen > 0 {
+		return nil
+	}
+	return s.Pool.InSystemTenant(r.Context(), func(tx pgx.Tx) error {
+		_, err := s.Audit.Append(r.Context(), tx, audit.Entry{
+			TenantID: p.TenantID, Actor: p.Username, ActorType: audit.ActorOperator,
+			Action: audit.ActionIncidentOpened, TargetType: "incident", TargetID: incidentID,
+			RequestID: requestID(r), SessionID: p.SessionID, SiteScope: p.SiteScope,
+			Reason: "first authenticated read of this incident in this session",
+		})
+		return err
+	})
 }
 
 // handleIncidentExplain answers "why did this incident exist" from stored facts

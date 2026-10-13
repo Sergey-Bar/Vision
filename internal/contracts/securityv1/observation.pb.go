@@ -7,12 +7,13 @@
 package securityv1
 
 import (
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
-	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
+
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 )
 
 const (
@@ -355,7 +356,7 @@ const file_security_v1_observation_proto_rawDesc = "" +
 	"created_at\x18\x17 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12:\n" +
 	"\x19supersedes_observation_id\x18\x18 \x01(\tR\x17supersedesObservationId\x12-\n" +
 	"\x12production_profile\x18\x19 \x01(\bR\x11productionProfileB\x0e\n" +
-	"\f_temperatureBKZIgithub.com/Sergey-Bar/vision/internal/contracts/securityv1;securityv1b\x06proto3"
+	"\f_temperatureBGZEgithub.com/Sergey-Bar/vision/internal/contracts/securityv1;securityv1b\x06proto3"
 
 var (
 	file_security_v1_observation_proto_rawDescOnce sync.Once

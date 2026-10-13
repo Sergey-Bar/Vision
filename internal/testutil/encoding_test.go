@@ -45,6 +45,13 @@ const replacementChar = "\uFFFD"
 // checked fact rather than a paragraph in a document nobody re-reads. Removing an
 // entry means fixing the file; adding one means the gate noticed something new.
 var replacementCharSites = map[string]int{
+	// docs/status.md carries one, and the reason it is here twice is worth writing
+	// down: a pass that rewrote large sections of that document with PowerShell
+	// also re-encoded every em dash into mojibake. Repairing that restored this
+	// character, which had been destroyed by the same rewrite. Removing it means
+	// fixing the file; it is listed because the ledger is the record of what is
+	// there, and a file that loses its character through a repair is exactly the
+	// case the ledger exists to catch.
 	"docs/status.md": 1,
 	// adapter.go's two are not comments: they are the marks either side of a hash
 	// marker, `"captured-at"`, in `withoutCapturedTimes`. They are not quote marks.

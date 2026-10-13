@@ -859,9 +859,32 @@ func (s *Service) registerFailure(ctx context.Context, tenant string, user userR
 		t := s.now().Add(delay)
 		until = &t
 	}
+	// The lock is written so that it can only ever be WIDENED, and that is the
+	// whole of this half-statement.
+	//
+	// `registerFailure` is called by eight concurrent wrong passwords on the same
+	// row, and each one has its own view of the counter: the goroutine whose
+	// atomic increment returned 8 sees a lock, and the one whose returned 3 does
+	// not. Writing `locked_until = $3` directly makes both of them the last
+	// writer sometimes, and the NULL from the low-count goroutine CLEARS the lock
+	// the high-count one just set. The counter was right, the lock was absent,
+	// and the account was usable. `TestConcurrentWrongPasswordsAreAllCounted`
+	// caught it under the full suite's load and passed for weeks in isolation,
+	// which is exactly how a lockout defect survives: the interleaving it needs
+	// is load-dependent.
+	//
+	// So a NULL may not clear a lock, and a new deadline may not shorten an
+	// existing one. `COALESCE(locked_until, $3)` is the row's current deadline or
+	// the new one when there is none, and `GREATEST` picks the later of the two.
+	// The policy stays in Go: `ShouldLock` still decides WHETHER and by how long,
+	// and what this statement changes is that the decision cannot be undone by a
+	// goroutine whose view was older.
 	if err := s.Pool.InTx(ctx, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx,
-			`UPDATE users SET locked_until = $3 WHERE tenant_id = $1 AND user_id = $2`,
+			`UPDATE users SET locked_until =
+			    CASE WHEN $3::timestamptz IS NULL THEN locked_until
+			         ELSE GREATEST(COALESCE(locked_until, $3::timestamptz), $3::timestamptz) END
+			  WHERE tenant_id = $1 AND user_id = $2`,
 			tenant, user.UserID, until)
 		return err
 	}); err != nil {

@@ -65,9 +65,25 @@ func benchmarkConfig() Config {
 // not compared, because comparing them would make this a test of the machine. The one
 // assertion is that the measurement is above the timer's resolution, because a run that
 // cannot resolve its own duration is not a measurement.
+//
+// It does NOT run under the race detector, and the reason is measured rather than
+// assumed: instrumented, the 2,000-frame run did not finish inside the 10-minute test
+// timeout and panicked, which took the rest of the package down with it — so the one
+// run whose numbers are worth reading was also the run that cost every other test in
+// here its instrumented pass. A cost measured through an instrumentor is a property of
+// the instrumentor, and the skip says so rather than quietly printing a number 20x
+// the truth. Without -race the numbers are the ones the proposal quotes.
 func TestTheNoveltyPassCostAt1080pIsMeasured(t *testing.T) {
 	if testing.Short() {
 		t.Skip("a 2,000-frame 1080p novelty benchmark is not a short test")
+	}
+	if raceEnabled {
+		t.Skip("the race detector inflates this benchmark's own subject — wall-clock time per pass — by " +
+			"more than an order of magnitude (measured: the instrumented 2,000-frame run exceeded the " +
+			"10-minute test timeout, so >300 ms a pass against 3.5 ms uninstrumented, an ~85x inflation), " +
+			"and it then PANICS, which aborts the whole package and costs the other tests here their " +
+			"instrumented run. The numbers this benchmark exists to print would be numbers about the " +
+			"instrumentor, so it runs on the suite's non-race pass instead")
 	}
 	const (
 		w, h    = 1920, 1080

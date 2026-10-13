@@ -22,7 +22,17 @@ type licenceRecord struct {
 	ShapeRecord  string `json:"shape_record"`
 	FilenameSays string `json:"filename_says"`
 	Licence      string `json:"licence"`
-	Decisions    struct {
+	// LicenceSource and LicenceRecordedOn are what make a licence a record rather
+	// than a word. A field holding `MIT` with nothing behind it is indistinguishable
+	// from a field holding `MIT` because it seemed likely, and the failure it
+	// produces is a demo that inherits a term nobody ever read.
+	LicenceSource     string `json:"licence_source"`
+	LicenceRecordedOn string `json:"licence_recorded_on"`
+	Origin            struct {
+		URL         string `json:"url"`
+		Established string `json:"established"`
+	} `json:"origin"`
+	Decisions struct {
 		Rename         string `json:"rename"`
 		RenameProvedBy string `json:"rename_proved_by"`
 	} `json:"decisions"`
@@ -127,8 +137,21 @@ func TestTheLicenceRecordNamesTheModelTheMeasurementDescribes(t *testing.T) {
 	}
 
 	// 3. The rename is recorded as a decision WITH its reason, and the licence is
-	// separately still unrecorded. The failure this protects against is the demo
-	// saying "YOLOv4" and letting a listener assume that settles the licensing.
+	// recorded WITH the source it was read from.
+	//
+	// This test used to assert the licence field contained `NOT RECORDED`, and it
+	// was right to: the rename fixed the FILENAME and the licence was a separate
+	// fact nobody had established, so a demo saying "YOLOv4" while letting a
+	// listener assume that settled the licensing was exactly the failure.
+	//
+	// What changed is the FACT, not the control. On 2026-10-11 the origin was
+	// MEASURED: the weights hash to the same SHA-256 as the ONNX Model Zoo's
+	// yolov4 asset, and the page that publishes that asset states MIT. So the
+	// licence is now recorded — and the assertion inverted rather than
+	// disappeared. A bare `MIT` with no page, no date and no origin would be the
+	// same claim this test used to refuse, in its opposite form: a term nobody
+	// can trace to the rights holder's own words. The record has to name WHERE it
+	// read the licence and WHEN.
 	if !strings.HasPrefix(strings.TrimSpace(lic.Decisions.Rename), "YES") {
 		t.Fatalf("the rename decision is %q. The file was renamed on 2026-10-03 and the record has "+
 			"to say so, with the reasoning, because a rename nobody recorded is indistinguishable "+
@@ -138,10 +161,36 @@ func TestTheLicenceRecordNamesTheModelTheMeasurementDescribes(t *testing.T) {
 		t.Error("the rename decision records no provenance for the name. `yolov4` has to be derived " +
 			"from the yolov4-416.cfg anchors, not guessed from a tensor shape that v5 also has")
 	}
-	if !strings.Contains(lic.Licence, "NOT RECORDED") {
-		t.Fatalf("licence = %q. The rename fixed the FILENAME and this is a different fact about a "+
-			"different subject. `NOT RECORDED` is still what is true, and anything said on stage "+
-			"about this model has to say both halves", lic.Licence)
+	if strings.Contains(strings.ToUpper(lic.Licence), licenceUnrecorded) && lic.LicenceSource == "" {
+		t.Fatalf("licence = %q and no licence_source is recorded. A licence nobody can trace to the "+
+			"rights holder's own page is a term nobody has read, and anything said on stage about this "+
+			"model inherits it", lic.Licence)
+	}
+	if strings.TrimSpace(lic.Licence) == "" {
+		t.Fatal("licence is empty. An ABSENT field is not a permissive field, and this is the field " +
+			"that says what a demonstration built on these weights may be shown")
+	}
+	if lic.LicenceSource == "" {
+		t.Fatalf("licence = %q with no licence_source. The licence is only a record if it names the "+
+			"page or file it was read FROM; a bare term is a guess wearing a record's clothes",
+			lic.Licence)
+	}
+	if strings.TrimSpace(lic.LicenceRecordedOn) == "" {
+		t.Error("licence_recorded_on is empty. A licence read on no date is a licence nobody can " +
+			"check against the version of the page it was read from")
+	}
+	// The origin and the digest are the two halves of the identity the licence now
+	// rests on: MIT as stated by a page, for bytes that page publishes. An origin
+	// URL with no https scheme, or a digest that is not 64 hex characters, is a
+	// record that looks established and cannot be checked.
+	if !strings.HasPrefix(lic.Origin.URL, "https://") {
+		t.Errorf("origin.url = %q, want an https URL. The licence record's whole new strength is "+
+			"that its source can be fetched and re-hashed by anybody; a non-https URL cannot be",
+			lic.Origin.URL)
+	}
+	if len(lic.SHA256) != 64 {
+		t.Fatalf("sha256 = %q, want 64 hex characters. The file is identified by its content and not "+
+			"by a name, and a digest that is not a digest identifies nothing", lic.SHA256)
 	}
 }
 

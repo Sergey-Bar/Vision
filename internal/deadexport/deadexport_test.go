@@ -183,7 +183,6 @@ var (
 		// gate that measures whether every member has an executor.
 		"internal/rules.Severities":           {Symbol: "internal/rules.Severities", Why: "published vocabulary: the incident severities a rule may declare, shared by the bundle schema and the compiler"},
 		"internal/rules.DefaultBusinessHours": {Symbol: "internal/rules.DefaultBusinessHours", Why: "published default: the business-hours window a schedule condition gets when the bundle omits one. It is a product decision recorded in docs/ai-and-data.md"},
-		"internal/rules.StateDuplicate":       {Symbol: "internal/rules.StateDuplicate", Why: "part of the verification-state vocabulary the evaluation harness and the incident row share, stored as text and read by the harness rather than by a Go caller"},
 		"internal/rules.MarshalCanonical":     {Symbol: "internal/rules.MarshalCanonical", Why: "UNWIRED. The canonical bundle marshaller nothing calls. Close it by having the bundle digest and the console's rule screen use it, so the digest an operator reads is the bytes the compiler saw, or delete it"},
 		"internal/rules.RuleIDs":              {Symbol: "internal/rules.RuleIDs", Why: "UNWIRED. The rule-id accessor nothing calls. Close it by having the console's rule screen and the activation digest diff list ids through it, or delete it"},
 
@@ -336,6 +335,29 @@ var (
 		// decisions an operator is told about by name in the operations runbook.
 		"internal/jobs.DefaultLeaseDuration":   {Symbol: "internal/jobs.DefaultLeaseDuration", Why: "published default: how long a claimed job is held before another worker may take it. The companion `jobs.VLMLeaseDuration` is the AI-plane figure and is recorded beside it; this is the general one, and both are deployment decisions an operator tunes by name"},
 		"internal/outbox.DefaultLeaseDuration": {Symbol: "internal/outbox.DefaultLeaseDuration", Why: "published default: how long a claimed outbox message is held before the relay may take it again. It is the lease whose loss would cause a duplicate dispatch, which is invariant 1's second half, so the number belongs to the operations contract rather than to a caller"},
+
+		// P2.2's priority arithmetic, written before its consumer.
+		//
+		// The plan of record is explicit that the weights belong in the site's
+		// versioned config and that changing them is a change with a diff, and
+		// `docs/status.md` is explicit that the schema change needs a human. This
+		// is the shape the weights will arrive in, written now so the human
+		// reviews a finished thing rather than a half of one. The queue that
+		// will read these is P2.2's other half, and it is not built: there is no
+		// exception queue in the tree to read a ranking.
+		//
+		// The published surface is these four, and each one is a number an
+		// operator or a reviewer needs by name rather than through a caller: the
+		// VERSION, so a ranking can say which arithmetic produced it; the
+		// WEIGHTS, which are the site-config change waiting to happen; the
+		// DENOMINATOR, so a caller cannot invent a second normalisation and
+		// therefore a second scale; and the SCALE, for the same reason. The
+		// function itself and its factor struct are the arithmetic and they are
+		// below, not here.
+		"internal/rules.PriorityVersion":        {Symbol: "internal/rules.PriorityVersion", Why: "published version: which version of the priority arithmetic produced a number. The weights move into site config when the schema is signed; this number changes when they do, and an exception queue that cannot say which arithmetic ranked it cannot be re-derived or defended in an audit"},
+		"internal/rules.DefaultPriorityWeights": {Symbol: "internal/rules.DefaultPriorityWeights", Why: "published default: the v1 weight table for the priority arithmetic. These are deployment numbers a site tunes by name, the plan of record says they belong in a versioned config so a change is a diff, and this struct is that config's in-memory form. Moving them to the schema is the blocked second half"},
+		"internal/rules.TotalWeight":            {Symbol: "internal/rules.TotalWeight", Why: "published denominator: the largest answer the priority arithmetic can produce for a weight table. Exported so a caller checking the claim that the answer is bounded has the denominator in one place; a caller that recomputes it gets a second scale, which is how a ranking number becomes a percentage in one place and a probability in another"},
+		"internal/rules.MaxPriority":            {Symbol: "internal/rules.MaxPriority", Why: "published scale: the top of the range the priority answer occupies, so no call site invents its own normalisation"},
 
 		// The POC's categorizer surface. `poc.StreamIngest` builds the engine and
 		// holds it on the hub, and the field that would consume it already exists

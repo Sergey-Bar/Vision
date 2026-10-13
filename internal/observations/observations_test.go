@@ -189,6 +189,62 @@ func TestUnknownProfileAndFieldAreRefused(t *testing.T) {
 	}
 }
 
+// TestEveryObservationProfileDeclaresTheFieldItIsScoredOn is the registry's own
+// self-check, and it is here rather than in the harness because the harness was
+// where the defect was.
+//
+// `predictedRestricted` in internal/evaluation reads the field a profile's
+// answer is made of. It read ONE field, by name, as a constant — the claim
+// `restricted-person` makes — so for every other profile it returned nil, no
+// case was ever answered, and no profile other than `restricted-person` could
+// ever pass Evaluate. The field is now declared beside the field set it belongs
+// to, in this file, and these tests are what keep the declaration true:
+//
+//   - a profile that declares a score field declares one it actually has in its
+//     own field set, so every answer would otherwise read as an absence and the
+//     profile could never be measured;
+//   - a profile that is not the investigator declares a scalar claim, because
+//     "not scorable" is the investigator's alone — a profile whose answer is a
+//     sentence has no boolean for a rate to be a rate OF;
+//   - the production profile declares one, so the M1 class is measurable at all.
+func TestEveryObservationProfileDeclaresTheFieldItIsScoredOn(t *testing.T) {
+	for id, p := range observations.M1Profiles {
+		if p.ScoreField != "" && !p.Fields[p.ScoreField] {
+			t.Errorf("profile %q scores the field %q, which its own field set does not declare: "+
+				"every answer would be read as an absence and the profile could never be measured",
+				id, p.ScoreField)
+		}
+		if p.ScoreField == "" && id != observations.ProfileInvestigate {
+			t.Errorf("profile %q declares no score field. Only the investigator answers with "+
+				"a sentence and a citation list; every other profile has a boolean claim in its "+
+				"output, and an unmeasurable profile cannot be promoted or held back", id)
+		}
+	}
+	if field, _ := observations.ProfileScoreField("restricted-person"); field != "restrictedZoneBreach" {
+		t.Errorf("the production profile scores %q, want restrictedZoneBreach: the M1 incident "+
+			"class is the one whose gates are the reason the harness exists", field)
+	}
+}
+
+// TestProfileScoreFieldReportsAnUnknownProfileAsUnknown: an unknown profile has
+// no declared field, and inventing one would score a profile against a claim it
+// never emits — the same defect as reading a constant, in a place where nothing
+// would notice. The second return is what lets a caller record an absence
+// instead of a negative.
+func TestProfileScoreFieldReportsAnUnknownProfileAsUnknown(t *testing.T) {
+	if _, known := observations.ProfileScoreField("invented-profile"); known {
+		t.Error("a profile this build does not carry reports itself known. Inventing a field " +
+			"for it would score it against a claim it never made")
+	}
+	if field, known := observations.ProfileScoreField("door-forced"); !known || field != "personPresent" {
+		t.Errorf("ProfileScoreField(door-forced) = %q,%v, want personPresent,true", field, known)
+	}
+	if field, known := observations.ProfileScoreField(observations.ProfileInvestigate); !known || field != "" {
+		t.Errorf("ProfileScoreField(investigate) = %q,%v, want \"\",true: the profile is known and "+
+			"has no scalar claim, which is a different thing from being unknown", field, known)
+	}
+}
+
 func TestShadowProfilesAreMarkedAndProductionIsNot(t *testing.T) {
 	w, tenant, site := writer(t)
 

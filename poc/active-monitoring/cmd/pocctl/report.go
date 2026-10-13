@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/soak"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
+	"github.com/Sergey-Bar/vision-poc/internal/soak"
+	"github.com/Sergey-Bar/vision-poc/internal/store"
 )
 
 // storedDetectorTally is the run's detector arithmetic, read from the store.
@@ -30,6 +30,49 @@ func storedDetectorTally(st *store.Store, runID string) soak.DetectorTally {
 		return soak.DetectorTally{}
 	}
 	return t
+}
+
+// storedCropTally is the run's crop-gate arithmetic, read from the store.
+//
+// Its sibling above explains the shape. This one closes the gap the sibling did
+// not: `Runner.crops` was accumulated on every frame and read by nothing, so
+// "when did we decide not to look, and how often" — and "how many proposed crops
+// were refused as too small" — existed nowhere a report could reach.
+func storedCropTally(st *store.Store, runID string) soak.CropTally {
+	raw, found, err := st.CropTally(context.Background(), runID)
+	if err != nil || !found {
+		return soak.CropTally{}
+	}
+	var t soak.CropTally
+	if err := json.Unmarshal(raw, &t); err != nil {
+		return soak.CropTally{}
+	}
+	return t
+}
+
+// storedVerificationSlice is the per-site, per-class slice, read from the store.
+//
+// Unlike its two siblings this one is not a stored blob: the cells are the
+// detections themselves, grouped at read time, because a slice that was written
+// once at the end of a run would be a slice about the moment it was written.
+// The report's own rule is that it describes the database and not the moment,
+// and this is the section where that rule matters most — the question it answers
+// is "was the model being served", and the answer changes every time a
+// detection's ai_state moves.
+//
+// An error returns an UNMEASURED slice and never a zero-filled one. The section
+// prints NOT RUN, which is a visible statement that this run says nothing; a
+// zero-filled slice would print "every retained detection had an answer" for a
+// run where nothing was read, which is the exact sentence this section exists to
+// refuse.
+func storedVerificationSlice(st *store.Store, runID string) soak.VerificationSlice {
+	cells, cellsErr := st.VerificationStatesBySiteAndClass(context.Background(), runID)
+	byState, statesErr := st.VerificationTotals(context.Background(), runID)
+	total, retained, totalsErr := st.RetainedDetections(context.Background(), runID)
+	if cellsErr != nil || statesErr != nil || totalsErr != nil {
+		return soak.VerificationSlice{}
+	}
+	return soak.VerificationSliceOf(cells, byState, total, retained)
 }
 
 func exec2(name string, args ...string) (string, error) {
@@ -290,7 +333,9 @@ func reportFor(st *store.Store, run *store.Run, c context.Context) (soak.Report,
 		Peaks: soak.Peaks{RSSBytes: peaks.RSSBytes, DBBytes: peaks.DB, DiskBytes: peaks.DiskBytes,
 			CPUPercent: peaks.CPUPercent, AIP99MS: peaks.AIP99MS, Samples: peaks.Samples},
 		Counters: soak.Counters{ByStatus: counts, PushAttempts: push.Total, DeadLettered: push.DeadLetter,
-			Heartbeats: beats, Faults: len(faults), Detector: storedDetectorTally(st, run.ID)},
+			Heartbeats: beats, Faults: len(faults), Detector: storedDetectorTally(st, run.ID),
+			CropGate:     storedCropTally(st, run.ID),
+			Verification: storedVerificationSlice(st, run.ID)},
 		FalsePositives: soak.NewFalsePositiveRow(in.FalsePositives),
 		Truth:          truth,
 		NotProven:      soak.NotProven(in, summary),

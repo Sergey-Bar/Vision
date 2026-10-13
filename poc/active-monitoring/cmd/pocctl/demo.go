@@ -11,15 +11,16 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/config"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/soak"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/xprotect"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/xpsim"
+	"github.com/Sergey-Bar/vision-poc/internal/config"
+	"github.com/Sergey-Bar/vision-poc/internal/soak"
+	"github.com/Sergey-Bar/vision-poc/internal/store"
+	"github.com/Sergey-Bar/vision-poc/internal/xprotect"
+	"github.com/Sergey-Bar/vision-poc/internal/xpsim"
 )
 
 // cmdDemo is T32: three minutes, a labelled clip, the real pipeline, the real
@@ -45,34 +46,44 @@ func cmdDemo(args []string) error {
 	if err != nil {
 		return err
 	}
-	if runtime.GOOS != "windows" {
-		return fmt.Errorf("demo: this script is written for the Windows shell, because that is where the run was developed. The pipeline itself is cross-platform: run `go run ./cmd/watch` with the same SP_POC_* variables on any platform")
+	// A capability check where a platform refusal used to be.
+	//
+	// This command used to open with `if runtime.GOOS != "windows" { return error
+	// }`, which named the platform and nothing else. A judge on macOS or Linux got
+	// "written for the Windows shell" for a pipeline that is pure Go plus ffmpeg,
+	// both of which run everywhere — and the error message itself said so, which
+	// made the refusal read as a choice rather than a limitation.
+	//
+	// What the demo actually needs is a capability list: a toolchain to build
+	// with, and ffmpeg/ffprobe to read a source with. Each missing one is named
+	// with what breaks and the install line for the platform in front of you,
+	// which is the same refusal style the rest of this module uses. A platform
+	// NAME cannot be acted on; a missing TOOL can.
+	if err := demoCapabilities(flags["skip-build"] != "true"); err != nil {
+		return err
 	}
 
 	root := repoRoot()
 	clip := flags["clip"]
 	zones := flags["zones"]
-	// The default material is the one the model actually detects things in.
+	// There is deliberately NO default clip, and this is the plan's B2 with its
+	// whole reasoning.
 	//
-	// It used to be `car-crossing.mp4`, which is a coloured rectangle on a
-	// `testsrc` background: a real run over it returns ZERO boxes, so the demo
-	// ran the whole pipeline and produced no event to show. That is not a demo,
-	// it is a demonstration of a detector that finds nothing, and `detections | 0`
-	// reads exactly like a quiet road.
+	// The default used to be `testdata\youtube\sTF-6_xinUU.mp4`: a real night
+	// intersection, real moving vehicles, and — as `testdata/labels.json` records
+	// in a field rather than in prose — `cleared_for_external_use: false`, its
+	// licence NOT recorded, not republishable, and explicitly not demonstrable to
+	// anyone outside the machine it sits on. The demo is shown to people. A
+	// default that hands the operator material they may not show is the defect
+	// this refusal exists to prevent, and the fix is not a different default:
+	// the clip is now NAMED, and the youtube row stays in labels.json as the
+	// record of why.
 	//
-	// This clip is a real night intersection and the model detects vehicles in it
-	// at 0.75-0.93. Its licence is NOT recorded — see testdata/labels.json — so it
-	// may be read on this machine and may NOT be shown outside it. That is a
-	// licensing limit on the footage, not on the code, and it is printed in step 1
-	// so nobody discovers it in a room.
-	const defaultClip = `testdata\youtube\sTF-6_xinUU.mp4`
-	const defaultZones = "testdata/night-intersection.zones.json"
-	if clip == "" {
-		clip = filepath.Join(root, defaultClip)
-	}
-	if zones == "" {
-		zones = filepath.Join(root, filepath.FromSlash(defaultZones))
-	}
+	// The zones file is the sibling of the clip, derived the same way the anchors
+	// file is derived from --model: the geometry belongs to the footage, and a
+	// zone file for footage the run is not reading produces zero events and no
+	// error. Both committed clips ship their sibling (`car-crossing.zones.json`,
+	// `bird-synthetic.zones.json`).
 	model := flags["model"]
 	if model == "" {
 		model = filepath.Join(root, "models", "yolov4n.onnx")
@@ -94,6 +105,13 @@ func cmdDemo(args []string) error {
 	// caller who named something that is not an `.onnx` file gets the file they
 	// named rather than a guessed sibling of it.
 	anchors := anchorsBeside(model, root)
+	// The zones file is derived from the clip exactly the way the anchors file is
+	// derived from the model: the geometry belongs to the footage. Both committed
+	// clips ship their sibling under the same base name, and `pocctl zone --pick`
+	// writes one the same way.
+	if clip != "" && zones == "" {
+		zones = zonesBeside(clip)
+	}
 	dataRoot := flags["data-root"]
 	if dataRoot == "" {
 		dataRoot = filepath.Join(root, ".demo-data")
@@ -123,10 +141,13 @@ func cmdDemo(args []string) error {
 	// hosted model. Requiring them here would put W1-4's dependency straight back
 	// into the one command an operator runs in front of a customer.
 	if live {
-		for _, p := range []string{flags["zones"]} {
-			if _, err := os.Stat(p); err != nil {
-				return fmt.Errorf("demo --live: %s is missing: %w", p, err)
-			}
+		if zones == "" {
+			return fmt.Errorf("demo --live: no --zones. A live run reads a camera, and the zones file is the " +
+				"geometry the run is told to test crossings against; without one the line test has no line and " +
+				"the run produces zero events and no error")
+		}
+		if _, err := os.Stat(zones); err != nil {
+			return fmt.Errorf("demo --live: %s is missing: %w", zones, err)
 		}
 		fmt.Printf("  zones  %s\n", zones)
 		fmt.Printf("  data   %s\n\n", dataRoot)
@@ -134,12 +155,25 @@ func cmdDemo(args []string) error {
 		fmt.Println()
 		// DERIVED, not asserted. See printTriggerBanner.
 	} else {
+		// B2: the clip is NAMED, never defaulted. The refusal is a table, not a
+		// wall: it says what is committed, what each thing is worth, and what the
+		// command is waiting on. A demo that refused with "clip missing" would send
+		// the operator looking for a file; this one sends them to the decision.
+		if clip == "" {
+			return noClipGiven(root)
+		}
+		if zones == "" {
+			return fmt.Errorf("demo: no --zones and %s has no sibling zone file. The zones file is the "+
+				"authority for the line, and a guessed line produces zero events and no error at all. Draw one "+
+				"with `pocctl zone --pick %s`, or pass --zones.", clip, clip)
+		}
 		for _, p := range []string{clip, zones, model, anchors, filepath.Join(root, "pyworker", "server.py")} {
 			if _, err := os.Stat(p); err != nil {
 				return fmt.Errorf("demo: %s is missing: %w\n\n"+
-					"  The demo needs the labelled clip, its zone file and the ONNX model. Build them with:\n"+
-					"    scripts\\make-bird-clip.sh      (the synthetic bird case)\n"+
-					"    pocctl fetch-model --url <url>  (the model is not in git)\n\n"+
+					"  The demo needs the labelled clip, its zone file and the ONNX model. Get them with:\n"+
+					"    pocctl bootstrap              (one command: toolchain, model, runtime, material)\n"+
+					"    pocctl fetch-model            (the model alone; the URL is pinned and the digest checked)\n"+
+					"    pocctl fetch-runtime --url <onnxruntime-release-zip-url>\n\n"+
 					"  The anchors file is not in git either: the measured model is an ANCHORED export and\n"+
 					"  its anchor boxes live in the model's .cfg, not in the ONNX file. See\n"+
 					"  pyworker/fixtures/yolov4n.contract.json.", p, err)
@@ -150,10 +184,7 @@ func cmdDemo(args []string) error {
 		fmt.Printf("  model  %s\n", model)
 		fmt.Printf("  anchors %s\n", anchors)
 		fmt.Printf("  data   %s\n\n", dataRoot)
-		fmt.Println("  The default clip is a real night intersection and the model detects vehicles in")
-		fmt.Println("  it. Its licence is NOT recorded (testdata/labels.json): it may be read on THIS")
-		fmt.Println("  machine and may NOT be shown to anyone outside it. A screenshot of this demo is")
-		fmt.Println("  a screenshot of that footage.")
+		printClipProvenance(root, clip)
 		fmt.Println()
 		// The banner is printed for BOTH paths, and it reads the mode out of the
 		// environment slice this command builds. It used to be a literal in the live
@@ -166,14 +197,14 @@ func cmdDemo(args []string) error {
 
 	step(2, 7, "build the two binaries")
 	if flags["skip-build"] != "true" {
-		if err := run(root, "go", "build", "-o", filepath.Join(root, "bin", "pocctl.exe"), "./cmd/pocctl"); err != nil {
+		if err := run(root, "go", "build", "-o", filepath.Join(root, "bin", binName("pocctl")), "./cmd/pocctl"); err != nil {
 			return err
 		}
-		if err := run(root, "go", "build", "-o", filepath.Join(root, "bin", "watch.exe"), "./cmd/watch"); err != nil {
+		if err := run(root, "go", "build", "-o", filepath.Join(root, "bin", binName("watch")), "./cmd/watch"); err != nil {
 			return err
 		}
 	}
-	pocctl := filepath.Join(root, "bin", "pocctl.exe")
+	pocctl := filepath.Join(root, "bin", binName("pocctl"))
 
 	step(3, 7, "inject the faults first: the screen is only shown after the rehearsal passes")
 	fmt.Println("  Gate D comes before the screen. A screen over a pipeline that has not been")
@@ -248,7 +279,7 @@ func cmdDemo(args []string) error {
 	fmt.Println()
 	fmt.Printf("  open http://%s once the line below says the screen is up\n", flags["ui-addr"])
 	fmt.Println()
-	watch := filepath.Join(root, "bin", "watch.exe")
+	watch := filepath.Join(root, "bin", binName("watch"))
 	// The run's exit code is NOT discarded.
 	//
 	// It was, with `_ =`, and that is how a demo announced "here is what landed"
@@ -281,11 +312,11 @@ func showLandedLive(root string, env []string, dataRoot string) error {
 	fmt.Println("  process that produced it. Nothing here is a claim about what happened;")
 	fmt.Println("  it is what the database holds.")
 	fmt.Println()
-	if err := runEnv(root, env, filepath.Join(root, "bin", "pocctl.exe"), "audit", "ledger"); err != nil {
+	if err := runEnv(root, env, filepath.Join(root, "bin", binName("pocctl")), "audit", "ledger"); err != nil {
 		return fmt.Errorf("demo --live: the ledger did not verify: %w", err)
 	}
 	fmt.Println()
-	if err := runEnv(root, env, filepath.Join(root, "bin", "pocctl.exe"), "audit", "observations"); err != nil {
+	if err := runEnv(root, env, filepath.Join(root, "bin", binName("pocctl")), "audit", "observations"); err != nil {
 		return fmt.Errorf("demo --live: the attribution records could not be read: %w", err)
 	}
 	fmt.Println()
@@ -294,7 +325,7 @@ func showLandedLive(root string, env []string, dataRoot string) error {
 	// id is a proof command nobody runs.
 	runID := os.Getenv("SP_POC_DATA_ROOT")
 	_ = runID
-	if err := runEnv(root, env, filepath.Join(root, "bin", "pocctl.exe"), "prove", "--run", newestRunID(dataRoot)); err != nil {
+	if err := runEnv(root, env, filepath.Join(root, "bin", binName("pocctl")), "prove", "--run", newestRunID(dataRoot)); err != nil {
 		return fmt.Errorf("demo --live: the replay did not reproduce the newest decision: %w", err)
 	}
 	fmt.Println()
@@ -404,6 +435,254 @@ func repoRoot() string {
 		fmt.Println("  Run pocctl from poc/active-monitoring.")
 	}
 	return wd
+}
+
+// --- the clip, and its licence ------------------------------------------------
+
+// zonesBeside is the zone file that belongs to a clip, by base name.
+//
+// The same relationship the anchors file has to the model: the geometry is a
+// property of the footage. Both committed clips ship their sibling
+// (`car-crossing.zones.json` beside `car-crossing.mp4`) and `pocctl zone --pick`
+// writes one the same way. The alternative — one zones default for every clip —
+// is what this demo used to have, and a zone file measured against footage the
+// run is not reading produces zero events and no error at all.
+func zonesBeside(clip string) string {
+	return strings.TrimSuffix(clip, filepath.Ext(clip)) + ".zones.json"
+}
+
+// noClipGiven is B2's refusal, and it is a table rather than a wall.
+//
+// The demo used to default to `testdata\youtube\sTF-6_xinUU.mp4`: real footage,
+// real moving vehicles, and a labels.json row saying in a field rather than in
+// prose that it may not be shown to anyone outside this machine. Every demo is a
+// demonstration TO people, so a default of "material you may not show" is the
+// defect. The clip is now named, and the youtube row is kept as the record of
+// why — which is what the plan's B2 asks for in as many words.
+func noClipGiven(root string) error {
+	fmt.Println("demo: no --clip, and there is deliberately no default clip.")
+	fmt.Println()
+	fmt.Println("  The default used to be testdata\\youtube\\sTF-6_xinUU.mp4 — a real night")
+	fmt.Println("  intersection the detector does see vehicles in. Its row in")
+	fmt.Println("  testdata/labels.json records, in fields rather than in prose: licence NOT")
+	fmt.Println("  RECORDED, cleared_for_external_use FALSE — readable on the machine it sits")
+	fmt.Println("  on and not demonstrable to anyone else. The submission this demo exists for")
+	fmt.Println("  is a demonstration to people, so the clip is now NAMED, and that row stays")
+	fmt.Println("  in labels.json as the record of why.")
+	fmt.Println()
+	printCommittedMaterial()
+	fmt.Println()
+	fmt.Println("  The synthetic clips are real material with real licences and one real limit:")
+	fmt.Println("  a COCO model returns ZERO boxes on a coloured rectangle over a testsrc")
+	fmt.Println("  pattern (measured, three instants, testdata/README.md). A run over one is")
+	fmt.Println("  honest and empty — the report says AC2/AC3/AC4 are NOT RUN with that reason")
+	fmt.Println("  rather than passing them — and it is not a demo.")
+	fmt.Println()
+	fmt.Println("  What this command is waiting on is B1: a clip of real motion whose licence")
+	fmt.Println("  row can be stated in full. Record it, add its row to testdata/labels.json,")
+	fmt.Println("  and run:")
+	fmt.Println("    pocctl demo --clip testdata/<your-clip>.mp4")
+	fmt.Println()
+	fmt.Println("  On this machine, with the file that is already here:")
+	fmt.Println("    pocctl demo --clip testdata\\youtube\\sTF-6_xinUU.mp4")
+	return fmt.Errorf("demo: no clip was named, so no footage was chosen on the operator's behalf")
+}
+
+// printCommittedMaterial prints the provenance table, with the two facts a reader
+// needs: what each clip is, and whether it may be shown.
+//
+// It is here, next to noClipGiven, because that is where the refusal needs it —
+// and `bootstrap` prints the same table, so one function answers "what material
+// is there" for both commands. A second copy would drift, and a material table
+// that disagrees with itself is worse than no table.
+func printCommittedMaterial() {
+	clips := committedClips()
+	if len(clips) == 0 {
+		fmt.Println("  testdata/labels.json could not be read, so nothing is claimed about the material.")
+		return
+	}
+	for _, c := range clips {
+		cleared, known := c.clearedForExternalUse()
+		clear := "clearance: absent"
+		if known {
+			clear = fmt.Sprintf("clearance: %v", cleared)
+		}
+		licence := "licence: " + licenceOrUnrecorded(c.Licence)
+		if len(licence) > 88 {
+			licence = licence[:88] + "..."
+		}
+		fmt.Printf("  %-30s %-9s %-20s %s\n", c.File, c.Provenance, clear, licence)
+	}
+	fmt.Println()
+	fmt.Println("  No clip is chosen for you. Name one with --clip; the zones file is derived")
+	fmt.Println("  beside it, the same way the anchors file is derived from --model.")
+}
+
+// committedClips reads the provenance table and returns its rows sorted.
+//
+// It reads `testdata/labels.json` rather than carrying a list in this file,
+// because a list in a source file is a list that forgets the row added next week
+// — and the whole point of the table above is that it is the record.
+//
+// The path is RESOLVED rather than assumed, for the reason findModuleRoot
+// describes: a command that reads the record must not stop reading it because it
+// was launched from a subdirectory.
+func committedClips() []clipLabel {
+	labels, err := loadLabels(labelsPath())
+	if err != nil {
+		return nil
+	}
+	out := make([]clipLabel, 0, len(labels))
+	for _, c := range labels {
+		out = append(out, c)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].File < out[j].File })
+	return out
+}
+
+// labelsPath is testdata/labels.json, found from wherever the command was run.
+func labelsPath() string {
+	for _, base := range []string{repoRoot(), findModuleRoot(), "."} {
+		if base == "" {
+			continue
+		}
+		candidate := filepath.Join(base, "testdata", "labels.json")
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	return filepath.Join("testdata", "labels.json")
+}
+
+// clipLicenceLine is the source-licence sentence for the relay path, read from
+// the clip's own row in the provenance table.
+//
+// It replaces a literal that named one clip's three REPLACE-ME fields. With the
+// clip no longer defaulted, that sentence would have been false for every other
+// clip — a licence line that does not describe the material is worse than a
+// missing one, because it is read as provenance.
+func clipLicenceLine(root, clip string) string {
+	labels, err := loadLabels(labelsPath())
+	if err != nil {
+		return "the relay re-publishes the clip named by --clip, and the provenance table could not be read: " + err.Error()
+	}
+	row, err := labelFor(labels, clip)
+	if err != nil {
+		return "the relay re-publishes the clip named by --clip, which has no row in testdata/labels.json, so no licence basis is recorded for it"
+	}
+	licence := strings.TrimSpace(row.Licence)
+	if licence == "" || strings.HasPrefix(upper(licence), licenceUnrecorded) {
+		return "the relay re-publishes the clip named by --clip, whose licence is NOT recorded in testdata/labels.json. Usable on this machine; NOT cleared to show outside it. No camera is connected."
+	}
+	cleared, known := row.clearedForExternalUse()
+	if known && !cleared {
+		return "the relay re-publishes the clip named by --clip, which testdata/labels.json records as NOT cleared for external use: " + licence
+	}
+	return "the relay re-publishes the clip named by --clip; testdata/labels.json records its licence as: " + licence
+}
+
+// printClipProvenance prints what the NAMED clip is, from its own row.
+//
+// This replaces a hardcoded paragraph about one specific clip's licence. The
+// paragraph was true of the default and false of anything else, so the moment
+// the clip stopped being defaulted it had to become a read. A run whose material
+// is not cleared to be shown must say so on the first screen, whatever the
+// material is — and that is derived from the row, exactly like every other
+// provenance line in this module.
+func printClipProvenance(root, clip string) {
+	labels, err := loadLabels(labelsPath())
+	if err != nil {
+		fmt.Printf("  the provenance table could not be read (%v), so nothing is claimed about\n", err)
+		fmt.Println("  the material. Record the clip's row in testdata/labels.json before showing this run.")
+		return
+	}
+	row, err := labelFor(labels, clip)
+	if err != nil {
+		fmt.Println("  this clip has NO ROW in testdata/labels.json, so nothing is claimed about where")
+		fmt.Println("  it came from or what licence covers it. Add the row before showing this run to anyone.")
+		return
+	}
+	if row.Provenance != "" {
+		fmt.Printf("  provenance %s (testdata/labels.json)\n", row.Provenance)
+	}
+	if strings.HasPrefix(upper(row.Licence), licenceUnrecorded) || strings.TrimSpace(row.Licence) == "" {
+		fmt.Println("  the licence for this material is NOT RECORDED. It may be read here and it may")
+		fmt.Println("  NOT be shown to anyone outside this machine: a screenshot of this demo is a")
+		fmt.Println("  screenshot of it.")
+		return
+	}
+	licence := row.Licence
+	if i := strings.Index(licence, ". "); i > 0 && i < 120 {
+		licence = licence[:i+1]
+	}
+	fmt.Printf("  licence %s\n", licence)
+	if cleared, known := row.clearedForExternalUse(); known && !cleared {
+		fmt.Println("  this material is NOT cleared for external use. A screenshot of this demo is a")
+		fmt.Println("  screenshot of it.")
+	}
+}
+
+// --- capabilities, instead of a platform name ---------------------------------
+
+// demoCapabilities is what replaced `if runtime.GOOS != "windows"`.
+//
+// The old refusal named a platform. A platform cannot be acted on by the person
+// reading it: they already know what computer they are holding. What they can act
+// on is a missing TOOL, named, with what breaks without it and the install line
+// for the system in front of them. The pipeline was always pure Go plus ffmpeg —
+// the old error message said as much in its own second sentence — so the refusal
+// was a statement about where the script was developed, not about what the run
+// needs.
+//
+// It asks `toolchainReport` rather than checking for itself, because `bootstrap`
+// asks the same question one step earlier and two commands that ask it
+// differently produce two answers, one of which is the one the operator reads
+// when they are deciding which to trust.
+func demoCapabilities(wantBuild bool) error {
+	present, missing := toolchainReport(wantBuild)
+	if len(missing) == 0 {
+		names := make([]string, 0, len(present))
+		for _, p := range present {
+			if !strings.HasPrefix(p.detail, "ABSENT") {
+				names = append(names, p.name)
+			}
+		}
+		fmt.Printf("  capabilities pass on %s/%s: %s\n", runtime.GOOS, runtime.GOARCH, strings.Join(names, ", "))
+		fmt.Println()
+		return nil
+	}
+	fmt.Println("demo refuses to start. These are missing, and each one makes the demo something")
+	fmt.Println("other than a demo:")
+	fmt.Println()
+	for _, m := range missing {
+		fmt.Printf("  - %s — %s\n", m.name, m.why)
+		fmt.Printf("      install: %s\n", installHint(m.name))
+	}
+	fmt.Println()
+	fmt.Println("  A missing tool is actionable and a platform NAME is not: the pipeline is pure")
+	fmt.Println("  Go plus ffmpeg, and what this command used to do was refuse by naming where the")
+	fmt.Println("  script was developed. `pocctl bootstrap` asks this same question one step")
+	fmt.Println("  earlier and fetches everything it can.")
+	return fmt.Errorf("demo: %d capability requirement(s) not met", len(missing))
+}
+
+// installHint is the per-platform install line for a missing tool.
+//
+// It names the package manager for the system you are on rather than all three,
+// because three answers is zero answers when one of them is a winget command on
+// a machine that has apt.
+func installHint(tool string) string {
+	switch runtime.GOOS {
+	case "windows":
+		if tool == "ffmpeg" || tool == "ffprobe" {
+			return "winget install --id Gyan.FFmpeg -e   (ffmpeg ships ffprobe beside it)"
+		}
+		return "https://go.dev/dl  (or: winget install --id GoLang.Go -e)"
+	case "darwin":
+		return "brew install " + tool
+	default:
+		return "sudo apt install " + tool + "   (or your distribution's package manager)"
+	}
 }
 
 // --- the relay --------------------------------------------------------------
@@ -1089,12 +1368,13 @@ func demoEnv(root, dataRoot, clip, zones, model, anchors, simAddr, uiAddr string
 		"SP_POC_SOURCE_ARG="+relayAddr(),
 		"SP_POC_SOURCE_RELAY=true",
 		// A live source is required to carry a recorded permission basis, and the
-		// relay's basis is the clip's own label. As of this writing the clip this
-		// demo ships with has NO recorded licence, which is stated here rather
-		// than papered over: the footage may be read on this machine and may not
-		// be shown to anyone else. Replace it with the real basis as soon as the
-		// material has one — see testdata/labels.json.
-		"SP_POC_SOURCE_LICENCE=the relay re-publishes the demo's labelled clip, whose licence is NOT recorded in testdata/labels.json (three REPLACE-ME fields). Usable on this machine; NOT cleared to show outside it. No camera is connected.",
+		// relay's basis is the clip's own label. It is DERIVED from the row rather
+		// than written here: this line used to be a literal about one specific
+		// clip's missing licence, and the moment the clip stopped being defaulted
+		// the sentence became false for every other clip. A relay that
+		// re-publishes material whose licence nobody recorded says so on the
+		// source line, whatever the material is.
+		"SP_POC_SOURCE_LICENCE="+clipLicenceLine(root, clip),
 	)
 }
 
@@ -1143,11 +1423,25 @@ func showLanded(root string, env []string, dataRoot, simAddr string, r *relay) e
 		fmt.Printf("  the report was not written: %v\n", err)
 		return nil
 	}
-	fmt.Println("  report (first 40 lines):")
+	// The report is printed as an EXCERPT, and the bound is a literal on
+	// purpose: it is the number a reader must be able to find by searching this
+	// file, and a test in internal/soak pins it against the sections it has to
+	// reach (TestTheDemoReportWindowCoversTheCropGateSection, which reads the
+	// bound out of this line rather than restating it).
+	//
+	// It was 90 for weeks, and 90 was wrong in a way no test could see: the
+	// crop-gate section starts at line 120 of a report whose detector and
+	// verification sections are populated, so every demo run cut it off
+	// entirely — the whole excerpt ended one line into "what the detector did".
+	// A window sized for a report with almost nothing in it is a window that
+	// silently hides the section that says when the run decided not to look,
+	// which is the claim the demo exists to show.
+	fmt.Println("  report (first 160 lines):")
 	fmt.Println()
 	sc := bufio.NewScanner(strings.NewReader(string(md)))
+	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	n := 0
-	for sc.Scan() && n < 40 {
+	for sc.Scan() && n < 160 {
 		fmt.Println("   ", sc.Text())
 		n++
 	}

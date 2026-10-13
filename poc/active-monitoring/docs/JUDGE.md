@@ -27,7 +27,7 @@ Three commands, in this order:
 | # | command | what it does | if it takes too long |
 |---|---|---|---|
 | 1 | `go build ./...` | compiles everything | — |
-| 2 | `pocctl demo` | runs the whole story on a labelled clip, against a local VMS simulator, in about 90 seconds | stop it, read §1 |
+| 2 | `pocctl demo --clip testdata\car-crossing.mp4` | runs the whole story on a labelled clip, against a local VMS simulator, in about 90 seconds | stop it, read §1 |
 | 3 | `pocctl audit ledger --tamper` | changes one byte of one ledger row, watches the chain fail, puts it back | — |
 
 Number 2 is the demo. Number 3 is the proof the demo is not theatre. Everything
@@ -104,8 +104,16 @@ happens** — it is a silent hole in coverage.
 
 ```powershell
 $env:SP_POC_CAMERA_INTEGRITY = 'true'
-pocctl demo
+pocctl demo --clip testdata\car-crossing.mp4
 ```
+
+The `--clip` is not optional. `pocctl demo` has no default clip on purpose: the
+clip it used to default to is a real night intersection whose `labels.json` row
+says it may not be shown outside this machine, and a demo is shown to people.
+Name the material you are showing; the command refuses rather than choosing for
+you, and prints the provenance table so the choice is informed. The committed
+synthetic clip is what to use here — see §1 for what a run over it proves and
+what it honestly cannot.
 
 What it does that nothing else does:
 
@@ -203,6 +211,26 @@ per frame it is a quarter again. That is what `SP_POC_CROP_MAX_REGIONS` and
 `SP_POC_NOVELTY_FPS` are for, and both print what they achieved.
 
 We would rather show you the 198 ms than hide it behind the 17 ms.
+
+### And the counter that says whether the gate was looking at all
+
+The region rate is only half the affordability question. The other half is **how often
+the gate ran at all**, and until this pass that number existed nowhere: the crop
+gate's own comment says its gated-out counter "is the counter that says whether the
+rate is too low", and the counter was accumulated on every frame and read by nothing.
+
+The report now has a section for it — **`## When the run decided not to look`** — and
+it reports a share and not a count, because 40 gated-out frames means nothing on its
+own and 40 out of 42 is a camera that is not looking most of the time. On this
+machine's demo clip the number is at the top of the report; on a run whose crop pass
+never ran it says `NOT RUN` rather than printing a zero, because a zero there would
+read as "the gate looked at every frame".
+
+The reason this matters more than it looks: a gate that skips most frames cannot
+propose regions often enough for the 1.5-second dwell the crop policy needs, and the
+only other symptom is that **the smallest objects quietly go missing**. Nothing else
+in the report shows that. It is the arithmetic in §3 above, turned around: the cost
+model tells you what a region costs, and this tells you whether you were offered any.
 
 ---
 

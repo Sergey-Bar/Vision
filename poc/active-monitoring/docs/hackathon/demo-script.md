@@ -14,11 +14,20 @@ Three things, and you say all three out loud at the beginning:
 1. "This is a proof of concept. It proves one thing: that a detection becomes a
    Milestone API call with a verified clip and no lost events."
 2. "The push target is a **simulator on this laptop**. Nothing reached Milestone."
-3. "The video is a **synthetic clip** — a rectangle moving. The system is not
-   being asked to recognise anything; it is being asked to be reliable."
+3. "The video is a **labelled clip I named on the command line** — the material in
+   this repository is a synthetic rectangle, and the system is not being asked to
+   recognise anything. It is being asked to be **reliable**."
 
 If you only say one of them, say the second. It is the one that stops a
 misunderstanding that is expensive to undo later.
+
+**Why you name a clip.** `pocctl demo` has no default clip, on purpose: its old
+default was a real night intersection whose own provenance row says it may not be
+shown to anyone outside this machine. The command now refuses without `--clip`
+and prints the material table, so you choose knowing what you are showing. If
+you are showing a room, show the committed synthetic clip and say what it is —
+the run over it is honestly empty and the report says `NOT RUN`, which is a
+better demonstration than a detector that quietly sees nothing.
 
 ---
 
@@ -61,7 +70,7 @@ evidence that the failure paths do what the report says they do."
 ## Minute 2–4 — the run
 
 ```powershell
-.\bin\pocctl.exe demo
+.\bin\pocctl.exe demo --clip testdata\car-crossing.mp4
 ```
 
 The screen comes up at `http://127.0.0.1:8097`. The run is `mode=demo-replay`,
@@ -71,6 +80,17 @@ and that is stamped in the header, in the log, and in the report.
 simulator and that no XProtect server was reachable. That sentence is on every
 page, every run. It is not a disclaimer we remember to add; it is generated from
 the run's own configuration, so it cannot be forgotten."
+
+**Say, pointing at the source line:** "This run is over a **synthetic rectangle**
+and the file says so next to every number. The model returns zero boxes on it —
+that is measured, not hoped — so this screen is here to show you what a run
+looks like and what the report does when the honest answer is 'nothing was
+there': `NOT RUN` with the reason, not a green tick."
+
+**If you have cleared footage, name it instead:** `demo --clip <path>` and the
+report labels every number from its `labels.json` row. If the footage is the
+night intersection on this machine, remember the licence line at the top of the
+run: it may be read here and it may not leave here.
 
 **When a detection appears:** "That is a line crossing. Three things happened in
 this order, and the order is the design: the detection was written to the

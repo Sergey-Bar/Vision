@@ -53,19 +53,30 @@ go build -o bin\fixtureprobe.exe ./cmd/fixtureprobe
 so on a fresh clone `.\bin\pocctl.exe` does not exist yet, and a document that
 opens with a command from `bin\` is a document whose first line fails.
 
-Then the two commands that make the detector real:
+Then one command that makes everything else runnable:
 
 ```powershell
-.\bin\pocctl.exe fetch-runtime --url <onnxruntime-release-zip-url>
-.\bin\pocctl.exe fetch-model   --url <your-onnx-url>
-.\bin\fixtureprobe.exe -detector qa\fixtures\crossing.mp4
+.\bin\pocctl.exe bootstrap     # toolchain, model, runtime, the material table, the truth line
 ```
 
-`fetch-runtime` prints the library's SHA-256. **Read it against the release page
-and re-run with `--sha256=` to confirm it** — a digest nobody checked is not a
-provenance record, it is a number. It ships no hardcoded digest on purpose: one
-baked into a source file is a digest somebody verified once, on a build that may
-not be the one being downloaded.
+**`bootstrap` is four fetches and a statement of what it verified.** The model
+comes from a pinned URL and is checked against a digest recorded in
+`pyworker/fixtures/yolov4n.licence.json` — the URL earned the pin because its
+bytes were *measured* against the weights this repository's contract was recorded
+from, two byte streams and one SHA-256, which is provenance rather than a guess.
+The runtime comes from the release asset for the platform, with no digest claimed
+on a clean clone, and says so: it is **RECORDED, NOT VERIFIED** until you pass
+`--sha256`. A machine that already has `models/runtime.json` keeps what that
+manifest records instead of being defaulted over.
+
+`fetch-runtime` prints the library's SHA-256 and ships no hardcoded digest on
+purpose: one baked into a source file is a digest somebody verified once, on a
+build that may not be the one being downloaded. When you supply `--sha256`, a
+mismatch is a refused wall; when you do not, it is a labelled skip.
+
+```powershell
+.\bin\fixtureprobe.exe -detector qa\fixtures\crossing.mp4
+```
 
 `fixtureprobe -detector` prints the declared output shape, the record width, the
 raw candidate count, what each suppression pass removed, and the per-class
@@ -246,6 +257,7 @@ a threshold gets chosen — but the **shipped pipeline does not require them**, 
 New commands:
 
 ```
+pocctl bootstrap               one command from a clean clone: toolchain, model, runtime, material table
 pocctl demo --live             the same demo against a live camera and a live VMS
 pocctl prove <detection>       recompute one decision from stored facts, zero provider calls
 pocctl audit ledger            recompute the hash-chained decision ledger
@@ -609,32 +621,65 @@ set it with a path on a LOCAL disk
 הכתובת המלאה: [`pyworker/fixtures/yolov4n.contract.json`](pyworker/fixtures/yolov4n.contract.json),
 הופקה ע"י `pyworker/probe_model.py`.
 
-### הרישיון של המודל **לא רשום**, וזה עוצר מכירה — לא את הדמו
+### הרישיון של המודל: **המקור נמדד**, והוא מ־ONNX Model Zoo
 
-המשקלות לא נשלפו מדף ההורדות הציבורי של Ultralytics, ובמאגר הזה **אין** שום
-רשומה של מקורן. אם הן מ־Ultralytics — הרישיון הוא **AGPL-3.0**, ובעמוד הרישיון
-שלהם עצמם כתוב ששימוש מסחרי ושימוש פנימי דורשים רישיון Enterprise. אם הן מ־
-ONNX Model Zoo תחת רישיון מקליח — החובה היא לשמוך נקרא.
+**מה נמדד (11.10.2026), ולא מה שהוערך.** המשקלות שעל המכונה הזו חושו ל־SHA-256
+(257,470,589 בתים), וקובץ `yolov4.onnx` של ONNX Model Zoo הורד וחושב: **אותו
+hash, אותו גודל**. שני זרמי בתים שונים, digest אחד. אין כאן דבר שדורש להאמין לו
+כדי שהוא יהיה נכון — גם ה־URL וגם ה‑SHA‑256 הם בתים שאפשר להוריד ולבדוק, וכל
+אדם יכול לעשות את הבדיקה בעצמו.
 
-**את שניהם אי אפשר להבחין מכל מה שיש במאגר הזה**, ולכן אין כאן טענה לכיוון
-הזה. הרשומה אומרת `NOT RECORDED` כי `NOT RECORDED` זה מה שנכון.
+בדיקה שנייה, עצמאית מהראשונה: העמוד שמפרסם את הקובץ מפרסם את הצורה שלו —
+`(1, 416, 416, 3)` ב־`NHWC` פנימה, `(1, 52, 52, 3, 85)` החוצה, שלושה מדרגים —
+וזו בדיוק הצורה שרשומה ב־[`pyworker/fixtures/yolov4n.contract.json`](pyworker/fixtures/yolov4n.contract.json)
+מן הבתים האלה, עוד לפני שהיה ידוע דבר על המקור. זיהוי שנמדד פעמיים, בשתי
+דרכים עצמאיות.
 
-**מה נעשה עכשיו:** מדידה, על המכונה הזו, להערכת עצמית של ה־POC.
-**מה לא נעשה עכשיו:** מכירה, הפצה מחוץ למכונה זו, או כל מוצר נגזר מהמשקלות.
+**מה נסגר ומה לא.** הרישיון **רשום**, כמו שהעמוד עצמו מצהיר: `SPDX-License-Identifier:
+MIT` וסעיף License שקורא `MIT License`. מה שזה מחייב הוא הודעת MIT, וארבע שורות
+הייחוס שהעמוד מפרסם נשמעות כפי שהן והועברו לכל שימוש מחוץ למכונה. מה **לא** נסגר:
+העמוד הוא בעל הייצוא, והוא עצמו ממקם את מה שהייצוא הומר ממנו
+(`darknet`, `tensorflow-yolov4-tflite`). ההחלטה להסתמך על הודעת MIT היא החלטה
+של אדם, והיא לא החלטה שקובץ הזה יכול לקחת — היא רק דורשת שיכתוב אותה מישהו.
 
-הרשומה: [`pyworker/fixtures/yolov4n.licence.json`](pyworker/fixtures/yolov4n.licence.json).
+הרשומה: [`pyworker/fixtures/yolov4n.licence.json`](pyworker/fixtures/yolov4n.licence.json),
+עם `origin.url`, `sha256`, `licence_source` ו‑`licence_recorded_on`.
 
-**שמו לא השתנה.** שינוי שם בלי שינוי רישיון רק מזיז את הבעיה: הקובץ ייקרא
-`yolov4.onnx` והרישיון יישאר לא רשום.
+### השם של הקובץ הוא עדיין שגוי — וזה רשום במקום שינוי
 
-### החומר בדמו **אינו מורשה להיות מוצג**
+השם הוא `yolov4n.onnx`. אין `yolov4n` בסט המאושר של ה‑zoo ולא היה מעולם: ה־`n`
+היה המצאה של המאגר הזה, נותר מהכתיב הקודם שלו (רשום בקובץ הרשומה, יחד עם הסיבה
+לשינוי). ה‑asset המקורי נקרא
+`yolov4.onnx` והוא ה‑YOLOv4 השלם ב‑416; קובץ ה‑anchors שלידו הוא סעיף
+`[anchors]` של `yolov4-416.cfg`. הקובץ **לא** שינה את שמו, כי שינוי נתוב ש־
+`SP_POC_DET_MODEL`, `fetch-model --out`, ה‑fixtures של הסיידקר וסקריפט ה‑gate
+כולם מכנים הוא שינוי עם שטח השפעה משל עצמו — ולכן הוא רשום כאן במקום שייעשה
+בשקט. מה שכן חדש: כל מקום שמזכיר את הקובץ יכול להצביע על הרשומה וללמוד בדיוק
+אילו בתים הוא מדבר עליהם, לפי digest.
 
-`testdata/car-crossing.mp4` ו־`testdata/youtube/sTF-6_xinUU.mp4` שניהם בעלי
-רישיון לא רשום ב־[`testdata/labels.json`](testdata/labels.json). הקליפ של יוטיוב
-מסומן במפורש: **לא מורש להפצה, לפרסום או להדגמה לאף אחד מחוץ למכונה הזו**.
+### החומר בדמו **אינו נבחר ברירת מחדל**
 
-עד שהשדות האלה ימולאו, הדמו קריא על חומר **כאן בלבד**. זה לא עוצר את הדמו
-עצמו, וזה יעצור אותו דווקא בחדר.
+אין ברירת מחדל. הדמו **היה** נפתח עם `testdata\youtube\sTF-6_xinUU.mp4` — צומת לילה
+אמיתי, כלי רכב אמיתיים, ושורה ב־[`testdata/labels.json`](testdata/labels.json)
+שאומרת בשדות ולא בפרוזה: `licence` **לא רשום**, `cleared_for_external_use`
+**false** — קריא על המכונה הזו, לא ניתן להצגה לאף אחד מחוצה לה. ההדגמה היא דבר
+שמראים לאנשים, ולכן ברירת מחדל שמוסרת כך היא בדיוק הבעיה ש־B2 פותר. הפתרון
+אינו ברירת מחדל אחרת: `--clip`.
+
+הדמו מסרב **בשם** ומדפיס את הטבלה: מה מחויב, מה הרישיון שלו, ואם הוא מורשה
+להיות מוצג.
+
+| | |
+|---|---|
+| `car-crossing.mp4` | `synthetic`, רישיון **רשום** (ffmpeg `testsrc` + `drawbox` — אין בעל זכויות לשאול), נאחזר 2026-10-01 |
+| `bird-synthetic.mp4` | `synthetic`, רישיון רשום |
+| `injection-hostile.mp4` | `synthetic`, רישיון רשום, **מקור התקפה מכוונת** — לא קליפ דמו |
+| `youtube/sTF-6_xinUU.mp4` | `real`, רישיון **לא רשום** — השורה נשמרת כ**הרשומה של למה אין ברירת מחדל** |
+
+**והמגבלה שנשארת:** מודל COCO מחזיר **אפס תיבות** על מלבן סינתטי. לכן הרצה על
+החומר המחויב היא הרצה ריקה **אמיתית**: `AC2`, `AC3` ו־`AC4` יוצאים `NOT RUN`
+עם הסיבה, לא `PASS`. עד שייכנס חומר בעל תנועה אמיתית ורישיון שניתן לציטוט
+(`B1`), זו התשובה הכנה ביותר שיש.
 
 ### נתיב ה־RTSP הוכח, אך **אף מצלמה לא היתה מחוברת**
 

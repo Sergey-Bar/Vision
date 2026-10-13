@@ -385,6 +385,23 @@ CREATE TABLE IF NOT EXISTS detector_tally (
   json   TEXT NOT NULL
 );
 
+-- The crop gate's arithmetic for a run, as one JSON blob, beside the detector's.
+--
+-- A blob for the same reason as the one above: written once at the end of a run,
+-- read by 'pocctl report', no query against a single field.
+--
+-- The reason this one exists at all is that Runner.crops was accumulated under a
+-- lock on every frame and read by nothing. The counter that says whether the
+-- novelty RATE gate is looking often enough -- and the one saying how many proposed
+-- crops were refused as too small -- were in memory and nowhere else, so a report
+-- could say what the model saw and could not say when the system decided not to
+-- look. Both halves matter, and this is the half that was missing.
+CREATE TABLE IF NOT EXISTS crop_tally (
+  run_id TEXT PRIMARY KEY REFERENCES runs(id),
+  at     TEXT NOT NULL,
+  json   TEXT NOT NULL
+);
+
 -- D-8: a person's verdict about a PUSHED event, keyed by the event's tag.
 --
 -- The key is the tag and not a detection id on purpose. The tag is the string

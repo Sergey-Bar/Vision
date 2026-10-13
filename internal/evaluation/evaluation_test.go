@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/Sergey-Bar/vision/internal/evaluation"
+	"github.com/Sergey-Bar/vision/internal/observations"
 )
 
 // promoteGates is DefaultGates with a case floor these small fixtures can meet.
@@ -319,14 +320,14 @@ func TestAvailabilityIsExposedForPilotReporting(t *testing.T) {
 // decides M1 exit gate 4 was not a gate.
 func TestRecallCountsOnlyTruePositives(t *testing.T) {
 	cases := []evaluation.Case{{
-		ID: "tp-1", ProfileID: "p", Outcome: evaluation.OutcomeTruePositive,
+		ID: "tp-1", ProfileID: "restricted-person", Outcome: evaluation.OutcomeTruePositive,
 		PredictedRestricted: yes(),
 	}}
 	for i := 0; i < 20; i++ {
 		// Twenty benign cases the profile flagged anyway: noise, and every one of
 		// them a wrong answer that must not count towards recall.
 		cases = append(cases, evaluation.Case{
-			ID: "benign-" + itoa(i), ProfileID: "p",
+			ID: "benign-" + itoa(i), ProfileID: "restricted-person",
 			Outcome: evaluation.OutcomeBenign, PredictedRestricted: yes(),
 		})
 	}
@@ -460,9 +461,9 @@ func TestAProfileWithNoTruePositivesFailsRatherThanPassing(t *testing.T) {
 	obs := make([]evaluation.Observation, 0, 200)
 	for i := 0; i < 200; i++ {
 		id := "case-" + strconv.Itoa(i)
-		cases = append(cases, evaluation.Case{ID: id, ProfileID: "p", Outcome: evaluation.OutcomeBenign})
+		cases = append(cases, evaluation.Case{ID: id, ProfileID: "restricted-person", Outcome: evaluation.OutcomeBenign})
 		obs = append(obs, evaluation.Observation{
-			ID: id, ProfileID: "p",
+			ID: id, ProfileID: "restricted-person",
 			Structured: map[string]any{"restrictedZoneBreach": false},
 		})
 	}
@@ -559,5 +560,182 @@ func TestDisagreementRateIsNormalised(t *testing.T) {
 	want := 5.0 / 20.0
 	if pr.DisagreementRate < want-0.001 || pr.DisagreementRate > want+0.001 {
 		t.Errorf("disagreement rate is %.3f, want %.3f", pr.DisagreementRate, want)
+	}
+}
+
+// buildProfileCases produces a case set for ANY profile: 80% true positives
+// correctly detected, 20% false positives, in the profile's own units.
+//
+// It exists because the fixtures above all describe one profile by name, with
+// one hard-coded field in the observations beside them, which is how the defect
+// they now guard against stayed invisible: a harness whose every fixture scores
+// the same field has no fixture that could notice it reading that field as a
+// constant.
+func buildProfileCases(profileID string, n int) []evaluation.Case {
+	cases := make([]evaluation.Case, 0, n)
+	for i := 0; i < n; i++ {
+		c := evaluation.Case{
+			ID: profileID + "-case-" + itoa(i), ProfileID: profileID,
+			HoursToDisposition: 0.25,
+		}
+		switch i % 5 {
+		case 4:
+			c.Outcome = evaluation.OutcomeFalsePositive
+			c.PredictedRestricted = yes()
+		default:
+			c.Outcome = evaluation.OutcomeTruePositive
+			c.PredictedRestricted = yes()
+		}
+		cases = append(cases, c)
+	}
+	return cases
+}
+
+// observationsInProfile builds observations answering in the named profile's
+// field, the way the runtime would.
+func observationsInProfile(cases []evaluation.Case, field string) []evaluation.Observation {
+	out := make([]evaluation.Observation, 0, len(cases))
+	for _, c := range cases {
+		predicted := c.PredictedRestricted != nil && *c.PredictedRestricted
+		out = append(out, evaluation.Observation{
+			ID: c.ID, ProfileID: c.ProfileID, LatencyMS: 1200,
+			Structured:     map[string]any{field: predicted},
+			OperatorAgreed: hours(0.25),
+		})
+	}
+	return out
+}
+
+// P0.1: the harness scores the profile being scored.
+//
+// FAILS IF: predictedRestricted names a field again â€” reads a constant instead
+// of the one the profile declares. With the hard-coded field restored, this
+// profile answers nothing, recall is 0 over non-zero true positives, and no
+// profile other than the one the constant names could ever pass a gate.
+//
+// REDCHECK: replace the registry lookup in predictedRestricted with
+// `obs.Structured["restrictedZoneBreach"]`.
+func TestASecondProfileIsScoredOnItsOwnField(t *testing.T) {
+	cases := buildProfileCases("door-forced", 100)
+	obs := observationsInProfile(cases, "personPresent")
+	report := evaluation.Evaluate(cases, obs, promoteGates())
+
+	if len(report.Reports) != 1 {
+		t.Fatalf("%d reports, want 1", len(report.Reports))
+	}
+	pr := report.Reports[0]
+	if !pr.Passed {
+		t.Errorf("a well-behaved door-forced profile failed: %v", pr.Failures)
+	}
+	if len(report.Promotable) != 1 || report.Promotable[0] != "door-forced" {
+		t.Errorf("promotable is %v, want [door-forced]", report.Promotable)
+	}
+	if pr.Answered != 100 {
+		t.Errorf("answered is %d, want 100: the profile's own field was not read", pr.Answered)
+	}
+	if pr.DetectedRestricted != 80 {
+		t.Errorf("detected-restricted is %d, want 80", pr.DetectedRestricted)
+	}
+	if pr.Recall < 0.99 {
+		t.Errorf("recall is %.3f, want 1.0", pr.Recall)
+	}
+	if pr.FalsePositiveRate < 0.19 || pr.FalsePositiveRate > 0.21 {
+		t.Errorf("false-positive rate is %.3f, want about 0.20", pr.FalsePositiveRate)
+	}
+}
+
+// The field of one profile must not score another.
+//
+// FAILS IF: the harness falls back to any field when the profile's own is
+// absent â€” the failure mode where a door-forced run borrows
+// `restrictedZoneBreach` from a copy of the record and is scored on a claim it
+// never made. A borrowed field is worse than no answer, because it produces a
+// real-looking rate for a profile that said nothing.
+func TestAnotherProfilesFieldDoesNotScoreAProfile(t *testing.T) {
+	cases := buildProfileCases("door-forced", 20)
+	// The observation carries the field of a DIFFERENT profile and none of its own.
+	obs := observationsInProfile(cases, "restrictedZoneBreach")
+
+	pr := evaluation.Evaluate(cases, obs, promoteGates()).Reports[0]
+	if pr.Answered != 0 {
+		t.Errorf("answered is %d, want 0: a field this profile does not declare was read as "+
+			"its answer, so the run was scored on a claim it never made", pr.Answered)
+	}
+	if pr.DetectedRestricted != 0 || pr.MissedRestricted != 0 {
+		t.Errorf("restricted counts are %d/%d, want 0/0: recall was computed from a field "+
+			"belonging to another profile", pr.DetectedRestricted, pr.MissedRestricted)
+	}
+	if pr.Passed {
+		t.Error("a profile that answered nothing passed. The floor gate exists so a rate is " +
+			"never decided by cases that produced no answer")
+	}
+}
+
+// A profile with no scalar claim is not scored, and that is an absence rather
+// than a zero.
+//
+// `investigate/v1` answers a question with a sentence and a citation list;
+// there is no boolean in it for a rate to be a rate OF. Counting those cases as
+// answers the profile never gave would be the defect the package doc names, so
+// the harness must leave them counted-but-unanswered and let the floor gate say
+// so.
+func TestAProfileThatDeclaresNoScalarAnswerIsNotScored(t *testing.T) {
+	cases := buildProfileCases(observations.ProfileInvestigate, 20)
+	obs := observationsInProfile(cases, "answer")
+	// The investigator's real shape: a string answer and a citation list, no boolean.
+	for i := range obs {
+		obs[i].Structured = map[string]any{
+			"answer":     "yes, the gate was open",
+			"citations":  []string{"fact-1"},
+			"confidence": 0.8,
+		}
+	}
+	report := evaluation.Evaluate(cases, obs, promoteGates())
+
+	if len(report.Reports) != 1 {
+		t.Fatalf("%d reports, want 1", len(report.Reports))
+	}
+	pr := report.Reports[0]
+	if pr.Labeled != 20 {
+		t.Errorf("labelled is %d, want 20: an operator did judge every case", pr.Labeled)
+	}
+	if pr.Answered != 0 {
+		t.Errorf("answered is %d, want 0: a string answer and a citation list are not a "+
+			"boolean claim, and scoring them as one invents an answer", pr.Answered)
+	}
+	if pr.Recall != 0 || pr.FalsePositiveRate != 0 {
+		t.Errorf("recall %.2f and false-positive rate %.2f, want 0/0 over no answered cases",
+			pr.Recall, pr.FalsePositiveRate)
+	}
+	if len(report.Promotable) != 0 {
+		t.Errorf("promotable is %v, want empty: a profile with no measurable claim cannot be "+
+			"measured into a promotion", report.Promotable)
+	}
+}
+
+// Every shipped profile that declares a score field declares one the registry
+// knows about, and the field is IN the profile's own field set.
+//
+// It is the check that keeps the registry self-consistent, and it is the one
+// that would have caught the original defect: a harness scoring a constant
+// cannot tell whether the constant is even a field of the profile it belongs
+// to, and nothing else in the tree asserts that.
+func TestEveryDeclaredScoreFieldIsAFieldOfItsOwnProfile(t *testing.T) {
+	for id, p := range observations.M1Profiles {
+		if p.ScoreField == "" {
+			continue
+		}
+		if !p.Fields[p.ScoreField] {
+			t.Errorf("profile %q scores the field %q, which its own field set does not "+
+				"declare: every answer would be read as an absence and the profile could "+
+				"never be measured", id, p.ScoreField)
+		}
+	}
+	field, known := observations.ProfileScoreField("door-forced")
+	if !known || field != "personPresent" {
+		t.Errorf("ProfileScoreField(door-forced) = %q,%v, want personPresent,true", field, known)
+	}
+	if _, known := observations.ProfileScoreField("no-such-profile"); known {
+		t.Error("ProfileScoreField reports a profile this registry does not carry as known")
 	}
 }
