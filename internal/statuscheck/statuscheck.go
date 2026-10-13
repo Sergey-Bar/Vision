@@ -292,6 +292,12 @@ func numbers(status string, d Derived) []Finding {
 // more spelling, and going blind is how a claim becomes unverified by accident.
 // So the table grew to thirty-one, and the comment that said it would not is this
 // paragraph. The next entry after it needs its own such paragraph, not a silence.
+//
+// It reached thirty-two the same day, when E1 landed `policy-package` — one line
+// in the script, one more spelling here, and the same loud failure to say so.
+// Which is the thing worth keeping: the failure was correct, the document was
+// genuinely stale, and the cost of being right was one map entry rather than a
+// rule the author had to remember.
 var gateWords = map[string]int{
 	"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
 	"eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13,
@@ -299,7 +305,7 @@ var gateWords = map[string]int{
 	"nineteen": 19, "twenty": 20, "twenty-one": 21, "twenty-two": 22,
 	"twenty-three": 23, "twenty-four": 24, "twenty-five": 25, "twenty-six": 26,
 	"twenty-seven": 27, "twenty-eight": 28, "twenty-nine": 29, "thirty": 30,
-	"thirty-one": 31,
+	"thirty-one": 31, "thirty-two": 32,
 }
 
 var gateCountRe = regexp.MustCompile(`(?i)\b((?:[a-z]+-)?[a-z]+)\s+gates\b`)

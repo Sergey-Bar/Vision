@@ -50,7 +50,7 @@ rather than the per-package **schema** the plan asked for, because migration 000
 hardcodes `public` and a per-schema harness would apply **no row-level security at
 all**; the reason is in R13.
 
-**Verification:** `scripts/verify.ps1` green - thirty-one gates: contract-check
+**Verification:** `scripts/verify.ps1` green - thirty-two gates: contract-check
 across all three published contract surfaces, vet, gofmt,
 `golangci-lint` (including gosec), the generated-code check,
 `go test -race -count=1 -json -coverprofile ./...`, skip-audit, no-silent-skips,
@@ -67,7 +67,7 @@ races. The most recent dated run record is
 list of twenty-six, zero failed, zero skipped, against a real database -
 including `recovery-drill`, which is the gate that skips whenever the database
 variable is absent, and which is why a run without that variable is not evidence
-even when it is green. The thirty-one gates above are the names the script
+even when it is green. The thirty-two gates above are the names the script
 declares; the record's twenty-six are the ones that ran, the difference being
 `lint`, `generated-code` and `ai-runtime`, registered inside tool-present
 branches. The record before it carried 17 gates, before skip-audit,
@@ -243,6 +243,25 @@ whole, and a plate is personal data the platform has no ruling to hold. The
 redaction is an allowlist under `analyticData` rather than a denylist of known
 plate keys, because the vendor ships new fields as a matter of routine and a
 denylist stops working the first time one appears.
+
+**the binding digest covers every part** (RC-23, `internal/policy/policy.go`,
+M3's unlock): with the model part's id dropped from the encoding,
+`policy_test.go:64` reports
+`changing the model part left the digest at 70c711d6…, so the binding cannot
+tell that world from this one` — and the other four subtests stay green, which
+is what makes it a finding about one part rather than a broken test. The failure
+mode is specific and quiet: a digest is a digest whether it hashed one input or
+five, so a binding whose model part had been dropped would still be printed by
+`securityctl policy explain`, still quoted in a decision row, and still tell an
+operator that two different worlds were the same world. The control is that the
+digest is a *binding*, which means it covers everything a decision is made
+under, and a part outside the encoding is a control that reads as present.
+E1's own package, `internal/policy`, was the tree's `policy.proto` and
+`0005_ai_and_policy.expand.sql` finally acquiring the Go owner they had been
+missing since M0 — the fifth trap in `internal/README.md` is now resolved, and
+`internal/README.md`'s package count, `ROADMAP.md`'s and `docs/roadmap`'s, and
+the gate count all moved in the same pass because `policy-package` is a gate and
+`internal/policy` is a package.
 
 **`red-check` is now seven controls, and the third one found a missing test.**
 

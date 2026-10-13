@@ -7,7 +7,7 @@ incidents, and records everything in a hash-chained audit ledger.
 
 This file is for two readers: a new engineer on day one, and an AI agent with no
 prior context. It answers *where things are* and *what each package is for* so
-neither of you has to open 86 packages to find out.
+neither of you has to open 87 packages to find out.
 
 It is a map, not an architecture document. It does not restate build state —
 `docs/status.md` is the only source of truth for that — and it does not restate
@@ -108,7 +108,8 @@ Only five do. Everything else reaches the ledger through its caller.
 | `outbox` | Transactional publish without a broker: the state change and its outbound effect commit together | store | no | `outbox.Enqueue`, `outbox.Message`, `outbox.Relay` |
 | `pipeline` | The loops: ingest, consume, outbox and gauge sampling, plus the shutdown order. Nothing else owns a lifecycle | present | no | `pipeline.Start`, `pipeline.New`, `Loops.Stop`, `pipeline.Deps` |
 | `predicatecov` | The predicate-coverage gate: every time-window and skew predicate is exercised by a fixture | support | test only | `predicatecov.Check`, `predicatecov.Coverage` |
- | `release` | Builds and verifies signed offline release archives. Verification is deliberately stricter than construction | support | no | `release.Build`, `release.Verify`, `release.Manifest`, `ScanForSecrets` |
+| `policy` | The M3 unlock: binds the five inputs a decision is made under — rule bundle, playbook, model, policy, site config — into one digest, and renders what it covers. A part with no digest is refused, never skipped, because a binding that omitted one would still produce a digest | evaluate | no (the caller records the change) | `policy.Binding`, `Binding.Digest`, `policy.Bind`, `Binding.Explain`, `policy.Recorder` |
+| `release` | Builds and verifies signed offline release archives. Verification is deliberately stricter than construction | support | no | `release.Build`, `release.Verify`, `release.Manifest`, `ScanForSecrets` |
  | `roadmapcheck` | Derives the roadmap's build-state claims — Go package count, migration count, contract count — from the directory that defines each and fails when `ROADMAP.md`, `docs/roadmap/master-roadmap.md` or `internal/README.md` prints a different number. The gate count is deliberately not re-derived: `statuscheck` owns it, and the roadmap says itself that it does not restate build state | support | test only | `roadmapcheck.Check` |
 | `rlsrole` | The RLS role generator and the write-canary gate for site-scoped tables | support | test only | `rlsrole.WriteCanary`, `rlsrole.Generate`, `TestWriteCanariesCoverAllSiteScopedTables` |
 | `rtsp` | The RTSP client and the camera state machine. Currently unused by the core; a demo capture path | ingest (demo) | no | `rtsp.Client`, `rtsp.State`, `rtsp.UserAgent`, `rtsp.DefaultPort` |
@@ -484,11 +485,15 @@ way when it is resolved rather than removing it.
     or the table stops matching its producer — which is now a failing test rather
     than a stream of false alarms.
 
-5. **`internal/policy` does not exist.** There is a `policy.proto` and a
-   `0005_ai_and_policy.expand.sql` migration, and there is no Go package. M3's
-   recommendation engine, and everything downstream of it, has no owner in the
-   tree. Do not go looking for it, and do not assume a `policy` table means a
-   policy engine.
+ 5. **[RESOLVED 2026-10-13 — do not read this as a current defect.] `internal/policy`
+    exists.** It did not: there was a `policy.proto` and a
+    `0005_ai_and_policy.expand.sql` migration and no Go package, so M3's
+    recommendation engine and everything downstream of it had no owner in the
+    tree. `internal/policy` now binds the five inputs a decision is made under —
+    rule bundle, playbook, model, policy, site config — into one digest, and
+    `securityctl policy explain` renders it. A `policy` *table* is still not a
+    policy engine; the package is the binding, and activating one is
+    `cmd/security-core`'s act behind the repository's own gates.
 
 6. **[RESOLVED — this trap was wrong and said so too confidently.]
     `securityctl adapter probe` **exists**: `cmd/securityctl/adapter_probe.go:25`,

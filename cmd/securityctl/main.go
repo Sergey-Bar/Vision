@@ -75,6 +75,10 @@ or from the site configuration.`,
 		identityCommand(),
 		releaseKeyCommand(),
 		siteConfigCommand(),
+		// The M3 unlock's operator surface: what a decision was made under. It
+		// writes nothing — recording a binding is `cmd/security-core`'s act, where
+		// the ledger's writer lives and the activation policy already governs it.
+		policyCommand(),
 		// The report comes from Postgres rather than from /v1/metrics, because a
 		// number in a gate artefact cannot be a reading of a process's memory.
 		efficiencyCommand(),
