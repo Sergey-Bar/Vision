@@ -103,6 +103,10 @@ type Worker struct {
 	Store *evidence.Store
 	// Bookmarks is the vendor write-back surface. Optional; see the type comment.
 	Bookmarks milestone.BookmarkWriter
+	// Media is the vendor's recording-reading surface, for the sites that allow taking
+	// the bytes. Optional; nil means the worker behaves exactly as it did before this
+	// field existed — a bookmark and a receipt, and no copy of an archive.
+	Media milestone.MediaReader
 	// Policy bounds the clock bands.
 	Policy clock.Policy
 	// Audit is the ledger. Optional, because a deployment that has not finished its ledger
@@ -136,7 +140,12 @@ type Outcome struct {
 	Refusal  string
 	// EvidenceID is the receipt row, empty when nothing was placed.
 	EvidenceID string
-	OpenedAt   time.Time
+	// Fetched is the clip row, empty when no bytes were taken. It is separate from
+	// EvidenceID because the two are different facts: one is our pointer, the other is
+	// our copy, and a caller that could not tell them apart would report a copy it
+	// never made.
+	Fetched  string
+	OpenedAt time.Time
 }
 
 // Handle runs one job.
@@ -201,8 +210,19 @@ func (w *Worker) Handle(ctx context.Context, j jobs.Job) (Outcome, error) {
 	if err != nil {
 		return Outcome{}, err
 	}
+	// The fetch runs after the receipt, and deliberately so: the receipt is the row an
+	// operator sees first, and a clip that arrives before its receipt is evidence with
+	// nothing to attach it to. A failure here returns the error and the job retries; the
+	// bookmark and the receipt are idempotent by derived id, so a retry rewrites the same
+	// rows rather than a second set.
+	fetched, err := w.fetch(ctx, j, facts, openedAt)
+	if err != nil {
+		return Outcome{Placed: true, Bookmark: ref, EvidenceID: outcome, OpenedAt: openedAt}, err
+	}
 	return Outcome{
 		Placed: true, Bookmark: ref, EvidenceID: outcome, OpenedAt: openedAt,
+		// Fetched is the clip's evidence id, empty when there was nothing to take.
+		Fetched: fetched,
 	}, nil
 }
 
