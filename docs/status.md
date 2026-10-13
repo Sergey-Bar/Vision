@@ -60,8 +60,8 @@ the Python runtime suite, and six more named `tree-state`, `fuzz`, `flake`,
 `roadmap-check`, `nl-hits-resolve` and `nl-replays-without-model` and `video-embed-audit` -
 against a real Postgres 16, with `SP_TEST_DATABASE_URL` set so the database-backed
 suites ran rather than skipped.
-`contractcheck` reports 20 messages and 22 enums compatible with the baseline, plus
-7 JSON Schemas (248 properties) and the OpenAPI document's 20 paths. No data
+`contractcheck` reports 25 messages and 22 enums compatible with the baseline, plus
+8 JSON Schemas (269 properties) and the OpenAPI document's 22 paths. No data
 races. The most recent dated run record is
 `dist/verification/verify-20261012-204754.json`, `verified: true`, with a gate
 list of twenty-six, zero failed, zero skipped, against a real database -

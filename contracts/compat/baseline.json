@@ -128,6 +128,21 @@
           "number": 25,
           "name": "production_profile",
           "type": "bool"
+        },
+        {
+          "number": 26,
+          "name": "model_identity",
+          "type": "string"
+        },
+        {
+          "number": 27,
+          "name": "model_contract_version",
+          "type": "string"
+        },
+        {
+          "number": 28,
+          "name": "temperature",
+          "type": "double"
         }
       ]
     },
@@ -967,6 +982,183 @@
         }
       ]
     },
+    "security.v1.InvestigationHit": {
+      "fields": [
+        {
+          "number": 1,
+          "name": "step_id",
+          "type": "string"
+        },
+        {
+          "number": 2,
+          "name": "event_id",
+          "type": "string"
+        },
+        {
+          "number": 3,
+          "name": "incident_id",
+          "type": "string"
+        },
+        {
+          "number": 4,
+          "name": "evidence_id",
+          "type": "string"
+        },
+        {
+          "number": 5,
+          "name": "normalized_at",
+          "type": "google.protobuf.Timestamp"
+        }
+      ]
+    },
+    "security.v1.InvestigationQuery": {
+      "fields": [
+        {
+          "number": 1,
+          "name": "site_id",
+          "type": "string"
+        },
+        {
+          "number": 2,
+          "name": "event_type",
+          "type": "string"
+        },
+        {
+          "number": 3,
+          "name": "device_id",
+          "type": "string"
+        },
+        {
+          "number": 4,
+          "name": "zone_id",
+          "type": "string"
+        },
+        {
+          "number": 5,
+          "name": "correlation_id",
+          "type": "string"
+        },
+        {
+          "number": 6,
+          "name": "incident_id",
+          "type": "string"
+        },
+        {
+          "number": 7,
+          "name": "from",
+          "type": "google.protobuf.Timestamp"
+        },
+        {
+          "number": 8,
+          "name": "to",
+          "type": "google.protobuf.Timestamp"
+        }
+      ]
+    },
+    "security.v1.InvestigationRun": {
+      "fields": [
+        {
+          "number": 1,
+          "name": "run_id",
+          "type": "string"
+        },
+        {
+          "number": 2,
+          "name": "template_id",
+          "type": "string"
+        },
+        {
+          "number": 3,
+          "name": "template_version",
+          "type": "string"
+        },
+        {
+          "number": 4,
+          "name": "hits",
+          "type": "InvestigationHit",
+          "repeated": true
+        },
+        {
+          "number": 5,
+          "name": "started_at",
+          "type": "google.protobuf.Timestamp"
+        },
+        {
+          "number": 6,
+          "name": "completed_at",
+          "type": "google.protobuf.Timestamp"
+        },
+        {
+          "number": 7,
+          "name": "narrative",
+          "type": "string"
+        },
+        {
+          "number": 8,
+          "name": "narrated",
+          "type": "bool"
+        }
+      ]
+    },
+    "security.v1.InvestigationStep": {
+      "fields": [
+        {
+          "number": 1,
+          "name": "step_id",
+          "type": "string"
+        },
+        {
+          "number": 2,
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "number": 3,
+          "name": "reason",
+          "type": "string"
+        },
+        {
+          "number": 4,
+          "name": "query",
+          "type": "InvestigationQuery"
+        },
+        {
+          "number": 5,
+          "name": "max_hits",
+          "type": "int32"
+        }
+      ]
+    },
+    "security.v1.InvestigationTemplate": {
+      "fields": [
+        {
+          "number": 1,
+          "name": "template_id",
+          "type": "string"
+        },
+        {
+          "number": 2,
+          "name": "incident_class",
+          "type": "string"
+        },
+        {
+          "number": 3,
+          "name": "version",
+          "type": "string"
+        },
+        {
+          "number": 4,
+          "name": "steps",
+          "type": "InvestigationStep",
+          "repeated": true
+        },
+        {
+          "number": 5,
+          "name": "question",
+          "type": "string"
+        }
+      ]
+    },
     "security.v1.Job": {
       "fields": [
         {
@@ -1731,6 +1923,10 @@
         {
           "number": 4,
           "name": "JOB_QUEUE_CHECKPOINT_SEAL"
+        },
+        {
+          "number": 5,
+          "name": "JOB_QUEUE_INVESTIGATION_NARRATE"
         }
       ]
     },
@@ -2293,6 +2489,84 @@
         }
       }
     },
+    "investigation-template.schema.json": {
+      "properties": {
+        "apiVersion": {
+          "type": "const:\"security.io/v1\"",
+          "required": true
+        },
+        "incidentClass": {
+          "type": "string",
+          "required": true
+        },
+        "kind": {
+          "type": "const:\"InvestigationTemplate\"",
+          "required": true
+        },
+        "question": {
+          "type": "string"
+        },
+        "steps": {
+          "type": "array",
+          "required": true
+        },
+        "steps[]": {
+          "type": "object"
+        },
+        "steps[].maxHits": {
+          "type": "integer",
+          "required": true
+        },
+        "steps[].name": {
+          "type": "string",
+          "required": true
+        },
+        "steps[].query": {
+          "type": "object",
+          "required": true
+        },
+        "steps[].query.correlationId": {
+          "type": "string"
+        },
+        "steps[].query.deviceId": {
+          "type": "string"
+        },
+        "steps[].query.eventType": {
+          "type": "string"
+        },
+        "steps[].query.from": {
+          "type": "string"
+        },
+        "steps[].query.incidentId": {
+          "type": "string"
+        },
+        "steps[].query.siteId": {
+          "type": "string"
+        },
+        "steps[].query.to": {
+          "type": "string"
+        },
+        "steps[].query.zoneId": {
+          "type": "string"
+        },
+        "steps[].reason": {
+          "type": "string",
+          "required": true
+        },
+        "steps[].stepId": {
+          "type": "string",
+          "required": true
+        },
+        "templateId": {
+          "type": "string",
+          "required": true
+        },
+        "version": {
+          "type": "string",
+          "required": true
+        }
+      }
+    },
     "rule-bundle.schema.json": {
       "properties": {
         "apiVersion": {
@@ -2491,6 +2765,7 @@
             "alarm.closed",
             "alarm.created",
             "analytics",
+            "analytics.restricted_person",
             "bookmark",
             "device.camera_offline",
             "device.camera_online",
@@ -2511,6 +2786,7 @@
             "alarm.closed",
             "alarm.created",
             "analytics",
+            "analytics.restricted_person",
             "bookmark",
             "device.camera_offline",
             "device.camera_online",
@@ -2949,6 +3225,9 @@
           "delete",
           "get"
         ],
+        "/v1/evidence": [
+          "get"
+        ],
         "/v1/evidence/{evidenceId}/content": [
           "get"
         ],
@@ -2979,6 +3258,9 @@
         ],
         "/v1/ops/dead-letters": [
           "get"
+        ],
+        "/v1/ops/dead-letters/replay": [
+          "post"
         ],
         "/v1/rules/bundles": [
           "get",

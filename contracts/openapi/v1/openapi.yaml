@@ -234,6 +234,47 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
 
+  /v1/evidence:
+    get:
+      tags: [evidence]
+      summary: Structured search over the canonical event record
+      description: >
+        The question the plan's C5 names - what happened at Door 18 between
+        14:00 and 15:00 - answered over the event windows behind incident.read,
+        the same capability the incident pages carry, because the rows searched
+        are the events incidents are built of. The window reads the
+        drift-corrected time and nothing else, and every hit carries the
+        incident it belongs to when there is one and nothing when there is not:
+        a fabricated link is a fabricated fact. A malformed window is refused
+        with the reason rather than widened to the beginning of the table.
+      parameters:
+        - { name: siteId, in: query, schema: { type: string, maxLength: 128 } }
+        - { name: eventType, in: query, schema: { type: string, maxLength: 128 } }
+        - { name: deviceId, in: query, schema: { type: string, maxLength: 128 } }
+        - { name: zoneId, in: query, schema: { type: string, maxLength: 128 } }
+        - { name: correlationId, in: query, schema: { type: string, maxLength: 128 } }
+        - { name: incidentId, in: query, schema: { type: string, maxLength: 128 } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: cursor, in: query, schema: { type: string }, description: Opaque keyset position, issued by the previous page. }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [hits]
+                properties:
+                  hits:
+                    type: array
+                    items: { $ref: "#/components/schemas/EvidenceHit" }
+                  nextCursor: { type: string, description: Present when another page follows. }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+
   /v1/audit/ledger:
     get:
       tags: [audit]
@@ -794,6 +835,29 @@ components:
               eventIds: { type: array, items: { type: string } }
               observationIds: { type: array, items: { type: string } }
               driftExclusions: { type: array, items: { type: object } }
+
+    EvidenceHit:
+      type: object
+      additionalProperties: false
+      required: [eventId, siteId, eventType, observedAt, normalizedAt]
+      description: >
+        One canonical event that matched. IncidentID is present when the event
+        belongs to an incident and absent otherwise: an event with no incident
+        is a fact about the record, and inventing a link for it would be a
+        fabricated one. `NormalizedAt` is the time the window read and
+        `ObservedAt` is what the source claimed; both are returned because an
+        operator reconciling a hit against a wall clock needs the gap rather
+        than having to infer it.
+      properties:
+        eventId: { type: string }
+        incidentId: { type: string, description: Empty when the event is in no incident. }
+        siteId: { type: string }
+        eventType: { type: string }
+        deviceId: { type: string }
+        zoneId: { type: string }
+        correlationId: { type: string }
+        observedAt: { type: string, format: date-time }
+        normalizedAt: { type: string, format: date-time }
 
     AuditEntry:
       type: object

@@ -58,21 +58,24 @@ func TestDeriveCountsTheTreeDirectly(t *testing.T) {
 		t.Fatalf("Derive: %v", err)
 	}
 
-	if d.Messages != 20 {
+	if d.Messages != 25 {
 		t.Errorf("contract messages: got %d, want 20", d.Messages)
 	}
 	if d.Enums != 22 {
 		t.Errorf("contract enums: got %d, want 22", d.Enums)
 	}
-	if d.Schemas != 7 {
-		t.Errorf("published JSON Schemas: got %d, want 7", d.Schemas)
+	if d.Schemas != 8 {
+		t.Errorf("published JSON Schemas: got %d, want 8", d.Schemas)
 	}
-	if d.Paths != 20 {
-		t.Errorf("OpenAPI paths: got %d, want 20", d.Paths)
+	if d.Paths != 22 {
+		t.Errorf("OpenAPI paths: got %d, want 22", d.Paths)
 	}
-	// 9 + 16 + 16 + 10 + 42 + 83 + 72.
-	if d.Properties != 248 {
-		t.Errorf("schema properties: got %d, want 248", d.Properties)
+	// The eight published schemas' properties, summed. The number moves when a
+	// schema gains a property, and `contractcheck -mode write` records it in the
+	// baseline - which is why a document that disagrees is a defect and not a
+	// rounding difference.
+	if d.Properties != 269 {
+		t.Errorf("schema properties: got %d, want 269", d.Properties)
 	}
 	if d.GoMinor != "26" {
 		t.Errorf("go.mod minor: got %q, want %q", d.GoMinor, "26")

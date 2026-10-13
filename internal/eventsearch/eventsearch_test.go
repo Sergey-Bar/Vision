@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,6 +15,40 @@ import (
 	"github.com/Sergey-Bar/vision/internal/testutil"
 )
 
+// testPool opens the package's pool ONCE.
+//
+// A pool per test is a pool per test: six tests in this package is six pools,
+// and under `go test -p 8` with every other database-backed package doing the
+// same it is how the harness's own teardown starts timing out at sixty seconds.
+// The pool is built once and cached, every test gets a fresh tenant instead, and
+// the isolation a fresh database was buying arrives at a four-hundredth of the
+// connection count. The same pattern `internal/operatormetrics` uses, for the
+// same reason its own comment gives.
+var (
+	testPoolOnce sync.Once
+	testPoolDB   *dbx.Pool
+	testPoolErr  error
+)
+
+func testPool(t *testing.T) *dbx.Pool {
+	t.Helper()
+	if os.Getenv(testutil.DatabaseURLEnv) == "" {
+		t.Skip("no SP_TEST_DATABASE_URL: the database-backed tests skip rather than fail")
+	}
+	testPoolOnce.Do(func() {
+		cfg := dbx.DefaultConfig()
+		if err := cfg.ApplyDSN(os.Getenv(testutil.DatabaseURLEnv)); err != nil {
+			testPoolErr = err
+			return
+		}
+		testPoolDB, testPoolErr = dbx.Open(context.Background(), cfg, "postgres")
+	})
+	if testPoolErr != nil {
+		t.Fatalf("open the pool: %v", testPoolErr)
+	}
+	return testPoolDB
+}
+
 func service(t *testing.T) (*eventsearch.Service, string, string) {
 	t.Helper()
 	raw := testutil.Pool(t)
@@ -21,15 +56,7 @@ func service(t *testing.T) (*eventsearch.Service, string, string) {
 		t.Fatalf("migrate: %v", err)
 	}
 	tenant, site, _ := testutil.NewTenant(t, raw)
-	cfg := dbx.DefaultConfig()
-	if err := cfg.ApplyDSN(os.Getenv(testutil.DatabaseURLEnv)); err != nil {
-		t.Fatalf("apply DSN: %v", err)
-	}
-	pool, err := dbx.Open(context.Background(), cfg, "postgres")
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(pool.Close)
+	pool := testPool(t)
 	return &eventsearch.Service{Pool: pool}, tenant, site
 }
 
