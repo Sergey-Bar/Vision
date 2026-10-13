@@ -88,6 +88,16 @@ var (
 
 func packagePool(t *testing.T) (*dbx.Pool, *pgxpool.Pool) {
 	t.Helper()
+	// The skip lives OUTSIDE the Once, and that is the whole fix. `testutil.Pool`
+	// skips when the harness is unconfigured, but a skip inside a sync.Once skips
+	// the test that happened to be first and leaves the cached fields nil - so
+	// every test after it took the nil pool and panicked inside the migrator,
+	// which reads as a broken package rather than as an absent environment. The
+	// repository's rule is that a database-backed suite SKIPS: a green run that
+	// tested nothing is bad, and a red run for a reason nobody saw is worse.
+	if os.Getenv(testutil.DatabaseURLEnv) == "" {
+		t.Skip("no SP_TEST_DATABASE_URL: the database-backed tests skip rather than fail")
+	}
 	sharedPoolOnce.Do(func() {
 		raw := testutil.Pool(t) // skips or fails fatally when the harness is wrong
 		sharedRaw = raw
