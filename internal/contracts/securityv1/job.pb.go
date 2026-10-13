@@ -31,6 +31,12 @@ const (
 	JobQueue_JOB_QUEUE_EVIDENCE_FETCH  JobQueue = 2
 	JobQueue_JOB_QUEUE_RULE_BULK       JobQueue = 3
 	JobQueue_JOB_QUEUE_CHECKPOINT_SEAL JobQueue = 4
+	// Narration of an investigation. A queue of its own rather than a flag on the
+	// VLM queue, because the model's contribution is a narrative field and the
+	// job that produces it must be replayable and dead-letterable exactly like
+	// every other one - a narration that cannot fail on its own is a narration
+	// nobody can wait for.
+	JobQueue_JOB_QUEUE_INVESTIGATION_NARRATE JobQueue = 5
 )
 
 // Enum value maps for JobQueue.
@@ -41,13 +47,15 @@ var (
 		2: "JOB_QUEUE_EVIDENCE_FETCH",
 		3: "JOB_QUEUE_RULE_BULK",
 		4: "JOB_QUEUE_CHECKPOINT_SEAL",
+		5: "JOB_QUEUE_INVESTIGATION_NARRATE",
 	}
 	JobQueue_value = map[string]int32{
-		"JOB_QUEUE_UNSPECIFIED":     0,
-		"JOB_QUEUE_VLM":             1,
-		"JOB_QUEUE_EVIDENCE_FETCH":  2,
-		"JOB_QUEUE_RULE_BULK":       3,
-		"JOB_QUEUE_CHECKPOINT_SEAL": 4,
+		"JOB_QUEUE_UNSPECIFIED":           0,
+		"JOB_QUEUE_VLM":                   1,
+		"JOB_QUEUE_EVIDENCE_FETCH":        2,
+		"JOB_QUEUE_RULE_BULK":             3,
+		"JOB_QUEUE_CHECKPOINT_SEAL":       4,
+		"JOB_QUEUE_INVESTIGATION_NARRATE": 5,
 	}
 )
 
@@ -421,13 +429,14 @@ const file_security_v1_job_proto_rawDesc = "" +
 	"\tsucceeded\x18\x02 \x01(\bR\tsucceeded\x12%\n" +
 	"\x0eobservation_id\x18\x03 \x01(\tR\robservationId\x12<\n" +
 	"\vdegradation\x18\x04 \x01(\x0e2\x1a.security.v1.AIDegradationR\vdegradation\x12!\n" +
-	"\ferror_detail\x18\x05 \x01(\tR\verrorDetail*\x8e\x01\n" +
+	"\ferror_detail\x18\x05 \x01(\tR\verrorDetail*\xb3\x01\n" +
 	"\bJobQueue\x12\x19\n" +
 	"\x15JOB_QUEUE_UNSPECIFIED\x10\x00\x12\x11\n" +
 	"\rJOB_QUEUE_VLM\x10\x01\x12\x1c\n" +
 	"\x18JOB_QUEUE_EVIDENCE_FETCH\x10\x02\x12\x17\n" +
 	"\x13JOB_QUEUE_RULE_BULK\x10\x03\x12\x1d\n" +
-	"\x19JOB_QUEUE_CHECKPOINT_SEAL\x10\x04*\x9e\x01\n" +
+	"\x19JOB_QUEUE_CHECKPOINT_SEAL\x10\x04\x12#\n" +
+	"\x1fJOB_QUEUE_INVESTIGATION_NARRATE\x10\x05*\x9e\x01\n" +
 	"\tJobStatus\x12\x1a\n" +
 	"\x16JOB_STATUS_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12JOB_STATUS_PENDING\x10\x01\x12\x15\n" +

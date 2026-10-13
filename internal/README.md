@@ -7,7 +7,7 @@ incidents, and records everything in a hash-chained audit ledger.
 
 This file is for two readers: a new engineer on day one, and an AI agent with no
 prior context. It answers *where things are* and *what each package is for* so
-neither of you has to open 84 packages to find out.
+neither of you has to open 85 packages to find out.
 
 It is a map, not an architecture document. It does not restate build state —
 `docs/status.md` is the only source of truth for that — and it does not restate
@@ -93,8 +93,9 @@ Only five do. Everything else reaches the ledger through its caller.
 | `hafnia` | The hosted-model client and the asset residency contract. Currently unused by the core | observe (demo) | no | `hafnia.Client`, `Client.Do`, `hafnia.Reason`, `hafnia.Quota` |
 | `identity` | Authentication, sessions, MFA (TOTP + WebAuthn), roles, capabilities, step-up | present | yes (every auth event) | `identity.Service`, `identity.Principal`, `identity.Capability` |
 | `inbox` | Intake: scoped dedupe key taken before the row, lease with expiry, terminal states, dead letters | store | no | `inbox.Writer`, `WriteOptions`, `inbox.Lease`, `inbox.Key` |
-| `incidents` | The case lifecycle, dispositions, and the decision-replay path | present | yes (`incident.created`, `incident.disposition.recorded`) | `incidents.Service`, `incidents.Create`, `incidents.Explanation`, `ReplayInputs` |
-| `jobs` | The Postgres work queue that replaces Kafka and Redis: `SKIP LOCKED` claims, per-queue idempotency keys, leases, dead letters | support | no | `jobs.Enqueuer`, `jobs.Queue` (`QueueVLM`, `QueueRuleBulk`, …), `jobs.Job`, `jobs.Worker` |
+ | `incidents` | The case lifecycle, dispositions, and the decision-replay path | present | yes (`incident.created`, `incident.disposition.recorded`) | `incidents.Service`, `incidents.Create`, `incidents.Explanation`, `ReplayInputs` |
+ | `investigate` | The stored, versioned investigation templates: deterministic retrieval over the canonical record, every hit resolving to an incident or an evidence row, and a language model that narrates the finished run and cannot add a hit. Two named gates hold it — `nl-hits-resolve` and `nl-replays-without-model` | present | no (the run is the record; narration is a job of its own) | `investigate.Service`, `investigate.Run`, `investigate.Template`, `investigate.Narrator` |
+ | `jobs` | The Postgres work queue that replaces Kafka and Redis: `SKIP LOCKED` claims, per-queue idempotency keys, leases, dead letters | support | no | `jobs.Enqueuer`, `jobs.Queue` (`QueueVLM`, `QueueRuleBulk`, …), `jobs.Job`, `jobs.Worker` |
 | `lifecycle` | install / upgrade / rollback / backup / restore, plus archive extraction that re-validates every path, plus the systemd unit writer | support | no | `lifecycle.State`, `lifecycle.Extract`, `lifecycle.Refuse`, `lifecycle.WriteUnits` |
 | `migrate` | The forward-only migration runner: ordered SQL, checksums, phase window, advisory lock | store | no | `migrate.Runner`, `Runner.Up`, `Runner.Verify`, `Runner.CurrentVersion` |
 | `milestone` | The XProtect protocol adapter. The *only* place vendor concepts may exist | ingest | no | `milestone.Adapter`, `milestone.Transport`, `RawRecord`, `Routes`, `ReplayTransport` |

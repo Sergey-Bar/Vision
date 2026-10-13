@@ -23,8 +23,8 @@ asks.
 
 ## Where we are
 
-**Milestone 1 of 8. The deterministic spine is built and green.** 84 Go
-packages, 26 forward-only migrations, 13 contracts, a hash-chained
+**Milestone 1 of 8. The deterministic spine is built and green.** 85 Go
+packages, 26 forward-only migrations, 14 contracts, a hash-chained
 audit ledger, a fixture-driven replay path, a content-addressed evidence store, a
 rule engine with no shell, SQL, network, dynamic code or regex, a working
 install/upgrade/rollback/backup lifecycle, and a dependency-free Python AI

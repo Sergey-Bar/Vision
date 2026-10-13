@@ -35,7 +35,7 @@ func service(t *testing.T) (*eventsearch.Service, string, string) {
 
 // seedEvent writes one canonical event, with an explicit drift so the observed
 // and normalized times can differ — which is the whole point of the first test.
-func seedEvent(t *testing.T, tenant, site, eventID, eventType string, observed time.Time, driftMS int) {
+func seedEvent(t *testing.T, tenant, site, eventID string, observed time.Time, driftMS int) {
 	t.Helper()
 	raw := testutil.Pool(t)
 	_, err := raw.Exec(context.Background(), `
@@ -52,10 +52,10 @@ func seedEvent(t *testing.T, tenant, site, eventID, eventType string, observed t
 		                              integration_id, event_type, schema_version, observed_at, received_at,
 		                              normalized_at, clock_source, clock_drift_ms, device_id, zone_id,
 		                              correlation_id, causation_id, payload, integrity_hash)
-		VALUES ($1,$2,$3,'sys',$4,'int-1',$5,'1',$6,$6,$7,'ntp',$8,'cam-door18','zone-door',
-		        $4,$4,'{"vendor":{}}'::jsonb, $9)
+		VALUES ($1,$2,$3,'sys',$4,'int-1','motion','1',$5,$5,$6,'ntp',$7,'cam-door18','zone-door',
+		        $4,$4,'{"vendor":{}}'::jsonb, $8)
 		ON CONFLICT DO NOTHING`,
-		tenant, eventID, site, eventID, eventType, observed.UTC(), normalized.UTC(),
+		tenant, eventID, site, eventID, observed.UTC(), normalized.UTC(),
 		driftMS, strings.Repeat("a", 64))
 	if err != nil {
 		t.Fatalf("seed event: %v", err)
@@ -77,10 +77,10 @@ func TestTheWindowReadsNormalizedAtAndNotTheSourceClock(t *testing.T) {
 
 	window := time.Date(2026, 6, 1, 14, 0, 0, 0, time.UTC)
 	// Claimed 14:00, corrected to 14:30 — inside.
-	seedEvent(t, tenant, site, "evt-inside", "motion", window, 30*60*1000)
+	seedEvent(t, tenant, site, "evt-inside", window, 30*60*1000)
 	// Claimed 14:10, corrected to 13:40 — outside, and the drift is the whole
 	// reason the answer is not the claimed one.
-	seedEvent(t, tenant, site, "evt-drifted-out", "motion", window.Add(10*time.Minute), -(30 * 60 * 1000))
+	seedEvent(t, tenant, site, "evt-drifted-out", window.Add(10*time.Minute), -(30 * 60 * 1000))
 
 	got, err := svc.Search(ctx, tenant, eventsearch.Query{
 		SiteIDs: []string{site},
@@ -105,8 +105,8 @@ func TestTheCaseThePlanNamed(t *testing.T) {
 	ctx := context.Background()
 
 	at := time.Date(2026, 6, 1, 14, 12, 0, 0, time.UTC)
-	seedEvent(t, tenant, site, "evt-door-18", "motion", at, 0)
-	seedEvent(t, tenant, site, "evt-other-door", "motion", at, 0)
+	seedEvent(t, tenant, site, "evt-door-18", at, 0)
+	seedEvent(t, tenant, site, "evt-other-door", at, 0)
 	raw := testutil.Pool(t)
 	_, err := raw.Exec(ctx, `
 		INSERT INTO incidents (tenant_id, incident_id, primary_site_id, state, severity, title,
@@ -155,10 +155,10 @@ func TestASiteOutsideTheScopeIsNotReturned(t *testing.T) {
 	svc, tenant, site := service(t)
 	ctx := context.Background()
 	at := time.Date(2026, 6, 1, 14, 0, 0, 0, time.UTC)
-	seedEvent(t, tenant, site, "evt-mine", "motion", at, 0)
+	seedEvent(t, tenant, site, "evt-mine", at, 0)
 	otherTenant, otherSite, _ := testutil.NewTenant(t, testutil.Pool(t))
 	_ = otherTenant
-	seedEvent(t, tenant, otherSite, "evt-theirs", "motion", at, 0)
+	seedEvent(t, tenant, otherSite, "evt-theirs", at, 0)
 
 	got, err := svc.Search(ctx, tenant, eventsearch.Query{
 		SiteIDs: []string{site}, From: at.Add(-time.Hour), To: at.Add(time.Hour),
@@ -179,7 +179,7 @@ func TestAnEmptyScopeReturnsNothing(t *testing.T) {
 	svc, tenant, _ := service(t)
 	ctx := context.Background()
 	at := time.Date(2026, 6, 1, 14, 0, 0, 0, time.UTC)
-	seedEvent(t, tenant, "s", "evt-unscoped", "motion", at, 0)
+	seedEvent(t, tenant, "s", "evt-unscoped", at, 0)
 
 	got, err := svc.Search(ctx, tenant, eventsearch.Query{From: at.Add(-time.Hour), To: at.Add(time.Hour)})
 	if err != nil {
@@ -200,7 +200,7 @@ func TestTheCursorPaginatesWithoutSkippingOrRepeating(t *testing.T) {
 	ctx := context.Background()
 	base := time.Date(2026, 6, 1, 14, 0, 0, 0, time.UTC)
 	for i := 0; i < 5; i++ {
-		seedEvent(t, tenant, site, "evt-page-"+string(rune('a'+i)), "motion", base.Add(time.Duration(i)*time.Minute), 0)
+		seedEvent(t, tenant, site, "evt-page-"+string(rune('a'+i)), base.Add(time.Duration(i)*time.Minute), 0)
 	}
 
 	seen := map[string]bool{}

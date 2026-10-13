@@ -13,6 +13,12 @@ enum JobQueue {
   JOB_QUEUE_EVIDENCE_FETCH = 2;
   JOB_QUEUE_RULE_BULK = 3;
   JOB_QUEUE_CHECKPOINT_SEAL = 4;
+  // Narration of an investigation. A queue of its own rather than a flag on the
+  // VLM queue, because the model's contribution is a narrative field and the
+  // job that produces it must be replayable and dead-letterable exactly like
+  // every other one - a narration that cannot fail on its own is a narration
+  // nobody can wait for.
+  JOB_QUEUE_INVESTIGATION_NARRATE = 5;
 }
 
 enum JobStatus {

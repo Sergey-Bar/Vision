@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.aicaptain.dev/json-schema/investigation-template.schema.json",
+  "title": "InvestigationTemplate",
+  "description": "A stored, versioned investigation template: the queries this site runs when it looks into one incident class. Retrieval is deterministic and stored; a language model narrates the results and adds nothing.",
+  "type": "object",
+  "required": ["apiVersion", "kind", "templateId", "incidentClass", "version", "steps"],
+  "properties": {
+    "apiVersion": { "const": "security.io/v1" },
+    "kind": { "const": "InvestigationTemplate" },
+    "templateId": {
+      "type": "string", "minLength": 1, "maxLength": 128,
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "incidentClass": {
+      "type": "string", "minLength": 1, "maxLength": 128,
+      "description": "The incident class this template investigates. One template per class."
+    },
+    "version": {
+      "type": "string", "minLength": 1, "maxLength": 64,
+      "description": "The template's version. Recorded on every run so an investigation can be replayed against the version that produced it."
+    },
+    "question": {
+      "type": "string", "maxLength": 500,
+      "description": "The question in the operator's words, carried verbatim."
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 25,
+      "items": { "$ref": "#/$defs/step" }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "step": {
+      "type": "object",
+      "required": ["stepId", "name", "reason", "query", "maxHits"],
+      "properties": {
+        "stepId": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-z0-9][a-z0-9._-]*$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "reason": {
+          "type": "string", "minLength": 1, "maxLength": 500,
+          "description": "Why this step exists, in the words a reviewer reads. A step with no reason is a step nobody can remove."
+        },
+        "query": { "$ref": "#/$defs/query" },
+        "maxHits": { "type": "integer", "minimum": 1, "maximum": 500 }
+      },
+      "additionalProperties": false
+    },
+    "query": {
+      "type": "object",
+      "description": "The structured search one step runs. Every field is exact and every field is bounded; there is deliberately no field for 'anything else you find interesting'.",
+      "properties": {
+        "siteId": { "type": "string", "maxLength": 128 },
+        "eventType": { "type": "string", "maxLength": 128 },
+        "deviceId": { "type": "string", "maxLength": 128 },
+        "zoneId": { "type": "string", "maxLength": 128 },
+        "correlationId": { "type": "string", "maxLength": 128 },
+        "incidentId": { "type": "string", "maxLength": 128 },
+        "from": { "type": "string", "format": "date-time" },
+        "to": { "type": "string", "format": "date-time" }
+      },
+      "additionalProperties": false,
+      "minProperties": 1
+    }
+  }
+}

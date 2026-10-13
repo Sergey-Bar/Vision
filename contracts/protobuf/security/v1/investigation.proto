@@ -1,0 +1,109 @@
+syntax = "proto3";
+
+package security.v1;
+
+option go_package = "github.com/Sergey-Bar/vision/internal/contracts/securityv1;securityv1";
+
+import "google/protobuf/timestamp.proto";
+
+// An investigation template is the stored, versioned answer to "how this site
+// looks into this class of incident".
+//
+// The plan's C6 is explicit about what this is for and what it is not. The
+// retrieval is deterministic and stored: the template declares the queries, the
+// queries run over the canonical record, and the hits are facts the record
+// already holds. The language model is a narrator over those facts and nothing
+// else - it may phrase them, it may not add any. A template that asked the
+// model "find what happened" would be a search whose answers are generated,
+// which is the one thing this platform is built to refuse.
+//
+// Versioning is not decoration: a template is content, signed like every other
+// content in this system, and an investigation whose template version is not
+// recorded cannot be replayed.
+message InvestigationTemplate {
+  string template_id = 1;
+  // The incident class this template investigates. One template per class, so
+  // the class an operator reads is the class the queries were written for.
+  string incident_class = 2;
+  string version = 3;
+  repeated InvestigationStep steps = 4;
+  // The question in the operator's words, carried verbatim so a rendered
+  // investigation answers the question that was asked.
+  string question = 5;
+}
+
+// One step of a template: a structured query with a name and a reason.
+//
+// Every field the step carries is a field of the structured search the record
+// already answers. There is deliberately no field that says "or anything else
+// you find interesting" - a step without a bound is a step that cannot be
+// replayed.
+message InvestigationStep {
+  string step_id = 1;
+  string name = 2;
+  // Why this step exists, in the words a reviewer reads. A step with no reason
+  // is a step nobody can remove.
+  string reason = 3;
+  InvestigationQuery query = 4;
+  // How many hits this step may contribute. A step that returns everything is
+  // a step that returns nothing usable, and the bound is declared rather than
+  // applied by the caller.
+  int32 max_hits = 5;
+}
+
+// The query one step runs. Every field is optional, every field is exact, and
+// the window reads the drift-corrected time — the same rule the structured
+// search holds, inherited rather than restated.
+message InvestigationQuery {
+  string site_id = 1;
+  string event_type = 2;
+  string device_id = 3;
+  string zone_id = 4;
+  string correlation_id = 5;
+  string incident_id = 6;
+  google.protobuf.Timestamp from = 7;
+  google.protobuf.Timestamp to = 8;
+}
+
+// One hit a step contributed.
+//
+// The reference is the whole point of the message. A hit that does not resolve
+// to an incident or an evidence row is a hit nobody can open, and the
+// `nl-hits-resolve` gate refuses exactly that at build time: every hit carries
+// one of the two, and the two are the only ones there are.
+message InvestigationHit {
+  string step_id = 1;
+  // The event the hit is, from the canonical record.
+  string event_id = 2;
+  // The incident the event belongs to, when it belongs to one. Empty is
+  // honest and common: most events are in no incident.
+  string incident_id = 3;
+  // The evidence the reference resolves to, when the event has any. This is
+  // what makes a hit openable rather than merely true.
+  string evidence_id = 4;
+  // The normalized time the query matched, which is the time the record claims
+  // and not the time the camera did.
+  google.protobuf.Timestamp normalized_at = 5;
+}
+
+// One run of one template.
+//
+// The run is the record of what the template asked and what came back. It is
+// produced identically whether or not a narrator was attached, which is what
+// makes `nl-replays-without-model` a gate rather than an aspiration: the model
+// contributes a narrative field and nothing else.
+message InvestigationRun {
+  string run_id = 1;
+  string template_id = 2;
+  string template_version = 3;
+  repeated InvestigationHit hits = 4;
+  google.protobuf.Timestamp started_at = 5;
+  google.protobuf.Timestamp completed_at = 6;
+  // The narration, when one was asked for. Empty when the AI plane was absent,
+  // and the absence of a narrative is never the absence of evidence.
+  string narrative = 7;
+  // Whether a narrator was attached to this run at all. Recorded rather than
+  // inferred from a non-empty narrative, because a narrator that produced
+  // nothing and a narrator that was never there are different facts.
+  bool narrated = 8;
+}

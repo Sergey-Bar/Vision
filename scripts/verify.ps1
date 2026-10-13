@@ -313,6 +313,19 @@ Invoke-Gate 'statuscheck' { & $go test -p 1 -count=1 ./internal/statuscheck/... 
 # that it does not restate build state.
 Invoke-Gate 'roadmap-check' { & $go test -p 1 -count=1 ./internal/roadmapcheck/... }
 
+# C6's two gates, over the investigation template engine.
+#
+# nl-hits-resolve is the plan's rule stated as a build failure: any hit that does
+# not resolve to an incident or an evidence reference fails the build. The test
+# seeds an event with neither and asserts the run drops it and says so, which is
+# the difference between a gate and a comment.
+#
+# nl-replays-without-model is invariant 3 on a whole surface: the same template
+# over the same record produces byte-identical hits with and without a narrator
+# attached. The model narrates the answer; it cannot be part of it.
+Invoke-Gate 'nl-hits-resolve' { & $go test -p 1 -count=1 ./internal/investigate/... }
+Invoke-Gate 'nl-replays-without-model' { & $go test -p 1 -count=1 ./internal/investigate/... }
+
 # Every published schema with a Go-side embedded copy, not just rule-bundle. The
 # six schemas are embedded in internal/contracts/schemasync and byte-compared by
 # its own tests; running that package here makes the copy step a gate rather than
