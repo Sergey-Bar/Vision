@@ -160,6 +160,12 @@ func run() error {
 		Facts:     evidencefetch.NewPoolFacts(pool),
 		Store:     store,
 		Bookmarks: adapter,
+		// The vendor's recording surface, when this deployment's adapter has one.
+		// Discovered by type assertion rather than required, so a replay transport
+		// or a second adapter without media keeps working exactly as it did: the
+		// worker places a bookmark and no copy is taken. This is the difference
+		// between C1 existing and C1 shipping.
+		Media:     mediaSurface(transport),
 		Policy:    clockPolicy(),
 		Audit:     writer,
 		Log:       log,
@@ -649,6 +655,21 @@ func secretKeyPath() string {
 // the correlator and the console agree on is visible in one place rather than
 // being two independent default constructions that can drift.
 func clockPolicy() clock.Policy { return clock.DefaultPolicy() }
+
+// mediaSurface returns the vendor's recording surface, or nil.
+//
+// Nil is a real configuration and not a fault: a deployment whose transport has
+// no media surface - a replay transport, or a second adapter's without one -
+// gets a bookmark and a receipt and takes no copy of an archive. The worker
+// treats the nil as "no media surface configured" rather than as an error, which
+// is the behaviour it had before this field existed.
+func mediaSurface(transport milestone.Transport) milestone.MediaReader {
+	m, err := milestone.MediaFor(transport)
+	if err != nil {
+		return nil
+	}
+	return m
+}
 
 // aiAllowsRemote reports whether the operator opted into sending evidence to a
 // non-loopback AI runtime.

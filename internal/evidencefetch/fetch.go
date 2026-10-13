@@ -41,13 +41,13 @@ import (
 	"github.com/Sergey-Bar/vision/internal/milestone"
 )
 
-// ActionFetched is bytes taken from the vendor's recording into our own store.
+// actionFetched is bytes taken from the vendor's recording into our own store.
 //
 // A separate action from `evidence.bookmark.placed` because the two are different facts
 // about the world: one says the vendor holds a pointer, the other says we hold bytes.
 // An auditor asking "what does this product store" is asking the second question, and a
 // ledger that answered it with the first would be wrong in the direction that matters.
-const ActionFetched = "evidence.fetched"
+const actionFetched = "evidence.fetched"
 
 // Fetched row constants. The media type is the vendor's, defaulted honestly: a clip
 // from this API is an MP4, and a receiver that wants to know more asks the row's own
@@ -228,7 +228,7 @@ func (w *Worker) appendFetchedAudit(ctx context.Context, tx pgx.Tx, j jobs.Job, 
 		TenantID:   j.TenantID,
 		Actor:      string(Actor),
 		ActorType:  Actor,
-		Action:     ActionFetched,
+		Action:     actionFetched,
 		TargetType: "incident",
 		TargetID:   f.IncidentID,
 		Reason: fmt.Sprintf("fetched %d %s bytes covering %s..%s", clip.Size, clip.Kind,
@@ -239,7 +239,7 @@ func (w *Worker) appendFetchedAudit(ctx context.Context, tx pgx.Tx, j jobs.Job, 
 	})
 	if err != nil {
 		return fmt.Errorf("evidencefetch: append the %s entry for incident %s: %w",
-			ActionFetched, f.IncidentID, err)
+			actionFetched, f.IncidentID, err)
 	}
 	return nil
 }
