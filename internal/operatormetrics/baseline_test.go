@@ -46,7 +46,7 @@ how: vms_operator_log
 func TestTheSameStreamProducesARatio(t *testing.T) {
 	s := store(t, map[string]string{"operator-a.yaml": goodBaseline})
 
-	got, err := s.Compare("operator-a", "camera-18", 300)
+	got, err := operatormetrics.CompareBaseline(s, "operator-a", "camera-18", 300)
 	if err != nil {
 		t.Fatalf("compare: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestTheSameStreamProducesARatio(t *testing.T) {
 func TestADifferentStreamIsNotComparable(t *testing.T) {
 	s := store(t, map[string]string{"operator-a.yaml": goodBaseline})
 
-	got, err := s.Compare("operator-a", "camera-42", 300)
+	got, err := operatormetrics.CompareBaseline(s, "operator-a", "camera-42", 300)
 	if err != nil {
 		t.Fatalf("compare: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestADifferentStreamIsNotComparable(t *testing.T) {
 func TestAnotherOperatorsBaselineIsNotUsed(t *testing.T) {
 	s := store(t, map[string]string{"operator-a.yaml": goodBaseline})
 
-	got, err := s.Compare("operator-b", "camera-18", 300)
+	got, err := operatormetrics.CompareBaseline(s, "operator-b", "camera-18", 300)
 	if err != nil {
 		t.Fatalf("compare: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestAnotherOperatorsBaselineIsNotUsed(t *testing.T) {
 func TestOurFigureMissingIsRefusedToo(t *testing.T) {
 	s := store(t, map[string]string{"operator-a.yaml": goodBaseline})
 
-	got, err := s.Compare("operator-a", "camera-18", 0)
+	got, err := operatormetrics.CompareBaseline(s, "operator-a", "camera-18", 0)
 	if err != nil {
 		t.Fatalf("compare: %v", err)
 	}

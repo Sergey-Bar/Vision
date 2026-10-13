@@ -81,8 +81,8 @@ type Baseline struct {
 // BaselineVersion is the artefact's contract version.
 const BaselineVersion = "security.io/mtti-baseline/v1"
 
-// AllowedMethods are the ways a baseline may have been measured.
-var AllowedMethods = map[string]bool{
+// allowedMethods are the ways a baseline may have been measured.
+var allowedMethods = map[string]bool{
 	"vms_operator_log": true,
 	"shift_report":     true,
 }
@@ -110,7 +110,7 @@ func (b *Baseline) Validate() error {
 	if strings.TrimSpace(b.CapturedBy) == "" {
 		problems = append(problems, "captured_by is required: a baseline nobody is answerable for is not evidence")
 	}
-	if !AllowedMethods[b.How] {
+	if !allowedMethods[b.How] {
 		problems = append(problems, "how must be one of vms_operator_log or shift_report: the method is what tells a reader whether to trust the median")
 	}
 	if len(problems) > 0 {
@@ -243,10 +243,15 @@ type Comparison struct {
 	BaselineSamples int `json:"baseline_samples,omitempty"`
 }
 
-// Compare is the plan's C8 in one function: our measured MTTI for one operator
-// on one stream, against that operator's own VMS-only baseline for the same
-// stream.
-func (s BaselineStore) Compare(operatorID, streamRef string, oursSeconds float64) (Comparison, error) {
+// CompareBaseline is the plan's C8 in one function: our measured MTTI for one
+// operator on one stream, against that operator's own VMS-only baseline for the
+// same stream.
+//
+// A function rather than a method for the reason `evaluation.Eligible` states:
+// the deadexport gate reads a function's callers by name and a method's by
+// qualified selector, and a caller that holds the store in a local would then
+// have no reader to point at.
+func CompareBaseline(s BaselineStore, operatorID, streamRef string, oursSeconds float64) (Comparison, error) {
 	b, err := s.For(operatorID, streamRef)
 	if err != nil {
 		return Comparison{}, err

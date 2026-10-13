@@ -279,11 +279,19 @@ func numbers(status string, d Derived) []Finding {
 //
 // It goes past twenty because the tree did, and the sentence in `gateClaim`'s
 // comment below — "a gate list of twenty-one would be a thing worth saying out
-// loud" — turned out to be the one prediction this gate got wrong. It stops at
-// thirty, and the reason to stop is worth keeping: a matcher that has to be taught
-// every spelling is a matcher whose author will decide to teach only the ones they
-// have seen. Thirty is comfortably past any gate list this repository will reach,
-// and when it is passed the failure is a loud one rather than a silent miss.
+// loud" — turned out to be the one prediction this gate got wrong.
+//
+// It stopped at thirty, and the reason to stop was worth keeping: a matcher that
+// has to be taught every spelling is a matcher whose author will decide to teach
+// only the ones they have seen. Thirty was comfortably past any gate list this
+// repository would reach.
+//
+// It reached thirty-one on 2026-10-13, when C6 added two gates and C7 a third,
+// and the loud failure fired exactly as designed: "thirty-one gates is -1, the
+// tree says 31". The choice at that point is between going blind and teaching one
+// more spelling, and going blind is how a claim becomes unverified by accident.
+// So the table grew to thirty-one, and the comment that said it would not is this
+// paragraph. The next entry after it needs its own such paragraph, not a silence.
 var gateWords = map[string]int{
 	"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
 	"eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13,
@@ -291,6 +299,7 @@ var gateWords = map[string]int{
 	"nineteen": 19, "twenty": 20, "twenty-one": 21, "twenty-two": 22,
 	"twenty-three": 23, "twenty-four": 24, "twenty-five": 25, "twenty-six": 26,
 	"twenty-seven": 27, "twenty-eight": 28, "twenty-nine": 29, "thirty": 30,
+	"thirty-one": 31,
 }
 
 var gateCountRe = regexp.MustCompile(`(?i)\b((?:[a-z]+-)?[a-z]+)\s+gates\b`)

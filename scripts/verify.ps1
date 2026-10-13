@@ -326,6 +326,13 @@ Invoke-Gate 'roadmap-check' { & $go test -p 1 -count=1 ./internal/roadmapcheck/.
 Invoke-Gate 'nl-hits-resolve' { & $go test -p 1 -count=1 ./internal/investigate/... }
 Invoke-Gate 'nl-replays-without-model' { & $go test -p 1 -count=1 ./internal/investigate/... }
 
+# C7's buildable half: the schema-level assertion that no person/plate/
+# face-crop/credential vector can exist. The ADR and the compliance ruling
+# remain E1's gate; this makes the closed part structurally true rather than
+# merely documented, so a migration that added `vector(1536)` to a face_crop
+# table fails the build instead of reversing the privacy decision quietly.
+Invoke-Gate 'video-embed-audit' { & $go test -p 1 -count=1 ./internal/embedaudit/... }
+
 # Every published schema with a Go-side embedded copy, not just rule-bundle. The
 # six schemas are embedded in internal/contracts/schemasync and byte-compared by
 # its own tests; running that package here makes the copy step a gate rather than
