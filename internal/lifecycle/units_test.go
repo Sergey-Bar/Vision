@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/lifecycle"
+	"github.com/Sergey-Bar/vision/internal/lifecycle"
 )
 
 // opts builds a UnitOptions rooted in a temporary directory.

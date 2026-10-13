@@ -11,12 +11,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/aistate"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/evidence"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/novelty"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/vlm"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/xprotect"
+	"github.com/Sergey-Bar/vision-poc/internal/aistate"
+	"github.com/Sergey-Bar/vision-poc/internal/evidence"
+	"github.com/Sergey-Bar/vision-poc/internal/novelty"
+	"github.com/Sergey-Bar/vision-poc/internal/store"
+	"github.com/Sergey-Bar/vision-poc/internal/vlm"
+	"github.com/Sergey-Bar/vision-poc/internal/xprotect"
 )
 
 // The four live defects, each with a test whose subject is the exact line the red

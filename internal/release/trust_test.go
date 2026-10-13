@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/release"
+	"github.com/Sergey-Bar/vision/internal/release"
 )
 
 // The offline verifiers exist to answer "did the party I trust build this". With

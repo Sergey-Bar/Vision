@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/airuntime"
-	"github.com/Sergey-Bar/Ai-Captain/internal/observations"
+	"github.com/Sergey-Bar/vision/internal/airuntime"
+	"github.com/Sergey-Bar/vision/internal/observations"
 )
 
 // captured is what the fake runtime saw.

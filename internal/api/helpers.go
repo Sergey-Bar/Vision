@@ -7,8 +7,8 @@ import (
 	"io"
 	"strconv"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/bundles"
-	"github.com/Sergey-Bar/Ai-Captain/internal/identity"
+	"github.com/Sergey-Bar/vision/internal/bundles"
+	"github.com/Sergey-Bar/vision/internal/identity"
 )
 
 // Small helpers kept in one file so the handler bodies read as handler bodies.

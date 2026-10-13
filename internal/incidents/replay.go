@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/clock"
-	"github.com/Sergey-Bar/Ai-Captain/internal/rules"
+	"github.com/Sergey-Bar/vision/internal/clock"
+	"github.com/Sergey-Bar/vision/internal/rules"
 )
 
 // ReplayStep is one step of the evaluation, in the order it happened.

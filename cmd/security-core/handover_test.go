@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/dutylog"
+	"github.com/Sergey-Bar/vision/internal/dutylog"
 )
 
 // The console hand-over page's reader, against a real artifact file: one read

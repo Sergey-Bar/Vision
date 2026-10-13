@@ -21,7 +21,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/milestone"
+	"github.com/Sergey-Bar/vision/internal/milestone"
 )
 
 const eventTypesRoute = "/api/rest/v1/eventTypes"

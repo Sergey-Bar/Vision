@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/milestone"
+	"github.com/Sergey-Bar/vision/internal/milestone"
 )
 
 // The probe's job is to turn a list of guesses into confirmed-or-contradicted.

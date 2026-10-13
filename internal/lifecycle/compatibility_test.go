@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/lifecycle"
-	"github.com/Sergey-Bar/Ai-Captain/internal/release"
+	"github.com/Sergey-Bar/vision/internal/lifecycle"
+	"github.com/Sergey-Bar/vision/internal/release"
 )
 
 // Three fields are signed into the manifest, written into the install state, and

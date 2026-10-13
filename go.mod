@@ -1,9 +1,9 @@
-module github.com/Sergey-Bar/Ai-Captain
+module github.com/Sergey-Bar/vision
 
 go 1.26.0
 
 require (
-	github.com/Sergey-Bar/ai-captain-poc v0.0.0
+	github.com/Sergey-Bar/vision-poc v0.0.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
@@ -23,4 +23,4 @@ require (
 	golang.org/x/text v0.42.0 // indirect
 )
 
-replace github.com/Sergey-Bar/ai-captain-poc => ./poc/active-monitoring
+replace github.com/Sergey-Bar/vision-poc => ./poc/active-monitoring

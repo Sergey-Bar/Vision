@@ -48,8 +48,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/incidents"
-	"github.com/Sergey-Bar/Ai-Captain/internal/observations"
+	"github.com/Sergey-Bar/vision/internal/incidents"
+	"github.com/Sergey-Bar/vision/internal/observations"
 )
 
 // storeEvidence puts the committed clips into the evidence store and links them to

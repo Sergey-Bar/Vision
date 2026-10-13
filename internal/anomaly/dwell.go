@@ -4,8 +4,8 @@ package anomaly
 import (
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/correlation"
-	"github.com/Sergey-Bar/Ai-Captain/internal/sitemodel"
+	"github.com/Sergey-Bar/vision/internal/correlation"
+	"github.com/Sergey-Bar/vision/internal/sitemodel"
 )
 
 // The anomaly types this package's rules emit. Unexported, because a caller

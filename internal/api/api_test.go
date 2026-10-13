@@ -14,17 +14,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/api"
-	"github.com/Sergey-Bar/Ai-Captain/internal/audit"
-	"github.com/Sergey-Bar/Ai-Captain/internal/bundles"
-	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
-	"github.com/Sergey-Bar/Ai-Captain/internal/evidence"
-	"github.com/Sergey-Bar/Ai-Captain/internal/identity"
-	"github.com/Sergey-Bar/Ai-Captain/internal/incidents"
-	"github.com/Sergey-Bar/Ai-Captain/internal/migrate"
-	"github.com/Sergey-Bar/Ai-Captain/internal/observability"
-	"github.com/Sergey-Bar/Ai-Captain/internal/rules"
-	"github.com/Sergey-Bar/Ai-Captain/internal/testutil"
+	"github.com/Sergey-Bar/vision/internal/api"
+	"github.com/Sergey-Bar/vision/internal/audit"
+	"github.com/Sergey-Bar/vision/internal/bundles"
+	"github.com/Sergey-Bar/vision/internal/dbx"
+	"github.com/Sergey-Bar/vision/internal/evidence"
+	"github.com/Sergey-Bar/vision/internal/identity"
+	"github.com/Sergey-Bar/vision/internal/incidents"
+	"github.com/Sergey-Bar/vision/internal/migrate"
+	"github.com/Sergey-Bar/vision/internal/observability"
+	"github.com/Sergey-Bar/vision/internal/rules"
+	"github.com/Sergey-Bar/vision/internal/testutil"
 )
 
 // theEvidenceStore is the store the most recently built test server was given.

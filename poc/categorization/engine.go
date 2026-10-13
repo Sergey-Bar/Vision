@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/airuntime"
+	"github.com/Sergey-Bar/vision/internal/airuntime"
 )
 
 // Engine performs AI-based categorization of video evidence.

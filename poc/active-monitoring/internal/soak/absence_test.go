@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/aistate"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/config"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/novelty"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/vlm"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/xprotect"
+	"github.com/Sergey-Bar/vision-poc/internal/aistate"
+	"github.com/Sergey-Bar/vision-poc/internal/config"
+	"github.com/Sergey-Bar/vision-poc/internal/novelty"
+	"github.com/Sergey-Bar/vision-poc/internal/store"
+	"github.com/Sergey-Bar/vision-poc/internal/vlm"
+	"github.com/Sergey-Bar/vision-poc/internal/xprotect"
 )
 
 // The absence aggregate's tests, and they are the plan's headline arithmetic: 500

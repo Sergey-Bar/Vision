@@ -31,11 +31,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/command"
-	"github.com/Sergey-Bar/Ai-Captain/internal/lifecycle"
-	"github.com/Sergey-Bar/Ai-Captain/internal/migrate"
-	"github.com/Sergey-Bar/Ai-Captain/internal/release"
-	"github.com/Sergey-Bar/Ai-Captain/internal/testutil"
+	"github.com/Sergey-Bar/vision/internal/command"
+	"github.com/Sergey-Bar/vision/internal/lifecycle"
+	"github.com/Sergey-Bar/vision/internal/migrate"
+	"github.com/Sergey-Bar/vision/internal/release"
+	"github.com/Sergey-Bar/vision/internal/testutil"
 )
 
 // releaseA and releaseB are two consecutive releases. The bodies differ, and so

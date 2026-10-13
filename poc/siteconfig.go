@@ -7,10 +7,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/anomaly"
-	"github.com/Sergey-Bar/Ai-Captain/internal/dutylog"
-	"github.com/Sergey-Bar/Ai-Captain/internal/siteconfig"
-	"github.com/Sergey-Bar/Ai-Captain/internal/sitemodel"
+	"github.com/Sergey-Bar/vision/internal/anomaly"
+	"github.com/Sergey-Bar/vision/internal/dutylog"
+	"github.com/Sergey-Bar/vision/internal/siteconfig"
+	"github.com/Sergey-Bar/vision/internal/sitemodel"
 )
 
 // The POC's view of the autonomous configurator.

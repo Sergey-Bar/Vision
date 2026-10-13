@@ -9,11 +9,11 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/correlator"
-	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
-	"github.com/Sergey-Bar/Ai-Captain/internal/migrate"
-	"github.com/Sergey-Bar/Ai-Captain/internal/rules"
-	"github.com/Sergey-Bar/Ai-Captain/internal/testutil"
+	"github.com/Sergey-Bar/vision/internal/correlator"
+	"github.com/Sergey-Bar/vision/internal/dbx"
+	"github.com/Sergey-Bar/vision/internal/migrate"
+	"github.com/Sergey-Bar/vision/internal/rules"
+	"github.com/Sergey-Bar/vision/internal/testutil"
 )
 
 // The fixture's epoch. Everything is written relative to it, so the golden output

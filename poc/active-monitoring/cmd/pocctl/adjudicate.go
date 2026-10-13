@@ -47,7 +47,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
+	"github.com/Sergey-Bar/vision-poc/internal/store"
 )
 
 // syntheticMark is one committed answer.

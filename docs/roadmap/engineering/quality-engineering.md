@@ -1,6 +1,6 @@
 # Quality Engineering
 
-Owner: E2 (Engineering). Status: living. Last revised 2026-09-28.
+Owner: E2 (Engineering). Status: living. Last revised 2026-10-12.
 
 The gate commands are in `AGENTS.md` and `Makefile`. Everything in this document
 is written against the tests that exist in the tree, named by function, and
@@ -389,7 +389,7 @@ hash row, so they can be raised without a migration),
 **Covers.** The rendered console and the HTTP contract around it. There is no
 browser automation and there will not be any — the console is server-rendered Go
 templates with no client-side JavaScript (§4.2 of
-``), so "E2E" here means asserting on the HTML a real
+[`ux-and-design-system.md`](ux-and-design-system.md)), so "E2E" here means asserting on the HTML a real
 request produces, against real services over a real database.
 
 **The twelve tests, and what each one is really asserting:**
@@ -428,7 +428,7 @@ comprehensible, is the disposition reachable without a mouse, does the evidence
 bundle let a competent operator reach the right answer, and would *this
 operator* rather than this engineer prefer it to the VMS.
 
-**The four M1 gates, and their test.** From `` M1, each
+**The four M1 gates, and their test.** From [`master-roadmap.md`](../master-roadmap.md) M1, each
 signed by E1 and E2:
 
 1. Live Milestone integration and replay parity → the parity report, both paths,
@@ -949,7 +949,7 @@ exists: "the alternative is shipping a model because it felt right."
 | `MinRecallOnTruePositives` | 0.70 | "catches a profile that is precise by being quiet" |
 | `MaxMedianLatencyMS` | 8000 | "a profile that adds thirty seconds to every incident is a profile operators learn to work around" |
 | `MaxDisagreementRate` | 0.25 | "either the profile is wrong or its output is not legible, and both are reasons not to promote it" |
-| `MinLabelledCases` | 30 | "a rate computed from four cases is a number, not an estimate" |
+| `MinLabelledCases` | 200 | "a rate computed from four cases is a number, not an estimate" |
 
 `ShadowGates()` is the same with `MinLabelledCases = 10`, because the point of
 shadow evaluation is to collect cases, not to promote.
@@ -1148,7 +1148,7 @@ commit".
    replacement of the person entirely) — and the anonymisation is recorded in the
    dataset's provenance file, because an unrecorded anonymisation is an assertion
    rather than a control. Recorded licence and provenance per §9.5 of
-   ``.
+   [`ux-and-design-system.md`](ux-and-design-system.md).
 3. **The suite has no access to a customer's data.** Tests run on synthetic
    fixtures and committed datasets only. A test that needs a live site is a
    manual test with a person, and `AGENTS.md`'s rule generalises: **the suite
@@ -1164,7 +1164,7 @@ commit".
 5. **Research artefacts go through the same sanitiser.** Shift-shadowing notes,
    interview transcripts and incident-review samples are customer data. They
    live in `docs/research/YYYY-MM/` sanitised, and the raw recordings are
-   deleted on the stated date (`` §5.2).
+   deleted on the stated date ([`trust-and-security-program.md`](../security/trust-and-security-program.md) §5.2).
 6. **Retention of test data is bounded.** Golden sets are permanent because they
    are inputs to a reproducibility claim. Evaluation datasets are versioned and
    superseding is a new directory, never an edit. Everything else — captured
@@ -1295,7 +1295,7 @@ monitoring, not about staffing. Two consequences, both accepted:
 2. **From M3 GA, the on-call rotation is a contracted commitment and it is
    priced.** Before M3, support is business hours on the founder's own timezone
    and the customer is told so in writing (§7 of
-   ``). Pretending otherwise in a contract is the
+   [`release-sre-and-support.md`](release-sre-and-support.md)). Pretending otherwise in a contract is the
    single worst thing we could do to a company that is buying us for
    provability.
 
@@ -1454,7 +1454,7 @@ that "green" in `docs/status.md` is not read as "nothing is wrong".
 | Q-5 | The console's dead-letter and clock-drift tables render from `consoleData` with `requirePrincipal`, not `requireCapability`, so a principal without `dead_letter.read` is shown the dead-letter list | `internal/api/handlers.go:158-163`, `internal/api/console.go:186-195` | A capability leak. The API routes get this right (`requireCapability(identity.CapDeadLetterRead, ...)`); the console routes do not, because `requirePrincipal` was used for the HTML surface. Invariant 5 is about tenant scoping, and this is the same family of defect: a surface reads data its caller is not authorised to read | Console routes use `requireCapability` like the API ones, or the data is omitted by capability. A test to match, in `internal/api/api_test.go` — and it is a §7-content-assertion gap as well (§2.7) |
 | Q-6 | `internal/evidence`'s `TestSymlinkEscapeIsRefused` skips on Windows | `internal/evidence/evidence_test.go:74-77` | §6.2. A test that skips on the platform running half our target installs is not protecting half our customers | Grant `SeCreateSymbolicLinkPrivilege` on the Windows CI runner, or test the post-open `Lstat` check directly, or use a junction. At least one ships in M1 |
 | Q-7 | **RESOLVED.** `go.mod` declared `go 1.26.0` while the workflow pinned `GO_VERSION: "1.24"` with `GOTOOLCHAIN: local`, so nothing could build; `docs/status.md` said 1.27 as well | `go.mod:3` | Three asserted versions, none reconcilable. The pin is now `1.26` and `docs/status.md` says `1.26.0`. The workflow has since been removed for an unrelated billing reason | Pin one version in `go.mod` and `docs/status.md`; a future pipeline must match it | Closed |
-| Q-8 | The Windows Service and systemd units are absent; `deploy/` was created and removed | `docs/status.md` | A site on an isolated network has no supported way to start the product at boot. Every other deployment concern in `` is downstream of this | M1. Genuinely small; deferred rather than absent, and nothing else depends on it — but "nothing depends on it" stops being true the moment there is a customer |
+| Q-8 | The Windows Service and systemd units are absent; `deploy/` was created and removed | `docs/status.md` | A site on an isolated network has no supported way to start the product at boot. Every other deployment concern in [`release-sre-and-support.md`](release-sre-and-support.md) is downstream of this | M1. Genuinely small; deferred rather than absent, and nothing else depends on it — but "nothing depends on it" stops being true the moment there is a customer |
 
 ### 11.5 The one summary line for a QA review
 

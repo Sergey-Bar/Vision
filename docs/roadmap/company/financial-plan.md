@@ -1,10 +1,10 @@
 # Financial Plan
 
-Owner: E1, with E2 on cost. Status: living. Last revised 2026-09-28.
+Owner: E1, with E2 on cost. Status: living. Last revised 2026-10-12.
 
-Read `` §6 and §8, ``,
-`` §8, `` §7.3 and §9, and
-`` first. This document is the one in the roadmap
+Read [`strategy-and-north-star.md`](../strategy-and-north-star.md) §6 and §8, [`master-roadmap.md`](../master-roadmap.md),
+[`gtm-and-sales.md`](gtm-and-sales.md) §8, [`release-sre-and-support.md`](../engineering/release-sre-and-support.md) §7.3 and §9, and
+[`team-and-operating-model.md`](../engineering/team-and-operating-model.md) first. This document is the one in the roadmap
 where being wrong is cheapest to discover today and most expensive to discover in
 month fourteen, so it is mostly assumptions with the arithmetic exposed.
 

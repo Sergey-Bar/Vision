@@ -31,7 +31,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/rules"
+	"github.com/Sergey-Bar/vision/internal/rules"
 )
 
 // bundleWith compiles a one-rule bundle whose `then` block is the given YAML body.

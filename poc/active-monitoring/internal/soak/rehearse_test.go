@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/xprotect"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/xpsim"
+	"github.com/Sergey-Bar/vision-poc/internal/store"
+	"github.com/Sergey-Bar/vision-poc/internal/xprotect"
+	"github.com/Sergey-Bar/vision-poc/internal/xpsim"
 )
 
 // TestTheRunRehearsesAgainstItsOwnPushTarget is the AC7 mechanism, tested.

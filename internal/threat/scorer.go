@@ -4,7 +4,7 @@ package threat
 import (
 	"fmt"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/correlation"
+	"github.com/Sergey-Bar/vision/internal/correlation"
 )
 
 // ScorerConfig configures the threat scorer.

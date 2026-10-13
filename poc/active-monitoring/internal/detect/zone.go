@@ -16,7 +16,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/proposal"
+	"github.com/Sergey-Bar/vision-poc/internal/proposal"
 )
 
 // Box is a detection in normalised coordinates: 0..1 against the frame. The

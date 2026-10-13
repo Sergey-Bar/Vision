@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/api"
+	"github.com/Sergey-Bar/vision/internal/api"
 )
 
 // The primary login path for every enrolled operator.

@@ -8,7 +8,7 @@
 
 ```sh
 protoc -I contracts/protobuf \
-  --go_out=. --go_opt=module=github.com/Sergey-Bar/Ai-Captain \
+  --go_out=. --go_opt=module=github.com/Sergey-Bar/vision \
   contracts/protobuf/security/v1/*.proto
 go run ./tools/contractcheck -mode check \
   -baseline contracts/compat/baseline.json -root contracts/protobuf

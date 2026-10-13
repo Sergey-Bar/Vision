@@ -28,7 +28,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/safename"
+	"github.com/Sergey-Bar/vision/internal/safename"
 )
 
 // Event kinds. These are the whole vocabulary; a line that is not one of

@@ -33,7 +33,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
+	"github.com/Sergey-Bar/vision/internal/dbx"
 
 	// `dispatch` owns the destinations file format and its validation, so it owns the
 	// default path too. The dependency runs config -> dispatch rather than the reverse:
@@ -42,7 +42,7 @@ import (
 	//
 	// It is not a cycle. `dispatch` imports `dbx`, `jobs`, `outbox` and `rules`, and
 	// none of them import `config`.
-	"github.com/Sergey-Bar/Ai-Captain/internal/dispatch"
+	"github.com/Sergey-Bar/vision/internal/dispatch"
 )
 
 // Config is the resolved configuration for one install.

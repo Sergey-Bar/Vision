@@ -13,11 +13,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/anomaly"
-	"github.com/Sergey-Bar/Ai-Captain/internal/brief"
-	"github.com/Sergey-Bar/Ai-Captain/internal/correlation"
-	"github.com/Sergey-Bar/Ai-Captain/poc/search"
-	"github.com/Sergey-Bar/Ai-Captain/poc/ws"
+	"github.com/Sergey-Bar/vision/internal/anomaly"
+	"github.com/Sergey-Bar/vision/internal/brief"
+	"github.com/Sergey-Bar/vision/internal/correlation"
+	"github.com/Sergey-Bar/vision/poc/search"
+	"github.com/Sergey-Bar/vision/poc/ws"
 )
 
 // Server serves the POC frontend, the JSON API and the analytics WebSocket

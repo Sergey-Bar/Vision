@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/sqlguard"
+	"github.com/Sergey-Bar/vision/internal/sqlguard"
 )
 
 // goSQL wraps a statement the way the product writes one: inside a backtick raw

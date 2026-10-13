@@ -30,10 +30,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/bundles"
-	"github.com/Sergey-Bar/Ai-Captain/internal/fixture"
-	"github.com/Sergey-Bar/Ai-Captain/internal/milestone"
-	"github.com/Sergey-Bar/Ai-Captain/internal/rules"
+	"github.com/Sergey-Bar/vision/internal/bundles"
+	"github.com/Sergey-Bar/vision/internal/fixture"
+	"github.com/Sergey-Bar/vision/internal/milestone"
+	"github.com/Sergey-Bar/vision/internal/rules"
 )
 
 // drainBounded is how many consume passes the seed will make before it stops.

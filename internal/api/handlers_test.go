@@ -12,14 +12,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/api"
-	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
-	"github.com/Sergey-Bar/Ai-Captain/internal/identity"
-	"github.com/Sergey-Bar/Ai-Captain/internal/incidents"
-	"github.com/Sergey-Bar/Ai-Captain/internal/observability"
-	"github.com/Sergey-Bar/Ai-Captain/internal/rules"
-	"github.com/Sergey-Bar/Ai-Captain/internal/simulate"
-	"github.com/Sergey-Bar/Ai-Captain/internal/testutil"
+	"github.com/Sergey-Bar/vision/internal/api"
+	"github.com/Sergey-Bar/vision/internal/dbx"
+	"github.com/Sergey-Bar/vision/internal/identity"
+	"github.com/Sergey-Bar/vision/internal/incidents"
+	"github.com/Sergey-Bar/vision/internal/observability"
+	"github.com/Sergey-Bar/vision/internal/rules"
+	"github.com/Sergey-Bar/vision/internal/simulate"
+	"github.com/Sergey-Bar/vision/internal/testutil"
 )
 
 // The HTTP handlers, driven against a real database.

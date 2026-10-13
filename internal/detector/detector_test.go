@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/detector"
-	"github.com/Sergey-Bar/Ai-Captain/internal/mp4"
+	"github.com/Sergey-Bar/vision/internal/detector"
+	"github.com/Sergey-Bar/vision/internal/mp4"
 )
 
 // The fixture is the same synthetic stream the muxer is tested against: three

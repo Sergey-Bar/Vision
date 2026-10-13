@@ -1,5 +1,5 @@
 // Package detectclient re-exports the AI sidecar client to modules outside
-// this one. The YouTube POC server (module github.com/Sergey-Bar/Ai-Captain)
+// this one. The YouTube POC server (module github.com/Sergey-Bar/vision)
 // lives outside this module's path, so it cannot import internal/ai directly —
 // and it must not grow a second copy of the wire, because the wire is pinned
 // from both sides and two clients are how one side drifts.
@@ -12,7 +12,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/ai"
+	"github.com/Sergey-Bar/vision-poc/internal/ai"
 )
 
 // Box is one detection in normalised frame coordinates — the wire format.

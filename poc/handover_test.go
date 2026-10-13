@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/correlation"
-	"github.com/Sergey-Bar/Ai-Captain/internal/dutylog"
+	"github.com/Sergey-Bar/vision/internal/correlation"
+	"github.com/Sergey-Bar/vision/internal/dutylog"
 )
 
 // newHandoverIngest builds an ingest with a site model and an open duty log

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/skipaudit"
+	"github.com/Sergey-Bar/vision/internal/skipaudit"
 )
 
 // stream builds a `go test -json` stream. The shape is what `go test` actually
@@ -290,13 +290,13 @@ func TestTheModulePrefixIsStripped(t *testing.T) {
 		},
 	}
 	in := stream(
-		`{"Action":"run","Package":"github.com/Sergey-Bar/Ai-Captain/internal/evidence","Test":"TestSkipped"}`,
-		`{"Action":"output","Package":"github.com/Sergey-Bar/Ai-Captain/internal/evidence",`+
+		`{"Action":"run","Package":"github.com/Sergey-Bar/vision/internal/evidence","Test":"TestSkipped"}`,
+		`{"Action":"output","Package":"github.com/Sergey-Bar/vision/internal/evidence",`+
 			`"Test":"TestSkipped","Output":"    no database; skipping\n"}`,
-		`{"Action":"skip","Package":"github.com/Sergey-Bar/Ai-Captain/internal/evidence","Test":"TestSkipped","Elapsed":0}`,
-		`{"Action":"pass","Package":"github.com/Sergey-Bar/Ai-Captain/internal/evidence","Elapsed":0.1}`,
+		`{"Action":"skip","Package":"github.com/Sergey-Bar/vision/internal/evidence","Test":"TestSkipped","Elapsed":0}`,
+		`{"Action":"pass","Package":"github.com/Sergey-Bar/vision/internal/evidence","Elapsed":0.1}`,
 	)
-	res, err := skipaudit.Check(strings.NewReader(in), exempt, "linux", "github.com/Sergey-Bar/Ai-Captain")
+	res, err := skipaudit.Check(strings.NewReader(in), exempt, "linux", "github.com/Sergey-Bar/vision")
 	if err != nil {
 		t.Fatalf("check: %v", err)
 	}

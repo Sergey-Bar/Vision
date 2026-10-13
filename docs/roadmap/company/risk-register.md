@@ -1,17 +1,17 @@
 # Risk Register
 
 Owner: E1 (accountable for the register itself). Status: **live instrument**.
-Last revised 2026-09-28.
+Last revised 2026-10-12.
 
 This is the whole plan's risk register, in one table, scored, owned, and dated.
 It is a working instrument: if a row is not reviewed, that row is the bug, not
-the register. `` §6's capacity law and
-``'s dates are the thing it protects.
+the register. [`strategy-and-north-star.md`](../strategy-and-north-star.md) §6's capacity law and
+[`master-roadmap.md`](../master-roadmap.md)'s dates are the thing it protects.
 
 **Two rules about what belongs here.**
 
 1. **A risk is a thing that has not happened yet.** Once it has happened it is
-   an incident (`` §10) and it lives in the incident
+   an incident ([`quality-engineering.md`](../engineering/quality-engineering.md) §10) and it lives in the incident
    tracker. The register holds the possibility, the signal, and the pre-agreed
    response.
 2. **Every row names a person, a signal, a response and a date.** A risk with
@@ -55,7 +55,7 @@ therefore the same scale we already have practice with:
 
 | Score | Band | What it means operationally |
 |---|---|---|
-| 20–25 | **Critical** | Named response, pre-agreed, tested. Reviewed **monthly** with both people present. Any change to it is a decision (``) |
+| 20–25 | **Critical** | Named response, pre-agreed, tested. Reviewed **monthly** with both people present. Any change to it is a decision ([`decisions-and-process.md`](../engineering/decisions-and-process.md)) |
 | 12–19 | **High** | Named response. Reviewed quarterly at minimum, or monthly if it moves |
 | 6–11 | Medium | Named response. Reviewed at its own date, which is at most two quarters out |
 | 1–5 | Low | Reviewed at its date. No pre-agreed response required beyond "watch the signal" — but a signal is still required |
@@ -90,10 +90,10 @@ therefore the same scale we already have practice with:
 may not remove one, may not change an owner's response, and may not set a state
 other than Open. That asymmetry is deliberate: adding is cheap and the downside
 of a spurious row is fifteen seconds; removing is where institutional memory is
-lost, and `` §4 says the same thing about ADRs.
+lost, and [`decisions-and-process.md`](../engineering/decisions-and-process.md) §4 says the same thing about ADRs.
 
 **The monthly review, thirty minutes, both people, standing agenda item 3**
-(the agenda is ``'s):
+(the agenda is [`team-and-operating-model.md`](../engineering/team-and-operating-model.md)'s):
 
 ```
 1  any Sev-1 or Sev-2 security finding open, and any new row it creates
@@ -236,7 +236,7 @@ State key: `O` Open · `M` Mitigating · `A` Accepted · `T` Transferred ·
 |---|---|---|---|---|---|---|---|---|---|
 | **H-01** | **Single-engineer bus factor on every critical path** — one of the two is unavailable and the work stops | 4 | 4 | **16** | Any work item where only one person could do it, is doing it, and has been for more than a week | E1 | `00` §6's constraint is permanent; the response is structural. **Every work item names a second person or names why there is none.** Every hard-won fact is in `docs/` (`docs/status.md` is the source of truth, not the commit history). A Sev-1 uses the two-person protocol so the incident commander does not write code. And the runway risk (F-01) is the real mitigation — a company that cannot afford both founders is a company with a bus factor of one regardless of documentation | 2026-10-31 | O |
 | **H-02** | A 24/7 support expectation is created before a rota is staffed | 3 | 4 | **12** | A customer asks for 24/7; a contract draft contains an SLI we cannot staff; a founder is woken by a non-Sev-1 | E1 | `12` §7.3: "Until that rota exists, we do not sell 24/7. We would rather decline a deal than sign one." Business hours, written down, in the design-partner agreement, in those words | 2027-06-30 | O |
-| **H-03** | Burnout in a two-person company during a hard milestone | 3 | 4 | **12** | Two consecutive weeks of 70+ hours; a slipped gate that is accepted without a reduction; a founder taking no holiday for two months | E1 | ``'s rota, and the honest constraint that the 40% tax is not optional. **The pre-agreed response to burnout is a scope cut, not a sprint.** And the 07 §10.3 rule that the incident commander does not write code applies to ordinary weeks too, not only to incidents | 2026-11-30 | O |
+| **H-03** | Burnout in a two-person company during a hard milestone | 3 | 4 | **12** | Two consecutive weeks of 70+ hours; a slipped gate that is accepted without a reduction; a founder taking no holiday for two months | E1 | [`team-and-operating-model.md`](../engineering/team-and-operating-model.md)'s rota, and the honest constraint that the 40% tax is not optional. **The pre-agreed response to burnout is a scope cut, not a sprint.** And the 07 §10.3 rule that the incident commander does not write code applies to ordinary weeks too, not only to incidents | 2026-11-30 | O |
 | **H-04** | The AI agent introduces defects faster than two people can review them | 4 | 3 | **12** | Review queue depth rising; a merge nobody can explain; a test that exists but asserts nothing; a test that has never been seen to fail | E2 | `07` §11.2's hard line, which is `19` §4's rules of engagement: every generated test is read by a human who can answer "what does this fail on"; mutants are the tool, not the scoreboard; an agent may not touch a `green` marker. The measurable signal: **the rate at which we re-read a diff and find something wrong rises** | 2026-11-30 | O |
 
 ### 2.7 FINANCIAL
@@ -529,7 +529,8 @@ date        risk ID  movement      why it moved                        decision
 **The rule about this log:** an entry that only changes a number, with no
 signal and no decision, is not a review. The log exists so that a decision made
 in a specific month can be found in that month rather than re-litigated in an
-arbitrary one — which is the same purpose `` §3
+arbitrary one — which is the same purpose
+[`decisions-and-process.md`](../engineering/decisions-and-process.md) §3
 serves for ADRs, and the same failure (`amnesia and re-arguing`) that both exist
 to prevent.
 
@@ -649,7 +650,7 @@ Named so the ladder is not the place where everything goes:
   or nowhere. "A risk nobody can observe is a signal" is the same discipline as
   `07` §7.2's "a metric that is not read by anyone" and `13` §2.2's review
   requirement.
-- **Anything already decided.** `` §5's settled
+- **Anything already decided.** [`decisions-and-process.md`](../engineering/decisions-and-process.md) §5's settled
   index exists so that a settled question is answered by pointing at the ADR,
   not by re-arguing. Re-opening a settled decision requires new evidence, and
   "I have thought about it more" is not evidence.

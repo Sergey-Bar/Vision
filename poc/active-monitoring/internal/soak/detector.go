@@ -1,8 +1,8 @@
 package soak
 
 import (
-	"github.com/Sergey-Bar/ai-captain-poc/internal/ai"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/ortdetect"
+	"github.com/Sergey-Bar/vision-poc/internal/ai"
+	"github.com/Sergey-Bar/vision-poc/internal/ortdetect"
 )
 
 // ORTDetector adapts *ortdetect.Detector to the [Detector] interface.

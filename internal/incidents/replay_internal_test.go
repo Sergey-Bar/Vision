@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/rules"
+	"github.com/Sergey-Bar/vision/internal/rules"
 )
 
 // A drift exclusion is a fact about a device, not a number to be compared

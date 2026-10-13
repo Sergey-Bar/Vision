@@ -20,6 +20,11 @@ type loaderYAML struct {
 				X float64 `yaml:"x"`
 				Y float64 `yaml:"y"`
 			} `yaml:"position"`
+			FieldOfView *struct {
+				BearingDegrees *float64 `yaml:"bearing_degrees"`
+				ExtentDegrees  *float64 `yaml:"extent_degrees"`
+				RangeMetres    *float64 `yaml:"range_metres"`
+			} `yaml:"field_of_view"`
 		} `yaml:"cameras"`
 		Zones []struct {
 			ID      string `yaml:"id"`
@@ -70,6 +75,26 @@ func LoadFromBytes(data []byte) (*Site, error) {
 	return ly.toSite()
 }
 
+// cameraFieldOfView maps the YAML's optional view block, keeping nil as nil.
+//
+// The three inner pointers are nil when the site did not write the key, so a
+// camera that declares only a bearing has a view whose extent is unknown — and
+// adjacency.go answers that as "unknown", not as "sees everything".
+func cameraFieldOfView(f *struct {
+	BearingDegrees *float64 `yaml:"bearing_degrees"`
+	ExtentDegrees  *float64 `yaml:"extent_degrees"`
+	RangeMetres    *float64 `yaml:"range_metres"`
+}) *FieldOfView {
+	if f == nil {
+		return nil
+	}
+	return &FieldOfView{
+		BearingDegrees: f.BearingDegrees,
+		ExtentDegrees:  f.ExtentDegrees,
+		RangeMetres:    f.RangeMetres,
+	}
+}
+
 func (ly *loaderYAML) toSite() (*Site, error) {
 	if ly.Site.ID == "" {
 		return nil, errors.New("sitemodel: site id is required")
@@ -85,6 +110,10 @@ func (ly *loaderYAML) toSite() (*Site, error) {
 			ID:       c.ID,
 			ZoneIDs:  c.ZoneIDs,
 			Position: Point{X: c.Position.X, Y: c.Position.Y},
+			// An undeclared view is nil, not a zero view. A site that has not
+			// measured its cameras' bearings gets no derived overlap rather
+			// than a false one.
+			FieldOfView: cameraFieldOfView(c.FieldOfView),
 		})
 	}
 	for _, z := range ly.Site.Zones {

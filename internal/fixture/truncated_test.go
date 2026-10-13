@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/fixture"
+	"github.com/Sergey-Bar/vision/internal/fixture"
 )
 
 // diesMidBody is a reader that hands over a prefix and then reports that the

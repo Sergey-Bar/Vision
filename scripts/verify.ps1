@@ -305,6 +305,14 @@ Invoke-Gate 'contract-check-openapi' { & $go run ./tools/contractcheck -mode che
 # The status document derives its numbers from the tree; a stale claim is a defect.
 Invoke-Gate 'statuscheck' { & $go test -p 1 -count=1 ./internal/statuscheck/... }
 
+# The roadmap documents state build state in prose — package, migration and
+# contract counts — and all three were stale at once (30, 24 and thirty against
+# a tree that declares 83). The counts derive from the directory that defines
+# them, so a roadmap document the tree contradicts fails here. The gate count is
+# deliberately not re-derived: statuscheck owns it, and the roadmap says itself
+# that it does not restate build state.
+Invoke-Gate 'roadmap-check' { & $go test -p 1 -count=1 ./internal/roadmapcheck/... }
+
 # Every published schema with a Go-side embedded copy, not just rule-bundle. The
 # six schemas are embedded in internal/contracts/schemasync and byte-compared by
 # its own tests; running that package here makes the copy step a gate rather than
@@ -864,6 +872,225 @@ Invoke-Gate 'red-check' {
             pkg  = './internal/dbx'
             why  = 'the driver resolves a missing role from the environment, which is the OS user, so an attempted connection is the wrong identity and fails with an error naming a role the operator never asked for'
         }
+        @{
+            # The harness that scored one profile by name.
+            #
+            # `predictedRestricted` read `obs.Structured["restrictedZoneBreach"]` - the
+            # claim ONE profile makes - so every other profile's answer was invisible,
+            # no case was ever answered, and recall failed every gate: no profile other
+            # than `restricted-person` could ever pass Evaluate. The roadmap row that
+            # said this was CLOSED, and that "the field now comes from the profile being
+            # scored", was describing this function and was false when it was written.
+            #
+            # The mutation is the profile pinned by name rather than the constant, and
+            # deliberately so: replacing the lookup with `"restrictedZoneBreach"` turns
+            # the suite red on `"internal/observations" imported and not used`, which is
+            # a compiler failing rather than a control failing. Pinning the profile keeps
+            # the package compiling and reproduces the defect exactly.
+            #
+            # The first mutation was tried by hand and discarded for that reason. A red
+            # that does not name the defect teaches the reader nothing about it.
+            name = 'the scored field comes from the profile being scored'
+            file = 'internal/evaluation/evaluation.go'
+            from = '	field, known := observations.ProfileScoreField(obs.ProfileID)'
+            to   = '	field, known := observations.ProfileScoreField("restricted-person") // REDCHECK RC-14: the profile was pinned by name'
+            test = 'TestASecondProfileIsScoredOnItsOwnField'
+            pkg  = './internal/evaluation'
+            why  = 'a harness that read one profile''s field as a constant scored every other profile as silent, so a profile that answered correctly measured recall 0 and could never be promoted - and the document claimed the opposite, which is the one defect class this repository cannot detect by reading its own prose'
+        }
+        @{
+            # A control that had stopped being one.
+            #
+            # The tie-break in `Render` — actions at the same timestamp ordered
+            # by subject — was guarded by a test whose fixture carried only ONE
+            # action at the timestamp its own comment named, so the guard
+            # skipped on every single run and the assertion never executed. The
+            # gate found it because a skip nobody had declared is a failing
+            # gate, which is the only reason this control exists at all: the
+            # fixture now carries the pair its comment describes, and the
+            # assertion finds the pair by value rather than by index.
+            #
+            # The mutation removes the secondary key, and the golden files
+            # change with it — which is the second thing this proves: the golden
+            # text now records inc-aaa before inc-bbb at the same instant, so a
+            # reply of the golden files to the OLD bytes would fail here and in
+            # `internal/brief`'s own golden test.
+            name = 'same-timestamp actions are ordered by subject'
+            file = 'internal/brief/brief.go'
+            from = '		if b.Actions[i].TS.Equal(b.Actions[j].TS) {'
+            to   = '		if false && b.Actions[i].TS.Equal(b.Actions[j].TS) { // REDCHECK RC-15: the tie-break removed'
+            test = 'TestRenderSortsEverySection'
+            pkg  = './internal/brief'
+            why  = 'a shift hand-over is read left to right by an operator taking over a site, and two lines at the same minute in caller-built order is the one ordering that is not reproducible from the facts alone'
+        }
+        @{
+            # The attention producer.
+            #
+            # `attention_minutes` is the North Star numerator and it had NO producer
+            # at all until this pass: nothing recorded when an operator started
+            # paying attention, so the interval a human was responsible for an
+            # incident existed in no table anywhere. The row is `incident.opened`,
+            # written once per session per incident on the first authenticated read.
+            #
+            # The mutation is the producer returning without writing, which is
+            # what a nil Audit writer looks like from the metric's side: the read
+            # succeeds, the ledger stays empty, and the North Star quietly reads
+            # zero forever.
+            name = 'the first authenticated read of an incident is audited'
+            file = 'internal/api/handlers.go'
+            from = 'func (s *Server) auditIncidentOpened(r *http.Request, p identity.Principal, incidentID string) error {'
+            to   = 'func (s *Server) auditIncidentOpened(r *http.Request, p identity.Principal, incidentID string) error { if true { return nil } // REDCHECK RC-17: the attention producer removed'
+            test = 'TestTheFirstReadOfAnIncidentIsAudited'
+            pkg  = './internal/api'
+            why  = 'without the row the North Star numerator has no source at any window length, and the failure is silent: every incident reads as zero attention rather than as unmeasured'
+        }
+        @{
+            # The tenant predicate in the durable queries.
+            #
+            # Found while writing them, which is the only way it would have been
+            # found: the first draft carried the tenant in `Pool.For(...)` alone,
+            # which sets a session variable that ROW-LEVEL SECURITY reads - and the
+            # test suite connects as a PG superuser, which PostgreSQL exempts from
+            # every policy. Two tenants in one run each saw both tenants' rows, and
+            # every number the queries return would have been summed over the whole
+            # installation. RLS is the backstop; the predicate is the filter.
+            name = 'one tenant''s report does not include another''s'
+            file = 'internal/operatormetrics/queries.go'
+            from = '		 WHERE i.tenant_id = $1'
+            to   = '		 WHERE i.created_at >= $1 AND i.created_at <= $2 // REDCHECK RC-16: the tenant predicate removed'
+            test = 'TestOneTenantsReportDoesNotIncludeAnothers'
+            pkg  = './internal/operatormetrics'
+            why  = 'a metric query that reads across tenants reports the whole installation''s numbers under one tenant''s name, which is both a disclosure and a wrong number, and the place it fails is not the place it is read'
+        }
+        @{
+            # The same defect class on the second query, because the second query is
+            # the one a reader acts on.
+            #
+            # The first mutation tried was removing the join predicate
+            # `ON i.tenant_id = v.tenant_id`, and it did NOT go red - incident ids
+            # do not collide across tenants in practice, so a join without it finds
+            # the same row. That mutation was discarded rather than recorded: a table
+            # entry nobody watched go red is a claim, and this repository's rule is
+            # that an entry is added only after the hand run.
+            #
+            # The real defect is the driving-table predicate, and it is the one an
+            # operator acts on: the slice exists to answer "WHERE does this system
+            # stay quiet", and without the predicate the answer names another
+            # tenant's sites.
+            name = 'the slice names this tenant''s sites, not the installation''s'
+            file = 'internal/operatormetrics/queries.go'
+            from = '		 WHERE v.tenant_id = $1'
+            to   = '		 WHERE (v.tenant_id = $1 OR true) // REDCHECK RC-18: the driving-table tenant predicate removed'
+            test = 'TestTheSilentShareIsReportedWhereItHappensNotOnlyInTotal'
+            pkg  = './internal/operatormetrics'
+            why  = 'the per-site slice is the one surface an operator acts on, and a cell that names another tenant''s site sends them to look at a rule class that was never theirs'
+        }
+        @{
+            # P2.2's control, and the one the autonomous plan names against itself.
+            #
+            # The priority function is allowed six inputs and forbidden three. The
+            # forbidden one that matters is the anomaly score: how unusual a
+            # detection is for its site. It is the most useful number the platform
+            # publishes and the worst prior it could rank by -- M6, "abnormal =
+            # dangerous". One person stepping off a pavement at 3am is maximally
+            # anomalous and trivial; twelve people crossing at 8am is entirely
+            # ordinary and urgent; a leaf crossing a lit doorway for the first time
+            # is a novelty event and not an incident. The leaf would be at the top
+            # of the queue.
+            #
+            # The refusal is expressed as a COEFFICIENT rather than as an absence,
+            # so the control that keeps it out is a number and not a comment: the
+            # term is in the sum, multiplied by `anomalyCoefficient`, which is
+            # zero. The weight table has no Anomaly field, so turning the term back
+            # on is exactly one edit to exactly one line.
+            #
+            # Hand-run before it was entered: `anomalyCoefficient` 0 -> 1, watched go
+            # red with "the same incident ranks 58.4906 and 62.2642 depending on how
+            # unusual it is for its site", restored, watched go green. Both
+            # transcripts are in docs/status.md.
+            name = 'the anomaly term stays out of the priority sum'
+            file = 'internal/rules/priority.go'
+            from = 'const anomalyCoefficient = 0'
+            to   = 'const anomalyCoefficient = 1 // REDCHECK RC-19: the anomaly term is back in the priority sum'
+            pkg  = './internal/rules'
+            test = 'TestAnAnomalousInputDoesNotRaisePriority'
+            why  = 'the exception queue ranks ANOMALY rather than evidence, which is M6: the leaf that crosses the driveway outranks the crowd crossing the road, and an operator shown three novelty events stops reading the queue at all. The anomaly score stays published -- in internal/operatormetrics, beside the verification slice, where it is honest about what it is -- and is never an input here'
+        }
+        @{
+            # The roadmap drift gate, proved against the defect it was written for.
+            #
+            # ROADMAP.md said "30 Go packages", master-roadmap said 24, and
+            # internal/README.md said thirty, against a tree that had moved past all
+            # three; the migration count was stale by thirteen. Nothing noticed,
+            # because no claim in those documents was derived from anything.
+            #
+            # The mutation puts a stale number back, which is the whole failure mode
+            # in one edit. It carries no `// REDCHECK` marker on purpose: a marker
+            # between "Go" and "packages" would break the claim regex the gate is
+            # proving, and the entry would then report a suite that stayed green for
+            # a reason that has nothing to do with the control.
+            #
+            # Hand-run before it was entered: 83 -> 82 in master-roadmap.md, watched
+            # TestRoadmapMatchesTheTree go red naming the file, the line and both
+            # numbers; restored; watched it go green. Both transcripts are in
+            # docs/status.md.
+            name = 'a stale package count in the roadmap is refused'
+            file = 'ROADMAP.md'
+            from = '83 Go'
+            to   = '84 Go'
+            test = 'TestRoadmapMatchesTheTree'
+            pkg  = './internal/roadmapcheck'
+            why  = 'the milestone plan is where scope is locked, and a number in it that the tree contradicts reads as checked. Three documents carried three different stale counts of the same tree at once, and the migration count had been wrong for thirteen migrations'
+        }
+        @{
+            # The naming decision, proved against the name it superseded.
+            #
+            # The product is VISION, locked 2026-10-12, and the console renders it
+            # in the topbar and in <title>. The mutation puts Captain back, which is
+            # the exact regression: the earlier name claimed the operator's agency
+            # on the strength of a pun, and the whole point of recording the
+            # decision was that it stays recorded.
+            #
+            # Hand-run before it was entered: the brand span reverted to Captain and
+            # the mark's colour moved to var(--err), watched TestProductNameIsConsistency
+            # fail six ways -- the title, the topbar, the rendered page, the template,
+            # the accent token and the semantic-colour rule; restored; watched it go
+            # green. Both transcripts are in docs/status.md.
+            name = 'the console renders the locked product name'
+            file = 'internal/api/templates/layout.html'
+            from = '<span class="brand-name">VISION</span>'
+            to   = '<span class="brand-name">Captain</span> <!-- REDCHECK RC-21: the superseded name is back -->'
+            test = 'TestProductNameIsConsistency'
+            pkg  = './internal/api'
+            why  = 'the name is what an operator reads at 04:00. A console that quietly reverts to the superseded name is a console nobody is watching, and the decision it reverts from is one a human signed'
+        }
+        @{
+            # The LPR bound at the ingest boundary, proved against the defect it
+            # was written for.
+            #
+            # `analyticData.object.value` carries licence-plate text, which is
+            # personal data, and the envelope is stored verbatim in
+            # source_events — so the only place the bound can be enforced is
+            # where the envelope is produced. Until 2026-10-13 nothing stopped
+            # it: the vendor's free-form payload was copied into the stored bytes
+            # whole, and a later compliance ruling would have had to explain a
+            # database that already held plates.
+            #
+            # The mutation turns the projection off, which is exactly the
+            # pre-C2 behaviour, and the test that asserts no plate text survives
+            # in the stored envelope goes red.
+            #
+            # Hand-run before it was entered: watched
+            # TestThePlateBearingFieldsAreRedactedFromTheStoredEnvelope go red
+            # naming the plate and the serial; restored; watched it go green.
+            name = 'the plate-bearing fields never reach the stored envelope'
+            file = 'internal/milestone/adapter.go'
+            from = 'redactAnalyticPII(item)'
+            to   = '// REDCHECK RC-22: the LPR bound is off'
+            test = 'TestThePlateBearingFieldsAreRedactedFromTheStoredEnvelope'
+            pkg  = './internal/milestone'
+            why  = 'a plate is personal data, the envelope is stored verbatim, and LPR is an M3 item routed to the compliance track before any code — so M2 ingesting plates is a privacy ruling made by an omission'
+        }
     )
 
     $proved = 0
@@ -1009,7 +1236,7 @@ if (-not $protoc) {
         $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("protoc-" + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $tmp -Force | Out-Null
         try {
-            & $protoc -I contracts/protobuf --go_out=$tmp --go_opt=module=github.com/Sergey-Bar/Ai-Captain `
+            & $protoc -I contracts/protobuf --go_out=$tmp --go_opt=module=github.com/Sergey-Bar/vision `
                 contracts/protobuf/security/v1/*.proto
             if ($LASTEXITCODE -ne 0) { Fail-Gate "protoc exited $LASTEXITCODE"; return }
             $generated = Get-ChildItem $tmp -Recurse -Filter '*.pb.go'
@@ -1471,7 +1698,7 @@ function Write-VerificationRecord {
         }
 
         excluded = @(
-            'poc/ - a second Go module (github.com/Sergey-Bar/ai-captain-poc). No gate in this script reaches it; run poc/active-monitoring/scripts/verify.ps1 separately.',
+            'poc/ - a second Go module (github.com/Sergey-Bar/vision-poc). No gate in this script reaches it; run poc/active-monitoring/scripts/verify.ps1 separately.',
             'SonarQube duplication, complexity and coverage analysis - scripts/sonar.ps1, run by hand.',
             'GitHub Actions - it does not exist here.',
             "SkillSpector's verdict on the installed skills is advisory and does not set outcome for the skills-audit gate. A finding is a question for a human, recorded in docs/threat-model.md; the gate fails only when the scanner itself errors or writes no report. A record read as 'the skills are clean' would be a misreading of it - a clean gate means the scan ran, not that nothing was found."

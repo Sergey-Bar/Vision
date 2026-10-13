@@ -25,7 +25,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/Sergey-Bar/Ai-Captain/migrations"
+	"github.com/Sergey-Bar/vision/migrations"
 )
 
 // lockID is the advisory lock every runner takes. Two `security-migrate up`

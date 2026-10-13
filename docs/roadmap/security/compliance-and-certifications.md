@@ -1,9 +1,10 @@
 # Compliance and Certifications
 
 Owner: E1 (accountable), with external counsel as required. Status: living.
-Last revised 2026-09-28.
+Last revised 2026-10-12.
 
-This is the second half of the security programme in ``.
+This is the second half of the security programme in
+[`trust-and-security-program.md`](trust-and-security-program.md).
 Where that document says *what is controlled*, this one says *what is provable to
 a third party* — and, just as importantly, what a third party's certificate
 does not mean.
@@ -165,7 +166,7 @@ subject to a gate.
 | 5 | **SOC 2 Type II: controls operating** | **2026-12-01 → 2027-03-31** | A **minimum-viable four-month observation window.** This is the earliest credible Type II and it is only credible if item 4 lands on time and the control set is already mostly real. The control set is mostly real: `docs/threat-model.md` §5 is 35 controls each mapped to a test, and `07` §3 maps every invariant to a test that fails when the control is removed. **We are not starting from zero; we are starting from an undocumented control set** | Items 1, 2, 4; a written information-security policy set; access control evidence; change management evidence (git history + PR reviews); incident response evidence (the `07` §10.3 protocol, written, and at least one real drill) | EST. five figures in fees, plus ~0.5 engineer-day/week | E1 | E1 owns; E2 produces evidence |
 | 6 | **SOC 2 Type II: fieldwork and report** | **Fieldwork 2027-05; report issued 2027-06-30** | Six months after this company was founded is early for a Type II and *perfectly normal* for a first one. The report is issued before M2's paid pilot converts, so the first paying non-design-partner customer sees one | Item 5 complete; a system description; the auditor's sampling; the complementary user-entity controls the customer must implement (and which we document for them) | included in item 5 | E1 | The audit firm; E1 on the management response |
 | 7 | **Penetration test** | **2028-01-31**, before M3 GA | `07` §11.1's commitment: "**We buy one before M3 GA from someone outside the company** — the first outside pair of eyes on the identity, the release and the evidence path is worth more than a year of our own tests, and the threat model is the scope document we hand them." M3 GA is 2028-03-31, so January leaves time to fix what it finds | Item 3's review, done and remediated; a stable GA candidate; a written scope and a written authorisation to test (`12` §10.4's safe harbour applies to *them* as testers of us, and our own out-of-scope statement should be explicit) | EST. low-to-mid five figures | E1 | An external firm, 5–10 days |
-| 8 | **ISO 27001: ISMS operating** | **2027-07-01 → 2028-01-31** | Starts the clock the moment the SOC 2 evidence set is stable, because ISO 27001 is mostly the same controls plus an ISMS: scope, statement of applicability, risk treatment, internal audit, management review. Six months of operation is the usual minimum before Stage 1 | Items 1, 2, 5; a risk register (`` — it exists and is the ISMS risk register, which is a nice property); a statement of applicability over Annex A | EST. five figures in certification fees; consultant support extra | E1 | E1 is the management representative; E2 is the ISMS operator |
+| 8 | **ISO 27001: ISMS operating** | **2027-07-01 → 2028-01-31** | Starts the clock the moment the SOC 2 evidence set is stable, because ISO 27001 is mostly the same controls plus an ISMS: scope, statement of applicability, risk treatment, internal audit, management review. Six months of operation is the usual minimum before Stage 1 | Items 1, 2, 5; a risk register ([`risk-register.md`](../company/risk-register.md) — it exists and is the ISMS risk register, which is a nice property); a statement of applicability over Annex A | EST. five figures in certification fees; consultant support extra | E1 | E1 is the management representative; E2 is the ISMS operator |
 | 9 | **ISO 27001: certification** | **2028-06-30** | Before M4's platform expansion, because the OEM and integrator channel (§8.6 of this document) will not sell into a large customer without one, and M4 is where the channel starts | Item 8; Stage 1 and Stage 2 audits; internal audit findings closed; a management review with minutes | EST. five-to-low-six figures total | E1 | A certification body |
 | 10 | **EU AI Act readiness** | **2027-06-30** for the legal classification; **2028-09-30** for the documentation | Classification first, because everything else depends on it and it is a legal question, not an engineering one. Documentation second, after ISO 27001 gives us the management-system evidence to point at | Item 4's counsel engagement; the AI governance record from `13` §4.4; the disclosure package from §5 of this document; the human-oversight model from `01` M7 | EST. five-to-mid figures for the legal classification; documentation is mostly internal once the classification is known | E1 | **External counsel**, plus E1 internally |
 | 11 | **ISO 42001 (AI management system)** | **2029-06-30**, after 27001 | It is built *on* ISO 27001, so it is impossible before item 9, and it needs the AI governance record (`13` §4.1's last four rows) to be real rather than designed. **It is also the cheapest differentiator in this table and the one a competitor is least likely to have** | Item 9; a populated model and profile registry; a documented promotion process with ≥1 real shadow run and ≥1 real promotion decision; the incident-notification commitment (§5.8) in a contract | EST. five-to-mid figures | E1 | A certification body; E1 as management representative |
@@ -208,7 +209,7 @@ is the change-management control.
 **One more thing the audit will ask and we have not answered:** the AI agent
 writes most of the code. An auditor will ask how access to a code-generating
 system is controlled, what it may do, and who reviews its output. The answer
-exists — `` §4 is the rules of engagement, and
+exists — [`decisions-and-process.md`](../engineering/decisions-and-process.md) §4 is the rules of engagement, and
 `13` §11.3 says an agent may not accept a risk — and it needs to be a written
 policy, not a conversation.
 
@@ -224,7 +225,7 @@ without deciding to.
 ### 3.1 GDPR / UK GDPR and video surveillance
 
 **What we do now.**
-Captain processes video-derived data on the customer's own infrastructure, on
+VISION processes video-derived data on the customer's own infrastructure, on
 the customer's network, under the customer's instruction, and does not
 transmit it anywhere. The data is a bounded set of snapshots and clips cited by
 incidents, stored content-addressed on the customer's own disk, with a
@@ -332,7 +333,7 @@ the statute's own drafters considered relevant to security AI.
 **The four questions to put to counsel, in this order, because each one's answer
 narrows the next:**
 
-1. **Is Captain a "high-risk AI system" under Annex III at all?** Specifically:
+1. **Is VISION a "high-risk AI system" under Annex III at all?** Specifically:
    is a system that *corroborates* and *raises an incident* for a human to
    action a "safety component" in the management or operation of critical
    infrastructure, or is it a monitoring-and-informing tool outside the scope of
@@ -870,7 +871,7 @@ LEGAL HOLD — who does it, and what it does
 lifecycle, and an audit trail. That is real work: a `legal_hold` table, a scope
 expression, an API and console surface, and the ledger entries. It should be a
 **milestone gate for the first regulated customer**, not a nice-to-have, and it
-is on the backlog in `` as a customer requirement.
+is on the backlog in [`product-and-backlog.md`](../engineering/product-and-backlog.md) as a customer requirement.
 
 ### 7.3 Retention as an auditable, customer-configurable setting
 
@@ -915,7 +916,7 @@ in the same commit as the incident package.
 
 ## 8. Contract templates inventory
 
-`` owns nothing here; the commercial motion is in the
+[`pricing-and-packaging.md`](../company/pricing-and-packaging.md) owns nothing here; the commercial motion is in the
 GTM documents. This section is the **inventory and the clause list**, because
 the clause list is where the compliance risk actually lives.
 
@@ -990,7 +991,7 @@ reason.
 | **AI-5** | **Audit rights.** The customer may verify the audit chain, every seal, and the attribution of any observation, **offline, without us and without our servers** | Unconditional, and it is the reason `securityctl audit verify-seals` needs no database | An audit right we have to service is a support ticket. An audit right the customer can exercise alone is a feature |
 | **AI-6** | **Model, version and evaluation disclosure.** The customer is entitled to the AI disclosure package (§5), on the version they are running, and to the evaluation report for every profile in their build | Unconditional; the package ships in the archive for exactly this reason | A vendor who will not say which model it ran is a vendor the customer cannot risk |
 | **AI-7** | **Model-bundle supply chain.** Bundles are signed, verified before installation, and never activated on install | The customer may pin a model version, and a site keeps its old bundle when the model changes, so a site's observations stay attributable to a version that still exists on disk | — |
-| **AI-8** | **Sub-processor and model-provider change notice.** A change to the model a profile runs is notice plus a re-evaluation, and a change to a model's licence terms is notice with the right to remain on the prior version | This is the AI-2 risk with a clock on it: a provider changing terms or prices mid-term. See ``'s RISK on the model provider | — |
+| **AI-8** | **Sub-processor and model-provider change notice.** A change to the model a profile runs is notice plus a re-evaluation, and a change to a model's licence terms is notice with the right to remain on the prior version | This is the AI-2 risk with a clock on it: a provider changing terms or prices mid-term. See [`ai-and-data.md`](../engineering/ai-and-data.md)'s RISK on the model provider | — |
 
 ### 8.5 The clauses we will not concede
 
@@ -1030,5 +1031,6 @@ room without hesitating.
 - **It does not let an agent draft a clause.** The AI disclosure package is a
   *product* artefact and a machine may generate it from the registry, because a
   generated document that is generated from the code cannot drift from the code.
-  A *legal* artefact is not a product artefact, and ``
+  A *legal* artefact is not a product artefact, and
+  [`decisions-and-process.md`](../engineering/decisions-and-process.md)
   §4 puts legal and contractual decisions on the human-review list.

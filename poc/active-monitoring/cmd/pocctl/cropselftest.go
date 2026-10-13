@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/ortdetect"
+	"github.com/Sergey-Bar/vision-poc/internal/ortdetect"
 )
 
 // The crop-pass self-test: the arithmetic the whole crop pass rests on, measured on

@@ -26,7 +26,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/ai"
+	"github.com/Sergey-Bar/vision-poc/internal/ai"
 )
 
 // FaultReason is the closed set of reasons this package produces. The store

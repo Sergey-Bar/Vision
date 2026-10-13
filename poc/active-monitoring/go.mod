@@ -1,4 +1,4 @@
-module github.com/Sergey-Bar/ai-captain-poc
+module github.com/Sergey-Bar/vision-poc
 
 go 1.26.0
 

@@ -384,7 +384,7 @@ const file_security_v1_edge_proto_rawDesc = "" +
 	"\x17EDGE_METHOD_UNSPECIFIED\x10\x00\x12\x18\n" +
 	"\x14EDGE_METHOD_OBSERVED\x10\x01\x12\x18\n" +
 	"\x14EDGE_METHOD_ASSERTED\x10\x02\x12\x18\n" +
-	"\x14EDGE_METHOD_INFERRED\x10\x03BKZIgithub.com/Sergey-Bar/Ai-Captain/internal/contracts/securityv1;securityv1b\x06proto3"
+	"\x14EDGE_METHOD_INFERRED\x10\x03BGZEgithub.com/Sergey-Bar/vision/internal/contracts/securityv1;securityv1b\x06proto3"
 
 var (
 	file_security_v1_edge_proto_rawDescOnce sync.Once

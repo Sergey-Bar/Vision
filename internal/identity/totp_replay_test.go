@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/identity"
-	"github.com/Sergey-Bar/Ai-Captain/internal/testutil"
+	"github.com/Sergey-Bar/vision/internal/identity"
+	"github.com/Sergey-Bar/vision/internal/testutil"
 )
 
 // A TOTP code is valid for its 30-second step and this platform accepts one step

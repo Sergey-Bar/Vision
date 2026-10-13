@@ -53,10 +53,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
-	"github.com/Sergey-Bar/Ai-Captain/internal/jobs"
-	"github.com/Sergey-Bar/Ai-Captain/internal/outbox"
-	"github.com/Sergey-Bar/Ai-Captain/internal/rules"
+	"github.com/Sergey-Bar/vision/internal/dbx"
+	"github.com/Sergey-Bar/vision/internal/jobs"
+	"github.com/Sergey-Bar/vision/internal/outbox"
+	"github.com/Sergey-Bar/vision/internal/rules"
 )
 
 // The topics. Constants, and the reason they are constants is in the package header: a

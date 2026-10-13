@@ -66,7 +66,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
+	"github.com/Sergey-Bar/vision/internal/dbx"
 )
 
 // DatabaseURLEnv is the environment variable naming a test database.

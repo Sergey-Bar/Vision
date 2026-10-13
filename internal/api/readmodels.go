@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/clock"
-	"github.com/Sergey-Bar/Ai-Captain/internal/clocksub"
-	"github.com/Sergey-Bar/Ai-Captain/internal/inbox"
-	"github.com/Sergey-Bar/Ai-Captain/internal/jobs"
-	"github.com/Sergey-Bar/Ai-Captain/internal/outbox"
+	"github.com/Sergey-Bar/vision/internal/clock"
+	"github.com/Sergey-Bar/vision/internal/clocksub"
+	"github.com/Sergey-Bar/vision/internal/inbox"
+	"github.com/Sergey-Bar/vision/internal/jobs"
+	"github.com/Sergey-Bar/vision/internal/outbox"
 )
 
 // The two operational read models the API exposes, wired to the services that

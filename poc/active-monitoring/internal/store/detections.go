@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/evidence"
+	"github.com/Sergey-Bar/vision-poc/internal/evidence"
 )
 
 // Detection is one line-cross event. It is written once, in `accepted`, inside

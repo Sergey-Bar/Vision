@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/aistate"
+	"github.com/Sergey-Bar/vision-poc/internal/aistate"
 )
 
 // SearchHit is one answer, with the clip it is about and the attribution that

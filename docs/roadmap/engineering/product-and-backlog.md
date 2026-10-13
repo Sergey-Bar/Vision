@@ -1,8 +1,8 @@
 # Product and Backlog
 
-Owner: E1 (Product/Architecture). Status: living. Last revised 2026-09-28.
+Owner: E1 (Product/Architecture). Status: living. Last revised 2026-10-12.
 
-Read `` and `` first. This
+Read [`strategy-and-north-star.md`](../strategy-and-north-star.md) and [`master-roadmap.md`](../master-roadmap.md) first. This
 document is the mechanism by which a capability becomes a ticket, a release and
 a validated outcome. It does not restate what is built; `docs/status.md` does
 that.
@@ -215,7 +215,7 @@ deferrals; item 30 is not, because gate 4 cannot be met without it.
 | 56 | Retention policy configuration per site | 5 | Regulated | M | M | planned |
 | 57 | Privacy zones and redaction | 5 | Regulated | L | M | planned |
 | 58 | Notification integrations: Teams, Slack, email, webhook, SIEM | 1,4 | Principle 1.6 | M | M | planned |
-| 59 | MTTV / MTTI / human attention minutes instrumentation | 1,2,4 | `` | M | M | planned |
+| 59 | MTTV / MTTI / human attention minutes instrumentation | 1,2,4 | [`metrics-and-analytics.md`](metrics-and-analytics.md) | M | M | planned |
 
 ### 2.3 M3 — AI Operator Copilot (2027-10-01 → 2028-03-31) — first production GA
 
@@ -262,7 +262,7 @@ deferrals; item 30 is not, because gate 4 cannot be met without it.
 | 88 | RBAC → RBAC + ABAC (view one site / export as supervisor / all regions as director / devices-not-evidence as integrator) | 2,4,5 | Inv 5 | L | L | planned |
 | 89 | Core failover and database HA, measured RTO/RPO | 2,5 | M5 gate | XL | L | planned |
 | 90 | Evidence-storage redundancy and site backup/DR | 2,5 | M5 moat | L | M | planned |
-| 91 | Seal reconciliation procedure for a restored ledger behind its seal | 2,5 | Inv 4, `` §6 | M | L | planned |
+| 91 | Seal reconciliation procedure for a restored ledger behind its seal | 2,5 | Inv 4, [`release-sre-and-support.md`](release-sre-and-support.md) §6 | M | L | planned |
 | 92 | Organisation-wide Security Graph (same credential at Site A, B, C is one incident) | 2,4 | M5 moat | XL | M | planned — most differentiated, cut last |
 
 ### 2.6 M6 — Site Intelligence (2029-10-01 → 2030-06-28)
@@ -622,7 +622,7 @@ which are commitments, not estimates.
 
 | Axis | 0 | 5 |
 |---|---|---|
-| **North Star impact** | No effect on Human Attention Minutes, missed-incident rate, override rate, false-escalation rate or evidence completeness | Directly moves one of them, and the move is measurable per `` |
+| **North Star impact** | No effect on Human Attention Minutes, missed-incident rate, override rate, false-escalation rate or evidence completeness | Directly moves one of them, and the move is measurable per [`metrics-and-analytics.md`](metrics-and-analytics.md) |
 | **Invariant protection** | Touches nothing in `AGENTS.md` | Removing it would weaken an invariant, and the ADR + test order applies |
 | **Segment pull** | No design partner asked | Three independent design partners asked, or the M<n> exit gate cannot be met without it |
 | **Unblocking** | Unblocks nothing | Unblocks two or more `blocked` rows in §2 |
@@ -718,7 +718,7 @@ always an operator, never only an IT or security manager.
 
 The interview is recorded with consent and transcribed the same day. The
 transcript is committed, anonymised, to `docs/research/YYYY-MM/<site-slug>.md`
-with the sanitiser applied (§3.7 of `` §8 applies to
+with the sanitiser applied (§3.7 of [`gtm-and-sales.md`](../company/gtm-and-sales.md); [`quality-engineering.md`](quality-engineering.md) §8 applies to
 research artefacts too). A finding is only a finding if it appears in two
 transcripts; a single mention is a lead, and leads are not written into the
 backlog.
@@ -814,7 +814,7 @@ described their shift in their own words.
    is a request for a provenance surface we have not built.
 8. *"If this stopped working entirely, right now, what would you do in the first
    ten minutes?"* — This writes our operations playbook, from their perspective,
-   and it is the §8 of `` before we have written it.
+   and it is the §8 of [`release-sre-and-support.md`](release-sre-and-support.md) before we have written it.
 
 **Closing (40–45 min)**
 
@@ -877,7 +877,7 @@ It is not committed when it is being built, however far along.
 6. `make ci` is green: `contract-check contract-sync vet lint test-race
    migration-phases rules-lint`.
 7. If it is a console capability: it renders with a real service behind it, not a
-   stub, and it has the five states from `` §3.
+   stub, and it has the five states from [`ux-and-design-system.md`](ux-and-design-system.md) §3.
 8. If it is a VLM profile: it has a spec, it has a dataset, and it has passed
    its named gates. A profile that has not passed runs in shadow and is marked
    as such wherever it appears.

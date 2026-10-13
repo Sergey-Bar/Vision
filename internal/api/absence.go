@@ -44,7 +44,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/identity"
+	"github.com/Sergey-Bar/vision/internal/identity"
 )
 
 // AbsenceView is one row of the panel.

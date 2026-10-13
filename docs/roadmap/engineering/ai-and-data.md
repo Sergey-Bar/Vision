@@ -1,7 +1,7 @@
 # AI and Data
 
 Owner: E1 (Product/Architecture), with the model runtime owned by the Applied
-AI hire once it exists. Status: living. Last revised 2026-09-28.
+AI hire once it exists. Status: living. Last revised 2026-10-11.
 
 Scope: the AI track — VLM observation profiles, the local LLM, evidence
 intelligence, semantic search, site intelligence, autonomy, and the governance
@@ -396,13 +396,13 @@ z/(1+z²/n) = 1.923072):
 to be small. It is a value that makes both gates *unfalsifiable* while appearing
 to enforce them. **The order of magnitude required for a 0.20 FP gate at 0.70
 recall is ~200 labelled cases**, and at n = 200 both gates become real
-statements. The change to make is `DefaultGates().MinLabelledCases = 200`, and it
-has a consequence that must be said out loud: **the M1 exit gate 4 ("a production
-VLM profile in shadow mode for 14 consecutive days at a design-partner site")
-cannot be signed at 200 labelled cases unless the site produces 200 judged cases
-of one class in the shadow window.** A single-site physical-security stream does
-not produce 200 *judged* cases of a restricted-person class in two weeks. The
-four options, and the recommendation:
+statements. **The change to make was `DefaultGates().MinLabelledCases = 200`, and
+it was made on 2026-10-11**; the consequence that must be said out loud stands
+unchanged: **M1 exit gate 4 ("a production VLM profile in shadow mode for 14
+consecutive days at a design-partner site") cannot be signed at 200 labelled cases
+unless the site produces 200 judged cases of one class in the shadow window.** A
+single-site physical-security stream does not produce 200 *judged* cases of a
+restricted-person class in two weeks. The four options, and the recommendation:
 
 | Option | What it means | Cost |
 |---|---|---|
@@ -559,21 +559,40 @@ decision reads as a list rather than as a boolean."
 **Two harness defects that would let a bad profile through, and both are in the
 evaluation programme's scope:**
 
-- **The harness only scores `restricted-person`.** `predictedRestricted`
-  (`:296-309`) hard-codes the field `restrictedZoneBreach`. For any other
-  profile, `DetectedRestricted` and `MissedRestricted` stay 0, so
-  `pr.Recall = rate(0, TruePositives) = 0`, and `evaluateGates` fails on
+- **~~The harness only scores `restricted-person`.~~ CLOSED 2026-10-11.**
+  `predictedRestricted` used to hard-code the field `restrictedZoneBreach`, so for
+  any other profile `DetectedRestricted` and `MissedRestricted` stayed 0,
+  `pr.Recall = rate(0, TruePositives) = 0`, and `evaluateGates` failed on
   `pr.TruePositives > 0 && pr.Recall < 0.70`. **No profile other than
-  `restricted-person` can ever pass `Evaluate`.** With ten profiles planned and
-  the M2 gate requiring "the M1 incident class plus two more", this is a
-  blocker. **What must exist:** the scored field is part of `Case` (a
-  `ScoredField` or a per-profile predicate), not a constant. This is the
-  single highest-value change to the harness.
-- **`DisagreementRate` leaks a count.** `pr.DisagreementRate++` at `:232` and the
-  division at `:240-242` is guarded by `if labeledNonNil > 0`. When
-  `labelpedNonNil <= 0` the field is never divided and is compared against the
-  0.25 gate as a raw count. A single disagreement on a profile with no
-  non-nil predictions fails the gate for the wrong reason.
+  `restricted-person` could ever pass `Evaluate`** — the suggested fix ("the scored
+  field is part of the profile being scored, not a constant") is what shipped:
+  `observations.Profile.ScoreField`, declared beside the field set it belongs to,
+  read by the harness through `ProfileScoreField`. RC-14 in
+  `scripts/verify.ps1` mutates it back to the pinned profile and
+  `TestASecondProfileIsScoredOnItsOwnField` goes red; transcript in
+  `docs/status.md`. What the finding missed is recorded there too: **every fixture
+  in the harness's own test file named one profile and carried one field**, which
+  is why a harness whose every fixture scored the same field had no fixture able
+  to notice. Roadmap row C4 claimed this closed before the code did, which is the
+  only reason the defect outlived its own write-up.
+- **~~`DisagreementRate` leaks a count.~~ CLOSED.** `pr.DisagreementRate` used to be
+ incremented as a count and divided only under a guard, so an un-normalised count
+  could reach a rate field. The rate is now `rate(pr.Disagreements,
+  pr.OperatorVerdicts)` — a numerator and denominator from the same population —
+  with `DisagreementMeasurable` reporting an unmeasurable disagreement rate rather
+  than comparing a count against a threshold
+  (`TestDisagreementIsNotMeasurableRatherThanACount`,
+  `TestDisagreementRateIsNormalised`).
+- **The case floor. CLOSED 2026-10-11 by measurement, not by argument.** §3.3
+  worked out that 30 cases cannot support the stated gates (a Wilson upper bound of
+  0.373 against a 0.20 gate). `MinLabelledCases` is now **200** in
+  `evaluation.DefaultGates()`, `ShadowGates()` is 10 and documented as a data
+  collection floor rather than a promotion floor, and the floor is checked against
+  **`Answered`** — not `Labeled` — because every rate divides by `Answered`
+  (`TestPromotionNeedsTwoHundredLabelledCases`,
+  `TestTheSampleSizeFloorCountsAnsweredCases`). What is still open is not this
+  number: it is collecting 200 judged cases per profile, which is §3.3's own
+  conclusion and a site operation, not a code change.
 
 ---
 
@@ -669,7 +688,7 @@ build item — it is in the adapter's scope list as an assumption.
 |---|---|---|
 | **Graph topology** | `graph.Walk` from an INCIDENT node over `has_evidence` → `supported_by` → EVENT → `observed_by` → DEVICE, bounded to 6 hops and 2,000 nodes | A query that walks *backwards* (DEVICE → events) — `walkSQL` (`graph.go:241-256`) is a forward recursive CTE from `(from_type, from_id)`, so device→events is a second walk with the relations inverted, or a materialised adjacency |
 | **Time windows** | `normalized_at` is the only field a window may read (`semantic.go:302-313`); the index exists: `canonical_events_site_time_idx (tenant_id, site_id, normalized_at)` and `canonical_events_device_time_idx (tenant_id, site_id, device_id, normalized_at)` | A retrieval window expressed in the same terms: `[normalized_at − pre, normalized_at + post]` with the site's `skewTolerance` from the bundle's `settings.clock` |
-| **Neighbouring cameras** | **Does not exist.** The M1 graph has `ZONE → contains → DEVICE` and `DEVICE → kind → camera`, and camera *adjacency* and field-of-view relationships are an **M6** item (`../master-roadmap.md` §M6 item 1) | Either pull adjacency forward to M2 — it is the single highest-value retrieval input and M6's "site model" should not be a prerequisite for it — or derive a first approximation from shared zone + `site-config`'s free-form placement. **Recommendation: pull adjacency forward.** M2 cannot deliver its exit gate without it, and M6 will then extend rather than create it |
+| **Neighbouring cameras** | **Exists — pulled forward.** `camera_adjacency` (migration 0026) with the `shares_zone` and `overlaps_field_of_view` relations, derived by `sitemodel.Site.AdjacentCameras` from the site model an operator already owns and rewritten per site by the model's own reload path. M2's exit-gate retrieval input is built; M6's "site model" now extends it rather than creating it. It is site-scoped rather than a graph edge because adjacency is a fact about one site's geometry — see the migration's own header for why `edges` was the wrong relation | Field-of-view overlap is empty at a site that has not measured its cameras' bearings. That is the honest state: an unmeasured view is not a zero view, and a defaulted bearing would draw a corridor between two cameras that have never seen each other's ground |
 | **Access and sensor correlation** | `access.granted` / `access.denied` are in the canonical vocabulary; `Entity` with `ENTITY_KIND_BADGE` exists; there is no `access.forced` | Event retrieval by `entity` value inside the window. The `entities` table's `entities_time_idx (tenant_id, site_id, last_observed_at)` and `entities_device_idx` exist |
 | **Evidence already attached** | `incident_evidence` and `evidence` tables; `Evidence.tier`, `sha256`, `retain_until`, `legal_hold` | Completeness computation (§5.5) |
 
@@ -1323,7 +1342,7 @@ rather than assert it."
 | **AI-1** | Model asserts a negative that corroborates an incident | Critical | Low | A stub returning `{"restrictedZoneBreach": false}` produces a *corroborated* incident on a fabricated negative — "the single worst failure this product can have" (`docs/status.md`) | The runtime has no such code path: no model, and `degraded_response` sets `insufficientEvidence: true` (`runtime.py:200`) | The F1 client must preserve this: never record a negative as a non-degraded observation |
 | **AI-2** | Fabricated licence plate sends a response to the wrong vehicle | Critical | Medium at M2, Low if `plateText` stays non-authoritative | `vehicle-at-gate.plateText`; the false confidence of a legible-plate model at night in rain | Schema: `plateLegible` is separate from `plateText`; the schema's own description says "Not normalized, not resolved to a vehicle identity in M1" | The rule that `plateText` may never gate a physical action (§9.4). It should be a semantic-validator check like §3.5's |
 | **AI-3** | Anomaly ≠ danger (§8.1) | Critical | High — it is the default failure of every anomaly product | M6 baselines producing "abnormal" that escalates | The roadmap states the rule twice | The type-level enforcement: no `dangerous` type, and a review rule that no code computes severity from a baseline |
-| **AI-4** | The gate passes on 30 cases and is believed | High | **Certain**, given `MinLabelledCases: 30` | §3.3's arithmetic | `MinLabelledCases` exists as a concept | The value. Change to ~200, or change the shadow gate to agreement rate (§3.3 C) |
+| **AI-4** | The gate passes on a handful of cases and is believed | High | **Closed on the value axis, 2026-10-11** — it was *Certain* at `MinLabelledCases: 30` and the floor is 200 now | §3.3's arithmetic | `MinLabelledCases` exists as a concept, and it is now a value the arithmetic supports | Nothing on the number. What is still open is the *collection*, which is §3.3's own conclusion and not a code change: 200 judged cases per profile, per class |
 | **AI-5** | Autonomy raised before the metrics exist | Critical | Medium | M7 A4 enabled on a site with no baseline | Blast-radius preview is specified | A pre-condition: the four companion metrics must be computable before an autonomy change, enforced by the policy engine (§9.2) |
 | **AI-6** | Suppression by model rather than by rule | Critical | Low today | Any path from Tier C to `VerificationState.SUPPRESSED` | Suppression is a rule action with a rule id | The review rule: Tier C may raise, never lower |
 | **AI-7** | Prompt injection via a bundle, a model bundle, or an operator note | High | Medium | §4.3 | Bundles are untrusted input (`AGENTS.md`); the runtime verifies before load | F2 (the "verification" is a digest), and a written rule that no record text is model input except through a reference-returning tool |

@@ -8,10 +8,10 @@ import (
 	"io"
 	"log/slog"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/evidence"
-	"github.com/Sergey-Bar/Ai-Captain/internal/jobs"
-	"github.com/Sergey-Bar/Ai-Captain/internal/observability"
-	"github.com/Sergey-Bar/Ai-Captain/internal/observations"
+	"github.com/Sergey-Bar/vision/internal/evidence"
+	"github.com/Sergey-Bar/vision/internal/jobs"
+	"github.com/Sergey-Bar/vision/internal/observability"
+	"github.com/Sergey-Bar/vision/internal/observations"
 )
 
 // VLMWorker consumes jobs.QueueVLM.

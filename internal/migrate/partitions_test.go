@@ -7,8 +7,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/migrate"
-	"github.com/Sergey-Bar/Ai-Captain/internal/testutil"
+	"github.com/Sergey-Bar/vision/internal/migrate"
+	"github.com/Sergey-Bar/vision/internal/testutil"
 )
 
 // Migration 0015 exists because 0002 and 0003 both ended their monthly

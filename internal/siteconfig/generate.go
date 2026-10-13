@@ -11,7 +11,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/safename"
+	"github.com/Sergey-Bar/vision/internal/safename"
 )
 
 // GenerateInput is everything the artifact is generated from: the site's

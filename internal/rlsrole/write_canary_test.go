@@ -10,9 +10,9 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
-	"github.com/Sergey-Bar/Ai-Captain/internal/migrate"
-	"github.com/Sergey-Bar/Ai-Captain/internal/testutil"
+	"github.com/Sergey-Bar/vision/internal/dbx"
+	"github.com/Sergey-Bar/vision/internal/migrate"
+	"github.com/Sergey-Bar/vision/internal/testutil"
 )
 
 // canaryActor is the actor every canary writes as.
@@ -268,6 +268,24 @@ var writeCanaries = []writeCanary{
 			(zone_id, tenant_id, site_id, parent_id, name, path, depth, created_at)
 			VALUES ('zone_canary_' || $1, $1, $2, NULL, 'canary zone', '/canary', 0, now())`,
 		delete: `DELETE FROM zones WHERE tenant_id = $1 AND zone_id = 'zone_canary_' || $1`,
+	},
+	{
+		// camera_adjacency is the C3 table: which cameras see which other
+		// cameras' ground. It is site-scoped and must be, because adjacency is
+		// a fact about one site's geometry — the reason it is its own table
+		// rather than a row in the tenant-scoped `edges` relation is the same
+		// reason it carries a policy. Migration 0026, on `ai-and-data.md`'s
+		// recommendation that it be pulled forward from M6.
+		//
+		// The canary's values have to satisfy the table's own CHECKs — a
+		// canonical pair, a named relation, no self-link — so a failure is a
+		// policy failure rather than a constraint one, which is the distinction
+		// the evidence entry above spells out.
+		table: "camera_adjacency",
+		insert: `INSERT INTO camera_adjacency
+			(tenant_id, site_id, camera_id, neighbour_id, relation, source, model_version)
+			VALUES ($1, $2, 'canary_cam_a', 'canary_cam_b', 'shares_zone', 'site_model', 'canary')`,
+		delete: `DELETE FROM camera_adjacency WHERE tenant_id = $1 AND camera_id = 'canary_cam_a'`,
 	},
 }
 

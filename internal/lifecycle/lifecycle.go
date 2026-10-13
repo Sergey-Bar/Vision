@@ -30,7 +30,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/release"
+	"github.com/Sergey-Bar/vision/internal/release"
 )
 
 // ErrRefused is a deliberate refusal rather than a failure: the precondition was

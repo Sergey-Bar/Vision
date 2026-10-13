@@ -27,7 +27,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/rules"
+	"github.com/Sergey-Bar/vision/internal/rules"
 )
 
 // CheckDestinations refuses an active bundle that names a dispatch this install cannot

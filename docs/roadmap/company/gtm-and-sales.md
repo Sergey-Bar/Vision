@@ -1,13 +1,14 @@
 # GTM and Sales
 
-Owner: E1 (Sales is a permanent E1 role — ``
-§1.2 R-01, §1.3). Status: living. Last revised 2026-09-28.
+Owner: E1 (Sales is a permanent E1 role —
+[`team-and-operating-model.md`](../engineering/team-and-operating-model.md)
+§1.2 R-01, §1.3). Status: living. Last revised 2026-10-12.
 
-Read `` §3 and §4, `` §M1/§M2/§M3,
-and `` §3.7 and §5 first. This document turns those into
+Read [`strategy-and-north-star.md`](../strategy-and-north-star.md) §3 and §4, [`master-roadmap.md`](../master-roadmap.md) §M1/§M2/§M3,
+and [`product-and-backlog.md`](../engineering/product-and-backlog.md) §3.7 and §5 first. This document turns those into
 a motion. It does not restate what is built; `docs/status.md` does that.
 
-**Marker convention, inherited from ``:**
+**Marker convention, inherited from [`strategy-and-north-star.md`](../strategy-and-north-star.md):**
 
 | Marker | Meaning |
 |---|---|
@@ -83,7 +84,7 @@ Three real mechanisms already enforce this, and a fourth is a backlog item:
 | Gate | Where it is enforced *(real)* | What a failure does |
 |---|---|---|
 | A VLM profile in shadow cannot affect authoritative state | `internal/observations`: `TestShadowProfilesCannotAffectAuthoritativeState` | The profile is marked shadow everywhere it appears, including the console. It cannot be shown as producing an outcome |
-| Promotion requires each named gate individually, never a single boolean | `internal/evaluation`: `TestEveryFailingGateIsNamed`; gates in `evaluation.DefaultGates()` — FPR ≤ 0.20, recall ≥ 0.70 on true positives, disagreement ≤ 0.25, median latency ≤ 8000 ms, ≥ 30 labelled cases for production, ≥ 10 for shadow | A profile without a passing, dated report is not in the release, per `` §9.1 line 12 |
+| Promotion requires each named gate individually, never a single boolean | `internal/evaluation`: `TestEveryFailingGateIsNamed`; gates in `evaluation.DefaultGates()` — FPR ≤ 0.20, recall ≥ 0.70 on true positives, disagreement ≤ 0.25, median latency ≤ 8000 ms, ≥ 200 answered labelled cases for production, ≥ 10 for shadow | A profile without a passing, dated report is not in the release, per [`quality-engineering.md`](../engineering/quality-engineering.md) §9.1 line 12 |
 | Storing a bundle does not activate it; activation requires a reviewed diff digest | `internal/bundles`: `TestStoreDoesNotActivate`, `TestActivationRequiresAReviewedDiffDigest` | Nothing a customer sees can change behaviour without a human reviewing a simulate diff |
 | **The demo itself refuses an ungated capability** | **Not yet built. M1 backlog: a demo/preview mode that renders shadow and degraded state explicitly, and a console affordance that marks a profile as shadow wherever it is shown** (`05` §1.7 names the UI equivalent of the store test as outstanding) | Until it exists, the discipline is manual, and a manual discipline is a discipline that fails under pressure |
 
@@ -104,9 +105,9 @@ wants a black box, and we lose to a cheaper black box, which is a fine outcome.
 - **Anything that weakens an invariant**, whatever the customer signs
   (`03` §7.3: no customer escalation, no security incident, no investor request
   and no deadline bypasses the invariant list in `AGENTS.md`).
-- **A 24/7 response commitment** until the rota exists (``
+- **A 24/7 response commitment** until the rota exists ([`release-sre-and-support.md`](../engineering/release-sre-and-support.md)
   §7.3: "we would rather decline a deal than sign one").
-- **A camera-count-priced product** (`` §1).
+- **A camera-count-priced product** ([`pricing-and-packaging.md`](pricing-and-packaging.md) §1).
 - **Cloud video.** Permanently, for every segment, without exception.
 
 ---
@@ -426,13 +427,14 @@ is told what they are getting instead.
 |---|---|---|
 | **Qualify** | 2027-03, at the M1 exit review | The exit-gate pack has been reviewed *with* the partner for 60 minutes, the reference wording is agreed, the before/after baseline exists, and the partner says they would pay. A partner who says "this is great" and would not sign anything is a case study, not a pipeline |
 | **Terms** | 2027-04 | Founding paid-pilot rate, PROPOSED **$600/site/month**, 6-month minimum, cancellable on 60 days' notice, then month-to-month on 60 days' notice. Perpetual licence, no expiry, no enforcement on site (`12` §3.3). 24/7 response is **not** offered at this rate or any rate until the rota exists — and at the base case it would require 58 sites to carry, which is the arithmetic in `17` §2.4 |
-| **Contract** | 2027-04 | MSA, DPA, sub-processor list, the AI clauses from `17` §9, and a data-handling one-pager. Reviewed by counsel once, then templated. The drafting cost is an `` line item, not an afterthought |
+| **Contract** | 2027-04 | MSA, DPA, sub-processor list, the AI clauses from `17` §9, and a data-handling one-pager. Reviewed by counsel once, then templated. The drafting cost is a [`financial-plan.md`](financial-plan.md) line item, not an afterthought |
 | **Conversion rate assumption** | — | **PROPOSED: 2 of 3 design partners convert.** One does not convert and we name the reason in the M2 retro. A 3-of-3 conversion is a sign we recruited friends |
 | **The external one** | 2027-07 onward | `01` §M2: "First external customer who is not personally known." This is the conversion event that matters, because it is the first evidence that the motion works without a relationship. PROPOSED: first external pilot signed 2027-08, installed 2027-09, at the founding rate rather than the list rate, explicitly labelled a reference-acquisition price |
 
 ### 4.2 The pricing experiment design
 
-`01` §M2: "The pricing experiment runs here, not before." ``
+`01` §M2: "The pricing experiment runs here, not before."
+[`pricing-and-packaging.md`](pricing-and-packaging.md)
 holds the price points; this section holds the *experiment*, because an
 experiment without a design is a price change with a survey attached.
 
@@ -809,7 +811,7 @@ numbers are a shape, not a forecast.)*
 
 **The implication, and it is the most important sentence in this section:** an OEM
 signed in 2028 Q2 produces its first meaningful revenue in 2029–2030, and consumes
-E1's calendar continuously from the first call. `` §7 names
+E1's calendar continuously from the first call. [`financial-plan.md`](financial-plan.md) §7 names
 this as one of three risks that can kill the plan, and the decision date is
 **2028-06-30**: if no OEM pilot agreement is signed by then, the M4 commercial
 track does not get a budget line and the second VMS adapter is chosen purely on

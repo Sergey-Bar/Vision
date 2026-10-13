@@ -322,7 +322,7 @@ const file_security_v1_disposition_proto_rawDesc = "" +
 	"$OPERATOR_AGREEMENT_NO_AI_OBSERVATION\x10\x01\x12\x1d\n" +
 	"\x19OPERATOR_AGREEMENT_AGREED\x10\x02\x12 \n" +
 	"\x1cOPERATOR_AGREEMENT_DISAGREED\x10\x03\x12\x1d\n" +
-	"\x19OPERATOR_AGREEMENT_UNSURE\x10\x04BKZIgithub.com/Sergey-Bar/Ai-Captain/internal/contracts/securityv1;securityv1b\x06proto3"
+	"\x19OPERATOR_AGREEMENT_UNSURE\x10\x04BGZEgithub.com/Sergey-Bar/vision/internal/contracts/securityv1;securityv1b\x06proto3"
 
 var (
 	file_security_v1_disposition_proto_rawDescOnce sync.Once

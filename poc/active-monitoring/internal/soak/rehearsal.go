@@ -6,9 +6,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/recorder"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/supervisor"
+	"github.com/Sergey-Bar/vision-poc/internal/recorder"
+	"github.com/Sergey-Bar/vision-poc/internal/store"
+	"github.com/Sergey-Bar/vision-poc/internal/supervisor"
 )
 
 // LocalFault is one of the six faults the plan rehearses against the LOCAL

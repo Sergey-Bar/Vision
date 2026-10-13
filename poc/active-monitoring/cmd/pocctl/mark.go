@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
+	"github.com/Sergey-Bar/vision-poc/internal/store"
 )
 
 // cmdMark records one person's verdict on one event this run pushed.

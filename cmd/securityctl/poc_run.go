@@ -14,10 +14,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/detector"
-	"github.com/Sergey-Bar/Ai-Captain/internal/evidence"
-	"github.com/Sergey-Bar/Ai-Captain/internal/mp4"
-	"github.com/Sergey-Bar/Ai-Captain/internal/observations"
+	"github.com/Sergey-Bar/vision/internal/detector"
+	"github.com/Sergey-Bar/vision/internal/evidence"
+	"github.com/Sergey-Bar/vision/internal/mp4"
+	"github.com/Sergey-Bar/vision/internal/observations"
 )
 
 // The profile the POC would have evaluated had an AI plane been configured.

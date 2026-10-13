@@ -8,9 +8,13 @@
     "",
     "The floors hold for the build modes in `build`. Coverage is not a property of the source: internal/migrate measures 78.6% without -race and 71.4% with it on an unchanged tree, so a floor from one mode is not a floor for the other, and `check` reports that it could not measure rather than comparing numbers that do not belong together.",
     "",
-    "`cmd/`, `migrations/` and `tools/` are named in `excluded` and are not floored. `migrations` is SQL with a Python harness beside it and no Go statements, and a floor of zero for a directory with no code teaches a reader to ignore this file."
+    "`cmd/`, `migrations/` and `tools/` are named in `excluded` and are not floored. `migrations` is SQL with a Python harness beside it and no Go statements, and a floor of zero for a directory with no code teaches a reader to ignore this file.",
+    "",
+    "`internal/roadmapcheck` was added on 2026-10-12 from the Windows measurement, not from a Linux run: the package is platform-neutral — no build-tagged files and no platform-skipped tests — so the statement set and the number are the same on both. A Linux run will prove it or correct it, which is what the margin is for.",
+    "",
+    "`internal/sitemodel`'s 82 carries the same provenance. The C3 adjacency tests are platform-neutral and the package has no build-tagged files, so the Windows measurement of 82.1 is the Linux number too; recorded on 2026-10-13 because leaving the old floor below the new measurement is the failure mode the margin exists to catch."
   ],
-  "package": "github.com/Sergey-Bar/Ai-Captain",
+  "package": "github.com/Sergey-Bar/vision",
   "mode": "atomic",
   "margin": 2,
   "floors": {
@@ -194,6 +198,10 @@
       "percent": 80.7,
       "measured": "2026-10-11"
     },
+    "internal/roadmapcheck": {
+      "percent": 78,
+      "measured": "2026-10-12"
+    },
     "internal/rules": {
       "percent": 73.3,
       "measured": "2026-10-11"
@@ -211,8 +219,8 @@
       "measured": "2026-10-11"
     },
     "internal/sitemodel": {
-      "percent": 75.3,
-      "measured": "2026-10-11"
+      "percent": 82,
+      "measured": "2026-10-13"
     },
     "internal/skipaudit": {
       "percent": 83.7,

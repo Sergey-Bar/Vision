@@ -21,7 +21,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/camerahealth"
+	"github.com/Sergey-Bar/vision/internal/camerahealth"
 )
 
 // Facts is everything a brief is rendered from. The six groups are the six

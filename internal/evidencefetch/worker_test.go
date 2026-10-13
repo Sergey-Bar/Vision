@@ -31,11 +31,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/clock"
-	"github.com/Sergey-Bar/Ai-Captain/internal/dispatch"
-	"github.com/Sergey-Bar/Ai-Captain/internal/evidence"
-	"github.com/Sergey-Bar/Ai-Captain/internal/jobs"
-	"github.com/Sergey-Bar/Ai-Captain/internal/milestone"
+	"github.com/Sergey-Bar/vision/internal/clock"
+	"github.com/Sergey-Bar/vision/internal/dispatch"
+	"github.com/Sergey-Bar/vision/internal/evidence"
+	"github.com/Sergey-Bar/vision/internal/jobs"
+	"github.com/Sergey-Bar/vision/internal/milestone"
 )
 
 // stubWriter is a `milestone.BookmarkWriter` that records what it was asked to do.

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/rtsp"
+	"github.com/Sergey-Bar/vision/internal/rtsp"
 )
 
 // TestCaptureReproducesTheStreamByteForByte is the round trip that matters: a

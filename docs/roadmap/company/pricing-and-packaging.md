@@ -1,10 +1,11 @@
 # Pricing and Packaging
 
 Owner: E1, with E2 on metering and licensing. Status: living. Last revised
-2026-09-28.
+2026-10-12.
 
-Read `` §3, §6 and §8, ``
-§M2/§M3/§M7, and `` §8.1 first. This document is
+Read [`strategy-and-north-star.md`](../strategy-and-north-star.md) §3, §6 and §8,
+[`master-roadmap.md`](../master-roadmap.md)
+§M2/§M3/§M7, and [`compliance-and-certifications.md`](../security/compliance-and-certifications.md) §8.1 first. This document is
 decided **early enough to instrument** and **not published before the evidence
 exists**, and those two facts are in tension on purpose: an unmeasured price that
 was not anticipated is a pricing model we cannot implement, and a measured price
@@ -255,7 +256,7 @@ fact in this document:**
 > uplift visibly rather than absorbing it ($1,200/site/month — which nearly
 > halves the site count required, since it is the only change that raises
 > contribution as fast as it raises fixed cost), and every site count, runway
-> number and capital ask in `` is computed with 24/7
+> number and capital ask in [`financial-plan.md`](financial-plan.md) is computed with 24/7
 > **excluded** and then shown with it **included**. A plan that quietly assumes
 > 24/7 is a plan built on a promise we cannot staff.
 
@@ -516,10 +517,10 @@ Concretely:
 
 ## 6. Offline and air-gapped licensing
 
-> Cross-reference: `` §3.3, which states the same
+> Cross-reference: [`release-sre-and-support.md`](../engineering/release-sre-and-support.md) §3.3, which states the same
 > problem and records that **the decision has not been made**. §6.1–6.3 below do
 > not change `12`; they propose the options `12` §3.3 asks for and mark the
-> decision as an ADR required before M3 GA. `` §3's technical
+> decision as an ADR required before M3 GA. [`launch-plan.md`](launch-plan.md) §2.3's technical
 > gate is where the ADR is verified as present.
 
 ### 6.1 The honest problem statement

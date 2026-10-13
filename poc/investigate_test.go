@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/airuntime"
-	"github.com/Sergey-Bar/Ai-Captain/internal/dutylog"
+	"github.com/Sergey-Bar/vision/internal/airuntime"
+	"github.com/Sergey-Bar/vision/internal/dutylog"
 )
 
 func dutyEventForTest() dutylog.Event {

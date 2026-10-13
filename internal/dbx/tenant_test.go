@@ -5,8 +5,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
-	"github.com/Sergey-Bar/Ai-Captain/internal/testutil"
+	"github.com/Sergey-Bar/vision/internal/dbx"
+	"github.com/Sergey-Bar/vision/internal/testutil"
 )
 
 // openPool builds a dbx pool against the test database.

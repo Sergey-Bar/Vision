@@ -7,7 +7,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/aistate"
+	"github.com/Sergey-Bar/vision-poc/internal/aistate"
 )
 
 // Observe asks one question about one clip and returns an observation.

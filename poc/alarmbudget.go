@@ -5,8 +5,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/sitemodel"
-	"github.com/Sergey-Bar/Ai-Captain/poc/ws"
+	"github.com/Sergey-Bar/vision/internal/sitemodel"
+	"github.com/Sergey-Bar/vision/poc/ws"
 )
 
 // The alarm budget.

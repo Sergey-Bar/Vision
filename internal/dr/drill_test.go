@@ -8,16 +8,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/audit"
-	"github.com/Sergey-Bar/Ai-Captain/internal/checkpoint"
-	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
-	"github.com/Sergey-Bar/Ai-Captain/internal/evidence"
-	"github.com/Sergey-Bar/Ai-Captain/internal/inbox"
-	"github.com/Sergey-Bar/Ai-Captain/internal/incidents"
-	"github.com/Sergey-Bar/Ai-Captain/internal/migrate"
-	"github.com/Sergey-Bar/Ai-Captain/internal/normalize"
-	"github.com/Sergey-Bar/Ai-Captain/internal/rules"
-	"github.com/Sergey-Bar/Ai-Captain/internal/testutil"
+	"github.com/Sergey-Bar/vision/internal/audit"
+	"github.com/Sergey-Bar/vision/internal/checkpoint"
+	"github.com/Sergey-Bar/vision/internal/dbx"
+	"github.com/Sergey-Bar/vision/internal/evidence"
+	"github.com/Sergey-Bar/vision/internal/inbox"
+	"github.com/Sergey-Bar/vision/internal/incidents"
+	"github.com/Sergey-Bar/vision/internal/migrate"
+	"github.com/Sergey-Bar/vision/internal/normalize"
+	"github.com/Sergey-Bar/vision/internal/rules"
+	"github.com/Sergey-Bar/vision/internal/testutil"
 )
 
 // DoD item 9. This is the whole-recovery drill, and it is a test rather than a

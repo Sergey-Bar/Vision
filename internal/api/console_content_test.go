@@ -1,7 +1,10 @@
 package api_test
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"html/template"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -12,9 +15,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/incidents"
-	"github.com/Sergey-Bar/Ai-Captain/internal/rules"
-	"github.com/Sergey-Bar/Ai-Captain/internal/testutil"
+	"github.com/Sergey-Bar/vision/internal/incidents"
+	"github.com/Sergey-Bar/vision/internal/rules"
+	"github.com/Sergey-Bar/vision/internal/testutil"
 )
 
 // The console renders forms, and two of its three pointed at routes that could not
@@ -775,3 +778,173 @@ func TestTheEvidenceTableHasOneRowPerItem(t *testing.T) {
 }
 
 var _ = testutil.DatabaseURLEnv
+
+// TestProductNameIsConsistency guards the brand the operator reads.
+//
+// The naming decision (`docs/roadmap/engineering/ux-and-design-system.md` §9.1)
+// names the product VISION and puts the category — "Physical Security
+// Intelligence Layer" — beside it as the one-line statement, with the same name
+// in `<title>` so a browser tab and a topbar never disagree. It supersedes
+// `Captain`, which is why the old name is refused rather than merely absent.
+//
+// The page is RENDERED, not read as text: a template that contains the right
+// strings and a `{{define}}` nobody executes would pass a text search and ship
+// a topbar with nothing in it. Rendering the `head` block directly is also what
+// keeps this test off the database — name consistency is a property of the
+// template, and a test that skipped without Postgres would be a green run that
+// checked nothing on every machine without one.
+//
+// The mark and the colour rule are asserted against the CSS because the naming
+// decision's constraint is structural: the mark uses the single brand accent
+// token `--accent` and never one of the four semantic operator colours
+// (§9.4 point 3), and a red logo is a logo for a different product.
+func TestProductNameIsConsistency(t *testing.T) {
+	const (
+		name      = "VISION"
+		statement = "Physical Security Intelligence Layer"
+		oldName   = "Captain"
+	)
+	root := repoDir(t)
+	layoutPath := filepath.Join(root, "internal", "api", "templates", "layout.html")
+
+	tmpl, err := template.New("layout.html").ParseFiles(layoutPath)
+	if err != nil {
+		t.Fatalf("parse layout.html: %v", err)
+	}
+	var buf bytes.Buffer
+	// The `head` block is what every page includes, so this is the real render
+	// path for the title and the topbar. An empty principal renders the
+	// unauthenticated form, which is the same brand markup.
+	if err := tmpl.ExecuteTemplate(&buf, "head", brandPage{Title: "Sign in"}); err != nil {
+		t.Fatalf("render layout head: %v", err)
+	}
+	page := buf.String()
+
+	titleRe := regexp.MustCompile(`(?s)<title>(.*?)</title>`)
+	brandRe := regexp.MustCompile(`(?s)class="brand-name">(.*?)<`)
+	titleMatch := titleRe.FindStringSubmatch(page)
+	if titleMatch == nil {
+		t.Fatalf("the rendered page has no <title>, so the tab carries no name at all:\n%s", page)
+	}
+	brandMatch := brandRe.FindStringSubmatch(page)
+	if brandMatch == nil {
+		t.Fatal("the rendered topbar has no brand-name element, so the console " +
+			"renders with no product name in it")
+	}
+	// One name, two places. `VISION — Sign in` in the tab and `VISION` in the
+	// topbar: the tab's name is the part before the separator, so a title that
+	// reads `Sign in — VISION` is a different claim and fails here.
+	if got := strings.TrimSpace(strings.SplitN(titleMatch[1], "—", 2)[0]); got != name {
+		t.Errorf("<title> opens with %q, want %q. The tab is what an operator "+
+			"reads when six consoles are open", got, name)
+	}
+	if got := strings.TrimSpace(brandMatch[1]); got != name {
+		t.Errorf("the topbar brand reads %q, want %q", got, name)
+	}
+	if !strings.Contains(page, `class="brand-statement">`+statement+`<`) {
+		t.Error("the topbar carries no one-line statement. The category is what " +
+			"the name means, and a bare word in a topbar is a logo, not a product")
+	}
+
+	// The old name is refused, not merely absent. `Captain` was the name the
+	// decision superseded, and a page that quietly went back to it is the
+	// exact regression this test exists for.
+	if strings.Contains(page, oldName) {
+		t.Error("the rendered page still carries the superseded name \"Captain\"")
+	}
+	for _, path := range templateFiles(t) {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		if strings.Contains(string(raw), oldName) {
+			t.Errorf("%s still carries the superseded name \"Captain\"", filepath.Base(path))
+		}
+	}
+
+	// The mark: 24-unit grid, square, currentColor so the token resolves once.
+	markRe := regexp.MustCompile(`(?s)<svg class="brand-mark"[^>]*viewBox="([^"]+)"[^>]*>(.*?)</svg>`)
+	mark := markRe.FindStringSubmatch(page)
+	if mark == nil {
+		t.Fatal("the topbar renders no brand mark. The naming decision specifies " +
+			"one (ux-and-design-system §9.2), and a name without a mark is text")
+	}
+	var x0, y0, w, h float64
+	if n, _ := fmt.Sscanf(mark[1], "%g %g %g %g", &x0, &y0, &w, &h); n != 4 {
+		t.Fatalf("the mark's viewBox %q is not four numbers, so its grid cannot be checked", mark[1])
+	}
+	if x0 != 0 || y0 != 0 || w != 24 || h != 24 {
+		t.Errorf("the mark's grid is %q, want a square 0 0 24 24. A mark is drawn "+
+			"on a fixed grid so it survives 24px and 32px", mark[1])
+	}
+	if !strings.Contains(mark[2], "currentColor") {
+		t.Error("the mark does not use currentColor, so its colour is hard-coded " +
+			"and the single brand accent token is not the one place it comes from")
+	}
+
+	// The colour rule, read out of the stylesheet the page actually links.
+	css, err := os.ReadFile(filepath.Join(root, "internal", "api", "templates", "static", "console.css"))
+	if err != nil {
+		t.Fatalf("read console.css: %v", err)
+	}
+	markRule := cssRule(string(css), ".brand-mark")
+	if markRule == "" {
+		t.Fatal("console.css has no .brand-mark rule, so the mark has no colour of " +
+			"its own and falls back to whatever inherited")
+	}
+	if !strings.Contains(markRule, "var(--accent)") {
+		t.Errorf(".brand-mark is %q, which does not use var(--accent). The naming "+
+			"decision puts the mark in the single brand accent token", markRule)
+	}
+	for _, status := range []string{"--ok", "--warn", "--err", "--info"} {
+		if strings.Contains(markRule, "var("+status+")") {
+			t.Errorf(".brand-mark uses var(%s), a semantic operator colour. §9.4 "+
+				"refuses a brand colour inside the semantic set: if --accent were "+
+				"also \"medium severity\", every link in an alert would look like a "+
+				"warning, and a red logo is a logo for a different product", status)
+		}
+	}
+	// And the four semantic tokens are the ones they were, because "the accent
+	// moved" and "a semantic colour moved" are different changes and only one of
+	// them is a brand decision.
+	for token, want := range map[string]string{
+		"--ok": "#3fb950", "--warn": "#d29922", "--err": "#f85149", "--info": "#58a6ff",
+	} {
+		if !strings.Contains(string(css), token+": "+want) {
+			t.Errorf("console.css no longer defines %s: %s. The semantic operator "+
+				"colours are not the brand's to change", token, want)
+		}
+	}
+}
+
+// brandPage is the minimum data the `head` block renders. It is deliberately
+// not the console's own data type: this test asserts a property of the template,
+// and building the real one would drag the database in for a check that has
+// nothing to do with it.
+type brandPage struct {
+	Title     string
+	CSRF      string
+	Principal struct {
+		Username    string
+		Roles       []string
+		BreakGlass  bool
+		MFAVerified bool
+		TenantID    string
+	}
+}
+
+// cssRule returns the body of one CSS rule by selector, so the colour claims are
+// checked against the rule that paints the mark rather than against the whole
+// stylesheet. A `var(--ok)` anywhere else in the file — in `.alert.error`, where
+// it belongs — is not a finding.
+func cssRule(css, selector string) string {
+	i := strings.Index(css, selector+" {")
+	if i < 0 {
+		return ""
+	}
+	rest := css[i+len(selector)+1:]
+	if end := strings.Index(rest, "}"); end >= 0 {
+		return rest[:end]
+	}
+	return ""
+}

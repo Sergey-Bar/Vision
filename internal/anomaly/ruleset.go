@@ -4,7 +4,7 @@ package anomaly
 import (
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/sitemodel"
+	"github.com/Sergey-Bar/vision/internal/sitemodel"
 )
 
 // DefaultRuleSet builds the rules a site gets by default, from its own zones

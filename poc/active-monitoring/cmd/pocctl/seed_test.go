@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
+	"github.com/Sergey-Bar/vision-poc/internal/store"
 )
 
 // seedSearchRun builds a store with one run, one detection and NO observation for

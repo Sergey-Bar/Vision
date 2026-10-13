@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
-	"github.com/Sergey-Bar/Ai-Captain/internal/outbox"
-	"github.com/Sergey-Bar/Ai-Captain/internal/testutil"
+	"github.com/Sergey-Bar/vision/internal/dbx"
+	"github.com/Sergey-Bar/vision/internal/outbox"
+	"github.com/Sergey-Bar/vision/internal/testutil"
 )
 
 // deadLetter drives one message to the dead-letter state and returns the relay

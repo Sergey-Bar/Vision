@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/clock"
-	"github.com/Sergey-Bar/Ai-Captain/internal/milestone"
+	"github.com/Sergey-Bar/vision/internal/clock"
+	"github.com/Sergey-Bar/vision/internal/milestone"
 )
 
 // The plan's P4.4: "The write-back bookmark lands on the incident the operator

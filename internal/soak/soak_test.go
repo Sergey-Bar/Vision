@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/evidence"
+	"github.com/Sergey-Bar/vision/internal/evidence"
 )
 
 // A criterion nobody can falsify is a comment with a pass symbol next to it.

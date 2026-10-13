@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/ortdetect"
+	"github.com/Sergey-Bar/vision-poc/internal/ortdetect"
 )
 
 // `pocctl detector` — the self-check.

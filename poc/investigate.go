@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/airuntime"
-	"github.com/Sergey-Bar/Ai-Captain/internal/dutylog"
-	"github.com/Sergey-Bar/Ai-Captain/internal/observations"
+	"github.com/Sergey-Bar/vision/internal/airuntime"
+	"github.com/Sergey-Bar/vision/internal/dutylog"
+	"github.com/Sergey-Bar/vision/internal/observations"
 )
 
 // The investigator: the GPU finale, and the only role the AI plane ships.

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/observability"
+	"github.com/Sergey-Bar/vision/internal/observability"
 )
 
 // The metric names are the plan's contract. A dashboard somebody hand-wrote

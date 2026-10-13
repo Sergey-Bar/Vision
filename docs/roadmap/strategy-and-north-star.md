@@ -30,7 +30,7 @@ four numbers are how we prove the difference rather than assert it.
 
 ## 1. The one-sentence product
 
-Captain is the local-first intelligence and autonomy layer that sits **above**
+VISION is the local-first intelligence and autonomy layer that sits **above**
 the physical-security stack a customer already owns, turns raw signals into
 verified, evidenced incidents, and then handles the routine work under policy so
 that humans receive exceptions instead of alerts.

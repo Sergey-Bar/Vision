@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/vlm"
+	"github.com/Sergey-Bar/vision-poc/internal/vlm"
 )
 
 // The durable half of RC-1: the store refuses an attribution row that carries a

@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/airuntime"
-	"github.com/Sergey-Bar/Ai-Captain/internal/observations"
+	"github.com/Sergey-Bar/vision/internal/airuntime"
+	"github.com/Sergey-Bar/vision/internal/observations"
 )
 
 // Answer is what a stub provider will say.

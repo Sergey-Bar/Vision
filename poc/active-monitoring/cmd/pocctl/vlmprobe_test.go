@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/vlm"
+	"github.com/Sergey-Bar/vision-poc/internal/store"
+	"github.com/Sergey-Bar/vision-poc/internal/vlm"
 )
 
 // TestVLMProbeRefusesWithoutTheEnvironmentOnlyCredentials is 0.2's first test. A

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/poc/spatial"
+	"github.com/Sergey-Bar/vision/poc/spatial"
 )
 
 func TestExtractVideoID(t *testing.T) {

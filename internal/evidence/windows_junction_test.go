@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/evidence"
+	"github.com/Sergey-Bar/vision/internal/evidence"
 )
 
 // The plan's fourth validation extra names four traversal forms and then adds

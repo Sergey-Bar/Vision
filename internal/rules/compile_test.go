@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/rules"
+	"github.com/Sergey-Bar/vision/internal/rules"
 )
 
 var siteNow = time.Date(2026, 3, 1, 22, 30, 0, 0, time.UTC)

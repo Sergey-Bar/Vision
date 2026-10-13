@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/release"
+	"github.com/Sergey-Bar/vision/internal/release"
 )
 
 func marshalJSON(v any) ([]byte, error)   { return json.Marshal(v) }

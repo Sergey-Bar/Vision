@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/inbox"
-	"github.com/Sergey-Bar/Ai-Captain/internal/normalize"
+	"github.com/Sergey-Bar/vision/internal/inbox"
+	"github.com/Sergey-Bar/vision/internal/normalize"
 )
 
 // `normalized_at` is, by AGENTS.md, the only field a time-window predicate may

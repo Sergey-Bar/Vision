@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/clock"
+	"github.com/Sergey-Bar/vision/internal/clock"
 )
 
 var base = time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC)

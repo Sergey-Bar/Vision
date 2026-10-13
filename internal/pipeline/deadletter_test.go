@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/inbox"
-	"github.com/Sergey-Bar/Ai-Captain/internal/testutil"
+	"github.com/Sergey-Bar/vision/internal/inbox"
+	"github.com/Sergey-Bar/vision/internal/testutil"
 )
 
 // poison replaces the stored envelope with one the adapter cannot derive a

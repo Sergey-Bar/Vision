@@ -40,7 +40,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/bench"
+	"github.com/Sergey-Bar/vision-poc/internal/bench"
 )
 
 // theSideBySideDisclaimer is printed on the face of the table.

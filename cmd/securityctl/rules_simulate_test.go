@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/command"
+	"github.com/Sergey-Bar/vision/internal/command"
 )
 
 // The plan's P4.2: "The rules simulate path runs with the AI plane killed and

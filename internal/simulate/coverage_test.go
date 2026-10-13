@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/simulate"
+	"github.com/Sergey-Bar/vision/internal/simulate"
 )
 
 // The field is declared with the comment "so a digest over a truncated run

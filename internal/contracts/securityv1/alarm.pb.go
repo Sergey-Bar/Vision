@@ -328,7 +328,7 @@ const file_security_v1_alarm_proto_rawDesc = "" +
 	"\x12ALARM_PRIORITY_LOW\x10\x01\x12\x19\n" +
 	"\x15ALARM_PRIORITY_NORMAL\x10\x02\x12\x17\n" +
 	"\x13ALARM_PRIORITY_HIGH\x10\x03\x12\x1b\n" +
-	"\x17ALARM_PRIORITY_CRITICAL\x10\x04BKZIgithub.com/Sergey-Bar/Ai-Captain/internal/contracts/securityv1;securityv1b\x06proto3"
+	"\x17ALARM_PRIORITY_CRITICAL\x10\x04BGZEgithub.com/Sergey-Bar/vision/internal/contracts/securityv1;securityv1b\x06proto3"
 
 var (
 	file_security_v1_alarm_proto_rawDescOnce sync.Once

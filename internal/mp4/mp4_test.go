@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/mp4"
+	"github.com/Sergey-Bar/vision/internal/mp4"
 )
 
 // The fixture is a synthetic 8-second stream: three seconds of a flat grey

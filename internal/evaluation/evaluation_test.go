@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/evaluation"
+	"github.com/Sergey-Bar/vision/internal/evaluation"
 )
 
 // promoteGates is DefaultGates with a case floor these small fixtures can meet.

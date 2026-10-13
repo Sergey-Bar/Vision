@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/ai-captain-poc/detectclient"
+	"github.com/Sergey-Bar/vision-poc/detectclient"
 )
 
 // The real path: resolved stream → ffmpeg frames → Python sidecar (the

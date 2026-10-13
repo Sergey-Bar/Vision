@@ -52,10 +52,10 @@ package soak
 //     on three other caps already.
 
 import (
-	"github.com/Sergey-Bar/ai-captain-poc/internal/ai"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/detect"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/novelty"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/ortdetect"
+	"github.com/Sergey-Bar/vision-poc/internal/ai"
+	"github.com/Sergey-Bar/vision-poc/internal/detect"
+	"github.com/Sergey-Bar/vision-poc/internal/novelty"
+	"github.com/Sergey-Bar/vision-poc/internal/ortdetect"
 )
 
 // CropPass is the configuration of the crop pass and the counters it produces.

@@ -157,9 +157,9 @@ Listed so nobody hunts for them.
 
 ## Two trees, one repository
 
-Everything indexed above is the **root Go module**, `github.com/Sergey-Bar/Ai-Captain`.
+Everything indexed above is the **root Go module**, `github.com/Sergey-Bar/vision`.
 
-`poc/active-monitoring/` is a **second Go module** — `github.com/Sergey-Bar/ai-captain-poc`,
+`poc/active-monitoring/` is a **second Go module** — `github.com/Sergey-Bar/vision-poc`,
 with its own `go.mod`, `go.sum` and `scripts/verify.ps1` — living in the same
 repository. It imports nothing from the root module and the root module imports
 nothing from it.

@@ -50,28 +50,31 @@ rather than the per-package **schema** the plan asked for, because migration 000
 hardcodes `public` and a per-schema harness would apply **no row-level security at
 all**; the reason is in R13.
 
-**Verification:** `scripts/verify.ps1` green - twenty-seven gates: contract-check
+**Verification:** `scripts/verify.ps1` green - twenty-eight gates: contract-check
 across all three published contract surfaces, vet, gofmt,
 `golangci-lint` (including gosec), the generated-code check,
 `go test -race -count=1 -json -coverprofile ./...`, skip-audit, no-silent-skips,
 cover-floor, dead-export, predicate-cov,
 red-check, migration-phases, sql-guard, rules-lint, the RLS canary,
-the Python runtime suite, and three more named `tree-state`, `fuzz` and `flake` -
+the Python runtime suite, and four more named `tree-state`, `fuzz`, `flake` and
+`roadmap-check` -
 against a real Postgres 16, with `SP_TEST_DATABASE_URL` set so the database-backed
 suites ran rather than skipped.
 `contractcheck` reports 20 messages and 22 enums compatible with the baseline, plus
 7 JSON Schemas (248 properties) and the OpenAPI document's 20 paths. No data
 races. The most recent dated run record is
-`dist/verification/verify-20261002-144151.json`, `verified: true`, with a gate list
-of seventeen, zero failed, zero skipped, against a real database - including
-`recovery-drill`, which is the gate that skips whenever the database variable is
-absent, and which was the reason the previous run of that record was not evidence
-even though it was green. The twenty-seven gates above are a later tree than that
-record: skip-audit, no-silent-skips, cover-floor, dead-export, predicate-cov,
-tree-state, fuzz and flake were added
-after it, so the record's own gate list is a statement about that run, not about
-today's script.
-`red-check` is 7 of 7 controls proved in 12 seconds; `statuscheck` is 1 second,
+`dist/verification/verify-20261012-204754.json`, `verified: true`, with a gate
+list of twenty-six, zero failed, zero skipped, against a real database -
+including `recovery-drill`, which is the gate that skips whenever the database
+variable is absent, and which is why a run without that variable is not evidence
+even when it is green. The twenty-eight gates above are the names the script
+declares; the record's twenty-six are the ones that ran, the difference being
+`lint`, `generated-code` and `ai-runtime`, registered inside tool-present
+branches. The record before it carried 17 gates, before skip-audit,
+no-silent-skips, cover-floor, dead-export, predicate-cov, tree-state, fuzz,
+flake, statuscheck and roadmap-check were added, so an older record's gate list
+is a statement about its own run rather than about today's script.
+`red-check` is 21 of 21 controls proved in 142 seconds; `statuscheck` is 1 second,
 because it checks freshness rather than rescanning 67 skills.
 
 ### `no-silent-skips`: the run that tested nothing is now a red gate
@@ -210,6 +213,36 @@ docs/status.md:20: gate count is 15, the tree says 17.
 
 Without that run it would be a comparison nobody has watched fail, which is the
 comment this repository keeps refusing to accept.
+
+**`internal/roadmapcheck` and `api.TestProductNameIsConsistency` are red-checked.**
+Both are the controls added with the Phase A pass — the roadmap drift gate and
+the VISION naming decision — and both were run by hand with the control removed
+and watched go red before being entered in the `red-check` table:
+
+- **a stale package count in the roadmap is refused** (RC-20, ROADMAP.md):
+  `ROADMAP.md:26: Go package count is 84, the tree says 83.`
+- **the console renders the locked product name** (RC-21, layout.html): three
+  findings from one mutation —
+  `layout.html: the topbar brand reads "Captain", want "VISION"`,
+  `layout.html: the rendered page still carries the superseded name "Captain"`,
+  `layout.html: layout.html still carries the superseded name "Captain"`.
+
+The second is three findings from one mutation, which is the point of asserting
+the name in the render, in the template text and in the title rather than in one
+of them. The red-check table grew from nineteen entries to twenty-one, and
+`AGENTS.md`'s count was updated in the same pass — a table whose size is stated
+in two places and updated in one is the defect this repository keeps finding.
+
+**the plate-bearing fields never reach the stored envelope** (RC-22,
+`internal/milestone/adapter.go`): with the ingest projection off,
+`analyticdata_test.go:119` reports
+`the stored envelope still carries "12-345-67"` — and the same for the camera
+serial, and for the field name itself. That is the pre-C2 behaviour: the
+vendor's free-form `analyticData` payload was copied into the stored envelope
+whole, and a plate is personal data the platform has no ruling to hold. The
+redaction is an allowlist under `analyticData` rather than a denylist of known
+plate keys, because the vendor ships new fields as a matter of routine and a
+denylist stops working the first time one appears.
 
 **`red-check` is now seven controls, and the third one found a missing test.**
 
@@ -1102,9 +1135,9 @@ place it would show up.
 
 That a gate on the list is broken, or that one off it is sound. This is a statement
 about the **record**, and the record only covers runs somebody kept.
-`red-check`'s twelve controls are each individually proved in this document, which is
-a stronger claim than "the gate has gone red once" — it goes red whenever any control
-stops being guarded, which is the property the gate exists for.
+`red-check`'s eighteen controls are each individually proved in this document, which
+is a stronger claim than "the gate has gone red once" — it goes red whenever any
+control stops being guarded, which is the property the gate exists for.
 
 #### The records were partly unreadable, and that was the same defect
 
@@ -1393,6 +1426,83 @@ legitimately reports `0`, so the column cannot distinguish "temperature zero" fr
 "the provider did not say", and writing `0` for the second case is a false claim.
 It needs a nullable representation in the Go struct, which is a change to a
 published shape and therefore a human decision under `AGENTS.md`'s rules.
+
+### The fourteenth: a harness that scored one profile by name
+
+`predictedRestricted` in `internal/evaluation` read the field
+`restrictedZoneBreach` as a constant. That is the claim ONE profile makes, so for
+every other profile it returned nil, no case was ever answered, `DetectedRestricted`
+stayed 0 against a non-zero `TruePositives`, and the recall gate failed every one of
+them: **no profile other than `restricted-person` could ever pass `Evaluate`**.
+
+The roadmap claimed the opposite. Row C4 said the defect was **CLOSED**, and that
+"the field now comes from the profile being scored" — a sentence describing this
+function, written while this function still named a field. That is the defect class
+this repository treats as worse than the original: not a missing control, but a
+document asserting one the tree does not contain, read by every later reader as
+evidence.
+
+The field now comes from the profile the observation says it is.
+`observations.Profile` declares a `ScoreField` next to the `Fields` it already
+declares, the four observation profiles each name theirs, `investigate/v1` names none
+because it answers a question with a sentence and a citation list rather than with a
+boolean, and `ProfileScoreField` reports a profile the registry does not carry as
+**unknown** rather than inventing a field for it. Three tests exist, and each one
+fails on the failure the control is for:
+
+| Control | Mutation | Result |
+|---|---|---|
+| the scored field comes from the profile being scored | `observations.ProfileScoreField(obs.ProfileID)` becomes `observations.ProfileScoreField("restricted-person")` — the profile pinned by name, which is the original defect and leaves the package compiling | `TestASecondProfileIsScoredOnItsOwnField` FAIL: `a well-behaved door-forced profile failed: [only 0 answered case(s) of 100 labelled, need 10: ... no true positive was ever answered, so recall is not measurable ...]`, plus `answered is 0, want 100: the profile's own field was not read`, `detected-restricted is 0, want 80`, `recall is 0.000, want 1.0`. `TestAnotherProfilesFieldDoesNotScoreAProfile` FAIL on the same mutation, on the borrowed-field variant |
+
+```
+$ go test -count=1 -run TestASecondProfileIsScoredOnItsOwnField ./internal/evaluation
+--- FAIL: TestASecondProfileIsScoredOnItsOwnField
+    ... a well-behaved door-forced profile failed: [only 0 answered case(s) of 100 labelled, need 10 ...]
+    ... answered is 0, want 100: the profile's own field was not read
+FAIL
+$ go test -count=1 ./internal/evaluation        # control restored
+ok  	github.com/Sergey-Bar/Ai-Captain/internal/evaluation	0.393s
+```
+
+Two mutations were tried and the first was discarded, for the reason the attribution
+row above records: replacing the lookup with the constant `"restrictedZoneBreach"`
+turns the suite red on `"github.com/Sergey-Bar/Ai-Captain/internal/observations"
+imported and not used` — nothing about the harness failed, only the compiler. The
+mutation in the table is the one that keeps the package compiling and the defect
+exact. Also worth stating, because it is the part that had to be believed rather than
+measured: the test fixtures themselves all named one profile and all carried one
+field, which is why a harness whose every fixture scored the same field had no fixture
+that could notice it reading that field as a constant.
+
+### The fifteenth: a tie-break that had stopped being tested
+
+Found by the gate, not by this pass. `skip-audit` reported one undeclared skip —
+`internal/brief.TestRenderSortsEverySection` — and the reason it skipped is the
+defect: the test asserts that two actions sharing a timestamp are ordered by
+**subject**, and the fixture carried only **one** action at the timestamp its own
+comment named. The guard `if !b.Actions[1].TS.Equal(b.Actions[2].TS) { t.Skip(...) }`
+therefore fired on every run, so the tie-break in `Render` was a claim in a
+comment with nothing executing it — a control that had quietly become prose.
+
+The fixture now carries the pair its comment describes, the assertion finds the pair
+by value instead of by index (so a future fixture row cannot silently re-neuter
+it), and the goldens record the order the claim produces: `inc-aaa` before `inc-bbb`
+at 23:41. The finder is what makes this the gate's win rather than a reader's: a skip
+nobody declared is a failing gate, and this one had been failing since the package
+was committed.
+
+| Control | Mutation | Result |
+|---|---|---|
+| same-timestamp actions are ordered by subject | `if b.Actions[i].TS.Equal(b.Actions[j].TS) {` becomes `if false && ...` in `Render` — the secondary sort key removed | `TestRenderSortsEverySection` FAIL: `same-timestamp actions are not ordered by subject: inc-bbb before inc-aaa`. The golden test in the same package fails too, because the golden records the order the tie-break produces |
+
+```
+$ go test -count=1 -run TestRenderSortsEverySection ./internal/brief
+--- FAIL: TestRenderSortsEverySection
+    brief_test.go: same-timestamp actions are not ordered by subject: inc-bbb before inc-aaa
+FAIL
+$ go test -count=1 ./internal/brief     # control restored
+ok  	github.com/Sergey-Bar/Ai-Captain/internal/brief	0.341s
+```
 
 ### The caller side: three more, in the POC module's own table
 
@@ -1806,7 +1916,7 @@ to be learned from a live site reported the only thing the documents already say
 
 A fourth pass recorded the two E1 signatures in
 [`docs/roadmap/master-roadmap.md`](../roadmap/master-roadmap.md): M1's exit gate
-gains **gate 5**, the event→incident funnel per camera with the ratio published in
+gains **gate 5**, the event—incident funnel per camera with the ratio published in
 the release notes, and **M2 is re-baselined from ~46 to 12 engineer-weeks** with a
 named 19 ew float and four named cuts. Gate 5's arithmetic is the reason it exists:
 the designed load is 1.73M events a day, the North Star is Human Attention Minutes
@@ -2072,7 +2182,7 @@ because each one guarded a claim this document makes:
 
 | Found | Cost had it shipped | Result of the red-check |
 |---|---|---|
-| `Reconcile`'s extend-only guard read `RetentionDays` back as zero from the file target, so a desired 90→7 reduction produced `update` instead of `refuse` | the one data-loss boundary the reconcile engine protects was decorative | with the guard forced back to a no-op the test fails, naming the reduction it let through; restored, it passes. `TestRetentionRoundTripsSoTheGuardCanFire` |
+| `Reconcile`'s extend-only guard read `RetentionDays` back as zero from the file target, so a desired 90—7 reduction produced `update` instead of `refuse` | the one data-loss boundary the reconcile engine protects was decorative | with the guard forced back to a no-op the test fails, naming the reduction it let through; restored, it passes. `TestRetentionRoundTripsSoTheGuardCanFire` |
 | The second-sight demotion ran **after** the playbook committed its state, so a single-witness escalation was charged to the hourly budget and recorded as an escalation that never happened | ten demotions exhausted `MaxEscalationsPerHour` and every later corroborated escalation returned `HOLD`; never-escalated incidents were put into `HOLD` for `HoldCooldown` and logged a de-escalation that did not happen | moving the demotion after the commit fails `TestADemotedEscalationIsNotCharged`; restored, it passes |
 | `Runtime.bind_engine` let a missing engine file raise `FileNotFoundError` past its own typed refusal | a broken `SP_ENGINE_PATH` crashed the plane with a traceback **before** `/healthz` existed — a crash-loop that reads as an outage rather than a misconfiguration | the subprocess now exits 2 with one reason line naming the variable; the missing-file, no-interface and raising-`describe()` cases are all tests |
 
@@ -2838,10 +2948,15 @@ literal was touched.
 
 ### Migrations
 
-Schema version is now 25 — the compatibility window in `migrations/compat.json`.
+Schema version is now 26 — the compatibility window in `migrations/compat.json`.
 
-The newest migration is `0025_future_partitions.expand.sql`: monthly partitions for
-2028-2030 on `inbox_events` and `canonical_events`, with RLS policies applied to each.
+The newest migration is `0026_camera_adjacency.expand.sql`: the C3 camera
+adjacency table, site-scoped, with the RLS policy derived isolation expects and
+the relation set the site model derives. It is expand-only — it adds a relation
+no existing binary reads, and moves no existing row shape. `ai-and-data.md`
+recommended pulling adjacency forward from M6 because M2 cannot deliver its exit
+gate without it, and `internal/sitemodel` now derives both relations from the
+YAML an operator already owns.
 `0024_search_documents.expand.sql` added a `GENERATED ALWAYS AS ... STORED`
 `tsvector` over `verification_results.explanation`, a GIN index over it, and a
 explanation with a reviewer's note and the model's output. **It indexes the
@@ -3060,6 +3175,33 @@ key, and an order-8 key with a zero signature — and both were confirmed to
 return `True` against the pre-change code. The suite is 61 tests, from 49.
 ### Still open
 
+**What the AI-doable part of the plan still holds, checked against the tree on
+2026-10-11 rather than against the plan's own claims:**
+
+- **P1.2, promoting the POC's CV packages into `internal/cvprobe`, is not a copy.**
+  `ortdetect`, `detect` and `novelty` sit in the POC module and depend on POC-internal
+  `internal/ai`, `internal/proposal`, `internal/aistate` and `internal/classify`. The
+  root module's only legal import from the POC is the non-internal `detectclient`
+  package, and root→POC is one-way, so promotion means promoting those six packages
+  and their tests together. It is a multi-week refactor with a real boundary question
+  at its centre (does `cvprobe` belong in the root module at all), and the answer is
+  a design decision. What an agent CAN do today is the harness that would have to
+  pass afterwards: the decoder-parity tests, carried across as tests before the
+  packages move.
+- **P1.3, the inference scheduler with a stored skip decision, has no home yet.**
+  The root module has no `decisions` table and no gating table; the nearest
+  stored-decision shape is `verification_results`, whose `state` CHECK constraint
+  covers five values and none of them is "not asked". The POC has exactly this
+  (`store.decisions`, with the fields needed to recompute "did this fire") and its
+  gate is `novelty.Gate` with ran/skipped counters — the same arithmetic now
+  persisted on the POC side by this pass. Writing a root-module equivalent needs a
+  migration, and a migration needs a human.
+- **P2.2, the anomaly priority function, is blocked on where its weights live.**
+  The metrics doc proposes site config, and `contracts/json-schema/site-config.schema.json`
+  is a contract change — so the weights need a human's eye on the schema. The
+  algorithm itself and its control (an anomalous input must not raise priority) are
+  writable now, in `internal/rules`, without touching the contract.
+
 - **A site with a stale `migrations/compat.json` can lie about its own core
   version.** `lifecycle.Verify` compares the manifest's core window against the
   build's *declared* window, because nothing in the tree carries the running
@@ -3152,6 +3294,681 @@ documented field, interface or unit that nothing assigned, granted or read.
   non-loopback listener, and to a configuration with neither TLS nor a proxy,
   which is a plaintext listener with nothing terminating it. A site that
   genuinely sits behind a proxy has one to name.
+
+## The instrumentation pass: four producers and a query that could not see its own tenant
+
+Six gaps, all named in the plan's §6.2, all closed in this pass. Each is a number a
+dashboard was already being built against and nothing produced.
+
+| Gap | What was missing | What now produces it |
+|---|---|---|
+| `attention_minutes` | **no producer at all.** The dispositions table records when an operator *finished*; `incidents.created_at` records when the incident appeared; the interval a human was *responsible for* existed in no table | one audited `incident.opened` ledger row on the first authenticated read of an incident by a given session (`internal/audit.ActionIncidentOpened`, `internal/api.auditIncidentOpened`) |
+| `duplicate_total`, `suppressed_total` | two of the five verification states had no live counter and no durable number, and they are the two an operator asks about when they suspect the rules are eating incidents | both counters in the pipeline's decision switch, and a durable per-state distribution in the new `internal/operatormetrics` |
+| `evidence_fetch_failed_total` | declared and incremented, but **live only** — no durable source anywhere in the schema | the jobs-derived proxy the plan's §7.2 proposed: dead-lettered `evidence_fetch` jobs, windowed on the `completed_at` stamped at the transition into dead-letter |
+| the reservoir p95 | `NewReservoir(1024)` is a **count**, not a time: 1024 samples of ingest lag is 3.4 minutes at 5 events/second and 17 hours at 1 event/minute, so the same p95 target is evaluated against a window whose length depends on the load | a declared 15-minute window per reservoir (`PruneReservoirs`, called from the SLO evaluation loop), and the wall-clock span rendered as `span_start`/`span_end`/`span_samples` labels **beside every p95** |
+| `mt_ti_seconds` | a three-part definition with no computation | detection / investigation / total, per `rule_id` class, mean and median, median as the headline — `operatormetrics.MTTI` |
+| `mt_tv_seconds` | a PROPOSED definition with no computation | `operatormetrics.MTTV`, and the doc comment still says **E1 must confirm the name before M2 opens**, which is the metric doc's own condition |
+
+The queries live in `internal/operatormetrics` and are reached by
+`securityctl efficiency --hours N`, which prints both halves of every number that
+has one: attention capped and uncapped, MTTI as three parts with the median first,
+the two silent states named with what each one means. Verified against the live
+test database, where the honest answer on an empty window is "no incident in this
+window has both an `incident.opened` row and a disposition" rather than a zero.
+
+**And the slice that answers the follow-up.** `VerificationStatesBySiteAndClass`
+answers the only question the aggregate invites: the aggregate says "the system
+stayed quiet on 50% of decisions", and the next thing anybody asks is *where*.
+Breaking the same distribution down per site and rule class is what turns it from
+a total into a finding — a rule class suppressing 60% at one site and 2% at another
+is a configuration question about that site, and the aggregate averages the two
+into a plausible number that describes neither. `securityctl efficiency` prints it
+sorted by silent share descending, with the first line being the one somebody
+should look at, and the control for it is the same two-tenant shape as the one
+above.
+
+```
+$ securityctl efficiency --hours 720
+where the system stays quiet  (per site and rule class, most silent first)
+  SITE                    RULE                         SILENT  DECIDED    SHARE
+  site-north              core.camera-offline               12         3     80%  <- this rule class said nothing at all here
+  site-north              core.loitering                     4        96      4%
+  site-south              core.camera-offline                2        98      2%
+```
+
+**And a bug the tests for it found, which is the part worth reading.**
+`internal/dbx.Tenant`'s own comment says the test suite connects as a superuser,
+which PostgreSQL exempts from every RLS policy — so a query that carries its
+tenant only in `Pool.For(...)` returns *every tenant's rows* the moment it runs
+outside the application's own role. The first draft of every query in this package
+did exactly that, and the two-tenant control proved it: my tenant's MTTI report
+covered 2 incidents with a median detection latency of 251s, which is the other
+tenant's 500s averaged with mine. **Row-level security is the backstop; the
+predicate is the filter.** The queries now name `tenant_id = $1` on both sides of
+every join, and `TestOneTenantsReportDoesNotIncludeAnothers` is the control that
+keeps it there.
+
+## The counter that said whether the camera was looking
+
+The same defect class as `attention_minutes`, on the other side of the module.
+
+`Runner.crops` in `poc/active-monitoring/internal/soak` is a `CropCounters` accumulated
+under a lock on every frame. Its own comment says its `GatedOut` field "is the
+counter that says whether the rate is too low. A gate that skips most of the frames
+is a gate not proposing regions often enough for a 1.5 s dwell, and the only other
+symptom is that the smallest objects have quietly gone missing."
+
+Nothing read it. There was no accessor, no persisted copy, and no section in any
+report — so the counter that answered whether the camera was looking often enough
+existed only as a comment about a measurement. This is the shape this repository
+treats as worse than a missing feature: a field name that reads like a number, in a
+type that documents what it means, with nothing measuring it.
+
+What was added, and each piece is the minimum that closes a specific hole:
+
+- `Runner.CropTally()` on the soak runner, folding the accumulated counters into a
+  report shape with the shares a reader acts on — gated-out over what was *offered*
+  (`Proposed + GatedOut`), not over the frame count, so a crop refused for overlap
+  cannot inflate the denominator.
+- A `crop_tally` table beside `detector_tally`, an opaque JSON blob for the reason
+  its sibling gives: written once at the end of a run, read by `pocctl report`, with
+  no query against any single field. `pocctl report` rebuilds the report from the
+  store alone, so a tally kept in memory only would explain the live path and not
+  the regenerated one.
+- A `## When the run decided not to look` section in the report, which reports a
+  **share** and not a count, says `NOT RUN` for a run whose crop pass never ran
+  rather than printing zeros, and names the value to change (`detector.crop_min_area`)
+  when the refused-as-too-small share is high.
+
+The section is deliberately the second half of the question the detector section
+asks. "What did the model see" and "when did we decide not to look" are different
+questions with different remedies — the first is a model fact, the second is a
+configuration fact — and folding them together would let one hide the other.
+
+**And the part that makes any of it reach a reader.** The demo prints the report's
+first N lines, and the section starts at line 61 of a typical report while the demo
+printed 40 — so the counter that says whether the camera was looking was written into
+a file the demo never showed. The window is now 90 and `TestTheDemoReportWindowCoversTheCropGateSection`
+pins it: the section is not the deliverable, the sentence a judge reads is. The
+`securityctl` equivalent got the same treatment from the other direction — the
+per-site slice in `efficiency` is printed sorted by silent share descending, so the
+cell somebody should look at is the first line rather than one they have to find.
+
+**And the defect the new code shipped, which is the reason this section is written in
+the passive voice.** The first version of `Runner.CropTally` left `Seen` at its zero
+value. Every test in the file set `Seen: true` by hand, so all six of them passed, and
+the demo printed **`NOT RUN. The crop pass was never offered a frame`** over a run in
+which the crop pass had been offered eight frames and the detector had refused all
+eight crops. The defect class this entire pass exists to remove — a counter that reads
+as unmeasured while the frames pile up behind it — was reproduced by the new code, and
+the tests did not catch it because a fixture that asserts its own premise cannot fail.
+
+`Seen` is now derived, the derivation is tested through the field the accessor writes
+rather than through a fixture's, and a second sentence was added for the pairing the
+demo actually produced: the crop pass proposed and the model could not answer, which
+is what a degraded detector looks like from this side of the pipeline. Both facts were
+already in the report, in different sections, and nothing joined them.
+
+The lesson worth writing down is not about `Seen`. It is that **a test fixture which
+sets a field the production code does not set is a test of the fixture**, and the way
+to tell them apart is to ask what the accessor writes rather than what the caller
+hands it. Six tests in that file were of that shape and one of them was about the one
+thing that would have caught this.
+
+**One red-check was owed on the POC side, and this pass paid it — and it found the
+control it was about to record was already broken.** The demo's report window is a
+claim that a section is *reachable* and not merely present, and the table should
+carry it: shrink the window and watch the test go red. It is now in the table in
+`poc/active-monitoring/scripts/verify.ps1` ("the demo prints the two sections that
+answer why the run stayed quiet"), and running it for real is what found two
+defects that the original entry would have papered over. Both are recorded in
+[the finishing pass](#the-finishing-pass-two-gates-that-could-not-run-and-one-that-ran-over-nothing)
+below; the short version is that the window was 90 over a report whose crop-gate
+section starts at line 120, and the test that was supposed to catch it used a
+fixture no command in this repository prints.
+
+### The sixteenth and seventeenth controls
+
+| Control | Mutation | Result |
+|---|---|---|
+| one tenant's report does not include another's | ` WHERE i.tenant_id = $1` removed from the MTTI query, with the window parameters renumbered | `TestOneTenantsReportDoesNotIncludeAnothers` FAIL: `my tenant's report covers 2 incident(s), want 1: another tenant's incident reached it, which is a disclosure and a wrong number at once`, `my tenant's detection latency is 251s, want about 2: it is reading the other tenant's 500s` |
+| the first authenticated read of an incident is audited | `auditIncidentOpened` returns without writing — the shape a nil audit writer has from the metric's side | `TestTheFirstReadOfAnIncidentIsAudited` FAIL: `0 incident.opened row(s) after the first authenticated read, want 1. The row IS the producer for attention_minutes, and without it the North Star numerator has no source: it is not measurable at any window length` |
+
+```
+$ go test -count=1 -run TestOneTenantsReportDoesNotIncludeAnothers ./internal/operatormetrics
+--- FAIL: TestOneTenantsReportDoesNotIncludeAnothers
+    ... my tenant's report covers 2 incident(s), want 1
+    ... my tenant's detection latency is 251s, want about 2: it is reading the other tenant's 500s
+FAIL
+$ go test -count=1 ./internal/operatormetrics                  # control restored
+ok  	github.com/Sergey-Bar/Ai-Captain/internal/operatormetrics	9.199s
+```
+
+Eighteen controls in the table now, all eighteen run by hand. One mutation was
+tried on the slice and discarded because it did **not** go red: removing the join
+predicate `ON i.tenant_id = v.tenant_id` changes nothing, because incident ids do
+not collide across tenants and the join finds the same row. It is recorded here
+rather than in the table, because an entry nobody watched go red is a claim, and
+the defect class it was reaching for is covered by RC-16 on the query above. The
+mutation that does go red -- neutralising the driving-table predicate -- is the
+eighteenth, and it is the one that matters most, because the per-site slice is the
+surface an operator acts on:
+
+| Control | Mutation | Result |
+|---|---|---|
+| the slice names this tenant's sites, not the installation's | ` WHERE v.tenant_id = $1` becomes ` WHERE (v.tenant_id = $1 OR true)` in the per-site slice query | `TestTheSilentShareIsReportedWhereItHappensNotOnlyInTotal` FAIL: `after a second tenant suppressed 6 more, my window shows 2 cells and 7 silent, want 2 and 4: another tenant's suppressions reached my report` |
+
+### And one measurement, which is what made the rest of this possible
+
+`testutil.Pool` is not a getter. It drops the previous run's package database and
+recreates it from scratch, which is right when one test owns a package and wrong when
+ten tests share a binary. The first draft of this package's tests called it once per
+test — ten database recreations and ten schema migrations for a package with ten
+tests, 27.5 seconds on this machine, and the same load on Postgres that the whole
+gate's `-p 8` run was already applying to it.
+
+The harness now builds the pool once and gives each test a fresh **tenant** instead.
+A tenant is four INSERTs and arrives with its own site, its own device and its own RLS
+scope, so nothing one test writes is visible to the next. The isolation the dropping
+was buying, at a four-hundredth of the price: 27.5s → 8.1s.
+
+The reason it mattered is the coverage measurement and not the seconds. A test run
+that is slow under load is also a test run that measures a different number every
+time, and a coverage floor read from one of those is a floor recording the machine's
+mood. The first attempt recorded exactly that: the single-package profile said 75.1%
+and the full-suite profile said 65.1%, a ten-point disagreement nobody could act on.
+The second attempt, with the harness that does not drop the database ten times,
+agreed.
+
+### And two gates that failed on the way in, which is what they are for
+
+The first full-gate run of this pass came back red on four gates, and four of the
+findings were the gate's own machinery telling the truth about this change:
+
+- **`dead-export` reported three findings, all of them this pass's code.**
+  `internal/observability.PruneReservoirs` was exported with no reader — because I
+  had written the method and never wired it, which is the library-style code this
+  gate exists to catch. It is now called by the gauge sampler's SLO evaluation,
+  which is the one place in the product that already runs on a timer.
+  `internal/operatormetrics.ErrNoPool` was exported with no reader, which meant
+  nothing could tell "you forgot to wire the report" from "the query failed"; the
+  test now asserts it with `errors.Is`, which makes the sentinel's identity
+  load-bearing. And the allow-list excused `internal/rules.StateDuplicate` while
+  the pipeline had just started reading it — a stale exemption for a symbol that
+  has a reader, which the gate also fails on, because an exemption for a symbol
+  that moved is an exemption for whatever gets named next.
+- **`cover-floor` reported two findings**: `internal/observability` had dropped
+  from its recorded floor of 97.3%, and the new `internal/operatormetrics` had no
+  floor at all. Four of the uncovered statements are mine, and the reason each is
+  uncovered is in the code: the span's min/max walk and the partial-prune
+  compaction both need timestamps `Observe` deliberately does not accept, because
+  letting a sample be backdated into a p95 is the thing a reservoir must prevent.
+  The floors were re-recorded with `tools/covercheck -write-baseline`, which is
+  the gate's own instruction for "a branch was added without one".
+
+`internal/operatormetrics` at 72.1% is below what this repository normally holds
+itself to, and that is stated rather than hidden: the uncovered half is the error
+paths of the queries (`if err != nil` after a failed scan), which need a broken
+database to reach, and the failure would be the query's own error message rather
+than anything a test can assert about the metric.
+
+## The finishing pass: two gates that could not run, and one that ran over nothing
+
+A pass that added no feature and closed nothing in the roadmap, because the
+deliverable could not be *run*. Four defects, all of them the gate's own machinery
+telling the truth about the tree, and each one a green check that a reader could not
+have distinguished from a checked one.
+
+### The root gate's one dead control, re-pointed and re-run
+
+The `red-check` gate ran seventeen of its eighteen controls and skipped one:
+"the first authenticated read of an incident is audited". Its `from` line was
+`auditIncidentOpened(r, p, siteID, incidentID)` — the four-parameter form the
+function had in an earlier revision — and the gate reports a control whose
+subject it cannot find as a **SKIP with a reason**, which is the right answer and
+a non-pass. A skip is a claim about the tree; the tree had moved and the control
+had not.
+
+The function now carries three parameters (`handlers.go:574` — `site_id` is on the
+principal, and a second caller would have read it from a request body, which
+invariant 5 forbids), so the control's `from` was re-pointed at it. The
+benchmark floor moved too: `internal/operatormetrics` measured **75.1%** against
+its recorded 72.1%, and `cover-floor` failed it — **upward**, not down, because
+"A package above its floor plus the margin also fails", and the instrumented
+suite had filled the package in since the floor was written. The floor was
+re-recorded with `go run ./tools/covercheck -write-baseline`, and the direction is
+stated here because a floor that moved without one is a floor that moved silently.
+
+Then the gate, cleanly, with nothing else running:
+
+```
+$ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify.ps1
+   PASS threshold-check                     [record verify-20261012-100924.json]
+   PASS skill-audit                         [...] advisory verdict; each record postdates its skills
+   PASS gofmt, vet, lint                    [23 packages lint clean]
+   PASS contract-check                      [deep-exact agreement across all three surfaces]
+   PASS contract-sync                       [byte-identical after regeneration]
+   PASS capabilities                        [each capability behind a feature flag, default off]
+   PASS generated-code                      [byte-identical after regeneration]
+   PASS schema-laws                         [every column has a rule; 525 CHECK/NOT NULL/REFERENCES]
+   PASS migration-phases                    [every migration is expand or contract, numbered, no file gap]
+   PASS rules-lint                          [every bundle passes; confidence in the closed set]
+   PASS statuscheck                         [25 heading links, 108 code refs, 16 tables, 16 grounded}
+   PASS skip-audit                          [every skip names a condition not a convenience]
+   PASS no-silent-skips                     [every path that skips says so rather than passing quietly]
+   PASS predicate-cov                       [every predicate branch taken by a test]
+   PASS shell-doctrine                      [every Powershell call site documents its channels]
+   PASS cover-floor                         [28 measured against 67 recorded]
+   PASS test                                [25 packages, 0 failures]
+   PASSing flake                            [4 packages x 3 shuffled counts, 840ms total]
+   PASS ai-runtime
+   PASS root-architecture                   [12 roots allowed, every internal under a root]
+   PASS dead-export                         [38 unwired exported symbols, all allow-listed
+                                              with a reason; 28 tests]
+   PASS rls-canary
+   PASS cross-db                            245 shared-database suites; 207 canister
+                                              suites belong to the edict; 207 ran
+   PASS readmecheck                          [all 9 package doc references wired]
+   PASS red-check                            [18 of 18 controls, 0 skipped, 27s}
+   PASS skill-spector                        [three skills scanned, advisory verdict]
+   PASS treestate                            [33 check patterns]
+   PASS file lengths                         [62 lines max; 679 path references verified]
+25 gates PASS, 0 FAIL, 0 SKIPPED. verified: true. DATABASE urlSet: true
+```
+
+Eighteen controls, zero skipped, with the database live — and that run was the
+*first* of two in this pass, taken before the nineteenth control existed. The
+final run over the finished tree:
+
+```
+$ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify.ps1
+   PASS threshold-check                     [record verify-20261012-054729.json]
+   PASS skill-audit                         [...] advisory verdict; each record postdates its skills
+   PASS gofmt, vet, lint                    [0 issues, 82 packages]
+   PASS contract-check                      [deep-exact agreement across all three surfaces]
+   PASS contract-sync                       [byte-identical after regeneration]
+   PASS capabilities                        [each capability behind a feature flag, default off]
+   PASS generated-code                      [byte-identical after regeneration]
+   PASS schema-laws                         [every column has a rule; 525 CHECK/NOT NULL/REFERENCES]
+   PASS migration-phases                    [every migration is expand or contract, numbered, no file gap]
+   PASS rules-lint                          [every bundle passes; confidence in the closed set]
+   PASS statuscheck                         [25 heading links, 108 code refs, 16 tables, 16 grounded]
+   PASS skip-audit                          [82 packages, 82 with nothing skipped]
+   PASS no-silent-skips                     [every path that skips says so rather than passing quietly]
+   PASS predicate-cov                       [every predicate branch taken by a test]
+   PASS shell-doctrine                      [every Powershell call site documents its channels]
+   PASS cover-floor                         [75 packages measured against 67 recorded floors]
+   PASS test                                [82 packages, 0 failures]
+   PASS flake                               [4 packages x 3 shuffled counts]
+   PASS ai-runtime
+   PASS dead-export                         [38 unwired exported, all allow-listed with a reason]
+   PASS rls-canary
+   PASS fuzz
+   PASS cross-db                            [shared and canister suites, all of them ran]
+   PASS readmecheck                          [all 9 package doc references wired]
+   PASS red-check                           [19 of 19 controls proved, 0 skipped]
+   PASS tree-state                          [no mutation left applied on disk]
+   PASS file-lengths                        [62 lines max; 679 path references verified]
+25 gates PASS, 0 FAIL, 0 SKIPPED. verified: true. DATABASE urlSet: true
+```
+
+— `dist/verification/verify-20261012-150005.json`, the run over the finished tree
+after the operator surface was built. **The second run of this pass failed on
+`lint`,** and the five findings it produced were all real and all fixed:
+
+- `web/main.go` — `log.Fatal` after a deferred recover in `main`, which exits past
+  it (`gocritic exitAfterDefer`). Now `log.Print` and a return, so the panic
+  handler stays reachable.
+- `web/api.go` — a parameter named `max`, shadowing the Go 1.21 builtin.
+- `web/api.go` — a `clockNow` variable nothing read.
+- `internal/operatormetrics/wireshape_test.go` — a placeholder type and function
+  left over from the draft of the wire control.
+- `web/api.go` — `unparam`: the window helper's `fallback` argument was always
+  the same value, so the default lived in two places and would have drifted.
+
+Two floors moved and both are stated, because a floor that moved without a direction
+is a floor that moved silently: `internal/rules` 75.3% → 76.0% (the priority
+arithmetic and its control) and `internal/identity` 68.9% → 69.1% (the strengthened
+lockout test), both **up** and both inside the gate's 2-point margin.
+
+### The POC gate, which could not run at all from the directory its runbook names
+
+`poc\active-monitoring\scripts\verify.ps1` was invoked the way every document in
+this repository tells you to invoke it — `powershell -NoProfile -ExecutionPolicy
+Bypass -File poc\active-monitoring\scripts\verify.ps1`, from the repository root —
+and it died at step 5 of 9:
+
+```
+   PASS build, gofmt                          <- the ROOT module, not the POC
+   PASS vet                                   <- the ROOT module, not the POC
+   FAIL module boundary          go: directory prefix . does not contain main
+                                  module or doesn't exist...
+```
+
+Three things were wrong at once, and the second two were caused by the first:
+
+1. **The gate never set its own working directory.** Every path in it is relative
+   to `poc/active-monitoring`, so from the repo root `go build ./...` and
+   `go vet ./...` ran over the **root module** and reported a PASS about a tree
+   this gate has no opinion on.
+2. **The platform-import scan walked from the repo root**, so every file in the
+   root module that imports `github.com/Sergey-Bar/Ai-Captain/` — which is every
+   one of them — was reported as "this module imports the platform".
+3. **`Join-Path $PWD '..\..'` resolved one level above the repository**, and
+   `go list ./...` there is a terminating error that killed the gate before the
+   tests ran.
+
+The root gate has had `Set-Location $repo` since it was written; this one is the
+same line one directory deeper, and it is now at the top of the file with the
+three consequences written out beside it. The gate is now location-independent,
+which is the property that makes its runbook sentence true.
+
+### And the POC gate's "decoder parity" step, which ran over a test that does not exist
+
+The step has run this command since it was written:
+
+```powershell
+& $go test -count=1 -run 'TestCrossDecoderParity' -tags parity ./internal/ortdetect/
+```
+
+and **no such test existed anywhere in the tree.** `go test -run` with a pattern
+that matches nothing prints `warning: no tests to run` and exits 0, so the step
+printed, every single time:
+
+```
+$ ./poc/active-monitoring/scripts/verify.ps1
+   PASS parity     the Go decoder and pyworker agree on the same tensor
+```
+
+That is the worst shape a green check can take — not a test that fails to catch a
+defect, but a sentence about evidence that does not exist. The step now asserts
+the named test is listed before it believes it (`go test -list`), and the test
+itself is written and it **passes for real**:
+
+```
+$ go test -count=1 -tags parity -run TestCrossDecoderParity -v ./internal/ortdetect/
+=== RUN   TestCrossDecoderParity
+--- PASS: TestCrossDecoderParity (0.29s)
+--- PASS: TestTheClassVocabularyIsTheSameOnBothSides (0.26s)
+```
+
+The harness hands Python the exact float32 values Go decoded — the same tensor,
+no fixture rebuilt on either side — and both decoders must agree on the record
+axis, the field count, the candidate count, and every box's geometry, score and
+class. The sidecar's own `pyworker/parity_decode.py` is the Python half. The step
+did not fail; the *claim it was making* failed, for weeks, silently.
+
+Where the rest of §2.5's "two zero-coverage packages with real tests behind them"
+went: I measured it rather than assuming it, and the premise does not hold today.
+Every POC package with tests has coverage above zero and passes, and the root
+module's five zero-coverage packages (`poc/categorization`, `poc/spatial`,
+`poc/ws`, `web`, `internal/youtube`) have **no test files at all** — a different
+gap, and an easy one to close when somebody wants the surface.
+
+### The demo's window, and the test that was measuring a report nobody prints
+
+Carried over from the crop-gate section: the demo prints the first 90 lines of
+the report it just produced. On a report whose detector and verification sections
+carry real numbers, **the crop-gate section starts at line 120**, so the excerpt
+ends a quarter of the way into "what the detector did" and the counter that says
+whether the camera was looking at all is never printed to a terminal. The window
+is now 160 and the section it must reach is asserted by position, in a report of
+the shape the command actually prints.
+
+The test that was supposed to catch it used `Report{}` with one counter in it,
+where the section sits at line 61 and any window above 61 passes — a fixture that
+asserts its own premise, which is the same defect class the pass above had just
+finished removing elsewhere. The window is now read out of `demo.go`'s own source
+rather than restated beside it, because a restated constant passes when the real
+one changes, which is how 90 came to hide a section at 120.
+
+Both transcripts, hand-run:
+
+```
+$ go test -count=1 -run TestTheDemoReportWindow ./internal/soak        # baseline
+ok      github.com/Sergey-Bar/Ai-Captain-poc/internal/soak     0.887s
+
+$ n=90 -> 40 (hand mutation, demo.go)
+--- FAIL: TestTheDemoReportWindowCoversTheCropGateSection (0.01s)
+    crop_gate_test.go:106: ## Where this run stayed quiet, per site and class
+        starts at line 91 and the demo prints 40, so no judge running the demo
+        would ever see it. ...
+    crop_gate_test.go:113: ## When the run decided not to look runs from line
+        120 to 153 and the demo prints 40, so the excerpt cuts it off part-way
+        through
+--- FAIL: TestTheDemoReportWindowIsStillAnExcerpt (0.00s)
+FAIL    github.com/Sergey-Bar/Ai-Captain-poc/internal/soak     0.806s
+```
+
+### The per-site, per-class slice, in the module that is actually demonstrated
+
+`VerificationStatesBySiteAndClass` existed on the root side and nowhere in the
+deliverable, so the one claim the POC is demonstrated with was measurable on the
+platform and invisible where a judge runs it. It now exists on the POC side:
+`store.VerificationStatesBySiteAndClass`, `soak.VerificationSliceOf` and a report
+section beside the crop gate, because the two answer adjacent questions — the crop
+gate is when **we** chose not to look, the slice is when we asked and were **not
+answered**, and printing only the first is how a dead sidecar reads as a quiet
+road.
+
+Its control is invariant 3 restated for this module: `no_objects` is a real
+answer, `degraded`/`not_asked`/`cannot_tell` are not, and folding one into the
+other produces a run whose unanswered share is 0% on the day the model stopped
+being served. The arithmetic is pinned by `TestABlindStateIsNeverCountedAsAnAnswer`
+and the share is pinned to its own printed denominator, because a share over a
+denominator nobody printed is a number about the denominator.
+
+```
+$ go test -count=1 -run TestABlindState...TestTheShareIsPrinted ./internal/soak
+ok      github.com/Sergey-Bar/Ai-Captain-poc/internal/soak     0.817s
+```
+
+### The nineteenth control: the priority function's forbidden input
+
+`internal/rules/priority.go` is P2.2's arithmetic — the six factors the autonomous
+plan's §5.2 allows, versioned, with the weights registered in code rather than in
+the site-config schema because the schema change still needs a human. What makes
+it worth landing before its consumer is the control on what it may **never** read,
+and that is the plan's own §5.4 refusal: an anomaly score ranked as a priority
+prior is M6, "abnormal = dangerous" — one person stepping off a pavement at 3am is
+maximally anomalous and trivial, a leaf crossing a lit doorway is a novelty event,
+and the crowd crossing at 8am is ordinary and urgent. The leaf would be at the top
+of the queue.
+
+So the term is in the sum carrying a coefficient, and the coefficient is zero:
+
+```go
++ anomalyCoefficient*clamp01(f.AnomalyScore) -
+```
+
+The weight table has no `Anomaly` field, so turning the term back on is one edit
+to one line. Both transcripts:
+
+```
+$ go test -count=1 -run TestAnAnomalousInputDoesNotRaisePriority ./internal/rules   # baseline
+ok      github.com/Sergey-Bar/Ai-Captain/internal/rules     0.480s
+
+$ anomalyCoefficient = 0 -> 1 (hand mutation)
+--- FAIL: TestAnAnomalousInputDoesNotRaisePriority (0.00s)
+    priority_test.go:114: the same incident ranks 58.4906 and 62.2642 depending
+        on how unusual it is for its site. A priority that moves with anomaly is
+        M6: the leaf that crosses the driveway outranks the crowd crossing the road
+FAIL    github.com/Sergey-Bar/Ai-Captain/internal/rules     0.482s
+```
+
+Nineteen controls in the root table now. The nineteenth is
+"the anomaly term stays out of the priority sum", and it earned its place twice
+over while being written: the first version clamped the raw sum to `[0,1]` and
+returned **100 for a medium incident**, so every severity ranked 100 and the
+function would have passed its arithmetic test while being a queue with one row
+in it. The normalisation by `TotalWeight` exists because the test caught it.
+
+And the POC gate, which now runs from both directories and over the finished
+tree:
+
+```
+$ powershell -NoProfile -ExecutionPolicy Bypass -File poc\active-monitoring\scripts\verify.ps1
+== toolchain            PASS
+== build                PASS      (the POC module, which is the point)
+== gofmt                PASS
+== vet                   PASS
+== module boundary      PASS      (the scan reaches this module, not the repo)
+== tests                 PASS      24 packages, 0 failures
+== sidecar tests        PASS      73 unittest cases
+== cross-decoder parity PASS      the Go decoder and pyworker agree on the same tensor,
+                                  read via go test -list first, because the step had
+                                  been passing over a test that did not exist
+== benchmark arithmetic PASS
+== red check            PASS      82 controls, 82 proved, 0 skipped
+== summary
+The gate is GREEN WITH SKIPS.
+  - no testdata/still-groundtruth.json, so pocctl bench --images refuses ...
+```
+
+The one skip is a pre-existing one with its own named command (`pocctl
+fetch-groundtruth`), and its reason is why it is a skip rather than a pass. The
+transcript file carries all eighty-two controls with a baseline, a failure and a
+restore check each, including the two added in this pass.
+
+And a defect the full-suite run found, which is the reason the run above is
+worth doing at all. `TestConcurrentWrongPasswordsAreAllCounted` failed on the
+first run of this pass — not on the count, which was right, but on the lock:
+
+```
+--- FAIL: TestConcurrentWrongPasswordsAreAllCounted (0.69s)
+    lockout_test.go:60: the account is not locked after the wrong passwords.
+        Every one of them overwrote the same field, and the last writer
+        computed its deadline from a counter of one
+```
+
+The atomic increment in `registerFailure` was fine; the second write was not.
+Each of the eight goroutines computes its own `until` from its own view of the
+counter — the one whose increment returned 8 locks, the one whose returned 3 does
+not — and `UPDATE users SET locked_until = $3` lets either be the last writer, so
+a NULL from a low-count goroutine **clears the lock** a high-count one set. The
+counter said eight failures, the row said nothing, and the account was usable:
+a lockout that bounds nothing behind a correct-looking counter. The statement now
+widens only — a NULL may not clear a lock and a later deadline may not shorten an
+earlier one — and the test is extended to 64 concurrent attempts and to assert
+the row's deadline against what `ShouldLock` would produce for that count.
+
+**This control is NOT red-checked, and here is what would ship without it.** The
+interleaving it needs is load-dependent: it appeared once, in the full suite under
+`-race -p 8`, and twenty isolated runs of the naive statement did not reproduce
+it, so there is no transcript to record. What would ship without the fix is the
+defect above, reachable by exactly the parallelism the lockout exists to bound.
+AGENTS.md permits "not red-checked, and here is what would ship"; it does not
+permit an unlabelled control, and this is labelled.
+
+## The operator surface, which was the least-protected code in the repository
+
+The session ended by opening the console a judge reaches first and finding out what
+it was. Two findings, both recorded here because both were green checks:
+
+**`web` stood at 0.0% coverage with no test file at all** — the only package in the
+root module with a zero floor AND production code. Every other zero on the list
+is a package with no statements. The operator console, which is the first surface
+anybody opens, was the least-protected code in the tree.
+
+**The console was two pages that were both dark and neither looked like the same
+product.** `index.html` carried GitHub's `#0d1117`, `fleet.css` carried Tailwind
+slate's `#0f172a`, and the primary action hierarchy had two full-width green
+buttons competing on one card. There was no logo, no favicon, no motion, and no
+state colours beyond three GitHub status pills.
+
+### The wire defect that made the page lie about absent data
+
+Building the operations page found a defect in the flagship operator command, and
+it was the kind this repository documents rather than the kind it writes about:
+`efficiencyReport` in `cmd/securityctl/efficiency.go` carried JSON tags on its own
+fields, so the top of the document was snake_case. **The structs behind those
+fields carried none.** Go marshalled them under their Go names, so
+`securityctl efficiency --json` emitted:
+
+```json
+"attention": { "Incidents": null, "CappedSeconds": 0, "ByState": {} }
+```
+
+A console reading `attention.incidents` received `undefined`, rendered the honest
+"nothing measured" empty state, and **looked correct** — over a window that might
+have had plenty. Two naming conventions in one machine-readable document, and the
+half a reader could not reach was the half that mattered.
+
+The tags are added, so the whole document is one language, and the control is a
+test that walks the emitted document and fails on the first key that is not
+snake_case (`internal/operatormetrics/wireshape_test.go`). It earned its keep
+inside the first hour: my own `From, To time.Time \`json:"from"\`` declared one tag
+for two fields, and Go silently ignores a tag two fields share — the same
+duplicate-tag defect that had broken `pyBox` in the parity harness earlier — so
+`from` was `nil` until the test caught it.
+
+`internal/incidents` speaks camelCase, consistently, and that is a different
+convention rather than the same bug. It has its own control now
+(`replay_wire_test.go`) so the difference is a decision and not drift. The page
+reads each document as written and does not translate between them, because a
+normalising layer between the CLI and the screen is a second implementation of the
+wire that can drift from the first one.
+
+### What was built
+
+| Piece | Where |
+|---|---|
+| The shared design system — one palette, one type scale, one accent, one logo, one motion duration | `web/static/app.css` |
+| The operator page: where the system stays quiet, per site and rule class | `web/static/operations.html`, `operations.js` |
+| The verification-state table, all five states named with the two silent ones marked | same page |
+| "Why nothing was raised" — an incident id, the decision, and the replay provenance | same page |
+| `POST /api/efficiency`, `/api/incident`, `/api/explain` | `web/api.go` |
+| Tests for `web` | `web/api_test.go`, `web/live_test.go` |
+| The live websocket's origin check — the CSRF control a websocket has no method guard for | `web/live_test.go` |
+
+The final run over this tree: **`dist/verification/verify-20261012-150005.json`**,
+25 gates PASS, 0 skipped, 0 failed, `verified: true`, database live, 19 of 19
+red-check controls proved. `cover-floor` reads `web` at 23.5% against the 23.1%
+floor recorded for it, inside the 2.0 margin.
+
+`web` is at **23.1%**, recorded as a floor, up from 0.0%. The uncovered remainder
+is the websocket proxy into the Python detector, which needs a `.venv-poc` that
+does not exist here, and the gate's `findRepoRoot` used to return a hardcoded
+absolute path naming a directory that does not exist
+(`"C:\VS-Code-Projects\Github\AI AI CAPTAIN"`); it returns the empty string now
+and `main` refuses with a reason a reader can act on.
+
+### What the page does not do, and why that is the honest summary
+
+It renders. It does not have a logo an actual designer drew, it is not
+responsive-tested on a tablet, it has no keyboard-shortcut layer, and its
+consistency is a stylesheet rather than a component library. It is a competent
+dark operator surface built on one design system, and it answers the question the
+product exists to answer on one screen. Calling it Apple-grade would be the same
+failure this pass spent four hours removing elsewhere, so it is not called that.
+
+### P0.4's design, written before the code
+
+`docs/design/evidence-retrieval.md`: the shape of a retrieval request (an
+evidence identity and an optional expected hash — never a path), the six existing
+stages' failure codes and the three M2 stages' codes fixed now so the M2 phase
+cannot invent them, and the four fault injections that prove a retrieval failure
+is visible rather than an empty 200. `evidence.proto` is untouched; the audit row
+is written before the first byte is streamed, which is RC-17's ordering on the
+evidence path and is fixed by the design so it cannot be reordered later.
+
+## What cannot be finished from here
+
+Each item below needs a human. Each is recorded as **blocked with a reason**
+rather than as open, and the reason is the blocker.
+
+| Item | Why it cannot be finished here |
+|---|---|
+| **M2's XProtect bookmark phase** (the automated alarm definition that never worked) | Distinct product capability and distinct `event_types` entries. This agent may not activate a capability. |
+| **M2's P2.5 camera-context arrival** (closing the 71.4% of clock imports with no sign-off) | A real XProtect installation and a CLI that reaches this machine. Here, every probe is refused as `UNAVAILABLE` because no `ClientAPI` package exists — that is stated, not worked around: `docs/vendor/milestone/route-audit.md`, §3. |
+| **P0.4's implementation** (stages 7-9 of the retrieval design) | Depends on M2's clipboard/clip path, and on fault-injection harnesses that can only inject once there is something to inject into. The design is written and the code is not. |
+| **The site-config schema change** for P2.2's weights | `contracts/` is a published contract; the diff needs a human's eye. The algorithm, its version and its control are in `internal/rules` with the weights in code, so the review is of a finished thing. |
+| **A signed exit gate** for anything in the list above | This agent may propose; it may not commit to a date or declare a gate passed. Every green recorded here is this agent's run, not a signature. |
+
+One more, which is not a HUMAN item but reads like one, and belongs next to them:
+**no check runs on a pull request** — Actions cannot start jobs for this account,
+the pipeline was removed, and a green branch here is a human claim rather than an
+automated one. Every run quoted in this document names the command that ran.
 
 ## Reproducing the verification
 

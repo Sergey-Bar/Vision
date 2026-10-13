@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/bench"
+	"github.com/Sergey-Bar/vision-poc/internal/bench"
 )
 
 // writePerClass prints the per-class table, and says what it is NOT.

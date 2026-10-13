@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/ui"
+	"github.com/Sergey-Bar/vision-poc/internal/store"
+	"github.com/Sergey-Bar/vision-poc/internal/ui"
 )
 
 // The two surfaces that describe the same window must describe it in the same

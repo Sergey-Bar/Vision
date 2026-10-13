@@ -10,9 +10,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/evidence"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/overlay"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
+	"github.com/Sergey-Bar/vision-poc/internal/evidence"
+	"github.com/Sergey-Bar/vision-poc/internal/overlay"
+	"github.com/Sergey-Bar/vision-poc/internal/store"
 )
 
 // The crossing snapshot. T6.3.

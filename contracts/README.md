@@ -113,7 +113,7 @@ review, which is why it is on this page.
 
 1. **Never hand-edit `internal/contracts/`.** It is `protoc` output. The
    `go_package` option in every `.proto` points at
-   `github.com/Sergey-Bar/Ai-Captain/internal/contracts/securityv1`, and CI
+   `github.com/Sergey-Bar/vision/internal/contracts/securityv1`, and CI
    regenerates and diffs it.
 2. **Contracts change before code, not after.** `AGENTS.md` and the master
    roadmap's non-negotiable sequence both say so. The order is: change

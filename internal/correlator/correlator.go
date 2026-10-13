@@ -33,9 +33,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/clock"
-	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
-	"github.com/Sergey-Bar/Ai-Captain/internal/rules"
+	"github.com/Sergey-Bar/vision/internal/clock"
+	"github.com/Sergey-Bar/vision/internal/dbx"
+	"github.com/Sergey-Bar/vision/internal/rules"
 )
 
 // ErrNoTrigger is returned when the trigger event does not exist for this

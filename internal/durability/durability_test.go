@@ -12,13 +12,13 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
-	"github.com/Sergey-Bar/Ai-Captain/internal/inbox"
-	"github.com/Sergey-Bar/Ai-Captain/internal/jobs"
-	"github.com/Sergey-Bar/Ai-Captain/internal/migrate"
-	"github.com/Sergey-Bar/Ai-Captain/internal/normalize"
-	"github.com/Sergey-Bar/Ai-Captain/internal/outbox"
-	"github.com/Sergey-Bar/Ai-Captain/internal/testutil"
+	"github.com/Sergey-Bar/vision/internal/dbx"
+	"github.com/Sergey-Bar/vision/internal/inbox"
+	"github.com/Sergey-Bar/vision/internal/jobs"
+	"github.com/Sergey-Bar/vision/internal/migrate"
+	"github.com/Sergey-Bar/vision/internal/normalize"
+	"github.com/Sergey-Bar/vision/internal/outbox"
+	"github.com/Sergey-Bar/vision/internal/testutil"
 )
 
 var base = time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC)

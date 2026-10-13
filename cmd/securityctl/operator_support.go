@@ -9,9 +9,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/audit"
-	"github.com/Sergey-Bar/Ai-Captain/internal/command"
-	"github.com/Sergey-Bar/Ai-Captain/internal/identity"
+	"github.com/Sergey-Bar/vision/internal/audit"
+	"github.com/Sergey-Bar/vision/internal/command"
+	"github.com/Sergey-Bar/vision/internal/identity"
 )
 
 // ed25519PublicKey aliases the key type so the operator file reads as prose.

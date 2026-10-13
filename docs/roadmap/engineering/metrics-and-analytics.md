@@ -1,10 +1,11 @@
 # Metrics and Analytics
 
 Owner: E1 (definition and reporting), E2 (instrumentation). Status: living.
-Last revised 2026-09-28. Live from M1.
+Last revised 2026-10-12. Live from M1.
 
-`` §"Product analytics" names this file. It is the definitions
-and sources behind every number in the roadmap. Read ``
+[`master-roadmap.md`](../master-roadmap.md) §"Product analytics" names this file. It is the definitions
+and sources behind every number in the roadmap. Read
+[`strategy-and-north-star.md`](../strategy-and-north-star.md)
 §4 (the three buyer answers) and `01` §M7 (the North Star) first.
 
 The rule this document is built on, from `01`:
@@ -196,9 +197,9 @@ None of these has a metric name in `metrics.go` yet. All sources are real.
 
 | Metric | Definition in plain English | Exact computation | Source table · columns | Why it matters | Who reads it |
 |---|---|---|---|---|---|
-| **`mt_ti_seconds`** (MTTI, "time to investigate") | From the moment the thing happened to the moment an operator recorded a verdict | Reported as **three numbers, never one**: **(a) detection latency** = `incidents.created_at − incidents.first_event_at`; **(b) investigation latency** = `min(dispositions.created_at) − incidents.created_at`; **(c) MTTI = (a) + (b)**. Aggregated per `rule_id` class, as mean and **median**, over incidents dispositioned in the window. Report the **median as the headline and the mean beside it** | `incidents.created_at`, `.first_event_at`, `.rule_id`; `dispositions.created_at` | The M2 exit gate is a reduction in this, measured against a VMS-only baseline (`01` §M2) | E1 monthly, E2 per site |
+| **`mt_ti_seconds`** (MTTI, "time to investigate") | From the moment the thing happened to the moment an operator recorded a verdict | **COMPUTED as of 2026-10-11** by `operatormetrics.Queries.MTTI`, as the three numbers below | `incidents.created_at`, `.first_event_at`, `.rule_id`; `dispositions.created_at` | The M2 exit gate is a reduction in this, measured against a VMS-only baseline (`01` §M2) | E1 monthly, E2 per site |
 | **`mt_tv_seconds`** (MTTV) | From the fact existing to the verdict on it | `extract(epoch FROM verification_results.evaluated_at − canonical_events.normalized_at)` for the trigger event, per class, median and p95 | `verification_results.evaluated_at`, `.state`; `canonical_events.normalized_at` | **PROPOSED definition, and a name the roadmap never expands.** `01` uses "MTTV" without defining it. This document proposes **Mean Time To Verify**, because the pipeline's second stage is verification and SLO 3 (`incident_visibility`) is the same quantity measured end to end. **E1 must confirm or correct this before M2 opens.** If it means Mean Time To *Respond*, only the source changes (`dispositions.created_at`); every other definition in this document is unaffected | E1 monthly |
-| **`attention_minutes`** | The numerator of the North Star: human minutes actually spent on our incidents | See §2.2.1 — **this is not measurable today** and the instrumentation is a named M1 deliverable | `audit_ledger` (new action), `dispositions.created_at`, `incidents.created_at` | The North Star. Also the only measure that goes *down* when the product works, which is why it is easy to fake and why §8 exists | E1 monthly, board |
+| **`attention_minutes`** | The numerator of the North Star: human minutes actually spent on our incidents | **MEASURABLE as of 2026-10-11.** The console appends one audited `incident.opened` ledger row on the first authenticated read of an incident by a given session (`internal/api.auditIncidentOpened`); `attention_minutes(incident) = dispositions.created_at − min(audit_ledger.ts WHERE action='incident.opened' AND target_id=incident_id)`, capped at a declared 4-hour maximum, **both reported**. The query is `operatormetrics.Queries.Attention`, reached by `securityctl efficiency` | `audit_ledger` (action `incident.opened`), `dispositions.created_at`, `incidents.created_at` | The North Star. Also the only measure that goes *down* when the product works, which is why it is easy to fake and why §8 exists | E1 monthly, board |
 | **`operator_actions_per_incident`** | How many distinct operator actions a disposition took | `count(DISTINCT action)` from `audit_ledger` where `actor_type = 'operator'` and `target_id = <incident>` — a **distinct-action** count, not a row count, so a page refresh is not an action | `audit_ledger.actor_type`, `.action`, `.target_id` | A disposition that takes four actions is not the same product as one that takes one, even at identical MTTI | E1 monthly |
 | **`operator_intervention_rate`** | Share of incidents that needed a human at all | `count(DISTINCT incident_id) FROM incidents WHERE <a human acted> ÷ count(*) FROM incidents`, in the window | `incidents.state`, `dispositions` existence | The M3 exit gate *(real — `01` §M3)*. **In M1 and M2 this is 1.0 by construction**: every incident in M1 requires a human, because bounded auto-resolution does not exist until M3. Reporting it before M3 measures the milestone, not the product | E1 from M3 |
 | **`evidence_completeness`** | Share of closed incidents that have retrievable evidence | `count(*) FROM incident_evidence` joined to `incidents` where `state IN ('dispositioned','closed')`, divided by the count of those incidents. Also report the retrieval status of each item, not just its existence | `incident_evidence`, `incidents.state`, `evidence.sha256` | A guardrail (§6) and a North Star companion. Existence is not completeness: a row pointing at bytes that fail their hash is incomplete | E1 monthly, E2 live |
@@ -206,22 +207,27 @@ None of these has a metric name in `metrics.go` yet. All sources are real.
 
 #### 2.2.1 `attention_minutes` — the honest problem, and the M1 fix
 
-There is no column, no table, and no ledger action that records when an operator
-**started** paying attention. `dispositions.created_at` records when they finished.
-`incidents.created_at` records when the incident appeared. Nothing records the
-opening of an incident, and the console's read endpoints do not audit: `GET
-/v1/incidents/{id}` is a `requireCapability(identity.CapIncidentRead, …)` route
-*(real — `internal/api/handlers.go:99-102`)* that writes no ledger row.
+There WAS no column, no table, and no ledger action that recorded when an operator
+**started** paying attention. `dispositions.created_at` recorded when they finished.
+`incidents.created_at` recorded when the incident appeared. Nothing recorded the
+opening of an incident, and the console's read endpoints did not audit: `GET
+/v1/incidents/{id}` was a `requireCapability(identity.CapIncidentRead, …)` route
+that wrote no ledger row.
 
-**What is proposed for M1** (`08` §7.1, task I-4):
+**What was done for M1** (`08` §7.1, task I-4), on 2026-10-11:
 
 1. The console writes one audited ledger row, `action = 'incident.opened'`,
    `target_type = 'incident'`, `target_id = <incident_id>`, on the first
-   authenticated read of an incident detail page by a given session.
-2. `attention_minutes(incident) = dispositions.created_at − min(audit_ledger.ts WHERE action='incident.opened' AND target_id=incident_id)`, capped at a declared per-class maximum **(PROPOSED: 4 hours; to be set from the M1 distribution, not before)**.
+   authenticated read of an incident detail page **by a given session**. Once per
+   session and not once per read, because a page refresh is not a new bout of
+   attention; two sessions reading the same incident are two.
+2. `attention_minutes(incident) = dispositions.created_at − min(audit_ledger.ts WHERE action='incident.opened' AND target_id=incident_id)`, capped at a declared per-class maximum (4 hours, still **PROPOSED**: to be set from the M1 distribution, not before). An incident with no `incident.opened` row is **not counted at all** — not as zero.
 3. The **capped** and **uncapped** values are both reported. The uncapped number is
    an over-count — it includes an operator who opened an incident before going to
-   lunch — and saying so is the point.
+   lunch — and saying so is the point. `securityctl efficiency` prints both.
+
+The query is `internal/operatormetrics.Queries.Attention`, and its own test is the
+control that keeps the "not zero" rule: `TestAnIncidentNobodyOpenedIsNotCountedAsZero`.
 
 **What this is not.** It is elapsed time, not active time. It measures the
 interval a human was *responsible for*, which is the quantity the customer
@@ -283,11 +289,11 @@ the repository, or `(NOT YET KNOWN)`.**
 | M1 | `attention_minutes` | **BASELINE ONLY** | **(NOT YET KNOWN)**. First measurement, with the caveat in §2.2.1 | — |
 | M1 | `operator_actions_per_incident` | **BASELINE ONLY** | **(NOT YET KNOWN)** | — |
 | M1 | `ai_plane_availability` share | **BASELINE** | **(NOT YET KNOWN)**. How often the AI plane was actually live at the design-partner site | — |
-| M1 | `ai_false_positive_rate` (production profile) | **BASELINE, against an existing gate** | gate ≤ 0.20, on ≥ 30 labelled cases | `evaluation.DefaultGates()` *(real — `evaluation.go:103-111`)* |
-| M1 | `ai_recall` (production profile) | **BASELINE, against an existing gate** | gate ≥ 0.70 on true positives, on ≥ 30 labelled cases | `evaluation.DefaultGates()` *(real)* |
+| M1 | `ai_false_positive_rate` (production profile) | **BASELINE, against an existing gate** | gate ≤ 0.20, on ≥ 200 **answered** labelled cases | `evaluation.DefaultGates()` *(real — `MinLabelledCases` is 200 as of 2026-10-11; it was 30 when this table was written, which §5.5 is the record of)* |
+| M1 | `ai_recall` (production profile) | **BASELINE, against an existing gate** | gate ≥ 0.70 on true positives, on ≥ 200 **answered** labelled cases | `evaluation.DefaultGates()` *(real)* |
 | M1 | `ai_disagreement_rate` | **BASELINE, against an existing gate** | gate ≤ 0.25 | `evaluation.DefaultGates()` *(real)* |
 | M1 | `vlm_median_latency_ms` | **BASELINE, against an existing gate** | gate ≤ 8000ms | `evaluation.DefaultGates()` *(real)* |
-| M1 | Shadow-window case count | **Demonstrate** | ≥ 10 labelled cases during shadow | `evaluation.ShadowGates()` *(real — `evaluation.go:116-120`)* |
+| M1 | Shadow-window case count | **Demonstrate** | ≥ 10 labelled cases during shadow | `evaluation.ShadowGates()` *(real — the floor is deliberately lower than the promotion floor and says so in the field's own doc)* |
 | M1 | Consecutive shadow days | **Demonstrate** | ≥ 14 | M1 exit gate 4 *(real — `01` §M1)* |
 | **M2** | `mt_ti_seconds` | **SET AND MEET** | **(PROPOSED, must be set before the trial opens and per class)** — `01` §M2: "reduced by a statistically meaningful margin on supported classes, measured per operator against their own VMS-only baseline. 'Meaningful' is set before the trial, per class, and recorded." §4 is the design | `01` §M2 *(real)* — the number itself is NOT YET KNOWN |
 | M2 | `evidence_completeness` | **SET** | **(PROPOSED: 1.0 for `high` and `critical`)**. The basis is `slo.go`'s own statement that an incident without evidence is not defensible, and asset A4 in the threat model | — |
@@ -335,8 +341,8 @@ before M2 opens, because a design written after the data exists is a rationalisa
 | Element | Choice | Why this and not the alternative |
 |---|---|---|
 | **Within-subject** | Every operator is their own control. There is no between-operator group | Investigation time varies far more between operators than between tools. If E2 (fast) and E1 (careful) are on different arms, the arm difference is the person. The roadmap already requires this: "per operator against their own VMS-only baseline" |
-| **Alternating blocks (ABAB), not parallel groups** | One block of VMS-only, then one block with Captain, then VMS-only, then Captain, and so on. **Block length = one shift** | Parallel groups drift with the event mix. Alternating also controls for the site getting busier or quieter over the trial, which over a quarter it will |
-| **Counterbalanced order** | Half the operators start with VMS-only, half start with Captain. Order is randomised per operator and recorded | Order effects (learning, fatigue) are real and asymmetric: the second block is faster for reasons that have nothing to do with the tool. Counterbalancing distributes the effect instead of ignoring it |
+| **Alternating blocks (ABAB), not parallel groups** | One block of VMS-only, then one block with VISION, then VMS-only, then VISION, and so on. **Block length = one shift** | Parallel groups drift with the event mix. Alternating also controls for the site getting busier or quieter over the trial, which over a quarter it will |
+| **Counterbalanced order** | Half the operators start with VMS-only, half start with VISION. Order is randomised per operator and recorded | Order effects (learning, fatigue) are real and asymmetric: the second block is faster for reasons that have nothing to do with the tool. Counterbalancing distributes the effect instead of ignoring it |
 | **Class by class** | The analysis is per `rule_id` class. A pooled result across classes with different intrinsic difficulty is meaningless | `01` §M2 says "on supported classes". A pool is only reportable as a secondary, and only with the class mix reported beside it |
 | **Minimum N per class per operator** | See §4.4. **N is not a number chosen in advance of the data; it is computed from the M1 baseline variance** | A fixed N chosen because it is convenient is the most common way a pilot produces a result nobody believes |
 | **Blinding** | **Impossible**, and stated rather than fudged. The operator knows which workflow they are in | Claiming a blinded trial with two visibly different UIs would be the first false statement in this document |
@@ -347,7 +353,7 @@ before M2 opens, because a design written after the data exists is a rationalisa
 The operator will work harder during a measured trial than on a normal shift. That
 is not a flaw in the operator; it is what happens when work is being watched, and
 a study that ignores it produces a number that inflates both arms — and inflates
-the Captain arm more, because the Captain arm is the one the operator is being
+the VISION arm more, because the VISION arm is the one the operator is being
 asked to try.
 
 | # | Countermeasure | Detail |
@@ -514,7 +520,7 @@ and there is no live signal that could detect a regression.
 
 Cost control, because this is a 2-person company: the operator labels in batches
 inside the bi-weekly review session already in the operating model's cadence
-(`` §6.3), and the batch is capped at
+([`team-and-operating-model.md`](team-and-operating-model.md) §6.3), and the batch is capped at
 whatever fits in the session. A partial sample is a partial sample and is reported
 as one.
 
@@ -525,12 +531,18 @@ with a decimal point.
 ### 5.5 Why these rates are meaningless below a minimum case count
 
 This is not a general statistical caution. It is a specific, computed finding
-about the gates that are already in the code.
+about the gates that are already in the code — and the finding **landed**:
+`MinLabelledCases` was 30 when this section was written and is **200** now
+(`evaluation.go`, changed 2026-10-11). What follows is the arithmetic that
+produced that change, kept because the interval table is the argument and not a
+formality.
 
-`evaluation.DefaultGates()` sets `MinLabelledCases: 30` *(real — `evaluation.go:109`)*.
-The harness's comment is: "A rate computed from four cases is a number, not an
-estimate" *(real — `evaluation.go:93-95`)*. **Thirty is better than four, and it is
-still not an estimate.** The table below is a Wilson score interval at 95%, two-
+`evaluation.DefaultGates()` sets `MinLabelledCases: 200`. It was 30 when the table
+below was computed, and the harness's comment is unchanged: "A rate computed from
+four cases is a number, not an estimate" *(real — `evaluation.go`)*. **Thirty was
+better than four, and it was still not an estimate** — and neither is two hundred
+if the cases cluster, which is the second half of this section. The table below is
+a Wilson score interval at 95%, two-
 sided, computed for this document. It assumes i.i.d. Bernoulli cases, which real
 cases are not — they cluster by incident, by camera, by hour and by site — so the
 effective sample size is smaller than the nominal one and these intervals are
@@ -574,13 +586,17 @@ effective sample size is smaller than the nominal one and these intervals are
    cluster-robust interval over the incident, or a per-site split. Until that
    exists, the report says "unadjusted for clustering" in the footnote, and a
    customer report says the same thing.
-4. **`MinLabelledCases: 30` stays as it is for the M1 shadow gate.** It is a
-   floor that rejects a profile judged on a handful of cases, and it does that
-   job. What changes is the **claim**: at 30 cases we can say the profile is not
-   obviously bad, and we cannot say it is at or under the gate. Roughly 200
-   labelled cases at an observed rate of ~0.14 is what it takes to support that
-   claim, and whether M1 or M2 can supply 200 per class is **(NOT YET KNOWN)** and
-   depends entirely on the design partner's event rate for that class.
+4. **`MinLabelledCases: 30` is gone; the promotion floor is 200 as of
+   2026-10-11.** It was a floor that rejected a profile judged on a handful of cases,
+   and it did that job — but it let both gates be *unfalsifiable* while appearing to
+   enforce them, which §3.3 computed and this section's interval table shows. At 200
+   cases we can say the profile is at or under the gate with an interval around it;
+   at 30 we could not. What changes is the **claim**: roughly 200 labelled cases at
+   an observed rate of ~0.14 is what it takes to support it, and whether M1 or M2
+   can supply 200 per class is **(NOT YET KNOWN)** and depends entirely on the
+   design partner's event rate for that class. The shadow floor stays 10, because
+   shadow is for collecting cases and a collection exercise must not fail for lack
+   of them.
 
 ### 5.6 What the harness already does, and this document does not redo
 
@@ -836,7 +852,7 @@ The three that are most likely to appear, and the reason each is refused:
 > *(real — `01` §"Product analytics")*.
 
 The test before adding anything, and it is the same test the intake filter uses
-(`` §5):
+([`team-and-operating-model.md`](team-and-operating-model.md) §5):
 
 1. **Who reads it, and what decision does it change?** "The team" is not an answer.
 2. **What would we do differently at a different value?** A metric where no value

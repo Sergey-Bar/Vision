@@ -210,7 +210,7 @@ quietly promote one of these into a headline.
 ## 5. Module boundary
 
 This module is a nested Go module. It must not import
-`github.com/Sergey-Bar/Ai-Captain/...`. The repository root's `go build ./...`
+`github.com/Sergey-Bar/vision/...`. The repository root's `go build ./...`
 and `go test ./...` skip this directory, which is exactly why
 `scripts/verify.ps1` exists here, and why one of its checks proves the root does
 not build this module. The root `go.mod`, root `scripts/verify.ps1` and

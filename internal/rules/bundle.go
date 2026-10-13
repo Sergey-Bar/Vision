@@ -302,7 +302,8 @@ func (b *Bundle) MarshalCanonical() ([]byte, error) {
 // that can never match is a rule an operator believes is running.
 var KnownEventTypes = map[string]bool{
 	"motion": true, "analytics": true,
-	"alarm.created": true, "alarm.acknowledged": true, "alarm.closed": true,
+	"analytics.restricted_person": true,
+	"alarm.created":               true, "alarm.acknowledged": true, "alarm.closed": true,
 	"device.camera_offline": true, "device.camera_online": true, "device_state": true,
 	"recording.started": true, "recording.stopped": true,
 	"bookmark": true, "metadata": true,

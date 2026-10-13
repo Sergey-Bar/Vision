@@ -7,8 +7,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/identity"
-	"github.com/Sergey-Bar/Ai-Captain/internal/testutil"
+	"github.com/Sergey-Bar/vision/internal/identity"
+	"github.com/Sergey-Bar/vision/internal/testutil"
 )
 
 // The lockout is the named control for the CSRF-exempt login route, and it

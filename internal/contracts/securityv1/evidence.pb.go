@@ -370,7 +370,7 @@ const file_security_v1_evidence_proto_rawDesc = "" +
 	"\x19EVIDENCE_TIER_UNSPECIFIED\x10\x00\x12!\n" +
 	"\x1dEVIDENCE_TIER_A_AUTHORITATIVE\x10\x01\x12\x1b\n" +
 	"\x17EVIDENCE_TIER_B_DERIVED\x10\x02\x12\"\n" +
-	"\x1eEVIDENCE_TIER_C_AI_OBSERVATION\x10\x03BKZIgithub.com/Sergey-Bar/Ai-Captain/internal/contracts/securityv1;securityv1b\x06proto3"
+	"\x1eEVIDENCE_TIER_C_AI_OBSERVATION\x10\x03BGZEgithub.com/Sergey-Bar/vision/internal/contracts/securityv1;securityv1b\x06proto3"
 
 var (
 	file_security_v1_evidence_proto_rawDescOnce sync.Once

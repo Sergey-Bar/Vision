@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/airuntime"
-	"github.com/Sergey-Bar/Ai-Captain/internal/hafnia"
-	"github.com/Sergey-Bar/Ai-Captain/internal/observations"
+	"github.com/Sergey-Bar/vision/internal/airuntime"
+	"github.com/Sergey-Bar/vision/internal/hafnia"
+	"github.com/Sergey-Bar/vision/internal/observations"
 )
 
 // The plan's third new risk: "prompt injection in frames".

@@ -4,12 +4,20 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
-<title>{{.Title}} — Physical Security Intelligence Layer</title>
+<title>VISION — {{.Title}}</title>
 <link rel="stylesheet" href="/static/console.css">
 </head>
 <body>
 <header class="topbar">
-  <span class="brand">Physical Security Intelligence Layer</span>
+  <span class="brand">
+    <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M12 2.2 20.4 7v10L12 21.8 3.6 17V7L12 2.2Z" fill="none" stroke="currentColor" stroke-width="1" stroke-linejoin="round"/>
+      <rect x="11" y="6" width="2" height="2" rx="0.6" fill="currentColor"/>
+      <rect x="7.8" y="10.6" width="8.4" height="2.8" rx="1.4" fill="currentColor"/>
+    </svg>
+    <span class="brand-name">VISION</span>
+    <span class="brand-statement">Physical Security Intelligence Layer</span>
+  </span>
   {{if .Principal.Username}}
   <span class="who">
     {{.Principal.Username}}

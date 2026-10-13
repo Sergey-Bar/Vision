@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/command"
-	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
-	"github.com/Sergey-Bar/Ai-Captain/internal/migrate"
-	"github.com/Sergey-Bar/Ai-Captain/migrations"
+	"github.com/Sergey-Bar/vision/internal/command"
+	"github.com/Sergey-Bar/vision/internal/dbx"
+	"github.com/Sergey-Bar/vision/internal/migrate"
+	"github.com/Sergey-Bar/vision/migrations"
 )
 
 // connect builds a pool from the site configuration's database block.

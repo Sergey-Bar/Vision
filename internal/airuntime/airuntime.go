@@ -37,7 +37,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/observations"
+	"github.com/Sergey-Bar/vision/internal/observations"
 )
 
 // APIVersion is the wire version this client speaks.

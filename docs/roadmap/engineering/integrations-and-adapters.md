@@ -1,6 +1,6 @@
 # Integrations and Adapters
 
-Owner: E1 (Product/Architecture). Status: living. Last revised 2026-09-28.
+Owner: E1 (Product/Architecture). Status: living. Last revised 2026-10-02.
 
 Scope: the M1–M4 integration architecture track. This is the most important
 architectural track in the company, because the second VMS adapter is the real

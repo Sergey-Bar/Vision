@@ -50,7 +50,7 @@ Five invariants that the rest of the code exists to protect.
 ## Two trees, one repository
 
 `poc/active-monitoring/` declares its own module path,
-`github.com/Sergey-Bar/ai-captain-poc`, with its own `go.mod`, `go.sum` and
+`github.com/Sergey-Bar/vision-poc`, with its own `go.mod`, `go.sum` and
 `scripts/verify.ps1`. It imports nothing from the module above and the module above
 imports nothing from it.
 

@@ -1,6 +1,6 @@
 # UX and Design System
 
-Owner: E1 (Product/Architecture). Status: living. Last revised 2026-09-28.
+Owner: E1 (Product/Architecture). Status: living. Last revised 2026-10-12.
 
 For the operator who uses this at 02:00 to decide whether something is worth
 waking somebody for, and who has to be able to justify the click afterwards.
@@ -1092,7 +1092,7 @@ run again in that form.
 
 ### 8.2 Shift shadowing
 
-Twice a quarter per segment, as `` §5.2 specifies. The
+Twice a quarter per segment, as [`product-and-backlog.md`](product-and-backlog.md) §5.2 specifies. The
 UX yield is a timing and a vocabulary; the research yield is the answer to
 question 7 in that guide, which is consistently "what had it shown me".
 
@@ -1142,43 +1142,97 @@ degraded AI plane; 21 is not worth the extra week.
 
 ### 9.1 Naming
 
-**The product is Captain.** Named in `00` §1. What the name has to do, and the
-decisions that followed:
+**The product is VISION.** Locked 2026-10-12 by E1, and recorded as a settled
+decision in `19` §5.31. It supersedes `Captain`, which is kept below rather
+than deleted, because the reasoning that was rejected is part of the record and
+the next rename will need it. What the name has to do, and the decisions that
+followed:
 
 | Decision | Rationale |
 |---|---|
 | One word, no "AI", no "Security" in the name | `AI` in a product name dates it and, from 2026, reads as a feature rather than the product. The name is the thing, not its mechanism |
 | Not a person's surname, not a naval metaphor | A surname is unfindable and a naval metaphor is a costume. This audience is extremely literal about names on a screen |
-| "Captain" is a rank, not a person | The operator is the captain. The product advises. A product that calls itself Captain is making a claim about the human's agency, and that claim is the whole of `00` §1 and principle 1.5. It also happens to be the Captain obvious pun, and at 04:00 that is one fewer thing to explain |
-| The internal repo keeps `security-platform` as `release.productName` | `internal/release/release.go` sets `productName = "security-platform"`. That string is in signed manifests and in the OpenAPI title. It is **not** changed: renaming it is a contract change requiring `contractcheck` and a baseline write, for a cosmetic gain, and the manifest string is a machine identifier, not a brand. The name in the UI is `Captain`; the name on the wire is `security-platform`; both are correct |
-| The console topbar says "Physical Security Intelligence Layer" today | That is the category, not the brand. **M1 change: the topbar brand becomes `Captain` with the category as a subtitle**, and the `<title>` in `layout.html` becomes `Captain — <page>`. Tracked as backlog row #25-adjacent in `05` §2, effort S |
+| ~~"Captain" is a rank, not a person~~ **Superseded 2026-10-12: the product is `VISION`** | The operator is the captain; the product advises — `00` §1 and principle 1.5. The earlier choice of `Captain` claimed that agency for the product on the strength of a pun, and the pun was not worth the claim. `VISION` names what the product does (it sees, verifies and evidences) rather than a rank it takes over the operator's |
+| The internal repo keeps `security-platform` as `release.productName` | `internal/release/release.go` sets `productName = "security-platform"`. That string is in signed manifests and in the OpenAPI title. It is **not** changed: renaming it is a contract change requiring `contractcheck` and a baseline write, for a cosmetic gain, and the manifest string is a machine identifier, not a brand. The name in the UI is `VISION`; the name on the wire is `security-platform`; both are correct |
+| The console topbar and `<title>` carry the name | The category is what the name means, not the brand. **Done 2026-10-12: the topbar brand is `VISION` with the category `Physical Security Intelligence Layer` as the one-line statement beside it, and `layout.html`'s `<title>` is `VISION — <page>`.** Guarded by `api.TestProductNameIsConsistency`, which renders the page and refuses the superseded name |
 
-Domain: `captain.security`. Checked for conflicts at the time of writing; a
-domain is not registered from this repository and the check is a manual step.
+Domain: `captain.security` was the check made for the superseded name; the
+domain for `VISION` is a commercial step, not a repository decision, and is not
+registered from here.
+
+**What the rename does not touch, and why.** Three classes of `Captain` string
+stay, each for the reason `release.productName` stays: they are machine
+identifiers, not brand, and changing them is a different kind of change with its
+own gate.
+
+1. **The published contract identifiers.** `contracts/json-schema/*.schema.json`
+   carry `"$id": "https://contracts.aicaptain.dev/..."`. A `$id` is the contract's
+   own name; changing one requires `contractcheck`, a baseline write and a human
+   reading the diff, for a cosmetic gain. It is the `security-platform` rule
+   applied to the schema surface.
+2. **The deploy identity.** The service id `captain-core`, the account
+   `NT SERVICE\CaptainCore`, and the paths `/etc/captain/`, `/opt/captain/` and
+   `C:\ProgramData\Captain\` are what an installed site is addressed by. No site
+   is installed today, so renaming them is free — but it is an installer
+   migration with its own review, not a console edit, and doing it inside a brand
+   change is how the two get conflated. The `DisplayName` strings an operator
+   reads in `services.msc` and `systemctl status` do carry the new name, because
+   those are the brand.
+3. **The addresses and the SDK module path.** `security@captain.security`,
+   `Documentation=https://contracts.aicaptain.dev` in the shipped systemd units,
+   and the planned `aicaptain.dev/sdk` module all name a domain that has not been
+   registered for either brand. They move when the domain is decided, by whoever
+   decides it — not by a repository edit that would invent one.
 
 ### 9.2 Logo and mark
 
-A single mark: **a shield outline containing a bracketed timestamp** — the
-`[` `]` are the same brackets the evidence hashes and event ids are rendered in,
-and the shield is the shape security buyers already read without being told. No
-second symbol, no gradient, no shield-plus-waveform, no lock.
+A single mark: **a hexagonal sensor chassis carrying a visor and a sensor node** —
+the chassis is the machine that watches, the visor is the one aperture it reports
+through, and the node is the instrument. No second symbol, no gradient, no
+helmet-plus-waveform, no lock.
+
+**Redirected 2026-10-13 by E1.** The earlier direction was a Marvel-Vision
+homage, recorded as D5 in the finish plan with `G-1` (trademark and IP counsel)
+as its gate. E1 waived that gate and redirected the brand to an original
+futuristic/robotic/sci-fi treatment: the homage was a borrowing, and a borrowing
+needs clearance while an original needs none. The **structural** decisions D5
+carried are unchanged and still bind — the semantic colour set, the
+no-colour-only-signal rule, WCAG contrast, the zero-client-JS constraint, the
+hand-drawn-SVG-only rule, and the prohibition on AI-generated imagery. `G-1` in
+the finish plan's human-gate table is closed by that decision, and `A4` in Phase A
+with it: nothing in the mark or the name copies a Marvel asset, so there is
+nothing to clear. The name stays `VISION`; only the art direction moved.
+
+**Implemented** as the inline SVG in `layout.html`'s topbar, drawn by hand on the
+grid below, so the mark ships with the page and needs no asset pipeline.
+`api.TestProductNameIsConsistency` asserts the grid, the `currentColor` and the
+colour token.
 
 Construction rules, because a mark has to survive being 16px on a dark table
 header and being etched on a rack:
 
-- Single-weight stroke, 1 unit, no fills except the timestamp bracket.
+- Single-weight stroke, 1 unit. The only filled elements are the visor and the
+  sensor node: two solids, and the chassis is what they sit inside.
 - Grid 24×24 units, 1 unit of clear space on all sides.
-- Solid `--text` on dark, solid `#08121c` on `--accent` fill. Two-colour
-  maximum, so it works in one ink on a printed incident package.
-- Never recoloured by severity. A red logo is a logo for a different product.
+- Drawn in `--accent`, the single brand accent token — never in one of the four
+  semantic operator colours (§9.4 point 3), so a severity and the logo never
+  share a colour and the mark is never recoloured by severity. `currentColor`
+  resolves to that token in one place (`.brand-mark`), and a red logo is a logo
+  for a different product. Two-colour maximum, so it works in one ink on a
+  printed incident package.
+- Angular, not organic: straight lines for the chassis, one rounded visor, no
+  curves anywhere else. A robotic read at 24px survives being reduced to
+  geometry, and a silhouette made of curves reduces to a blob.
+- Never recoloured by severity. Same rule, restated because the new shape makes
+  it easier to forget: the mark is the product's face, not a status light.
 
 ### 9.3 One-line statement
 
-> **Captain turns your security stack's noise into a short, evidenced list of things that actually happened — and it can prove every one of them.**
+> **VISION turns your security stack's noise into a short, evidenced list of things that actually happened — and it can prove every one of them.**
 
 The long form for the site and for a deck:
 
-> Captain is the local-first intelligence and autonomy layer that sits above the
+> VISION is the local-first intelligence and autonomy layer that sits above the
 > physical-security stack you already own. It turns raw signals into verified,
 > evidenced incidents, then handles the routine work under policy — so your
 > people get exceptions, not alerts. Every decision is reproducible from stored
@@ -1300,11 +1354,12 @@ Specific, and each one a real argument we had:
    contributed an attributable observation. A name or copy that says "the system
    decided" is fine; a name that says "it decided" is a claim about which
    component acted, and we do not want that ambiguity in the product's own voice.
-7. **One word, one spelling, no clever pluralisation.** "Captain", "captain",
-   `CAPTAIN`, "Captain AI" and "captain.security" all appearing in the same
+7. **One word, one spelling, no clever pluralisation.** "VISION", "vision",
+   `VISION`, "Vision AI" and a mismatched domain all appearing in the same
    codebase is how a brand becomes a search problem. The string is in
    `layout.html`, the docs and the `<title>` and it is spelled the same way in
-   all of them; `TestProductNameIsConsistent` checks the templates.
+   all of them; `TestProductNameIsConsistent` checks the templates and refuses
+   the superseded `Captain`.
 8. **Check the trademark before the domain, not after.** A single-class
    application in class 9/42, in the two jurisdictions we would sell in first, is
    a few hundred euros and takes weeks. It is a budget line in the M1 commercial

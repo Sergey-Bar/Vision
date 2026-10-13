@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/rtsp"
+	"github.com/Sergey-Bar/vision/internal/rtsp"
 )
 
 // The same synthetic fixture the muxer and the detector are tested against. The

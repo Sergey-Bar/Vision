@@ -44,7 +44,22 @@ code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-siz
   background: var(--panel);
   border-bottom: 1px solid var(--line);
 }
-.brand { font-weight: 600; }
+/* The brand. The name is VISION (naming decision, ux-and-design-system §9.1);
+ * the statement beside it is the category, which is what an operator reads first
+ * and what the §9.3 one-liner is a longer form of.
+ *
+ * The mark is drawn in the single brand accent token --accent, and never in one
+ * of the four semantic operator colours: §9.4 refuses a brand colour inside the
+ * semantic set, so a warning and the logo never share a colour and the accent
+ * stays "you can act on this". The SVG uses currentColor throughout, so the
+ * token is resolved in exactly one place - here - and the mark needs no rule of
+ * its own per element. It is 24 units on a 24-unit grid, so it renders at 24px
+ * and stays legible at 32px.
+ */
+.brand { display: inline-flex; align-items: center; gap: 9px; font-weight: 600; letter-spacing: 0.06em; }
+.brand-mark { width: 24px; height: 24px; flex: none; color: var(--accent); }
+.brand-name { font-size: 1.02rem; }
+.brand-statement { color: var(--muted); font-weight: 400; font-size: 0.82rem; letter-spacing: 0.02em; }
 .topbar .who { margin-left: auto; color: var(--muted); font-size: 0.9em; }
 .topbar form.inline { display: inline; }
 

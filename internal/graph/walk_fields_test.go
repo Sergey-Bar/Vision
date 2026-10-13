@@ -3,7 +3,7 @@ package graph_test
 import (
 	"testing"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/graph"
+	"github.com/Sergey-Bar/vision/internal/graph"
 )
 
 // `Walk` scanned `node_id` and `edge_id` into the same destination, so the edge

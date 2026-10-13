@@ -1,13 +1,13 @@
 # M1 — Trust Spine Execution Plan
 
-Owner: E1. Status: living. Last revised 2026-09-28. Window: **2026-09-28 → 2027-03-31**.
+Owner: E1. Status: living. Last revised 2026-10-12. Window: **2026-09-28 → 2027-03-31**.
 
-Read `` first (the capacity law in §6 constrains every
-number here) and `` §"M1" (the exit gate this plan executes).
+Read [`strategy-and-north-star.md`](../strategy-and-north-star.md) first (the capacity law in §6 constrains every
+number here) and [`master-roadmap.md`](../master-roadmap.md) §"M1" (the exit gate this plan executes).
 `docs/status.md` is the authoritative build state and is not restated here.
 
 This is the plan the team executes this quarter. Every date in it traces to a gate
-in ``; every claim about what is built traces to
+in [`master-roadmap.md`](../master-roadmap.md); every claim about what is built traces to
 `docs/status.md` or to the code.
 
 ---
@@ -34,7 +34,7 @@ and a task ID in §2.
 | # | Finding | Evidence | Consequence for M1 |
 |---|---|---|---|
 | F1 | **`securityctl adapter probe` does not exist.** `internal/milestone/routes.go:16` instructs the reader that "the first thing to do on a real installation is to run `securityctl adapter probe`", and `:121` exposes `UnverifiedRoutes()` explicitly so the command can print them. The command is absent from the tree at `cmd/securityctl/main.go:45-61`. | direct read | **This is the first task of M1.** It is the instrument that turns item (d) from a hypothesis into a list of confirmed and contradicted routes, and nothing in W1 can start without it. |
-| F2 | **`internal/observability` has no production caller.** The only importer in the repository is `internal/observability/observability_test.go`. There is no scrape endpoint. | grep for `internal/observability` across all `*.go` returns 1 hit | Every metric in `metrics.go` is correctly *named* and correctly *evaluated by `Breaches`*, but nothing emits it. Gate 3 ("every SLO demonstrably met under a recorded load run") is not reachable from the current code. See `` §7. |
+| F2 | **`internal/observability` has no production caller.** The only importer in the repository is `internal/observability/observability_test.go`. There is no scrape endpoint. | grep for `internal/observability` across all `*.go` returns 1 hit | Every metric in `metrics.go` is correctly *named* and correctly *evaluated by `Breaches`*, but nothing emits it. Gate 3 ("every SLO demonstrably met under a recorded load run") is not reachable from the current code. See [`release-sre-and-support.md`](../engineering/release-sre-and-support.md) §5.2. |
 | F3 | **RESOLVED.** The workflow pinned `GO_VERSION: "1.24"` with `GOTOOLCHAIN: local` against a `go 1.26.0` module, and `docs/status.md` said 1.27 | direct read of all three, at the time | Three asserted versions, none reconcilable, so a "green" pipeline claim was really a local claim. Pin corrected to `1.26` and `docs/status.md` to `1.26.0`; the workflow has since been removed for an unrelated billing reason |
 
 ### 1.2 What is *not* open, and must not be re-litigated
@@ -54,7 +54,7 @@ and a task ID in §2.
 
 Nine workstreams. Capacity is 2 engineers × 26 weeks = **52 engineer-weeks**, of
 which **20 engineer-weeks (38.5%) is the standing tax** defined in
-`` §6 — support, demos, sales calls, incident
+[`strategy-and-north-star.md`](../strategy-and-north-star.md) §6 — support, demos, sales calls, incident
 response, hiring, admin, and the AI review pass. The build allocation below totals
 **32.0 engineer-weeks**, which is 61.5% and therefore inside the 60% line's
 intent (the tax is spent on W9 and on the customer-facing half of W1/W5, and is
@@ -62,7 +62,7 @@ not double-counted in the build column).
 
 Owner convention: **E1** = product, architecture, security, sales. **E2** = backend,
 AI, data, release. This split is stated plainly and defended in
-`` §1.
+[`team-and-operating-model.md`](../engineering/team-and-operating-model.md) §1.
 
 ### W1 — Live-Milestone verification
 
@@ -71,7 +71,7 @@ AI, data, release. This split is stated plainly and defended in
 | Owner | **E2** (adapter code), **E1** (site relationship, credentials, NDA) |
 | Outcome | Every route in `internal/milestone/routes.go` is confirmed or corrected against a real server. `UnverifiedRoutes()` is empty or every remaining entry has a written reason. Live-vs-replay parity is demonstrated on the same scenarios. |
 | Estimate | **4.0 ew** |
-| Likely drafting agent | `adapter-verifier` (see `` §2), for `probe` scaffolding, the parity differ, and the route table. E2 owns every conclusion. |
+| Likely drafting agent | `adapter-verifier` (see [`team-and-operating-model.md`](../engineering/team-and-operating-model.md) §2), for `probe` scaffolding, the parity differ, and the route table. E2 owns every conclusion. |
 
 | ID | Task | Deps | Notes |
 |---|---|---|---|
@@ -225,7 +225,7 @@ notes for the M1 build carry the load rate and every SLO reading.
 | M1-T41 | Shadow-mode wiring: a shadow profile writes observations and creates no incident and suppresses nothing | M1-T12, M1-T36 | `observations.IsProductionProfile` already gates `production_profile`; the runtime must be told which mode it is in |
 | M1-T42 | Label pipeline: harvest cases from the site, map operator dispositions to labels, and persist them so `evaluation.Evaluate` can read them | M1-T41, M1-T38 | The labels come from `dispositions.outcome`. A case nobody judged is not evidence and is counted as `undispositioned`, never folded into a rate (`evaluation.go:29-35`) |
 | M1-T43 | Run the harness continuously; emit a per-profile report: `Labeled`, `Undispositioned`, `TruePositives`, `FalsePositives`, `Benign`, `Degraded`, `Insufficient`, `DetectedRestricted`, `MissedRestricted`, FPR, recall, disagreement rate, median latency, hours-to-disposition | M1-T42 | Every failing gate is **named**, not averaged (`evaluation.go:259-289`) |
-| M1-T44 | Meet `DefaultGates()`: FPR ≤ 0.20, recall ≥ 0.70 on true positives, median latency ≤ 8000 ms, disagreement ≤ 0.25, ≥30 labelled cases | M1-T43, **≥14 days** | These are the numbers in `evaluation.DefaultGates()`. They are not invented here |
+| M1-T44 | Meet `DefaultGates()`: FPR ≤ 0.20, recall ≥ 0.70 on true positives, median latency ≤ 8000 ms, disagreement ≤ 0.25, ≥200 **answered** labelled cases | M1-T43, **≥14 days** | These are the numbers in `evaluation.DefaultGates()`. They are not invented here |
 | M1-T45 | Attach the evaluation report; record the 14-day start and end dates and the continuous-day count | M1-T44 | **Gate 4 evidence.** "14 consecutive days" means 14 consecutive calendar days with the profile running and the site live. A gap resets the clock |
 | M1-T46 | Human promotion decision, recorded in the ledger with `actor_type='admin'` | M1-T45 | The harness says which profiles are *eligible*. Promotion is a human act (`evaluation.go:139-141`) |
 
@@ -294,7 +294,7 @@ for M1's stages; `docs/status.md` says what is true on the day it is read.
 
 | ID | Task | Deps | Notes |
 |---|---|---|---|
-| M1-T59 | The three buyer answers, as documents that match the code: what the AI decided and why; what happens when the AI is down; can you prove it did what it says | M1-T13, M1-T39, M1-T46 | `` §4. Every claim in them is traceable to a test or a table |
+| M1-T59 | The three buyer answers, as documents that match the code: what the AI decided and why; what happens when the AI is down; can you prove it did what it says | M1-T13, M1-T39, M1-T46 | [`strategy-and-north-star.md`](../strategy-and-north-star.md) §4. Every claim in them is traceable to a test or a table |
 | M1-T60 | Trust documentation for a security buyer: the threat model, the five invariants, the accepted risks stated plainly, the control-to-test map | M1-T55 | Security buyers detect unsupported claims as a profession. Accepted risk R4 (synthetic fixtures are not captures) is closed by W1 and must be updated when it is |
 | M1-T61 | Architecture doc (`README.md` §Layout promises one and it does not exist) and the operational runbook (`README.md` §Layout promises one; only the DR drill's inline runbook exists) | M1-T26, M1-T58 | **Inconsistency found while writing this plan:** `README.md` lists `docs/` as "Threat model, architecture, operational runbook" and neither of the latter two exists |
 | M1-T62 | Pilot agreement template: named reference, measured before/after investigation time, anonymised incident data for evaluation, exit terms, no SLA we cannot keep | M1-T03 | The M1 commercial state is design partners only, up to three, at no charge (`01` §M1). Getting the data rights in writing before the data exists is the whole point |
@@ -313,7 +313,7 @@ signed before the first byte of customer data is collected.
 Window 2026-09-28 (Monday, ISO **2026-W40**) → 2027-03-31 (Wednesday, ISO
 **2027-W13**). That is 13 ISO weeks in 2026 plus 13 in 2027, the last of which
 contributes Monday–Wednesday. This is exactly two quarters of the 13-week unit
-that `` §6 defines, which is the check that the
+that [`strategy-and-north-star.md`](../strategy-and-north-star.md) §6 defines, which is the check that the
 calendar respects the capacity law.
 
 **Legend.** `W#` workstream active · `■` demo/pilot/customer week (the visible
@@ -476,14 +476,14 @@ felt.
 |---|---|
 | "The team runs out of money" | Not measurable from this repository and not the engineers' decision. It is a founder-level constraint and belongs in the operating model, not the M1 risk table |
 | "The model gets worse" | A model change is a new signed bundle, a new evaluation, and a new shadow run. It is an expected, handled event, not a risk. The controls already exist |
-| "A customer asks for something we do not build" | That is the anti-segment rule in `00` §3, enforced by the intake filter in `` §5. It is a process control, not an uncertainty |
+| "A customer asks for something we do not build" | That is the anti-segment rule in `00` §3, enforced by the intake filter in [`team-and-operating-model.md`](../engineering/team-and-operating-model.md) §5. It is a process control, not an uncertainty |
 | "A competitor ships the same thing" | The moat is the site-specific record, not the feature. Out of scope for a 26-week plan |
 
 ---
 
 ## 6. M1 exit gate — signed checklist
 
-Restated from `` §"M1 — Trust Spine", with the evidence artifact
+Restated from [`master-roadmap.md`](../master-roadmap.md) §"M1 — Trust Spine", with the evidence artifact
 each line requires. `01` is the source; this table adds only the artifact and the
 signature. **All four are signed by E1 and E2.** A line is signed only with its
 artifact attached, and an artifact is only accepted if it is reproducible by the
@@ -549,7 +549,7 @@ other person without being told how.
 | 4.1 | The profile ran in **shadow mode** for ≥14 consecutive calendar days | A per-day table: date, observations written, degraded count, and a continuity mark. A day with a gap resets the count and the table shows where | M1-T41, T45 | ☐ | ☐ |
 | 4.2 | It was at a **design-partner site**, on a **real GPU** | Site id, and `ai_observations.hardware` from the run, showing the GPU the inference actually happened on | M1-T41 | ☐ | ☐ |
 | 4.3 | Shadow mode affected no authoritative state | Evidence: no incident created, nothing suppressed, and no rule decision citing a shadow observation. The `production_profile` flag on the rows, and a test asserting a shadow profile cannot affect authoritative state | M1-T41 | ☐ | ☐ |
-| 4.4 | It passed `evaluation.DefaultGates()` | The evaluation report: FPR ≤ 0.20, recall ≥ 0.70 on true positives, median latency ≤ 8000 ms, disagreement ≤ 0.25, ≥30 labelled cases — each stated with its measured value and PASS/FAIL, and `Undispositioned` counted separately and never folded into a rate | M1-T43, T44 | ☐ | ☐ |
+| 4.4 | It passed `evaluation.DefaultGates()` | The evaluation report: FPR ≤ 0.20, recall ≥ 0.70 on true positives, median latency ≤ 8000 ms, disagreement ≤ 0.25, ≥200 answered labelled cases — each stated with its measured value and PASS/FAIL, and `Undispositioned` counted separately and never folded into a rate | M1-T43, T44 | ☐ | ☐ |
 | 4.5 | The model bundle was signed and verified | The bundle signature as recorded in `ai_observations.model_bundle_signature`, and a negative test showing a tampered bundle is refused before any inference | M1-T11 | ☐ | ☐ |
 | 4.6 | Every observation carries full attribution | One sample row showing `model`, `model_hash`, `runtime_version`, `prompt_template_id`, `prompt_version`, `input_evidence_hashes` and `output_hash` all populated, plus the test that refuses an incomplete one | M1-T12, T16 | ☐ | ☐ |
 | 4.7 | Promotion was a human decision | The ledger row: `actor_type='admin'`, action naming the profile and version, with the evaluation report digest in `reason` | M1-T46 | ☐ | ☐ |
@@ -574,7 +574,7 @@ gate above is worth anything, and they are restated from `AGENTS.md` and
 
 ### Reduced scope, restated
 
-From `` §"M1", verbatim in substance. It is here so nobody
+From [`master-roadmap.md`](../master-roadmap.md) §"M1", verbatim in substance. It is here so nobody
 invents a different cut under pressure:
 
 > Ship with ONVIF-agnostic synthetic fixtures and a demo site, and defer the

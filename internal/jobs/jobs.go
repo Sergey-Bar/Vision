@@ -25,7 +25,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
+	"github.com/Sergey-Bar/vision/internal/dbx"
 )
 
 // Queue names the work class. It is a discriminator, not a routing key: each

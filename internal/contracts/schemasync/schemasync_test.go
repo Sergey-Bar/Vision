@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/contracts/schemasync"
+	"github.com/Sergey-Bar/vision/internal/contracts/schemasync"
 )
 
 func repoRoot(t *testing.T) string {

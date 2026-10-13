@@ -25,7 +25,7 @@ import (
 	"os/exec"
 	"strconv"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/injectionfixture"
+	"github.com/Sergey-Bar/vision-poc/internal/injectionfixture"
 )
 
 func main() {

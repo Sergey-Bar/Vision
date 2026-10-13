@@ -19,8 +19,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/clock"
-	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
+	"github.com/Sergey-Bar/vision/internal/clock"
+	"github.com/Sergey-Bar/vision/internal/dbx"
 )
 
 // Service measures and records drift.

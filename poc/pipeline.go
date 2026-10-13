@@ -12,9 +12,9 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/poc/search"
-	"github.com/Sergey-Bar/Ai-Captain/poc/spatial"
-	"github.com/Sergey-Bar/Ai-Captain/poc/ws"
+	"github.com/Sergey-Bar/vision/poc/search"
+	"github.com/Sergey-Bar/vision/poc/spatial"
+	"github.com/Sergey-Bar/vision/poc/ws"
 )
 
 // Frame geometry every coordinate in the POC is expressed in. The frontend

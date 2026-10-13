@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/fixture"
+	"github.com/Sergey-Bar/vision/internal/fixture"
 )
 
 // fixtureDir finds the committed fixture set by walking up to the module root, so

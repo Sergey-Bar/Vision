@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
+	"github.com/Sergey-Bar/vision-poc/internal/store"
 )
 
 // cmdReview writes an HTML contact sheet for a run: every pushed event, the clip

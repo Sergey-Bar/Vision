@@ -34,8 +34,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/bench"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/ortdetect"
+	"github.com/Sergey-Bar/vision-poc/internal/bench"
+	"github.com/Sergey-Bar/vision-poc/internal/ortdetect"
 )
 
 // resolveFootagePath finds a model file.

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/rtsp"
+	"github.com/Sergey-Bar/vision/internal/rtsp"
 )
 
 func pkt(seq uint16, marker bool, ssrc uint32, payload []byte) rtsp.Packet {

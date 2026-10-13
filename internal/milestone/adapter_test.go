@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/milestone"
+	"github.com/Sergey-Bar/vision/internal/milestone"
 )
 
 var testEpoch = time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC)
@@ -235,6 +235,26 @@ var vendorSpellings = []struct {
 	{rawType: "Metadata", want: "metadata"},
 	{rawType: "AccessGranted", want: "access.granted"},
 	{rawType: "AccessDenied", want: "access.denied"},
+	{
+		// The one class the analyticData refinement produces, reached through
+		// the path production takes: an analytics event whose analyticData
+		// names the class the taxonomy knows. The spelling table is not the
+		// only producer — `restricted-person` is not a vendor spelling, it is
+		// a class — so the vocabulary's reachability is asserted here too or
+		// this guard would read the new name as drift.
+		rawType: "ObjectDetected",
+		want:    "analytics.restricted_person",
+		item: map[string]any{
+			"AnalyticData": map[string]any{
+				"Object": map[string]any{
+					"Type": "ObjectDetected",
+					"Value": map[string]any{
+						"ClassId": "RestrictedPerson", "ClassName": "restricted-person",
+					},
+				},
+			},
+		},
+	},
 	{rawType: "GateEvent", want: "gate"},
 	{rawType: "GateOpen", want: "gate"},
 	{rawType: "GateClose", want: "gate"},

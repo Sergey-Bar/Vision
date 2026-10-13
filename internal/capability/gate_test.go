@@ -498,7 +498,7 @@ func registeredExecutors(d Dispatch) bool {
 `,
 		"internal/pipeline/pipeline.go": `package pipeline
 
-import "github.com/Sergey-Bar/Ai-Captain/internal/observability"
+import "github.com/Sergey-Bar/vision/internal/observability"
 
 func Consume() {
 	l.inc(observability.CounterInboxAccepted)
@@ -507,9 +507,9 @@ func Consume() {
 		"cmd/security-core/main.go": `package main
 
 import (
-	"github.com/Sergey-Bar/Ai-Captain/internal/identity"
-	"github.com/Sergey-Bar/Ai-Captain/internal/jobs"
-	"github.com/Sergey-Bar/Ai-Captain/internal/observability"
+	"github.com/Sergey-Bar/vision/internal/identity"
+	"github.com/Sergey-Bar/vision/internal/jobs"
+	"github.com/Sergey-Bar/vision/internal/observability"
 )
 
 func run() {

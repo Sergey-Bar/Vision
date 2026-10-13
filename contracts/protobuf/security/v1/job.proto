@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package security.v1;
 
-option go_package = "github.com/Sergey-Bar/Ai-Captain/internal/contracts/securityv1;securityv1";
+option go_package = "github.com/Sergey-Bar/vision/internal/contracts/securityv1;securityv1";
 
 import "google/protobuf/timestamp.proto";
 import "security/v1/incident.proto";

@@ -9,11 +9,11 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/command"
-	"github.com/Sergey-Bar/Ai-Captain/internal/detector"
-	"github.com/Sergey-Bar/Ai-Captain/internal/evidence"
-	"github.com/Sergey-Bar/Ai-Captain/internal/mp4"
-	"github.com/Sergey-Bar/Ai-Captain/internal/rtsp"
+	"github.com/Sergey-Bar/vision/internal/command"
+	"github.com/Sergey-Bar/vision/internal/detector"
+	"github.com/Sergey-Bar/vision/internal/evidence"
+	"github.com/Sergey-Bar/vision/internal/mp4"
+	"github.com/Sergey-Bar/vision/internal/rtsp"
 )
 
 // pocBuildVersion is printed in the banner and stored on the incident.

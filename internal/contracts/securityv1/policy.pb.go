@@ -350,7 +350,7 @@ const file_security_v1_policy_proto_rawDesc = "" +
 	"\x19RULE_EVALUATION_MODE_LINT\x10\x01\x12 \n" +
 	"\x1cRULE_EVALUATION_MODE_EXPLAIN\x10\x02\x12!\n" +
 	"\x1dRULE_EVALUATION_MODE_SIMULATE\x10\x03\x12#\n" +
-	"\x1fRULE_EVALUATION_MODE_PRODUCTION\x10\x04BKZIgithub.com/Sergey-Bar/Ai-Captain/internal/contracts/securityv1;securityv1b\x06proto3"
+	"\x1fRULE_EVALUATION_MODE_PRODUCTION\x10\x04BGZEgithub.com/Sergey-Bar/vision/internal/contracts/securityv1;securityv1b\x06proto3"
 
 var (
 	file_security_v1_policy_proto_rawDescOnce sync.Once

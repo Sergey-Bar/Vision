@@ -9,8 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/camerahealth"
-	"github.com/Sergey-Bar/ai-captain-poc/detectclient"
+	"github.com/Sergey-Bar/vision-poc/detectclient"
+	"github.com/Sergey-Bar/vision/internal/camerahealth"
 )
 
 // The camera fleet.

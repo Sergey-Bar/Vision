@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/mp4"
+	"github.com/Sergey-Bar/vision/internal/mp4"
 )
 
 // The capture path reads from a network peer, so its parsers are fuzz targets

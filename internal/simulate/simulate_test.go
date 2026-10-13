@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/simulate"
+	"github.com/Sergey-Bar/vision/internal/simulate"
 )
 
 // The activation gate compares a digest of a simulation run against the digest

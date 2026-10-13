@@ -36,8 +36,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/command"
-	"github.com/Sergey-Bar/Ai-Captain/internal/milestone"
+	"github.com/Sergey-Bar/vision/internal/command"
+	"github.com/Sergey-Bar/vision/internal/milestone"
 )
 
 func serveVMSCommand() *command.Command {

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
+	"github.com/Sergey-Bar/vision/internal/dbx"
 )
 
 // ApplyDSN's contract is that a field absent from the DSN keeps the Config's

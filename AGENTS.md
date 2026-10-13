@@ -161,9 +161,13 @@ a validation guard or a claimed protection carries a red-check, and the record
 goes in `docs/status.md` with both transcripts. "Not red-checked, and here is what
 would ship" is an acceptable answer; an unlabelled control is not. Where a control
 is red-checkable by removing one line, it belongs in the `red-check` table in
-`scripts/verify.ps1`, which is the part that keeps running. That table holds eleven
-entries — two observations, two evidence, three rules, three connection-string, one
-refusal — against thirty in the POC module. Entries are added only after being run by hand
+`scripts/verify.ps1`, which is the part that keeps running. That table holds
+twenty-two entries — three observations, two evidence, three rules, four
+connection-string, one ingest-scope, one evaluation, one rendering, one
+attention-producer, two tenant-scope, the priority function's forbidden
+anomaly input, one roadmap package count, one console product name, and the
+ingest privacy bound on `analyticData` — against eighty-one in the POC
+module. Entries are added only after being run by hand
 and watched go red, because a table seeded with plausible mutations nobody has run
 reports thirty guarded controls and proves none of them. **That rule has teeth: the
 sixth control tried was the path-traversal segment regex, it turned out nothing

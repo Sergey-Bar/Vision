@@ -18,8 +18,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/ai"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
+	"github.com/Sergey-Bar/vision-poc/internal/ai"
+	"github.com/Sergey-Bar/vision-poc/internal/store"
 )
 
 // Live is the per-frame state the pipeline hands the screen. It is drawn by the

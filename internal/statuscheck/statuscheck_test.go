@@ -77,19 +77,20 @@ func TestDeriveCountsTheTreeDirectly(t *testing.T) {
 	if d.GoMinor != "26" {
 		t.Errorf("go.mod minor: got %q, want %q", d.GoMinor, "26")
 	}
-	// Twenty-six named gates in scripts/verify.ps1. `lint`, `generated-code` and
-	// `ai-runtime` each appear twice because they are registered inside a tool-
+	// Twenty-eight named gates in scripts/verify.ps1. `lint`, `generated-code`
+	// and `ai-runtime` each appear twice because they are registered inside a tool-
 	// present branch, and one branch is one gate. `skip-audit`, `no-silent-skips`,
 	// `cover-floor`, `dead-export` and `predicate-cov` are the five added with the
 	// 2026-10-02 gate pass and the 2026-10-04 one; `tree-state`, `fuzz` and `flake`
-	// are three more.
+	// are three more; `roadmap-check` is the one that holds the roadmap documents'
+	// package, migration and contract counts to the tree.
 	//
 	// This is the one assertion in the file that duplicates what the gate already
 	// derives, and it is deliberate: a derivation that stops finding gates would
 	// make the document agree with a smaller tree, and only a number written out
 	// here notices that. Updating it is the cost of adding a gate.
-	if d.Gates != 27 {
-		t.Errorf("gates: got %d, want 27", d.Gates)
+	if d.Gates != 28 {
+		t.Errorf("gates: got %d, want 28", d.Gates)
 	}
 }
 

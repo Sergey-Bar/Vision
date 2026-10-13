@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/command"
+	"github.com/Sergey-Bar/vision/internal/command"
 )
 
 // The acceptance report is a claim about the product, and a claim nobody runs is

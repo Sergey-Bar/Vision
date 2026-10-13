@@ -5,8 +5,8 @@ import (
 	"math"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/correlation"
-	"github.com/Sergey-Bar/Ai-Captain/internal/sitemodel"
+	"github.com/Sergey-Bar/vision/internal/correlation"
+	"github.com/Sergey-Bar/vision/internal/sitemodel"
 )
 
 // TailgateRule detects tailgate-like entry (two entities close together).

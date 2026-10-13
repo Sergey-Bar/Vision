@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/observations"
+	"github.com/Sergey-Bar/vision/internal/observations"
 )
 
 // P2.8: "The idempotency key is derived from camera, window and prompt version.

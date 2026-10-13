@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/brief"
-	"github.com/Sergey-Bar/Ai-Captain/internal/identity"
-	"github.com/Sergey-Bar/Ai-Captain/internal/incidents"
+	"github.com/Sergey-Bar/vision/internal/brief"
+	"github.com/Sergey-Bar/vision/internal/identity"
+	"github.com/Sergey-Bar/vision/internal/incidents"
 )
 
 //go:embed templates/*.html templates/static/*

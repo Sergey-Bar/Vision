@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
+	"github.com/Sergey-Bar/vision-poc/internal/store"
 )
 
 // `pocctl search --unsearchable` is a SPELLING of `pocctl unsearchable`, and the two

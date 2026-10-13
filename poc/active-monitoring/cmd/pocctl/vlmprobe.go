@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/vlm"
+	"github.com/Sergey-Bar/vision-poc/internal/vlm"
 )
 
 // vlmProbeRequest is the parsed argument list.

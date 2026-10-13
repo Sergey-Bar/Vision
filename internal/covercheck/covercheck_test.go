@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/covercheck"
+	"github.com/Sergey-Bar/vision/internal/covercheck"
 )
 
-const mod = "github.com/Sergey-Bar/Ai-Captain"
+const mod = "github.com/Sergey-Bar/vision"
 
 // profile builds a `go test -coverprofile` stream. The counts are per basic
 // block, which is what the toolchain emits.

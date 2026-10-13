@@ -3,7 +3,7 @@ package main
 import (
 	"flag"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/command"
+	"github.com/Sergey-Bar/vision/internal/command"
 )
 
 // The lifecycle, rule and operator commands below are the command-tree skeleton

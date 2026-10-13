@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/vlm"
+	"github.com/Sergey-Bar/vision-poc/internal/store"
+	"github.com/Sergey-Bar/vision-poc/internal/vlm"
 )
 
 // The three predicates S3 puts on a HIT, as the plan writes them:

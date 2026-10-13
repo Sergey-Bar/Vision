@@ -21,31 +21,31 @@ import (
 
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/airuntime"
+	"github.com/Sergey-Bar/vision/internal/airuntime"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/anomaly"
+	"github.com/Sergey-Bar/vision/internal/anomaly"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/correlation"
+	"github.com/Sergey-Bar/vision/internal/correlation"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/evidence"
+	"github.com/Sergey-Bar/vision/internal/evidence"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/mp4"
+	"github.com/Sergey-Bar/vision/internal/mp4"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/sitemodel"
+	"github.com/Sergey-Bar/vision/internal/sitemodel"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/telemetry"
+	"github.com/Sergey-Bar/vision/internal/telemetry"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/threat"
+	"github.com/Sergey-Bar/vision/internal/threat"
 
-	"github.com/Sergey-Bar/Ai-Captain/poc/categorization"
+	"github.com/Sergey-Bar/vision/poc/categorization"
 
-	"github.com/Sergey-Bar/Ai-Captain/poc/search"
+	"github.com/Sergey-Bar/vision/poc/search"
 
-	"github.com/Sergey-Bar/Ai-Captain/poc/spatial"
+	"github.com/Sergey-Bar/vision/poc/spatial"
 
-	"github.com/Sergey-Bar/Ai-Captain/poc/ws"
+	"github.com/Sergey-Bar/vision/poc/ws"
 
-	"github.com/Sergey-Bar/ai-captain-poc/detectclient"
+	"github.com/Sergey-Bar/vision-poc/detectclient"
 
 	"gopkg.in/yaml.v3"
 )

@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/lifecycle"
-	"github.com/Sergey-Bar/Ai-Captain/internal/release"
+	"github.com/Sergey-Bar/vision/internal/lifecycle"
+	"github.com/Sergey-Bar/vision/internal/release"
 )
 
 func buildArchive(t *testing.T, files map[string]string, mode map[string]string, key ed25519.PrivateKey) (string, release.Manifest, ed25519.PublicKey) {

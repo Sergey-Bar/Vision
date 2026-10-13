@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/clock"
+	"github.com/Sergey-Bar/vision/internal/clock"
 )
 
 // The write-back on the incident path.

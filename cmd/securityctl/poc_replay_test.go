@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/command"
+	"github.com/Sergey-Bar/vision/internal/command"
 )
 
 // The plan's §14 extras, on the demonstration path.

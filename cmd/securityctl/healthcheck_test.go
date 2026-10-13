@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/command"
+	"github.com/Sergey-Bar/vision/internal/command"
 )
 
 // The health probe, tested against a real socket.

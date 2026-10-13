@@ -42,7 +42,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
+	"github.com/Sergey-Bar/vision/internal/dbx"
 )
 
 // NodeType and Relation are the closed vocabularies. M1's graph is small enough

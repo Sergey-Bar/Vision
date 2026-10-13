@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/mp4"
-	"github.com/Sergey-Bar/Ai-Captain/internal/rtsp"
+	"github.com/Sergey-Bar/vision/internal/mp4"
+	"github.com/Sergey-Bar/vision/internal/rtsp"
 )
 
 // reportVersion is bumped when the JSON shape changes, so a dashboard can refuse

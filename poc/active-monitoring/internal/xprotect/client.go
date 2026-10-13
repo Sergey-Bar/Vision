@@ -26,7 +26,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/aistate"
+	"github.com/Sergey-Bar/vision-poc/internal/aistate"
 )
 
 // The documented paths. They are constants, not strings assembled at call sites,

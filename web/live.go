@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/youtube"
+	"github.com/Sergey-Bar/vision/internal/youtube"
 	"github.com/gorilla/websocket"
 )
 

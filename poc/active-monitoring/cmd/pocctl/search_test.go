@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/vlm"
+	"github.com/Sergey-Bar/vision-poc/internal/store"
+	"github.com/Sergey-Bar/vision-poc/internal/vlm"
 )
 
 // --- RC-9: the search surface must not print "no matches" for a window the model

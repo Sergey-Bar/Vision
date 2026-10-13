@@ -13,14 +13,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/identity"
+	"github.com/Sergey-Bar/vision/internal/identity"
 )
 
 // capUse matches a reference to a Cap* identifier.
 //
 // It is deliberately loose. Every match that is not a declared capability is
-// ignored — `Captain` appears in the module path in the import block of most
-// files, and `CapturedAt` is a generated protobuf field — so the noise costs
+// ignored — `CapturedAt` is a generated protobuf field — so the noise costs
 // nothing. What matters is one direction only: a declared capability has to
 // appear here, outside this package. A tighter pattern would be more precise
 // and would need to know every shape a reference can take, and the failure mode

@@ -30,7 +30,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/classify"
+	"github.com/Sergey-Bar/vision-poc/internal/classify"
 )
 
 // Box is one detection in NORMALISED coordinates: 0..1 against the frame, not

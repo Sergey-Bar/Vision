@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/correlation"
-	"github.com/Sergey-Bar/Ai-Captain/internal/sitemodel"
+	"github.com/Sergey-Bar/vision/internal/correlation"
+	"github.com/Sergey-Bar/vision/internal/sitemodel"
 )
 
 func TestDwellRule(t *testing.T) {

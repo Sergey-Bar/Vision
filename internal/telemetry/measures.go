@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/camerahealth"
+	"github.com/Sergey-Bar/vision/internal/camerahealth"
 )
 
 // Sample is a consistent, lock-free copy of the counters at one instant.

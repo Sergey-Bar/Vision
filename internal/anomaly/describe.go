@@ -5,7 +5,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/sitemodel"
+	"github.com/Sergey-Bar/vision/internal/sitemodel"
 )
 
 // RuleSummary is one rule a rule set applies, described for an operator.

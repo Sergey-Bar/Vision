@@ -4,8 +4,8 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/brief"
-	"github.com/Sergey-Bar/Ai-Captain/internal/identity"
+	"github.com/Sergey-Bar/vision/internal/brief"
+	"github.com/Sergey-Bar/vision/internal/identity"
 )
 
 // The console's hand-over page.

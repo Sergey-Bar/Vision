@@ -7,7 +7,7 @@ incidents, and records everything in a hash-chained audit ledger.
 
 This file is for two readers: a new engineer on day one, and an AI agent with no
 prior context. It answers *where things are* and *what each package is for* so
-neither of you has to open thirty packages to find out.
+neither of you has to open 83 packages to find out.
 
 It is a map, not an architecture document. It does not restate build state —
 `docs/status.md` is the only source of truth for that — and it does not restate
@@ -100,17 +100,19 @@ Only five do. Everything else reaches the ledger through its caller.
 | `mp4` | The Annex-B H.264 parser and the pre-roll ring buffer. Currently unused by the core; a demo capture path | ingest (demo) | no | `mp4.Decode`, `mp4.PreRoll`, `mp4.NAL`, `mp4.Max` |
 | `normalize` | Inbox row → canonical event, committing with the inbox transition in one transaction | normalize | no | `normalize.Normalizer`, `Input`, `Result`, `DeriveEventID`, `ToProto` |
 | `observability` | The metric registry (closed name set) and SLO evaluation | support | no | `observability.Registry`, `observability.Breaches`, `observability.SLO` |
+| `operatormetrics` | The DURABLE half of the metric surface: attention minutes, MTTI/MTTV, the two silent verification states, and the evidence-failure proxy, all as Postgres computations. The registry answers "what is happening now"; this answers "what happened in the window", which is the only shape a gate artefact may quote. Read-only | support | no | `operatormetrics.Queries`, `Queries.Attention`, `Queries.MTTI`, `Queries.MTTV`, `Queries.VerificationStates`, `Queries.EvidenceFetchFailures` |
 | `observations` | Persists and validates AI observations: mandatory attribution, append-only, supersession, profiles | observe | no (the caller audits `ai.observation.*`) | `observations.Writer`, `Observation`, `M1Profiles`, `Degradation` |
 | `outbox` | Transactional publish without a broker: the state change and its outbound effect commit together | store | no | `outbox.Enqueue`, `outbox.Message`, `outbox.Relay` |
 | `pipeline` | The loops: ingest, consume, outbox and gauge sampling, plus the shutdown order. Nothing else owns a lifecycle | present | no | `pipeline.Start`, `pipeline.New`, `Loops.Stop`, `pipeline.Deps` |
 | `predicatecov` | The predicate-coverage gate: every time-window and skew predicate is exercised by a fixture | support | test only | `predicatecov.Check`, `predicatecov.Coverage` |
-| `release` | Builds and verifies signed offline release archives. Verification is deliberately stricter than construction | support | no | `release.Build`, `release.Verify`, `release.Manifest`, `ScanForSecrets` |
+ | `release` | Builds and verifies signed offline release archives. Verification is deliberately stricter than construction | support | no | `release.Build`, `release.Verify`, `release.Manifest`, `ScanForSecrets` |
+ | `roadmapcheck` | Derives the roadmap's build-state claims — Go package count, migration count, contract count — from the directory that defines each and fails when `ROADMAP.md`, `docs/roadmap/master-roadmap.md` or `internal/README.md` prints a different number. The gate count is deliberately not re-derived: `statuscheck` owns it, and the roadmap says itself that it does not restate build state | support | test only | `roadmapcheck.Check` |
 | `rlsrole` | The RLS role generator and the write-canary gate for site-scoped tables | support | test only | `rlsrole.WriteCanary`, `rlsrole.Generate`, `TestWriteCanariesCoverAllSiteScopedTables` |
 | `rtsp` | The RTSP client and the camera state machine. Currently unused by the core; a demo capture path | ingest (demo) | no | `rtsp.Client`, `rtsp.State`, `rtsp.UserAgent`, `rtsp.DefaultPort` |
 | `rules` | The rule DSL: bundle, JSON Schema, semantic validation, compiled AST, deterministic engine. Imports nothing internal | evaluate | no | `rules.Compiler`, `Compile`, `CompiledBundle`, `Engine`, `Decision`, `Tier`, `DegradeTo` |
 | `safename` | One file-name stem mapping from an id — no separator, no reserved character, no control character. The shared guard for `dutylog`'s shift files and `siteconfig`'s object files, so a hardening covers both rather than one copy | support | no | `safename.Safe` |
 | `schemalaws` | The schema-level invariant suite: RLS isolation, append-only, provenance, `storage_ref` CHECKs, no person model | support | test only | `schemalaws` (threat-model controls C1–C6, C11–C12, C18–C19, C32–C33, C35) |
-| `sitemodel` | The autonomy layer's site topology: cameras, zones, routes and assets loaded from YAML, plus the point-in-polygon test every behaviour rule uses | store | no | `sitemodel.Site`, `sitemodel.LoadFromFile`, `LoadFromBytes`, `Site.ZoneByID` |
+| `sitemodel` | The autonomy layer's site topology: cameras, zones, routes and assets loaded from YAML, the point-in-polygon test every behaviour rule uses, and the camera adjacency the site model derives — `shares_zone` from zone declarations, `overlaps_field_of_view` from a declared bearing and extent, never from a defaulted one. The derivation's relation names and the rewrite remain unexported until the retrieval that reads them exists, which is `internal/deadexport` doing its job | store | no | `sitemodel.Site`, `sitemodel.LoadFromFile`, `LoadFromBytes`, `Site.ZoneByID`, `Site.AdjacentCameras`, `sitemodel.Service` |
 | `simulate` | Runs a bundle over the fixture set and diffs the outcome; the diff *digest* is the activation gate | evaluate | no | `simulate.Runner.Run`, `simulate.DigestFor` |
 | `siteconfig` | The autonomous configurator: an inventory seam with one method, declaration-based learned zones, capture/retention plans, and one reconcile engine with two targets behind one interface (that interface is the multi-VMS seam). Pure: sinks and targets are injected, no DB and no vendor | present | no (the injected sink audits) | `siteconfig.CameraInventory`, `Generate`, `Artifact`, `Reconcile`, `Apply`, `Target`, `AuditSink` |
 | `skipaudit` | The skipped-test auditor: fails a run when any database-backed test skips rather than runs | support | test only | `skipaudit.Check`, `TestNoPackageSkipsWhenDatabaseIsConfigured` |
@@ -390,7 +392,7 @@ which runs:
 
 ```sh
 protoc -I contracts/protobuf \
-  --go_out=. --go_opt=module=github.com/Sergey-Bar/Ai-Captain \
+  --go_out=. --go_opt=module=github.com/Sergey-Bar/vision \
   contracts/protobuf/security/v1/*.proto
 go run ./tools/contractcheck -mode check \
   -baseline contracts/compat/baseline.json -root contracts/protobuf

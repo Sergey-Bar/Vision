@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/ai"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/recorder"
+	"github.com/Sergey-Bar/vision-poc/internal/ai"
+	"github.com/Sergey-Bar/vision-poc/internal/recorder"
 )
 
 // TestRSSIsMeasuredNotGuessedOnThisPlatform: AC5's memory clause compares a

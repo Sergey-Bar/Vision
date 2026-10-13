@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/milestone"
+	"github.com/Sergey-Bar/vision/internal/milestone"
 )
 
 // A redirect is a second host, and Go's default client follows up to ten of them

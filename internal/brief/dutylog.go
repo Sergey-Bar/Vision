@@ -1,7 +1,7 @@
 package brief
 
 import (
-	"github.com/Sergey-Bar/Ai-Captain/internal/dutylog"
+	"github.com/Sergey-Bar/vision/internal/dutylog"
 )
 
 // FactsFromEvents maps a duty log's events into brief facts.

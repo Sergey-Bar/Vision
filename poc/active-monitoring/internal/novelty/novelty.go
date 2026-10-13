@@ -39,7 +39,7 @@ import (
 	"math"
 	"sort"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/proposal"
+	"github.com/Sergey-Bar/vision-poc/internal/proposal"
 )
 
 // Mode is which comparison the engine makes.

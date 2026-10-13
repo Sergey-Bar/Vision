@@ -257,6 +257,9 @@ func buildKnownEventTypes() map[string]bool {
 var normalizedEventTypes = []string{
 	"motion",
 	"analytics",
+	// The one class the analyticData refinement produces. The M1 incident
+	// class, deterministic rather than modelled: see analyticdata.go.
+	"analytics.restricted_person",
 	"alarm.created",
 	"alarm.acknowledged",
 	"alarm.closed",
@@ -670,6 +673,14 @@ func (a *Adapter) toRecord(item map[string]any, index int, now time.Time) (RawRe
 	// encoding/json sorts map keys - and therefore round-trips, which is what
 	// lets the consume loop re-derive every derived field from the stored bytes
 	// weeks later and get the same answers.
+	//
+	// The redaction runs here, before the marshal, and on the replay path too.
+	// `analyticData.object.value` is where licence-plate text lives, and the
+	// envelope is stored verbatim in source_events and is the bytes a replay
+	// re-derives from — so a projection that left the plate in the stored bytes
+	// would have redacted nothing. The class fields the refinement read are
+	// untouched, which is what keeps the derivation identical on both paths.
+	redactAnalyticPII(item)
 	envelope, err := json.Marshal(item)
 	if err != nil {
 		return RawRecord{}, fmt.Errorf("event %s could not be re-encoded after sanitizing: %w", id, err)
@@ -776,7 +787,25 @@ func deriveEventType(rawType string, item map[string]any) string {
 			return "device_state"
 		}
 	}
-	return normalizeEventType(rawType)
+	base := normalizeEventType(rawType)
+	// An analytics event whose analyticData names a class the taxonomy knows
+	// becomes a typed event: `restricted-person` is the M1 incident class, and
+	// the vendor's own assertion makes it a geometric test rather than a
+	// modelled one — no VLM, no GPU, no 8-second inference, and a geometric
+	// test cannot hallucinate a person who is not there.
+	//
+	// A class the taxonomy does not name keeps the generic analytics event it
+	// always had. The event is not lost and nothing is guessed; the refinement
+	// is a table with one entry, and a second entry is a decision with a rule
+	// behind it.
+	if base == "analytics" {
+		if obj, ok := parseAnalyticObject(item); ok {
+			if refined, ok := analyticCanonicalClass(obj); ok {
+				return refined
+			}
+		}
+	}
+	return base
 }
 
 // normalizeEventType maps the vendor's PascalCase vocabulary onto the stable

@@ -7,9 +7,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/migrate"
-	"github.com/Sergey-Bar/Ai-Captain/internal/testutil"
-	"github.com/Sergey-Bar/Ai-Captain/migrations"
+	"github.com/Sergey-Bar/vision/internal/migrate"
+	"github.com/Sergey-Bar/vision/internal/testutil"
+	"github.com/Sergey-Bar/vision/migrations"
 )
 
 // TestMigrationsApplyToEmptyDatabase is the smoke test: a fresh install lands on

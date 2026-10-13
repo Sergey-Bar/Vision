@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/release"
+	"github.com/Sergey-Bar/vision/internal/release"
 )
 
 func keyPair(t *testing.T) (ed25519.PrivateKey, ed25519.PublicKey) {

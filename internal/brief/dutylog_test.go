@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/dutylog"
+	"github.com/Sergey-Bar/vision/internal/dutylog"
 )
 
 // TestFactsFromEventsRoutesCoverageToCoverage is the shared mapping's whole

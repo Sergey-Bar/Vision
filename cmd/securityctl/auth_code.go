@@ -45,7 +45,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/command"
+	"github.com/Sergey-Bar/vision/internal/command"
 )
 
 // totpPeriod is the time step in seconds. RFC 6238 says 30 and `identity`'s

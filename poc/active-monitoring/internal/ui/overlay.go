@@ -13,9 +13,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/overlay"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/soak"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
+	"github.com/Sergey-Bar/vision-poc/internal/overlay"
+	"github.com/Sergey-Bar/vision-poc/internal/soak"
+	"github.com/Sergey-Bar/vision-poc/internal/store"
 )
 
 // DrawOverlay draws the approved boxes, the tracked markers and the lines onto the

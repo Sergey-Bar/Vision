@@ -252,7 +252,7 @@ const file_security_v1_action_proto_rawDesc = "" +
 	"\x18ACTION_STATUS_DISPATCHED\x10\x02\x12\x1b\n" +
 	"\x17ACTION_STATUS_COMPLETED\x10\x03\x12\x18\n" +
 	"\x14ACTION_STATUS_FAILED\x10\x04\x12\x19\n" +
-	"\x15ACTION_STATUS_DEDUPED\x10\x05BKZIgithub.com/Sergey-Bar/Ai-Captain/internal/contracts/securityv1;securityv1b\x06proto3"
+	"\x15ACTION_STATUS_DEDUPED\x10\x05BGZEgithub.com/Sergey-Bar/vision/internal/contracts/securityv1;securityv1b\x06proto3"
 
 var (
 	file_security_v1_action_proto_rawDescOnce sync.Once

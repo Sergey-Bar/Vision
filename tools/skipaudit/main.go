@@ -27,7 +27,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/skipaudit"
+	"github.com/Sergey-Bar/vision/internal/skipaudit"
 )
 
 func main() {

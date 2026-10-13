@@ -6,7 +6,7 @@ import (
 
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/command"
+	"github.com/Sergey-Bar/vision/internal/command"
 )
 
 // geometryFromSPS is the parenthetical on the banner's resolution line. The clip's
@@ -22,7 +22,7 @@ const geometryFromSPS = "read from the stream's own parameter set, which outrank
 // line and is the difference between the two.
 func printBanner(env *command.Env, rep *pocReport, o pocOptions) {
 	w := env.Stdout
-	fmt.Fprintf(w, "AI Captain capture proof — %s\n", pocBuildVersion)
+	fmt.Fprintf(w, "VISION capture proof — %s\n", pocBuildVersion)
 	fmt.Fprintf(w, "  source     %s (%s)", rep.Source.Kind, rep.Source.Endpoint)
 	if rep.Source.Transport != "" && rep.Source.Transport != "none" {
 		fmt.Fprintf(w, ", %s", rep.Source.Transport)

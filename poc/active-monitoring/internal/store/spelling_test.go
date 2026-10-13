@@ -3,8 +3,8 @@ package store
 import (
 	"testing"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/aistate"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/vlm"
+	"github.com/Sergey-Bar/vision-poc/internal/aistate"
+	"github.com/Sergey-Bar/vision-poc/internal/vlm"
 )
 
 // TestTheStoredSpellingsMatchTheVerifierClosedSets is what makes the duplicated

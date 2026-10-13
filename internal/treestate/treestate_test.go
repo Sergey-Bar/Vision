@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/treestate"
+	"github.com/Sergey-Bar/vision/internal/treestate"
 )
 
 // The four assertions are tested in the direction that matters: each one is fed a

@@ -1,8 +1,8 @@
 # Master Product Roadmap — Today to Product
 
-Owner: E1. Status: living. Last revised 2026-09-28.
+Owner: E1. Status: living. Last revised 2026-10-12.
 
-Read `` first. It defines who we sell to, what the
+Read [`strategy-and-north-star.md`](strategy-and-north-star.md) first. It defines who we sell to, what the
 moat is, and the capacity law that constrains every date below.
 
 This document is the calendar: what ships, when, what gates it, and what is cut
@@ -47,8 +47,8 @@ deliberate holiday buffer and carries no work.
 installation, with one AI-assisted operator workflow that a real operator
 actually prefers to the VMS workflow.
 
-State today: the deterministic spine is built and green — 24 Go packages,
-twelve forward-only migrations, thirteen contracts, a hash-chained audit
+State today: the deterministic spine is built and green — 83 Go packages,
+26 forward-only migrations, 13 contracts, a hash-chained audit
 ledger, a fixture-driven replay path, a content-addressed evidence store, a
 rule engine with no shell, SQL, network, dynamic code or regex in the language,
 an evaluation harness for AI observation profiles, a working
@@ -165,8 +165,8 @@ the **ordered pool** while the committed set is named and sized.
 | Committed | ew | Why it survived the cut |
 |---|---|---|
 | Evidence intelligence — snapshots, clips, range probe | **6** | The blocker. Nothing else in this milestone works without evidence, and it is the largest single item and the one with unbounded vendor risk |
-| `eventTypes` resolution + `analyticData` normalisation | **2** | The M1 incident class becomes deterministic. `analyticData` is already on the Events API this adapter calls — no new transport, no new protocol family |
-| Camera adjacency — schema, graph relation, backfill | **2** | The highest-value retrieval input, and the roadmap already recommends pulling it from M6 |
+| `eventTypes` resolution + `analyticData` normalisation | **2** | The M1 incident class becomes deterministic. `analyticData` is already on the Events API this adapter calls — no new transport, no new protocol family. **The typing half is done**: `internal/milestone/analyticdata.go` refines `analytics.restricted_person` from the vendor's class and redacts the plate-bearing fields at ingest; the lane that remains is the byte retrieval below |
+| Camera adjacency — schema, relation, backfill | **2** | The highest-value retrieval input, and the roadmap already recommends pulling it from M6. **Done**: `camera_adjacency` (0026), the two relations derived in `internal/sitemodel`, and the per-site rewrite in `ReplaceFromModel` |
 | One VLM profile end to end — prompt, eval set, promotion gate, shadow | **2** | The M1 class only |
 | **Committed** | **12** | **19 ew of float** |
 | Incident summaries | — | Deferred to the float. The roadmap's own reduced scope says *"ship the evidence engine before the summaries"* |
@@ -224,10 +224,17 @@ The gate is **unchanged**, and two of its three classes are now cheap because
 VLM profiles 2–10. **The evidence engine is the last thing to cut**, and that is
 the one reversal of the previous reduced-scope list.
 
-**One known blocker, stated rather than assumed.** `evaluation.Evaluate`
-hard-codes the `restricted-person` field (self-critique C4), so every other
-profile scores recall 0 and cannot pass a gate. The second M2 class is therefore
-blocked on that defect, not on the profile work.
+**One known blocker, CLOSED 2026-10-11 — and it had been claimed closed once
+already, falsely.** `evaluation.Evaluate` used to hard-code the
+`restricted-person` field (self-critique C4), so every other profile scored recall 0
+and could not pass a gate. Row C4 below said that was fixed and that "the field now
+comes from the profile being scored" while the code still named a field, which is the
+worse of the two states: a document asserting a control the tree does not contain.
+The field now does come from the profile being scored — `observations.Profile`
+declares it, the registry carries it, and `TestASecondProfileIsScoredOnItsOwnField`
+fails when the profile is pinned by name again. That control is in
+`scripts/verify.ps1` as RC-14 and its transcript is in `docs/status.md`, so the
+claim is now falsifiable rather than merely written.
 
 **Commercial state.** Paid pilot. Design-partner sites convert to a paid pilot
 at a founding rate. First external customer who is not personally known. The
@@ -421,7 +428,7 @@ genuinely different from anything a VMS vendor ships.
 **Exit gate.** A site where baselines, memory and drift detection are live; a
 proposed rule with a historical impact diff reviewed and approved by a customer
 operator; and the M6 review confirms the compounding claim in
-`` §5 — a new site costs more to onboard than an
+[`strategy-and-north-star.md`](strategy-and-north-star.md) §5 — a new site costs more to onboard than an
 existing site costs to keep. If it does not, the data moat did not materialise
 and M7–M8 are re-planned as automation on top of search.
 
@@ -533,7 +540,7 @@ matures, including ONVIF's media-signing direction and its tightening
 cybersecurity requirements, rather than building our own.
 
 The full program, with owners and cadence, is in
-``. It is written against the five invariants in
+[`security/trust-and-security-program.md`](security/trust-and-security-program.md). It is written against the five invariants in
 `AGENTS.md`, which are the law and which no milestone may weaken without an ADR
 and a test, in that order.
 
@@ -622,8 +629,8 @@ document a reader is most likely to trust:
 | C2 | **CLOSED.** The runtime's bundle check verified a digest, not a signature: `ModelBundle.verify()` compared `sha256(manifest)` against the *contents* of `manifest.sig` and never used `public_key`, while the docstring and error message both said "signature". It now performs Ed25519 verification against a configured public key, refuses an unsigned bundle, refuses a missing key, and refuses a key it can tell is not well-formed. | A bundle whose `.sig` file contains a hash is no longer accepted as if it were signed. This was the one finding that undermined a supply-chain claim in a document that is otherwise careful about them. |
 | C3 | **The adapter's known-event-type table is keyed on spellings normalisation never produces.** 12 of 18 keys are unreachable and 9 types that are produced are missing. | Real motion, analytics and access events are marked malformed. Bounded today only because `RawRecord.Malformed` has no consumer outside the adapter. |
 | C3 | **CLOSED, structurally.** `KnownMilestoneEventTypes` was keyed on spellings normalisation never produces: 12 of its 18 keys were unreachable and 9 produced types were missing, so real motion, analytics and access events were flagged malformed. It is now **derived** from `normalizedEventTypes` — one list, next to the switches that produce it, with a consistency test that fails when an arm is missing from it. | The two tables can no longer disagree, which is the finding's real content; a keying mistake is now impossible rather than merely absent. |
-| C4 | **CLOSED.** `evaluation.Evaluate` hard-coded the `restricted-person` field, so every other profile scored recall 0 and could never pass a gate. The field now comes from the profile being scored. | M2's "the M1 incident class plus two more" is unblocked on this axis. |
-| C5 | **The labelled-case minimum is statistically insufficient.** At n=30 an observed 0.20 false-positive rate has a Wilson upper bound of 0.373, and a 0.70 recall has a lower bound of 0.521. ~200 cases are needed for the stated gates. | A profile could pass its gates on evidence that cannot support them. Full working in [the AI track](engineering/ai-and-data.md) §3. This one is open and it is **not** a coding task — it is the cost of collecting ~200 labelled cases per profile, and it is the single largest non-build item in M2. |
+| C4 | **CLOSED 2026-10-11 — and this row had claimed it once before, falsely.** *Was:* `evaluation.Evaluate` hard-coded the `restricted-person` field, so every other profile scored recall 0 and could never pass a gate. The earlier CLOSED wording said "the field now comes from the profile being scored" while the code still read `obs.Structured["restrictedZoneBreach"]` as a constant. *Is:* `observations.Profile.ScoreField` declares the claim next to the field set it belongs to, `ProfileScoreField` reports an unknown profile as unknown rather than inventing a field, and `TestASecondProfileIsScoredOnItsOwnField` fails when the profile is pinned by name again. That control is RC-14 in `scripts/verify.ps1`, transcript in `docs/status.md`. | M2's "the M1 incident class plus two more" is unblocked on this axis. The finding's real content is not the missing feature but the false CLOSED: a control that exists only in a sentence is indistinguishable from one that exists in the code, which is why this one carries a red-check. |
+| C5 | **The labelled-case minimum is statistically insufficient — CLOSED on the value, 2026-10-11.** At n=30 an observed 0.20 false-positive rate has a Wilson upper bound of 0.373, and a 0.70 recall has a lower bound of 0.521. ~200 cases are needed for the stated gates, and the gate is now 200. | A profile could pass its gates on evidence that cannot support them. Full working in [the AI track](engineering/ai-and-data.md) §3, which carried the arithmetic that produced the change. What is still open is not the number: it is collecting ~200 labelled cases per profile, which is a site operation and the single largest non-build item in M2. |
 | C6 | **CLOSED 2026-10-02.** *Was:* `internal/observability` had no production caller, so no metric was emitted. *Is:* the pipeline samples backlog depth, dead letters, job-queue depth, ingest lag p95, clock-drift severity, AI availability and open incidents into the registry the SLO definitions read, and a ledger-gated test asserts the two incident gauges are written. | M1 gate 3 is **unmet rather than unreachable**. What remains is a recorded load run, which is a room and a stopwatch. |
 | C7 | **A rule can legally name `aiObservation.field: summary`** although the schema says it is never evaluated by a rule, and nothing enforces either. | A weak, invariable constraint on the AI trust boundary. |
 | C8 | **CLOSED.** `internal/graph`'s package doc claimed a test asserting the absence of `entity_aliases`; no such test existed, so M1's no-person-model decision was protected by a comment. | The claim is now a test. |

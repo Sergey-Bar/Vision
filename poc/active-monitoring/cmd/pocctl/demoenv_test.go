@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/config"
+	"github.com/Sergey-Bar/vision-poc/internal/config"
 )
 
 // lookupFrom turns a `NAME=value` slice into the accessor `config` reads through.

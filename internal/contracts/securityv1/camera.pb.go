@@ -297,7 +297,7 @@ const file_security_v1_camera_proto_rawDesc = "" +
 	"\x19RECORDING_STATE_RECORDING\x10\x01\x12\x1b\n" +
 	"\x17RECORDING_STATE_STOPPED\x10\x02\x12\x1c\n" +
 	"\x18RECORDING_STATE_ARCHIVED\x10\x03\x12\x1b\n" +
-	"\x17RECORDING_STATE_UNKNOWN\x10\x04BKZIgithub.com/Sergey-Bar/Ai-Captain/internal/contracts/securityv1;securityv1b\x06proto3"
+	"\x17RECORDING_STATE_UNKNOWN\x10\x04BGZEgithub.com/Sergey-Bar/vision/internal/contracts/securityv1;securityv1b\x06proto3"
 
 var (
 	file_security_v1_camera_proto_rawDescOnce sync.Once

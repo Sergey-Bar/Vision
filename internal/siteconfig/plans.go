@@ -5,9 +5,9 @@ import (
 	"sort"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/anomaly"
-	"github.com/Sergey-Bar/Ai-Captain/internal/camerahealth"
-	"github.com/Sergey-Bar/Ai-Captain/internal/sitemodel"
+	"github.com/Sergey-Bar/vision/internal/anomaly"
+	"github.com/Sergey-Bar/vision/internal/camerahealth"
+	"github.com/Sergey-Bar/vision/internal/sitemodel"
 )
 
 // Plans: what the artifact says the site should DO, not just what it has.

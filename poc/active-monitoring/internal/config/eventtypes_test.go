@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/aistate"
+	"github.com/Sergey-Bar/vision-poc/internal/aistate"
 )
 
 // TestAnUnmappedAbsencePairIsRefusedByName is the plan's requirement and the whole

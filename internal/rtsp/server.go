@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/mp4"
+	"github.com/Sergey-Bar/vision/internal/mp4"
 )
 
 // A long-running RTSP server, extracted from the client's own test.

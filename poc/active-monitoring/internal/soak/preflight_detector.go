@@ -5,8 +5,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/config"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/ortdetect"
+	"github.com/Sergey-Bar/vision-poc/internal/config"
+	"github.com/Sergey-Bar/vision-poc/internal/ortdetect"
 )
 
 // The detector's preflight row, and the arithmetic it refuses on.

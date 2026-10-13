@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/fixture"
+	"github.com/Sergey-Bar/vision/internal/fixture"
 )
 
 // ReplayTransport serves envelopes from a fixture directory instead of a socket.

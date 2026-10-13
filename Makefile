@@ -11,7 +11,7 @@ CONTRACTS_DIR := contracts/protobuf
 SCHEMA_DIR := contracts/json-schema
 OPENAPI_DIR := contracts/openapi
 CONTRACT_BASELINE := contracts/compat/baseline.json
-MODULE := github.com/Sergey-Bar/Ai-Captain
+MODULE := github.com/Sergey-Bar/vision
 MIGRATIONS_DIR := migrations
 
 .PHONY: all bootstrap generate contract-check contract-check-schema \

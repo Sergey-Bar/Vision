@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/predicatecov"
+	"github.com/Sergey-Bar/vision/internal/predicatecov"
 )
 
 const repoRoot = "../.."

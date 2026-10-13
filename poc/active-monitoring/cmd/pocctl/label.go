@@ -8,8 +8,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/labelui"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
+	"github.com/Sergey-Bar/vision-poc/internal/labelui"
+	"github.com/Sergey-Bar/vision-poc/internal/store"
 )
 
 func cmdLabel(args []string) error {

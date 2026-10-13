@@ -231,7 +231,7 @@ const file_security_v1_entity_proto_rawDesc = "" +
 	"\x10ENTITY_KIND_GATE\x10\x04\x12\x17\n" +
 	"\x13ENTITY_KIND_VEHICLE\x10\x05\x12\x16\n" +
 	"\x12ENTITY_KIND_DEVICE\x10\x06\x12\x15\n" +
-	"\x11ENTITY_KIND_OTHER\x10\aBKZIgithub.com/Sergey-Bar/Ai-Captain/internal/contracts/securityv1;securityv1b\x06proto3"
+	"\x11ENTITY_KIND_OTHER\x10\aBGZEgithub.com/Sergey-Bar/vision/internal/contracts/securityv1;securityv1b\x06proto3"
 
 var (
 	file_security_v1_entity_proto_rawDescOnce sync.Once

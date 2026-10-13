@@ -19,7 +19,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/rules"
+	"github.com/Sergey-Bar/vision/internal/rules"
 )
 
 // ChangeKind classifies a difference between two runs.

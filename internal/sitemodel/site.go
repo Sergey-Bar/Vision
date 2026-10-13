@@ -17,6 +17,10 @@ type Camera struct {
 	ID       string
 	ZoneIDs  []string
 	Position Point
+	// FieldOfView is what the site has declared this camera sees. Nil is the
+	// common case and is an honest one — see adjacency.go for why an unmeasured
+	// view never produces a derived overlap.
+	FieldOfView *FieldOfView
 }
 
 // Zone represents a zone in the site.

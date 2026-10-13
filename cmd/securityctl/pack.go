@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/release"
+	"github.com/Sergey-Bar/vision/internal/release"
 )
 
 func background() context.Context { return context.Background() }

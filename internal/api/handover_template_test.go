@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/brief"
-	"github.com/Sergey-Bar/Ai-Captain/internal/dutylog"
+	"github.com/Sergey-Bar/vision/internal/brief"
+	"github.com/Sergey-Bar/vision/internal/dutylog"
 )
 
 // The hand-over page is the console's inheritance of the same packages the POC

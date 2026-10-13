@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/evidence"
+	"github.com/Sergey-Bar/vision/internal/evidence"
 )
 
 // Open had a third state that nothing documented: an empty expectSHA returned

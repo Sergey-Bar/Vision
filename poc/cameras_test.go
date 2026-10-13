@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/sitemodel"
-	"github.com/Sergey-Bar/Ai-Captain/internal/telemetry"
+	"github.com/Sergey-Bar/vision/internal/sitemodel"
+	"github.com/Sergey-Bar/vision/internal/telemetry"
 )
 
 // loadTestSite is the shared demo site: two cameras, a restricted zone and a

@@ -52,8 +52,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/ai"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/proposal"
+	"github.com/Sergey-Bar/vision-poc/internal/ai"
+	"github.com/Sergey-Bar/vision-poc/internal/proposal"
 )
 
 // Box is one detection, normalised 0..1 against the FRAME.

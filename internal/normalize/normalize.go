@@ -31,10 +31,10 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/clocksub"
-	securityv1 "github.com/Sergey-Bar/Ai-Captain/internal/contracts/securityv1"
-	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
-	"github.com/Sergey-Bar/Ai-Captain/internal/inbox"
+	"github.com/Sergey-Bar/vision/internal/clocksub"
+	securityv1 "github.com/Sergey-Bar/vision/internal/contracts/securityv1"
+	"github.com/Sergey-Bar/vision/internal/dbx"
+	"github.com/Sergey-Bar/vision/internal/inbox"
 )
 
 // SchemaVersion is the canonical event schema version this build writes. It is

@@ -179,7 +179,7 @@ func WriteUnits(opts UnitOptions) ([]WrittenUnit, error) {
 func coreUnit(opts UnitOptions) string {
 	var b strings.Builder
 	b.WriteString(`[Unit]
-Description=AI Captain Security Core
+Description=VISION Security Core
 Documentation=https://contracts.aicaptain.dev
 After=network-online.target postgresql.service
 Wants=network-online.target
@@ -252,7 +252,7 @@ func aiUnit(opts UnitOptions) string {
 	}
 	var b strings.Builder
 	b.WriteString(`[Unit]
-Description=AI Captain AI Runtime
+Description=VISION AI Runtime
 After=network-online.target security-core.service
 Wants=network-online.target
 
@@ -293,7 +293,7 @@ AmbientCapabilities=
 // would let a core start with a tenant id of "CHANGE-ME", which is worse than
 // refusing to start at all.
 func coreEnvTemplate(opts UnitOptions) string {
-	return fmt.Sprintf(`# AI Captain Security Core — site configuration.
+	return fmt.Sprintf(`# VISION Security Core — site configuration.
 #
 # Written by `+"`securityctl install`"+`. Existing values are preserved on
 # re-install; this template is only created when the file does not exist.
@@ -380,7 +380,7 @@ SP_LOG_LEVEL=info
 
 // aiEnvTemplate renders the AI runtime's environment file.
 func aiEnvTemplate() string {
-	return `# AI Captain AI Runtime — site configuration.
+	return `# VISION AI Runtime — site configuration.
 #
 # Written by ` + "`securityctl install`" + `. Preserved on re-install.
 

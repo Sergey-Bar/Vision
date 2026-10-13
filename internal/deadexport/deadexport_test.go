@@ -16,7 +16,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/deadexport"
+	"github.com/Sergey-Bar/vision/internal/deadexport"
 )
 
 const repoRoot = "../.."

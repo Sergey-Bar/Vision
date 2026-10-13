@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/store"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/xprotect"
+	"github.com/Sergey-Bar/vision-poc/internal/store"
+	"github.com/Sergey-Bar/vision-poc/internal/xprotect"
 )
 
 // The rehearsal plan. It is the SAME table `pocctl rehearse` runs, and it is

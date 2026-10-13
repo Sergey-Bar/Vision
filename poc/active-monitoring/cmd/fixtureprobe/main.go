@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/detect"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/novelty"
+	"github.com/Sergey-Bar/vision-poc/internal/detect"
+	"github.com/Sergey-Bar/vision-poc/internal/novelty"
 )
 
 // fixtureprobe reports whether a clip can produce a detection at all, BEFORE a run

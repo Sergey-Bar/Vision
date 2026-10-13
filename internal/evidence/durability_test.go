@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/evidence"
+	"github.com/Sergey-Bar/vision/internal/evidence"
 )
 
 // The plan's P2.7: "A kill -9 test at three points — mid-receive, mid-mux,

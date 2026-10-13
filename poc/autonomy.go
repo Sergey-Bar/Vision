@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/correlation"
-	"github.com/Sergey-Bar/Ai-Captain/internal/threat"
-	"github.com/Sergey-Bar/Ai-Captain/poc/ws"
+	"github.com/Sergey-Bar/vision/internal/correlation"
+	"github.com/Sergey-Bar/vision/internal/threat"
+	"github.com/Sergey-Bar/vision/poc/ws"
 )
 
 // autonomyPass runs the autonomy layer over one frame's detections: track

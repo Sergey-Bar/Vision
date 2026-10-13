@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/observations"
+	"github.com/Sergey-Bar/vision/internal/observations"
 )
 
 // P4.3, the plan's "invariant-3 trap".

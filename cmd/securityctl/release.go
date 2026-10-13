@@ -13,9 +13,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/command"
-	"github.com/Sergey-Bar/Ai-Captain/internal/release"
-	"github.com/Sergey-Bar/Ai-Captain/migrations"
+	"github.com/Sergey-Bar/vision/internal/command"
+	"github.com/Sergey-Bar/vision/internal/release"
+	"github.com/Sergey-Bar/vision/migrations"
 )
 
 // buildReleaseCmd builds the flag set and closes over the values, which is the

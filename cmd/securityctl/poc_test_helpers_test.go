@@ -5,7 +5,7 @@ import (
 
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/mp4"
+	"github.com/Sergey-Bar/vision/internal/mp4"
 )
 
 // Small helpers the poc tests need, kept here so the test file reads as

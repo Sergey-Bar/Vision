@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/evidence"
+	"github.com/Sergey-Bar/vision/internal/evidence"
 )
 
 func newStore(t *testing.T) *evidence.Store {

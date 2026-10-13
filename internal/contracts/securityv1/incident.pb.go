@@ -748,7 +748,7 @@ const file_security_v1_incident_proto_rawDesc = "" +
 	"\x19AI_DEGRADATION_NO_RUNTIME\x10\x02\x12\x1a\n" +
 	"\x16AI_DEGRADATION_TIMEOUT\x10\x03\x12\x18\n" +
 	"\x14AI_DEGRADATION_ERROR\x10\x04\x12\x19\n" +
-	"\x15AI_DEGRADATION_ABSENT\x10\x05BKZIgithub.com/Sergey-Bar/Ai-Captain/internal/contracts/securityv1;securityv1b\x06proto3"
+	"\x15AI_DEGRADATION_ABSENT\x10\x05BGZEgithub.com/Sergey-Bar/vision/internal/contracts/securityv1;securityv1b\x06proto3"
 
 var (
 	file_security_v1_incident_proto_rawDescOnce sync.Once

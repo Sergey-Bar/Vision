@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/identity"
+	"github.com/Sergey-Bar/vision/internal/identity"
 )
 
 func ctx() context.Context { return context.Background() }

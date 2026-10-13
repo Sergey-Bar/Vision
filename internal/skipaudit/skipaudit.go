@@ -196,7 +196,7 @@ func (r Result) Report(exempt map[string]Expected) string {
 //
 // `modulePrefix` is the module path from `go.mod`, without a trailing slash, and
 // it is stripped from every package name before anything else looks at one. `go
-// test -json` reports `github.com/Sergey-Bar/Ai-Captain/internal/evidence`; the
+// test -json` reports `github.com/Sergey-Bar/vision/internal/evidence`; the
 // declaration list, and every human reading a failure, says
 // `internal/evidence`. Leaving the prefix on would mean every declared skip
 // silently fails to match its own skip, and the gate would report all four at once

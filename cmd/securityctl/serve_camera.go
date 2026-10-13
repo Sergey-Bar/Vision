@@ -53,8 +53,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/command"
-	"github.com/Sergey-Bar/Ai-Captain/internal/rtsp"
+	"github.com/Sergey-Bar/vision/internal/command"
+	"github.com/Sergey-Bar/vision/internal/rtsp"
 )
 
 func serveCameraCommand() *command.Command {

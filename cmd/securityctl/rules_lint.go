@@ -11,8 +11,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/command"
-	"github.com/Sergey-Bar/Ai-Captain/internal/rules"
+	"github.com/Sergey-Bar/vision/internal/command"
+	"github.com/Sergey-Bar/vision/internal/rules"
 )
 
 // lintReport is the machine-readable form. The exit code is the contract scripts

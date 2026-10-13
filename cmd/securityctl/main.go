@@ -17,7 +17,7 @@ import (
 	"os/signal"
 	"strings"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/command"
+	"github.com/Sergey-Bar/vision/internal/command"
 )
 
 func main() {
@@ -75,6 +75,9 @@ or from the site configuration.`,
 		identityCommand(),
 		releaseKeyCommand(),
 		siteConfigCommand(),
+		// The C3 adjacency table's backfill and read: the table is a projection
+		// of the site model, and this is how an operator says "recompute it".
+		cameraAdjacencyCommand(),
 	)
 	// There is deliberately NO `demo` here, and its absence is the finding rather than
 	// a gap. It used to be registered as RESERVED: it printed what P6 would build and

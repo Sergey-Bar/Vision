@@ -13,13 +13,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/clock"
-	"github.com/Sergey-Bar/Ai-Captain/internal/command"
-	"github.com/Sergey-Bar/Ai-Captain/internal/cost"
-	"github.com/Sergey-Bar/Ai-Captain/internal/evidence"
-	"github.com/Sergey-Bar/Ai-Captain/internal/milestone"
-	"github.com/Sergey-Bar/Ai-Captain/internal/rtsp"
-	"github.com/Sergey-Bar/Ai-Captain/internal/soak"
+	"github.com/Sergey-Bar/vision/internal/clock"
+	"github.com/Sergey-Bar/vision/internal/command"
+	"github.com/Sergey-Bar/vision/internal/cost"
+	"github.com/Sergey-Bar/vision/internal/evidence"
+	"github.com/Sergey-Bar/vision/internal/milestone"
+	"github.com/Sergey-Bar/vision/internal/rtsp"
+	"github.com/Sergey-Bar/vision/internal/soak"
 )
 
 // acceptanceCommand is the plan's P5.3.

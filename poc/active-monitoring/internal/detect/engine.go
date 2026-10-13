@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/aistate"
-	"github.com/Sergey-Bar/ai-captain-poc/internal/classify"
+	"github.com/Sergey-Bar/vision-poc/internal/aistate"
+	"github.com/Sergey-Bar/vision-poc/internal/classify"
 )
 
 // Crossing is one decision: a tracked object went from one side of a line to

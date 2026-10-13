@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/fixture"
+	"github.com/Sergey-Bar/vision/internal/fixture"
 )
 
 // The fixture is the thing that gets committed, so the sanitizer is the only

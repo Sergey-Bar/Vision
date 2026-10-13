@@ -25,7 +25,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/fixture"
+	"github.com/Sergey-Bar/vision/internal/fixture"
 )
 
 // epoch is the instant every scenario's offset zero refers to. It is a constant

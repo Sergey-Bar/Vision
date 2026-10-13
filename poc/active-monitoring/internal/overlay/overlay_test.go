@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Sergey-Bar/ai-captain-poc/internal/classify"
+	"github.com/Sergey-Bar/vision-poc/internal/classify"
 )
 
 // blank is a mid-grey frame, so a drawn pixel is visible as a CHANGE and not

@@ -27,7 +27,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/command"
+	"github.com/Sergey-Bar/vision/internal/command"
 )
 
 // The vectors from RFC 6238 Appendix B, for the SHA-1 digest this command uses.

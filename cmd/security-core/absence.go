@@ -1,8 +1,8 @@
 package main
 
 import (
-	"github.com/Sergey-Bar/Ai-Captain/internal/api"
-	"github.com/Sergey-Bar/Ai-Captain/internal/dbx"
+	"github.com/Sergey-Bar/vision/internal/api"
+	"github.com/Sergey-Bar/vision/internal/dbx"
 )
 
 // The coverage panel's reader, wired to the site's pool.

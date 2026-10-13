@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/mp4"
-	"github.com/Sergey-Bar/Ai-Captain/internal/rtsp"
+	"github.com/Sergey-Bar/vision/internal/mp4"
+	"github.com/Sergey-Bar/vision/internal/rtsp"
 )
 
 // A camera is an untrusted network peer, so the two things that touch its bytes

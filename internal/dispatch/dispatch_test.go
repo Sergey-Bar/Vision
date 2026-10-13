@@ -55,8 +55,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/outbox"
-	"github.com/Sergey-Bar/Ai-Captain/internal/rules"
+	"github.com/Sergey-Bar/vision/internal/outbox"
+	"github.com/Sergey-Bar/vision/internal/rules"
 )
 
 // delivery builds one outbox delivery of the given topic and payload.

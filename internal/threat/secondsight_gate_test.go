@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/correlation"
+	"github.com/Sergey-Bar/vision/internal/correlation"
 )
 
 // escalatingPlaybook is the default playbook with RequireHumanForCritical

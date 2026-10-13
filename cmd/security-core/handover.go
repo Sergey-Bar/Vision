@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/api"
-	"github.com/Sergey-Bar/Ai-Captain/internal/brief"
-	"github.com/Sergey-Bar/Ai-Captain/internal/dutylog"
+	"github.com/Sergey-Bar/vision/internal/api"
+	"github.com/Sergey-Bar/vision/internal/brief"
+	"github.com/Sergey-Bar/vision/internal/dutylog"
 )
 
 // The console hand-over page's reader, wired to the site's duty-log directory.

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/config"
+	"github.com/Sergey-Bar/vision/internal/config"
 )
 
 // env builds a deterministic lookup. No test here reads the real environment: a

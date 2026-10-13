@@ -2,7 +2,7 @@
 
 ## Overview
 
-This POC demonstrates a Minimum Viable Product (MVP) that integrates YouTube live streams with the existing AI Captain analytics engine. The system provides real-time video playback, live categorization, spatial analysis, and smart search capabilities.
+This POC demonstrates a Minimum Viable Product (MVP) that integrates YouTube live streams with the existing VISION analytics engine. The system provides real-time video playback, live categorization, spatial analysis, and smart search capabilities.
 
 ## System Architecture
 

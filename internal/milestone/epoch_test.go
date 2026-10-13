@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/fixture"
-	"github.com/Sergey-Bar/Ai-Captain/internal/milestone"
+	"github.com/Sergey-Bar/vision/internal/fixture"
+	"github.com/Sergey-Bar/vision/internal/milestone"
 )
 
 // P0.6: `ReplayTransport.Get` computed the scenario's effective epoch and then

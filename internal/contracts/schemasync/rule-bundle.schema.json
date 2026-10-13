@@ -116,6 +116,7 @@
           "items": {
             "enum": [
               "motion", "analytics",
+              "analytics.restricted_person",
               "alarm.created", "alarm.acknowledged", "alarm.closed",
               "device.camera_offline", "device.camera_online", "device_state",
               "recording.started", "recording.stopped",

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/milestone"
+	"github.com/Sergey-Bar/vision/internal/milestone"
 )
 
 // P1.1: a bookmark into the vendor's own recording, a clock reading, and a

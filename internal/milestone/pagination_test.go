@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/milestone"
+	"github.com/Sergey-Bar/vision/internal/milestone"
 )
 
 // pagedTransport serves a feed in pages, the way a real paginated API does, and

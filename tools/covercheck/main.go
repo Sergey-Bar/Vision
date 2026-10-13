@@ -21,7 +21,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/covercheck"
+	"github.com/Sergey-Bar/vision/internal/covercheck"
 )
 
 func main() {

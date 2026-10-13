@@ -4,7 +4,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/camerahealth"
+	"github.com/Sergey-Bar/vision/internal/camerahealth"
 )
 
 // Camera health, from counters and from the frame bytes the capture loop

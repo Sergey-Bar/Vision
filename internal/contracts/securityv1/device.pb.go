@@ -475,7 +475,7 @@ const file_security_v1_device_proto_rawDesc = "" +
 	"\x16DRIFT_BAND_UNSPECIFIED\x10\x00\x12\x11\n" +
 	"\rDRIFT_BAND_OK\x10\x01\x12\x13\n" +
 	"\x0fDRIFT_BAND_WARN\x10\x02\x12\x15\n" +
-	"\x11DRIFT_BAND_SEVERE\x10\x03BKZIgithub.com/Sergey-Bar/Ai-Captain/internal/contracts/securityv1;securityv1b\x06proto3"
+	"\x11DRIFT_BAND_SEVERE\x10\x03BGZEgithub.com/Sergey-Bar/vision/internal/contracts/securityv1;securityv1b\x06proto3"
 
 var (
 	file_security_v1_device_proto_rawDescOnce sync.Once

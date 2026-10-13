@@ -3,7 +3,7 @@ package observations_test
 import (
 	"testing"
 
-	"github.com/Sergey-Bar/Ai-Captain/internal/observations"
+	"github.com/Sergey-Bar/vision/internal/observations"
 )
 
 // TestTheInvestigatorProfileStartsShadow is the promotion rule from the plan

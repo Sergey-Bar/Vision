@@ -54,7 +54,7 @@ WORKDIR /src
 # graph read, so a dependency-first layer that copies only `go.mod`/`go.sum`
 # and runs `go mod download` fails outright — reproduced:
 #
-#     go: github.com/Sergey-Bar/ai-captain-poc@v0.0.0 (replaced by ./poc/active-monitoring):
+#     go: github.com/Sergey-Bar/vision-poc@v0.0.0 (replaced by ./poc/active-monitoring):
 #         reading poc\active-monitoring\go.mod: no such file or directory
 #
 # The split is still worth most of what it was worth: `COPY . .` is the layer a
