@@ -19,6 +19,14 @@
     <span class="brand-statement">Physical Security Intelligence Layer</span>
   </span>
   {{if .Principal.Username}}
+  <nav class="topnav" aria-label="Console">
+    <a href="/incidents">Incidents</a>
+    <a href="/search">Search</a>
+    <a href="/coverage">Coverage</a>
+    <a href="/handover">Hand-over</a>
+  </nav>
+  {{end}}
+  {{if .Principal.Username}}
   <span class="who">
     {{.Principal.Username}}
     {{range .Principal.Roles}}&middot; {{.}}{{end}}

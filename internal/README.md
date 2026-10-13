@@ -7,7 +7,7 @@ incidents, and records everything in a hash-chained audit ledger.
 
 This file is for two readers: a new engineer on day one, and an AI agent with no
 prior context. It answers *where things are* and *what each package is for* so
-neither of you has to open 83 packages to find out.
+neither of you has to open 84 packages to find out.
 
 It is a map, not an architecture document. It does not restate build state —
 `docs/status.md` is the only source of truth for that — and it does not restate
@@ -87,6 +87,7 @@ Only five do. Everything else reaches the ledger through its caller.
 | `evaluation` | Scores a VLM profile against labelled cases and decides promotion, with the gates as code | observe | no | `evaluation.Evaluate`, `evaluation.Gates`, `Runner`, `Case` |
 | `evidence` | Content-addressed filesystem store. The only code that touches the evidence root | store | no (the API audits `evidence.fetched`) | `evidence.Store`, `New`, `ValidateRef`, `Store.Put`, `Store.Open` |
 | `evidencefetch` | The `QueueEvidenceFetch` worker: places Milestone bookmarks, fetches clips, stores receipts | observe | no (the worker audits `evidence.bookmark.*`) | `evidencefetch.Worker`, `Worker.Handle`, `evidencefetch.Receipt` |
+| `eventsearch` | The structured search over the canonical event record — the "Door 18, 14:00–15:00" question, behind `incident.read`. The window reads `normalized_at` and nothing else; every hit carries the incident it belongs to when there is one and nothing when there is not, because a fabricated link is a fabricated fact | observe | no | `eventsearch.Service`, `eventsearch.Search`, `eventsearch.Query`, `eventsearch.Hit` |
 | `fixture` | The on-disk format for captured/replayed envelopes, plus the sanitizer that is the single network-to-repo choke point | ingest (test double) | no | `fixture.Scenario`, `SanitizeResponse`, `fixture.Store` |
 | `graph` | The M1 Security Graph: topology and provenance edges, bounded traversal, snapshot. No person model | store | no | `graph.Service`, `graph.Edge`, `graph.Provenance`, `Service.Walk` |
 | `hafnia` | The hosted-model client and the asset residency contract. Currently unused by the core | observe (demo) | no | `hafnia.Client`, `Client.Do`, `hafnia.Reason`, `hafnia.Quota` |

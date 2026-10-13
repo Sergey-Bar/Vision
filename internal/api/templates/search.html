@@ -1,0 +1,75 @@
+{{define "search.html"}}
+{{template "head" .}}
+<main>
+  <h1>Search the record</h1>
+  {{template "messages" .}}
+
+  {{if .SearchErr}}
+  <p class="empty">{{.SearchErr}}</p>
+  {{end}}
+
+  <section class="searchform">
+    <form method="get" action="/search">
+      <fieldset>
+        <legend>When</legend>
+        <label>From <input type="text" name="from" placeholder="2026-06-01T14:00:00Z" value="{{.SearchQuery.From.Format "2006-01-02T15:04:05Z07:00"}}"></label>
+        <label>To <input type="text" name="to" placeholder="2026-06-01T15:00:00Z" value="{{.SearchQuery.To.Format "2006-01-02T15:04:05Z07:00"}}"></label>
+        <p class="hint">
+          RFC3339, and the site's time is the honest one to paste. The window is
+          read against the drift-corrected time, not against what the camera
+          claimed, so an event whose source clock was wrong is answered by when
+          it happened.
+        </p>
+      </fieldset>
+      <fieldset>
+        <legend>Where and what</legend>
+        <label>Site <input type="text" name="siteId" value="{{.SearchQuery.SiteIDs}}"></label>
+        <label>Zone <input type="text" name="zoneId" placeholder="zone-door" value="{{.SearchQuery.ZoneID}}"></label>
+        <label>Camera <input type="text" name="deviceId" placeholder="cam-door18" value="{{.SearchQuery.DeviceID}}"></label>
+        <label>Event type <input type="text" name="eventType" placeholder="motion" value="{{.SearchQuery.EventType}}"></label>
+        <label>Correlation <input type="text" name="correlationId" value="{{.SearchQuery.CorrelationID}}"></label>
+        <label>Incident <input type="text" name="incidentId" value="{{.SearchQuery.IncidentID}}"></label>
+      </fieldset>
+      <button type="submit">Search</button>
+    </form>
+  </section>
+
+  {{if .SearchRan}}
+  <section class="feed">
+    {{if .Search}}
+    <table>
+      <thead>
+        <tr><th>When (corrected)</th><th>Type</th><th>Camera</th><th>Zone</th>
+            <th>Incident</th><th>Correlation</th></tr>
+      </thead>
+      <tbody>
+      {{range .Search}}
+        <tr>
+          <td><time datetime="{{.NormalizedAt.Format "2006-01-02T15:04:05Z07:00"}}">{{$.Time .NormalizedAt}}</time></td>
+          <td>{{.EventType}}</td>
+          <td><code>{{.DeviceID}}</code></td>
+          <td>{{.ZoneID}}</td>
+          <td>
+            {{if .IncidentID}}
+              <a href="/incidents/{{.IncidentID}}"><code>{{.IncidentID}}</code></a>
+            {{else}}
+              <span class="muted" title="This event is in no incident. It is still in the record.">—</span>
+            {{end}}
+          </td>
+          <td><code>{{.CorrelationID}}</code></td>
+        </tr>
+      {{end}}
+      </tbody>
+    </table>
+    {{else}}
+      <p class="empty">
+        No events match that window. The window is read against the corrected
+        time, so an event whose source clock was wrong may be outside it — and
+        the coverage panel is the page that answers what was not seen at all.
+      </p>
+    {{end}}
+  </section>
+  {{end}}
+</main>
+{{template "foot" .}}
+{{end}}

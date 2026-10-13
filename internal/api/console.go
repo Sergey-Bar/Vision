@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Sergey-Bar/vision/internal/brief"
+	"github.com/Sergey-Bar/vision/internal/eventsearch"
 	"github.com/Sergey-Bar/vision/internal/identity"
 	"github.com/Sergey-Bar/vision/internal/incidents"
 )
@@ -90,8 +91,17 @@ type consoleData struct {
 	DutyLog    *DutyLogState
 	DutyLogErr string
 	SiteID     string
-	Error      string
-	Message    string
+	// Search is the structured search page: the query the operator typed, the
+	// page it answered, and the reason an answer was not available. All three
+	// are always present, because a search page that renders a blank result set
+	// reads as "nothing happened", and the honest answer when the search is not
+	// configured is a sentence that says so.
+	Search      []eventsearch.Hit
+	SearchQuery eventsearch.Query
+	SearchErr   string
+	SearchRan   bool
+	Error       string
+	Message     string
 }
 
 // SiteTimezone renders a site's time, never the host's.
@@ -468,6 +478,70 @@ func (s *Server) handleConsoleIncidents(w http.ResponseWriter, r *http.Request, 
 	}
 
 	s.render(w, http.StatusOK, "incidents.html", data)
+}
+
+// handleConsoleSearch renders the search page.
+//
+// It only searches when the operator asked something: a governed query (site,
+// event type, camera, zone, correlation, incident) or a window. Landing on the
+// page with no parameters renders the form and nothing else, because a page
+// that answered an empty query on arrival would render "no results" before the
+// operator had asked a question — the same class of empty that reads as a fact.
+func (s *Server) handleConsoleSearch(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
+	data := s.consoleData(r, p, "Search")
+	q := r.URL.Query()
+	asked := false
+	for _, key := range []string{"siteId", "eventType", "deviceId", "zoneId", "correlationId", "incidentId", "from", "to"} {
+		if strings.TrimSpace(q.Get(key)) != "" {
+			asked = true
+			break
+		}
+	}
+	if !asked {
+		s.render(w, http.StatusOK, "search.html", data)
+		return
+	}
+	if d.EventSearch == nil {
+		data.SearchErr = "The evidence search is not configured on this deployment."
+		s.render(w, http.StatusServiceUnavailable, "search.html", data)
+		return
+	}
+	site := q.Get("siteId")
+	if site != "" && !p.CanSeeSite(site) {
+		WriteError(w, http.StatusForbidden, "site_not_assigned",
+			"You are not assigned to that site.", requestID(r))
+		return
+	}
+	scope := site
+	if scope == "" {
+		scope = strings.Join(p.SiteScope, ",")
+	}
+	from, to, err := parseSearchTimes(q.Get("from"), q.Get("to"))
+	if err != nil {
+		data.SearchErr = err.Error()
+		s.render(w, http.StatusBadRequest, "search.html", data)
+		return
+	}
+	query := eventsearch.Query{
+		SiteIDs:       splitScope(scope),
+		EventType:     q.Get("eventType"),
+		DeviceID:      q.Get("deviceId"),
+		ZoneID:        q.Get("zoneId"),
+		CorrelationID: q.Get("correlationId"),
+		IncidentID:    q.Get("incidentId"),
+		From:          from, To: to,
+		Limit: parseLimit(q.Get("limit"), eventsearch.DefaultLimit, eventsearch.MaxLimit),
+	}
+	res, err := d.EventSearch.Search(r.Context(), p.TenantID, query)
+	if err != nil {
+		data.SearchErr = "The search could not be read: " + err.Error()
+		s.render(w, http.StatusInternalServerError, "search.html", data)
+		return
+	}
+	data.Search = res.Hits
+	data.SearchQuery = query
+	data.SearchRan = true
+	s.render(w, http.StatusOK, "search.html", data)
 }
 
 func (s *Server) handleConsoleIncident(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {

@@ -18,6 +18,7 @@ import (
 	"github.com/Sergey-Bar/vision/internal/audit"
 	"github.com/Sergey-Bar/vision/internal/bundles"
 	"github.com/Sergey-Bar/vision/internal/dbx"
+	"github.com/Sergey-Bar/vision/internal/eventsearch"
 	"github.com/Sergey-Bar/vision/internal/evidence"
 	"github.com/Sergey-Bar/vision/internal/identity"
 	"github.com/Sergey-Bar/vision/internal/incidents"
@@ -131,6 +132,9 @@ func serverWithRegistry(t *testing.T, registry *observability.Registry) (*api.Se
 		Incidents: &incidents.Service{Pool: pool, Audit: writer},
 		Bundles:   &bundles.Service{Pool: pool, Compiler: rules.NewCompiler(), Audit: writer},
 		Metrics:   registry,
+		// The structured search, real, over the same pool. A nil service behind
+		// the search route is exactly the shape the comment above refuses.
+		EventSearch: &eventsearch.Service{Pool: pool},
 	}
 	// The routes closure captures s, so it is assigned after construction rather
 	// than inside the literal.

@@ -13,6 +13,7 @@ import (
 	"github.com/Sergey-Bar/vision/internal/audit"
 	"github.com/Sergey-Bar/vision/internal/bundles"
 	"github.com/Sergey-Bar/vision/internal/dispatch"
+	"github.com/Sergey-Bar/vision/internal/eventsearch"
 	"github.com/Sergey-Bar/vision/internal/evidence"
 	"github.com/Sergey-Bar/vision/internal/identity"
 	"github.com/Sergey-Bar/vision/internal/incidents"
@@ -56,6 +57,12 @@ type Deps struct {
 	// Enqueuer is the job queue enqueuer. Nil means the route says the
 	// endpoint is not configured.
 	Enqueuer *jobs.Enqueuer
+	// EventSearch is the structured search over the canonical event record —
+	// the "what happened at Door 18 between 14:00 and 15:00" question. Nil
+	// means the route and the console page say the search is not configured
+	// rather than answering every query with an empty page: an empty result and
+	// an unconfigured one are different answers, and only one of them is true.
+	EventSearch *eventsearch.Service
 }
 
 // DeadLetterReader is the dead-letter surface.
@@ -281,6 +288,32 @@ func (s *Server) RegisterRoutes(d Deps) func(*http.ServeMux) {
 			func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
 				s.handleConsoleHandover(w, r, p, d)
 			}))
+		// Search.
+		//
+		// `incident.read` is the capability, and the reasoning is worth stating
+		// because it is the same one the metrics route carries. The rows a
+		// search returns are the canonical events incidents are built from —
+		// the record an operator reading incidents is already reading, one row
+		// at a time. A capability of its own would be a migration, a role seed
+		// and an ADR, and the principal who may read an incident is the
+		// principal asking "what else happened in that window". The site scope
+		// is resolved from the principal exactly as the incident list resolves
+		// it, and a site outside it is refused rather than returned empty,
+		// because "no such site" and "not yours" are the same answer and a
+		// different one is a disclosure.
+		mux.Handle("GET /v1/evidence",
+			s.requireCapability(identity.CapIncidentRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleEvidenceSearch(w, r, p, d)
+			}))
+
+		// The console's search page, gated exactly as its API twin is and for
+		// the same reason: the page renders the same rows, so a principal
+		// without the capability must not reach them by asking for HTML.
+		mux.Handle("GET /search", s.requireCapability(identity.CapIncidentRead,
+			func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleConsoleSearch(w, r, p, d)
+			}))
+
 		// The console's sign-out. Gated on a principal rather than on a capability,
 		// because the capability that would be right here does not exist: signing out
 		// is not something an operator may lack the right to do, and a
@@ -461,6 +494,109 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request, p identity
 	}
 	s.clearSessionCookie(w)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleEvidenceSearch is the structured search: the plan's C5, over the
+// canonical event record.
+//
+// The question it answers is the one the plan named — "Door 18, 14:00–15:00" —
+// and the answer is a page of canonical events, each carrying the incident it
+// belongs to when there is one. The window is read as an explicit RFC3339
+// instant, and the query reads `normalized_at` and nothing else, which is the
+// invariant `internal/predicatecov` guards in Go source and this handler guards
+// at the edge by refusing a malformed time rather than guessing one.
+func (s *Server) handleEvidenceSearch(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
+	if d.EventSearch == nil {
+		WriteError(w, http.StatusServiceUnavailable, "search_unavailable",
+			"The evidence search is not configured.", requestID(r))
+		return
+	}
+	if err := s.tenantHeader(r, p); err != nil {
+		WriteError(w, http.StatusForbidden, "tenant_mismatch", err.Error(), requestID(r))
+		return
+	}
+	q := r.URL.Query()
+	site := q.Get("siteId")
+	if site != "" && !p.CanSeeSite(site) {
+		// Refused rather than empty, for the reason the incident list gives:
+		// "no such site" and "not yours" are the same answer, and a different
+		// one is a disclosure.
+		WriteError(w, http.StatusForbidden, "site_not_assigned",
+			"You are not assigned to that site.", requestID(r))
+		return
+	}
+	scope := site
+	if scope == "" {
+		scope = strings.Join(p.SiteScope, ",")
+	}
+	from, to, err := parseSearchTimes(q.Get("from"), q.Get("to"))
+	if err != nil {
+		// A malformed time is refused with the reason. Parsing it as the zero
+		// time would widen the window to everything, which is the one answer
+		// this route must never give.
+		WriteError(w, http.StatusBadRequest, "bad_time", err.Error(), requestID(r))
+		return
+	}
+	res, err := d.EventSearch.Search(r.Context(), p.TenantID, eventsearch.Query{
+		SiteIDs:       splitScope(scope),
+		EventType:     q.Get("eventType"),
+		DeviceID:      q.Get("deviceId"),
+		ZoneID:        q.Get("zoneId"),
+		CorrelationID: q.Get("correlationId"),
+		IncidentID:    q.Get("incidentId"),
+		From:          from, To: to,
+		Limit:  parseLimit(q.Get("limit"), eventsearch.DefaultLimit, eventsearch.MaxLimit),
+		Cursor: q.Get("cursor"),
+	})
+	if err != nil {
+		status := http.StatusInternalServerError
+		if strings.Contains(err.Error(), "cursor") {
+			// A cursor the server did not issue is the caller's mistake, not
+			// the server's, and 500 would put it in the server's error budget.
+			status = http.StatusBadRequest
+		}
+		WriteError(w, status, "search_failed", err.Error(), requestID(r))
+		return
+	}
+	WriteJSON(w, http.StatusOK, res)
+}
+
+// parseSearchTimes reads the window's ends.
+//
+// Both are optional and both are RFC3339. A malformed end is an error rather
+// than a zero time, because a zero `from` widens the window to the beginning of
+// the table — the query that answers a question nobody asked.
+func parseSearchTimes(from, to string) (time.Time, time.Time, error) {
+	var f, t time.Time
+	var err error
+	if strings.TrimSpace(from) != "" {
+		if f, err = time.Parse(time.RFC3339, from); err != nil {
+			return f, t, fmt.Errorf("from is not an RFC3339 instant: %q", from)
+		}
+	}
+	if strings.TrimSpace(to) != "" {
+		if t, err = time.Parse(time.RFC3339, to); err != nil {
+			return f, t, fmt.Errorf("to is not an RFC3339 instant: %q", to)
+		}
+	}
+	if !f.IsZero() && !t.IsZero() && t.Before(f) {
+		return f, t, fmt.Errorf("the window ends before it starts: from %s to %s",
+			f.Format(time.RFC3339), t.Format(time.RFC3339))
+	}
+	return f, t, nil
+}
+
+// splitScope turns the comma-joined scope a principal carries into the list the
+// search takes. An empty scope stays empty — see eventsearch.cleanSites on why
+// an empty array is not a NULL one.
+func splitScope(scope string) []string {
+	var out []string
+	for _, s := range strings.Split(scope, ",") {
+		if s = strings.TrimSpace(s); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func (s *Server) handleIncidentList(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {

@@ -60,6 +60,13 @@ code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-siz
 .brand-mark { width: 24px; height: 24px; flex: none; color: var(--accent); }
 .brand-name { font-size: 1.02rem; }
 .brand-statement { color: var(--muted); font-weight: 400; font-size: 0.82rem; letter-spacing: 0.02em; }
+/* The console's navigation. In the topbar rather than a sidebar because the
+   operator surface is one hand wide of links and nothing else: every page is
+   one click from every other, and a page that needs a mouse to reach is a page
+   reached less often at 04:00. */
+.topnav { display: flex; gap: 4px; margin-left: 18px; }
+.topnav a { color: var(--muted); text-decoration: none; font-size: 0.88em; padding: 4px 9px; border-radius: 6px; }
+.topnav a:hover, .topnav a:focus { color: var(--fg); background: #1a2027; }
 .topbar .who { margin-left: auto; color: var(--muted); font-size: 0.9em; }
 .topbar form.inline { display: inline; }
 

@@ -54,6 +54,7 @@ import (
 	"github.com/Sergey-Bar/vision/internal/correlator"
 	"github.com/Sergey-Bar/vision/internal/dbx"
 	"github.com/Sergey-Bar/vision/internal/dispatch"
+	"github.com/Sergey-Bar/vision/internal/eventsearch"
 	"github.com/Sergey-Bar/vision/internal/evidence"
 	"github.com/Sergey-Bar/vision/internal/evidencefetch"
 	"github.com/Sergey-Bar/vision/internal/graph"
@@ -275,10 +276,15 @@ func run() error {
 	server.SetStartTime(start)
 
 	deps := api.Deps{
-		Identity:    ident,
-		Incidents:   incidentsSvc,
-		Bundles:     bundlesSvc,
-		Evidence:    store,
+		Identity:  ident,
+		Incidents: incidentsSvc,
+		Bundles:   bundlesSvc,
+		Evidence:  store,
+		// The structured search: SQL over the canonical event windows, behind
+		// the same capability the incident pages carry. Wired here because the
+		// pool the API already holds is the pool it queries, and a service that
+		// needed its own would be a second connection count for one SELECT.
+		EventSearch: &eventsearch.Service{Pool: pool},
 		DeadLetters: api.DeadLetters{Inbox: inboxSvc, Jobs: jobWorker},
 		// The coverage panel's counts. Supplied here rather than inside `internal/api`
 		// because these tables belong to the packages that own them, and a COUNT over
