@@ -86,6 +86,16 @@ type Floor struct {
 	Percent float64 `json:"percent"`
 	// Measured is when the number was taken, YYYY-MM-DD.
 	Measured string `json:"measured"`
+	// Margin overrides the baseline's ratchet tolerance for THIS package alone. It
+	// exists for a package whose coverage is legitimately load-variable: the
+	// fault-injection drills (kill -9, the recovery drill) spawn subprocesses and
+	// cover different statements depending on scheduling under the gate's parallel
+	// -race, so one global margin either flags their spike as a stale floor (the
+	// spike runs red) or forces a floor ratcheted to the spike that the ordinary
+	// runs fail downward. A per-package margin lets such a package hold a wide,
+	// named tolerance without loosening the comparison for everyone. Zero means
+	// use the baseline margin; it is an escape with a reason, not a default.
+	Margin float64 `json:"margin,omitempty"`
 }
 
 // Baseline is the committed file, and the reason the whole thing exists.
@@ -335,13 +345,19 @@ func Check(pkgs []Package, b Baseline, build string) []Finding {
 			})
 			continue
 		}
-		if got > f.Percent+b.Margin+1e-9 {
+		// The ratchet's tolerance is per-package: the floor's own margin when it
+		// names one (a load-variable package, see Floor.Margin), else the baseline's.
+		margin := b.Margin
+		if f.Margin > 0 {
+			margin = f.Margin
+		}
+		if got > f.Percent+margin+1e-9 {
 			out = append(out, Finding{
 				Package: p.Name, Rule: RuleStaleFloor,
 				Detail: fmt.Sprintf("%.1f%% against a floor of %.1f%% recorded on %s, and the margin is "+
 					"%.1f. Raise the floor to %.1f: a floor that only fails downwards gets lowered once "+
 					"and everything above it is free",
-					got, f.Percent, f.Measured, b.Margin, got),
+					got, f.Percent, f.Measured, margin, got),
 			})
 		}
 	}

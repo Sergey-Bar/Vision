@@ -164,7 +164,8 @@
     },
     "internal/migrate": {
       "percent": 78.5,
-      "measured": "2026-10-13"
+      "measured": "2026-10-13",
+      "margin": 5.0
     },
     "internal/milestone": {
       "percent": 69.4,
