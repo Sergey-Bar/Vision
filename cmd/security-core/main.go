@@ -259,7 +259,7 @@ func run() error {
 	// It is a refusal rather than a warning on purpose. A product whose one advertised
 	// side effect is dead but which starts cleanly is worse than one that does not start:
 	// the first looks like a working install.
-	if err := checkActiveBundleDispatch(ctx, pool, dispatcher, bundlesSvc, log); err != nil {
+	if err := checkActiveBundleDispatch(ctx, cfg.Tenant, pool, dispatcher, bundlesSvc, log); err != nil {
 		return err
 	}
 
@@ -455,9 +455,16 @@ func readiness(ctx context.Context, pool *dbx.Pool, log *slog.Logger) error {
 //
 // The last two share a code path and must not: the temptation is to log a warning for any
 // error from `Active`, which silently converts an outage into a clean startup.
-func checkActiveBundleDispatch(ctx context.Context, pool *dbx.Pool, d *dispatch.Dispatcher,
+func checkActiveBundleDispatch(ctx context.Context, tenant string, pool *dbx.Pool, d *dispatch.Dispatcher,
 	bundlesSvc *bundles.Service, log *slog.Logger) error {
-	_, content, err := bundlesSvc.Active(ctx, pool.For("", "bundles").TenantID())
+	// The active bundle is read for THIS core's tenant, never the empty one. A
+	// bundle is tenant-scoped data, so an empty tenant trips dbx's no-tenant guard
+	// (a red-checked control) rather than returning ErrNoActiveBundle, and a fresh
+	// deployment -- one with no active bundle yet, a supported state -- failed to
+	// start reading one. Passing the configured tenant lets a genuinely empty
+	// bundle table return ErrNoActiveBundle, which this function treats as a clean
+	// start, while a real active bundle still has its dispatches checked.
+	_, content, err := bundlesSvc.Active(ctx, pool.For(tenant, "bundles").TenantID())
 	if err != nil {
 		if errors.Is(err, bundles.ErrNoActiveBundle) {
 			log.Info("no active bundle yet; the dispatch check has nothing to do")

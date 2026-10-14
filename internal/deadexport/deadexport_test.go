@@ -99,7 +99,6 @@ var (
 		"internal/correlator.MaxCandidates": {Symbol: "internal/correlator.MaxCandidates", Why: "published bound: the ceiling on correlation candidates per trigger. It is a cost limit an operator can lower, so the number belongs to the configuration contract"},
 		"internal/correlator.ErrNoTrigger":  {Symbol: "internal/correlator.ErrNoTrigger", Why: "sentinel: the correlator returns it when a window held no trigger, and the reason appears in the window report an operator reads"},
 
-		"internal/dbx.ErrNoTenant":  {Symbol: "internal/dbx.ErrNoTenant", Why: "sentinel: the connection layer refuses without a tenant context, which is invariant 5's first half made mechanical, and the refusal is reported to the operator in prose rather than by comparison"},
 		"internal/dbx.ParseDSN":     {Symbol: "internal/dbx.ParseDSN", Why: "published parser for the site's DSN, which is a configuration format an operator writes by hand. It is named in the deployment documentation and is the parser the migrator and the install path both document"},
 		"internal/dbx.SystemTenant": {Symbol: "internal/dbx.SystemTenant", Why: "published constant: the tenant id the system-level operations run under. It is a value in a configuration file and in a migration, not an internal detail"},
 

@@ -183,6 +183,15 @@ WITH candidate AS (
       FROM jobs
      WHERE run_after <= now()
        AND ($4 = '' OR tenant_id = $4)
+       -- A worker serves ONE queue, and the claim must say so. Without this
+       -- filter every worker claimed every queue's jobs, so the vlm worker and
+       -- the evidence_fetch worker raced on the same row: whichever claimed it
+       -- first ran, and the loser's handler refused the other's job ("job is on
+       -- queue vlm, not evidence_fetch"), backing it off and dead-lettering work
+       -- a correct worker was already looping to pick up. The empty-name escape
+       -- mirrors the tenant filter above: a caller that names no queue claims
+       -- every queue, which is what the package's own lease tests exercise.
+       AND ($5 = '' OR queue = $5)
        AND (
              status IN ('pending', 'failed')
              -- A job whose worker died is still status=leased. Without this
@@ -244,7 +253,7 @@ func (q *Worker) Claim(ctx context.Context, tenantID, owner string, limit int) (
 
 	var out []Job
 	err := q.Pool.InSystemTenant(ctx, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, claimSQL, owner, seconds, limit, tenantID)
+		rows, err := tx.Query(ctx, claimSQL, owner, seconds, limit, tenantID, string(q.Name))
 		if err != nil {
 			return fmt.Errorf("jobs: claim: %w", err)
 		}
