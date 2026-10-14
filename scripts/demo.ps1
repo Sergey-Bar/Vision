@@ -257,6 +257,10 @@ if ($obs) {
     Dim 'The all-zero modelHash is deliberate. "Never asked" can never be mistaken'
     Dim 'for an attribution, and a rule consuming this signal must say what it does'
     Dim 'about it. A missing observation is never a negative answer.'
+    Dim ''
+    Dim 'With an engine bound the plane answers for real. This act demos the ABSENCE'
+    Dim 'path because that is the artefact this run wrote; the boot gate stands the'
+    Dim 'plane up and records a live, non-degraded, cited investigate/v1 observation.'
     AddResult "4" "THE AI PLANE" "Absence is stated, never inferred." `
         "degraded=true, reason=no_runtime, insufficientEvidence=true, modelHash=000...000. Three different absence reasons stay distinguishable and no rule treats one as a negative." `
         "HONEST" "Invariant 3: a missing AI observation is never a negative observation."
