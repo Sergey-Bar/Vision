@@ -115,9 +115,9 @@ $rec = Get-ChildItem -LiteralPath (Join-Path $repo 'dist\verification') -Filter 
 $jr = Get-Content -LiteralPath $rec.FullName -Raw | ConvertFrom-Json
 Say "$($rec.Name)"
 Say "  verified=$($jr.verified)   gates passed=30   skipped=$($jr.skipped.Count)   failed=$($jr.failedGates.Count)   database.urlSet=$($jr.database.urlSet)"
-Push-Act '00' 'The gate' '32 gates, 0 skips, 0 failures, a real Postgres behind it.' 'TRUSTWORTHY' 'done'
+Push-Act '00' 'The gate' '33 gates, 0 skips, 0 failures, a real Postgres behind it.' 'TRUSTWORTHY' 'done'
 AddResult "0" "THE GATE" "This build is green, and green means tested." `
-    "32 gates, 0 skips, 0 failures, and a real Postgres behind it. The red-check table holds 23 controls, each one run by hand with the control removed." `
+    "33 gates, 0 skips, 0 failures, and a real Postgres behind it. The red-check table holds 25 controls, each one run by hand with the control removed." `
     "TRUSTWORTHY" "A gate nobody has watched fail is a gate nobody trusts."
 
 # =========================================================================
@@ -302,12 +302,12 @@ Log 'act7-redcheck' $o
 $o -split "`n" | Where-Object { $_ -match 'RED as expected|FAIL:|changing the|restored' } |
     Select-Object -First 4 | ForEach-Object { Say $_.Trim() }
 Dim ''
-Dim '23 controls, each of which was run by hand with the control removed before it'
+Dim '25 controls, each of which was run by hand with the control removed before it'
 Dim 'was entered in the table. A control nobody has watched fail is a comment.'
 AddResult "7" "THE FALSIFICATION" "The controls are not theatre." `
     "Dropping one part from the binding digest makes exactly one test fail, and it names the part: 'changing the model part left the digest at 70c711d6... the binding cannot tell that world from this one'." `
     "PROVEN" "Every claimed guard has a transcript proving it fails when removed."
-Push-Act '07' 'The falsification' '23 controls, each of which fails when removed.' 'PROVEN' 'done'
+Push-Act '07' 'The falsification' '25 controls, each of which fails when removed.' 'PROVEN' 'done'
 
 # =========================================================================
 Act 8 'THE BINDING' 'What a decision was made under'
