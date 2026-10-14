@@ -292,9 +292,10 @@
     "cmd/",
     "tools/",
     "migrations/",
-    "scripts/"
+    "scripts"
   ],
   "build": [
     "race"
   ]
 }
+
