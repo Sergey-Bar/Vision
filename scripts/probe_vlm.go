@@ -30,25 +30,32 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// os.Exit skips defers, so calling it inside a function that has one is how the
+// pool-leak flag from gocritic appears -- the exit lives here, the defers live in
+// run(), so the pool closes before the process ends.
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
 	tenant := os.Getenv("PROBE_TENANT")
 	site := os.Getenv("PROBE_SITE")
 	root := os.Getenv("SP_EVIDENCE_ROOT")
 	if tenant == "" || site == "" || root == "" {
 		fmt.Fprintln(os.Stderr, "probe_vlm: PROBE_TENANT, PROBE_SITE and SP_EVIDENCE_ROOT are required")
-		os.Exit(2)
+		return 2
 	}
 
 	ctx := context.Background()
 	cfg := dbx.DefaultConfig()
 	if err := cfg.ApplyDSN(os.Getenv("SP_DATABASE_URL")); err != nil {
 		fmt.Fprintf(os.Stderr, "probe_vlm: SP_DATABASE_URL: %v\n", err)
-		os.Exit(2)
+		return 2
 	}
 	pool, err := dbx.Open(ctx, cfg, os.Getenv("SP_DATABASE_PASSWORD"))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "probe_vlm: open: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 	defer pool.Close()
 
@@ -59,7 +66,7 @@ func main() {
 		`SELECT incident_id FROM incidents WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT 1`,
 		tenant).Scan(&incident); err != nil {
 		fmt.Fprintf(os.Stderr, "probe_vlm: no incident for tenant %q: %v (seed the tenant first)\n", tenant, err)
-		os.Exit(1)
+		return 1
 	}
 
 	// A structured fact, the shape the investigate engine reads. Determining bytes:
@@ -75,12 +82,12 @@ func main() {
 	store, err := evidence.New(evidence.Options{Root: root})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "probe_vlm: evidence store: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 	obj, err := store.Put(tenant, bytes.NewReader(facts))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "probe_vlm: put evidence: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 
 	payload, _ := json.Marshal(map[string]any{
@@ -107,7 +114,7 @@ func main() {
 		return err
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "probe_vlm: enqueue: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 
 	fmt.Printf("incident=%s\tevidenceId=%s\tevidenceSHA256=%s\n",
@@ -140,9 +147,9 @@ func main() {
 			// "none" is the non-degraded case, not a degraded one.
 			nonDegraded := dr == "" || dr == "none"
 			if nonDegraded && citations != "" && citations != "[]" && !insufficient {
-				os.Exit(0)
+				return 0
 			}
-			os.Exit(1)
+			return 1
 		}
 		if time.Now().After(deadline) {
 			if err != nil {
@@ -150,7 +157,7 @@ func main() {
 			} else {
 				fmt.Fprintf(os.Stderr, "probe_vlm: no investigate observation within 45s (last model=%q)\n", model)
 			}
-			os.Exit(1)
+			return 1
 		}
 		time.Sleep(1 * time.Second)
 	}

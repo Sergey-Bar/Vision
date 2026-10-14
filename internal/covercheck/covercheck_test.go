@@ -131,6 +131,32 @@ func TestARiseInsideTheMarginIsNotAFinding(t *testing.T) {
 	}
 }
 
+func TestAFloorWithItsOwnMarginOverridesTheBaseline(t *testing.T) {
+	// 20 blocks of 1 statement, 11 covered: 55%.
+	in := profile(blocks("internal/rules", "engine.go", 20, 1, 11)...)
+	pkgs, _ := covercheck.Parse(strings.NewReader(in), mod+"/")
+
+	// The floor names its own margin of 5, so the ratchet ceiling is 52 + 5 = 57
+	// and the three-point rise fits -- no finding. A package whose coverage is
+	// legitimately load-variable (the fault-injection drills, which cover different
+	// statements depending on scheduling) needs a wide, named tolerance without
+	// loosening the comparison for every other package.
+	b := covercheck.Baseline{Margin: 2, Floors: map[string]covercheck.Floor{
+		"internal/rules": {Percent: 52, Measured: "2026-10-02", Margin: 5},
+	}}
+	if f := covercheck.Check(pkgs, b, "race"); len(f) != 0 {
+		t.Errorf("a floor's own margin did not override the baseline's: %v", f)
+	}
+
+	// The same numbers with no margin on the floor fall back to the baseline's 2,
+	// whose ceiling (54) the rise crosses - so the pass above was the per-floor
+	// margin doing the work, not the numbers being too low to trip anything.
+	b.Floors["internal/rules"] = covercheck.Floor{Percent: 52, Measured: "2026-10-02"}
+	if f := covercheck.Check(pkgs, b, "race"); len(f) != 1 {
+		t.Errorf("the baseline margin should apply when the floor names none: %v", f)
+	}
+}
+
 func TestAPackageWithNoFloorIsAFinding(t *testing.T) {
 	in := profile(mod + "/internal/newthing/new.go:1.1,2.2 4 4")
 	pkgs, _ := covercheck.Parse(strings.NewReader(in), mod+"/")

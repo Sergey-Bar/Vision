@@ -307,7 +307,8 @@
   "excluded": [
     "cmd/",
     "tools/",
-    "migrations/"
+    "migrations/",
+    "scripts/"
   ],
   "build": [
     "race"
