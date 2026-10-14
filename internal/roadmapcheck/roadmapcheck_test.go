@@ -60,8 +60,8 @@ func TestDeriveCountsTheTreeDirectly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Derive: %v", err)
 	}
-	if d.Packages != 87 {
-		t.Errorf("Go packages: got %d, want 87", d.Packages)
+	if d.Packages != 88 {
+		t.Errorf("Go packages: got %d, want 88", d.Packages)
 	}
 	if d.Migrations != 26 {
 		t.Errorf("migrations: got %d, want 26", d.Migrations)

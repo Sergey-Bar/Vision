@@ -7,7 +7,7 @@ incidents, and records everything in a hash-chained audit ledger.
 
 This file is for two readers: a new engineer on day one, and an AI agent with no
 prior context. It answers *where things are* and *what each package is for* so
-neither of you has to open 87 packages to find out.
+neither of you has to open 88 packages to find out.
 
 It is a map, not an architecture document. It does not restate build state —
 `docs/status.md` is the only source of truth for that — and it does not restate
