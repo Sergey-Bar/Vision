@@ -8,9 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 )
 
 // FileSecretStore wraps MFA secrets with AES-256-GCM under a key read from a
@@ -40,10 +43,12 @@ import (
 //
 // # What it refuses
 //
-// A short key, a wrong-length key, a readable-by-others key file, and a
-// ciphertext this store did not produce. Each is refused with the reason, because
-// "could not unwrap the secret" with no further detail is a dead end for whoever
-// is locked out.
+// A short key, a wrong-length key, a readable-by-others key file on a platform
+// whose mode bits enforce it, and a ciphertext this store did not produce. Each
+// is refused with the reason, because "could not unwrap the secret" with no
+// further detail is a dead end for whoever is locked out. The world-readable key
+// file is a warning rather than a refusal on Windows, where the mode is
+// advisory and the ACL is the control -- see checkPermissions.
 type FileSecretStore struct {
 	keyPath string
 }
@@ -200,19 +205,78 @@ func (s *FileSecretStore) key() ([]byte, error) {
 	return raw, nil
 }
 
-// checkPermissions warns when the key file is readable by anyone else.
+// checkPermissions refuses when the key file is readable by anyone other than
+// its owner, and only on a platform where the mode bits decide that.
 //
-// A warning rather than a refusal: on Windows the mode bits are advisory and a
-// hard refusal would make the product unstartable on the platform most of its
-// pilots run on. The check is done where the mode actually means something.
+// The split is the point, and it is stated rather than inferred. On POSIX the
+// mode is the mechanism, so a world-readable key is a refusal. On Windows the
+// mode is advisory -- os.Chmod cannot clear the bits and the ACL is what
+// actually protects the file -- so the same condition is reported once as a
+// warning and the store continues. The previous behaviour returned the
+// refusal on every platform, and because os.Chmod cannot produce 0400 on
+// Windows the mode it checked was permanently 0666 there: the sole path that
+// enrols an administrator's TOTP factor failed after migrate and connect had
+// both succeeded, which reads as a TOTP fault and is nothing of the kind.
+// Refusing everywhere is one defect; enforcing nowhere would be the other.
 func (s *FileSecretStore) checkPermissions() error {
 	info, err := os.Stat(s.keyPath)
 	if err != nil {
 		return fmt.Errorf("identity: stat the secret key: %w", err)
 	}
-	if mode := info.Mode().Perm(); mode&0o077 != 0 {
-		return fmt.Errorf("identity: the secret key at %s is readable by anyone other than its "+
-			"owner (mode %04o); run securityctl install to set it to 0400", s.keyPath, mode)
+	if problem := keyPermissionProblem(info.Mode().Perm()); problem != "" {
+		if permissionBitsMeanSomething() {
+			return fmt.Errorf("identity: the secret key at %s is %s; run securityctl "+
+				"install to set it to 0400", s.keyPath, problem)
+		}
+		warnAdvisoryKeyPermissions(s.keyPath, problem)
 	}
 	return nil
+}
+
+// keyPermissionProblem reports why a key file's mode is unacceptable -- naming
+// the offending mode -- or "" when it is acceptable.
+//
+// Pure over the mode. The rule is identical on every platform; only whether it
+// is ENFORCED differs, and that is permissionBitsMeanSomething's decision. The
+// separation is what lets the rule be tested on a host whose mode bits enforce
+// nothing, which is the only way to prove the control on the very machine that
+// does not enforce it. Without this split the rule is a POSIX assertion that is
+// invisible where most pilots run.
+func keyPermissionProblem(mode os.FileMode) string {
+	if mode.Perm()&0o077 == 0 {
+		return ""
+	}
+	return fmt.Sprintf("readable by anyone other than its owner (mode %04o)", mode.Perm())
+}
+
+// permissionBitsMeanSomething reports whether this platform decides file access
+// by the mode bits. True on POSIX; false on Windows and Plan 9, where the mode
+// is advisory and the ACL -- or the read-only flag -- is the real control.
+//
+// This is the entire platform split in one predicate, so it is read rather
+// than guessed: concluding "the mode does not mean anything here" from which
+// bits happened to be set is how a genuinely world-readable key on a real POSIX
+// host becomes indistinguishable from an advisory one on Windows. It takes no
+// argument and reads runtime.GOOS directly so that a test can assert the
+// control in both directions on the single machine it is running on.
+func permissionBitsMeanSomething() bool {
+	return runtime.GOOS != "windows" && runtime.GOOS != "plan9"
+}
+
+// warnAdvisoryKeyPermissions reports a world-readable key file once per process,
+// on a platform where the mode does not enforce it. Once rather than every
+// operation, because checkPermissions is reached through every wrap and every
+// unwrap, and a warning nobody can read past the first of a thousand is not a
+// warning. It is a warning and not a refusal by design: refusing an advisory
+// condition would make the product unstartable on Windows, and silently
+// accepting it would let a genuinely exposed key look protected.
+var advisoryKeyWarned sync.Once
+
+func warnAdvisoryKeyPermissions(path, problem string) {
+	advisoryKeyWarned.Do(func() {
+		slog.Default().Warn(
+			"the secret key file is world-readable; this platform's mode bits are advisory "+
+				"and do not enforce 0400, so restrict the file's ACL or run securityctl install to protect it",
+			"path", path, "problem", problem)
+	})
 }
