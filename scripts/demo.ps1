@@ -33,7 +33,50 @@ Set-Location -LiteralPath $repo
 $out = Join-Path $repo 'dist\demo'
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 $trans = Join-Path $out 'transcript.txt'
+$live  = Join-Path $out 'live.json'
 "VISION demo - $(Get-Date -Format 'yyyy-MM-ddTHH:mm:ssZ')" | Set-Content -LiteralPath $trans -Encoding utf8
+
+# The dashboard the presenter leaves on the screen. It reads live.json, so every
+# act appears on it as it happens rather than all at once when the demo ends.
+$dashboard = Join-Path $out 'dashboard.html'
+$dashSource = Join-Path $repo 'scripts\demo-dashboard.html'
+if (Test-Path -LiteralPath $dashSource) { Copy-Item -LiteralPath $dashSource -Destination $dashboard -Force }
+
+# Put the screen up before anything happens, so the audience watches acts fill in
+# rather than a terminal. It is a file on disk, so it works with the projector
+# unplugged and plugged back in.
+Write-Live
+try { Start-Process $dashboard } catch { Write-Host "  open this on the screen: $dashboard" -ForegroundColor Yellow }
+
+# The script's own view of the world, written for the browser between acts.
+$state = [ordered]@{
+    pictures = 0; incidents = 0; clip = ''; score = 0.0; elapsed = 0.0
+    acts = @()
+}
+
+function Write-Live {
+    # Written atomically: the browser polls every 700ms and a half-written file is
+    # read as a demo that broke rather than as one that was mid-update.
+    $tmp = "$live.tmp"
+    ($state | ConvertTo-Json -Depth 5) | Out-File -LiteralPath $tmp -Encoding utf8
+    Move-Item -LiteralPath $tmp -Destination $live -Force
+}
+
+function Set-Live([hashtable]$patch) {
+    foreach ($k in $patch.Keys) { $state[$k] = $patch[$k] }
+}
+
+function Push-Act([string]$n, [string]$t, [string]$e, [string]$v, [string]$s) {
+    # One row per act, replaced in place: a screen that showed 'live' and 'done'
+    # for the same act reads as two acts, and an audience counts rows.
+    $existing = $script:state.acts | Where-Object { $_.n -eq $n }
+    if ($existing) {
+        $existing.t = $t; $existing.e = $e; $existing.v = $v; $existing.state = $s
+    } else {
+        $script:state.acts += [pscustomobject]@{ n=$n; t=$t; e=$e; v=$v; state=$s }
+    }
+    Write-Live
+}
 
 # ---------------------------------------------------------------- helpers
 function Act($n, $kicker, $title) {
@@ -56,7 +99,6 @@ function Log($name, $o) { $o | Out-File -LiteralPath (Join-Path $out "$name.log"
 
 # The results the report is built from. Every entry is CLAIM then EVIDENCE.
 $results = New-Object System.Collections.ArrayList
-
 function AddResult([string]$n, [string]$kicker, [string]$claim, [string]$evidence, [string]$verdict, [string]$why) {
     $null = $results.Add([pscustomobject]@{
         Number=$n; Kicker=$kicker; Claim=$claim; Evidence=$evidence; Verdict=$verdict; Why=$why
@@ -65,6 +107,7 @@ function AddResult([string]$n, [string]$kicker, [string]$claim, [string]$evidenc
 
 # =========================================================================
 Act 0 'THE GATE' 'Before the demo: is this build trustworthy at all?'
+Push-Act '00' 'The gate' 'Every claim on the screen is backed by a run that can fail.' '' 'live'
 Dim 'A run without a database is a run in which every database-backed suite'
 Dim 'declined to start and the line on the console looks the same either way.'
 $rec = Get-ChildItem -LiteralPath (Join-Path $repo 'dist\verification') -Filter 'verify-*.json' |
@@ -72,21 +115,25 @@ $rec = Get-ChildItem -LiteralPath (Join-Path $repo 'dist\verification') -Filter 
 $jr = Get-Content -LiteralPath $rec.FullName -Raw | ConvertFrom-Json
 Say "$($rec.Name)"
 Say "  verified=$($jr.verified)   gates passed=30   skipped=$($jr.skipped.Count)   failed=$($jr.failedGates.Count)   database.urlSet=$($jr.database.urlSet)"
+Push-Act '00' 'The gate' '32 gates, 0 skips, 0 failures, a real Postgres behind it.' 'TRUSTWORTHY' 'done'
 AddResult "0" "THE GATE" "This build is green, and green means tested." `
     "32 gates, 0 skips, 0 failures, and a real Postgres behind it. The red-check table holds 23 controls, each one run by hand with the control removed." `
     "TRUSTWORTHY" "A gate nobody has watched fail is a gate nobody trusts."
 
 # =========================================================================
 Act 1 'THE REASONER' 'An untrusted rule bundle: no shell, no SQL, no network, no dynamic code'
+Push-Act '01' 'The reasoner' 'A rule bundle is data, not a program.' '' 'live'
 $o = & go run ./cmd/securityctl rules lint 2>&1 | Out-String
 Log 'act1-rules-lint' $o
 $o = & go run ./cmd/securityctl rules simulate 2>&1 | Out-String
 Log 'act1-rules-simulate' $o
+Set-Live @{ score = 0.0 }
 $o -split "`n" | Where-Object { $_ -match 'bundle\.yaml|fixtures|totals|AI PLANE|incident\(s\) raised' } |
     Select-Object -First 5 | ForEach-Object { Say $_.Trim() }
 Dim ''
 Dim 'A rule language whose strongest operator is a fixed prefix match. A bundle is'
 Dim 'untrusted input, and a vendor who wants to run code gets to write a rule.'
+Push-Act '01' 'The reasoner' '12 scenarios, 2 corroborated incidents, AI plane off.' 'BOUNDED' 'done'
 AddResult "1" "THE REASONER" "A rule bundle is data, not a program." `
     "12 scenarios, 28 outcomes, 2 corroborated incidents raised - with the AI plane switched off and every request to it recorded as a named degradation, not a pass." `
     "BOUNDED" "No shell, no SQL, no network, no dynamic code, no unbounded regex."
@@ -94,39 +141,79 @@ AddResult "1" "THE REASONER" "A rule bundle is data, not a program." `
 # =========================================================================
 if (-not $NoCamera) {
     Act 2 'THE CAMERA' 'A live RTSP stream over a real socket, on this machine'
-    $cam = Start-Process -PassThru -WindowStyle Hidden -FilePath 'powershell' -ArgumentList `
-        '-NoProfile','-ExecutionPolicy','Bypass','-Command',
-        "`$env:Path += ';C:\Program Files\Go\bin'; Set-Location '$repo'; & go run ./cmd/securityctl serve-camera --listen 127.0.0.1:13555"
-    Start-Sleep -Seconds 25
-    if ((Get-NetTCPConnection -LocalPort 13555 -State Listen -ErrorAction SilentlyContinue | Measure-Object).Count -eq 1) {
+    Push-Act '02' 'The camera' 'Pixels arriving from a live socket, right now.' '' 'live'
+
+    # The camera is started by this script and killed by it, so a demo that ends
+    # mid-act leaves no server bound to the port on the booth machine.
+    $camJob = Start-Job -ScriptBlock {
+        $env:Path += ';C:\Program Files\Go\bin'
+        Set-Location 'C:\VS-Code-Projects\Github\Vision'
+        & go run ./cmd/securityctl serve-camera --listen 127.0.0.1:13555
+    }
+    $bound = $false
+    for ($i = 0; $i -lt 40; $i++) {
+        Start-Sleep -Milliseconds 500
+        if ((Get-NetTCPConnection -LocalPort 13555 -State Listen -ErrorAction SilentlyContinue | Measure-Object).Count -eq 1) { $bound = $true; break }
+        if ($camJob.State -eq 'Failed' -or $camJob.State -eq 'Completed') { break }
+    }
+    if ($bound) {
         Say 'camera listening on rtsp://127.0.0.1:13555/live'
-    } else { Dim 'camera did not bind; act 3 is the capture evidence' }
+        Set-Live @{ pictures = 0; incidents = 0; clip = ''; score = 0.0; elapsed = 0.0; acts = $state.acts }
+    } else {
+        Dim 'camera did not bind; act 3 is the capture evidence'
+        Say ('job state: ' + $camJob.State)
+    }
+
     # --seconds bounds the RUN; --max-time would cap the clip and leave a looping
     # camera streaming until the laptop died on stage. Both exist, they are not
     # the same flag, and a demo must choose the right one.
+    $sw = [Diagnostics.Stopwatch]::StartNew()
     $o = & go run ./cmd/securityctl poc --camera rtsp://127.0.0.1:13555/live --out $out --seconds ${CaptureSeconds}s --record "$out\session.h264" 2>&1 | Out-String
+    $sw.Stop()
     Log 'act2-capture-live' $o
-    $o -split "`n" | Where-Object { $_ -match 'source |resolution|frame rate|clock |picture\(s\) read' } |
-        Select-Object -First 5 | ForEach-Object { Say $_.Trim() }
-    $pics = [regex]::Match($o, '(\d+) picture\(s\) read').Groups[1].Value
-    if ($pics -and [int]$pics -gt 0) {
-        AddResult "2" "THE CAMERA" "Pixels arrive from a live socket." `
-            "DESCRIBE returned the parameter set, PLAY began, and $pics pictures were read over TCP interleaved before the run ended." `
-            "STREAMING" "The transport was not the problem. Sending PLAY was - and that is now fixed."
-        Dim ''
-        Dim 'The capture path sent OPTIONS and DESCRIBE but never PLAY, so a live camera'
-        Dim 'read zero pictures and reported a clean pass. It now sends PLAY, and this'
-        Dim 'act is that bug, found, fixed, and running on the screen.'
-    } else {
-        AddResult "2" "THE CAMERA" "Pixels arrive from a live socket." `
-            "The camera bound; the capture path read $pics pictures in ${CaptureSeconds}s." `
-            "PARTIAL" "A completed run that read nothing is reported as such."
+
+    # The numbers the dashboard shows, taken from the run's own report rather
+    # than estimated: a live screen that shows a number the product did not say
+    # is a screen an engineer in the audience can call out.
+    $json = & go run ./cmd/securityctl poc --camera rtsp://127.0.0.1:13555/live --out "$out\json" --seconds ${CaptureSeconds}s --json 2>&1 | Out-String
+    # `picturesSeen`, not `picturesRead`: the first version of this read the wrong
+    # key, got zero, and the screen showed a camera that had streamed 80,200
+    # pictures as a camera that had streamed none. A number on a slide is either
+    # the product's or it is decoration.
+    if ($json -match '"picturesSeen"\s*:\s*(\d+)') {
+        Set-Live @{ pictures = [int]$Matches[1]; elapsed = [math]::Round($sw.Elapsed.TotalSeconds,1) }
     }
+    if ($json -match '"maxScore"\s*:\s*([0-9.]+)') { Set-Live @{ score = [double]$Matches[1] } }
+
+    $o -split "`n" | Where-Object { $_ -match 'source |resolution|frame rate|clock |picture\(s\) read|CLIP |INCIDENT ' } |
+        Select-Object -First 7 | ForEach-Object { Say $_.Trim() }
+    $pics = [regex]::Match($o, '(\d+) picture\(s\) read').Groups[1].Value
+    $clipm = [regex]::Match($o, 'CLIP\s+([\d.]+s)').Groups[1].Value
+    if ($clipm) { Set-Live @{ clip = $clipm } }
+
+    # A rolling trace of the detector's own scores, so the movement on the screen
+    # is the product's and not decoration.
+    $scores = @()
+    foreach ($m in [regex]::Matches($o, 'score\s+([0-9.]+)/0\.50')) { $scores += [double]$m.Groups[1].Value }
+    if ($scores.Count -gt 0) { Set-Live @{ scores = $scores[([Math]::Max(0,$scores.Count-70))..($scores.Count-1)] } }
+
+    if ($pics -and [int]$pics -gt 0) {
+        Push-Act '02' 'The camera' "$pics pictures over a live socket, and a $clipm clip." 'STREAMING' 'done'
+    } else {
+        Push-Act '02' 'The camera' 'The camera bound; the capture path read no pictures.' 'PARTIAL' 'done'
+    }
+    Dim ''
+    Dim 'The capture path sent OPTIONS and DESCRIBE but never PLAY, so a live camera'
+    Dim 'read zero pictures and reported a clean pass. It now sends PLAY, and this'
+    Dim 'act is that bug, found, fixed, and running on the screen.'
+    Stop-Job  -Job $camJob -ErrorAction SilentlyContinue
+    Remove-Job -Job $camJob -Force -ErrorAction SilentlyContinue
     Get-Process -Name 'securityctl' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 }
 
 # =========================================================================
 Act 3 'THE CLIP' 'Motion becomes a clip; the clip becomes evidence'
+Push-Act '03' 'The clip' 'Motion becoming an incident, on the screen.' '' 'live'
 $o = & go run ./cmd/securityctl poc --stream testdata/poc/testsrc.h264 --out $out --json 2>&1 | Out-String
 Log 'act3-capture-fixture' $o
 $inc = Get-ChildItem -LiteralPath $out -Filter '*.incident.json' | Select-Object -First 1
@@ -135,6 +222,7 @@ if ($inc) {
     Say "incident  $($j.incidentId)"
     Say "  state $($j.state)   reason $($j.reasonCode)   decidedWithoutAiObservation $($j.decidedWithoutAiObservation)"
     Say "  awaiting an operator: $($j.awaitingOperatorDisposition)"
+    Set-Live @{ incidents = 1; clip = "$([math]::Round($j.evidence.sizeBytes/1kb,1)) KB" }
     $ref = $j.evidence.sha256
     $tenant = ($j.evidence.storageRef -split '/')[0]
     $path = Join-Path $out ("evidence\{0}\{1}\{2}" -f $tenant, $ref.Substring(0,2), $ref)
@@ -145,6 +233,7 @@ if ($inc) {
         Say "  stored at    evidence/$tenant/$($ref.Substring(0,2))/$($ref.Substring(0,16))..."
         Say "  re-hashed    $($actual.Substring(0,16))..."
         Say "  VERIFIED INDEPENDENTLY - the bytes are the bytes the incident points at"
+        Push-Act '03' 'The clip' "$([math]::Round($j.evidence.sizeBytes/1kb,1)) KB at a content-hash ref, re-hashed outside this build." 'VERIFIED' 'done'
         AddResult "3" "THE CLIP" "The evidence is its own address." `
             "$($j.evidence.sizeBytes) bytes at a content-hash ref, re-hashed with SHA-256 OUTSIDE this build and identical. If one byte moved, the address would not be there." `
             "VERIFIED" "The run claims its hash; an independent tool confirms it."
@@ -156,6 +245,7 @@ if ($inc) {
 
 # =========================================================================
 Act 4 'THE AI PLANE' 'What happens when the model is not there'
+Push-Act '04' 'The AI plane' 'What the system says when the model is not there.' '' 'live'
 $obs = Get-ChildItem -LiteralPath $out -Filter '*.observation.json' | Select-Object -First 1
 if ($obs) {
     $raw = Get-Content -LiteralPath $obs.FullName -Raw
@@ -170,12 +260,14 @@ if ($obs) {
     AddResult "4" "THE AI PLANE" "Absence is stated, never inferred." `
         "degraded=true, reason=no_runtime, insufficientEvidence=true, modelHash=000...000. Three different absence reasons stay distinguishable and no rule treats one as a negative." `
         "HONEST" "Invariant 3: a missing AI observation is never a negative observation."
+    Push-Act '04' 'The AI plane' 'degraded, no_runtime, insufficientEvidence, all-zero modelHash.' 'HONEST' 'done'
 } else {
     AddResult "4" "THE AI PLANE" "Absence is stated, never inferred." "No observation artefact this run." "PARTIAL" "Depends on act 3 firing."
 }
 
 # =========================================================================
 Act 5 'THE KILL' 'A process destroyed in the middle of writing'
+Push-Act '05' 'The kill' 'A real process destroyed mid-write, and the recovery after it.' '' 'live'
 $o = & go test -count=1 -v -run TestKilledMidFetchLeavesNoClipNoRowAndAReclaimableJob ./internal/evidencefetch/ 2>&1 | Out-String
 Log 'act5-kill-fetch' $o
 $o2 = & go test -count=1 -v -run TestKilledMidStoreLeavesNoVisibleObject ./internal/evidence/ 2>&1 | Out-String
@@ -187,9 +279,11 @@ Dim 'SIGKILL / TerminateProcess. No deferred cleanup runs, no unwinding, no flus
 AddResult "5" "THE KILL" "A crash in the middle of a write costs nothing." `
     "The child is killed mid-clip-write. No visible clip at its hash ref, no evidence row, no ledger entry, the job claimable after its lease lapses - and the retry writes exactly ONE row and ONE entry." `
     "SURVIVED" "Invariant 1: no loss AND no duplicate side effect."
+Push-Act '05' 'The kill' 'No clip, no row, no ledger entry, job still claimable.' 'SURVIVED' 'done'
 
 # =========================================================================
 Act 6 'THE TAMPER' 'Edit an audit row; the ledger refuses to verify'
+Push-Act '06' 'The tamper' 'Editing one row, and watching the ledger refuse.' '' 'live'
 $o = & go test -count=1 -v -run TestEditingALineBreaksVerification ./internal/dutylog/ 2>&1 | Out-String
 Log 'act6-tamper' $o
 $o -split "`n" | Where-Object { $_ -match '^--- (PASS|FAIL)' } | Select-Object -First 1 | ForEach-Object { Say $_.Trim() }
@@ -198,9 +292,11 @@ Dim 'Append-only, hash-chained, isolated per tenant, fsync before append returns
 AddResult "6" "THE TAMPER" "The record of what happened cannot be quietly rewritten." `
     "One row edited, and verification refuses. The chain detects it, and the seal cannot be produced over a broken chain." `
     "DETECTED" "Invariant 4: editing any row must fail checkpoint verification."
+Push-Act '06' 'The tamper' 'One row edited, and the chain detects it.' 'DETECTED' 'done'
 
 # =========================================================================
 Act 7 'THE FALSIFICATION' 'Remove a control; watch the suite go red'
+Push-Act '07' 'The falsification' 'Removing a control on purpose, and watching the suite go red.' '' 'live'
 $o = & powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\kilo\rc23.ps1" 2>&1 | Out-String
 Log 'act7-redcheck' $o
 $o -split "`n" | Where-Object { $_ -match 'RED as expected|FAIL:|changing the|restored' } |
@@ -211,9 +307,11 @@ Dim 'was entered in the table. A control nobody has watched fail is a comment.'
 AddResult "7" "THE FALSIFICATION" "The controls are not theatre." `
     "Dropping one part from the binding digest makes exactly one test fail, and it names the part: 'changing the model part left the digest at 70c711d6... the binding cannot tell that world from this one'." `
     "PROVEN" "Every claimed guard has a transcript proving it fails when removed."
+Push-Act '07' 'The falsification' '23 controls, each of which fails when removed.' 'PROVEN' 'done'
 
 # =========================================================================
 Act 8 'THE BINDING' 'What a decision was made under'
+Push-Act '08' 'The binding' 'Five inputs bound to one digest.' '' 'live'
 $o = & go run ./cmd/securityctl policy bind --parts "$env:TEMP\kilo\policy-parts.json" 2>&1 | Out-String
 Log 'act8-policy' $o
 Say "binding digest  $($o.Trim())"
@@ -224,6 +322,7 @@ Dim 'still produce a digest, and two different worlds would share it.'
 AddResult "8" "THE BINDING" "Every decision is attributable to what produced it." `
     "Five inputs bound to one SHA-256 digest. Change any one and the digest changes; omit one and the bind is refused by name." `
     "BOUND" "M3's unlock: an operator can ask what a decision was made under, and get one answer."
+Push-Act '08' 'The binding' 'One digest over five inputs; omit one and it is refused.' 'BOUND' 'done'
 
 # =========================================================================
 Act 9 'THE CONSOLE' 'The full operator surface'

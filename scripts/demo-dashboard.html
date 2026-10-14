@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VISION — live operator console</title>
+<style>
+  :root{
+    --bg:#070910; --panel:#0f131c; --panel2:#141926; --line:#1e2532;
+    --fg:#e9eef7; --dim:#8794a8; --faint:#525e72;
+    --ok:#3ddc84; --amber:#ffb020; --cyan:#39c2ff; --violet:#b388ff; --red:#ff5757;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--fg); overflow:hidden;
+    font:15px/1.55 "Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .app{display:grid;grid-template-columns:1fr 380px;height:100vh}
+
+  /* ---- left: the console ---- */
+  .main{padding:26px 30px;overflow-y:auto;display:flex;flex-direction:column;gap:18px}
+  .brand{display:flex;align-items:center;gap:16px}
+  .brand .mark{
+    width:34px;height:34px;border-radius:8px;flex:none;
+    background:linear-gradient(135deg,var(--cyan),var(--violet));
+    box-shadow:0 0 24px rgba(57,194,255,.35);
+  }
+  .brand h1{margin:0;font-size:13px;letter-spacing:.4em;text-transform:uppercase;font-weight:650}
+  .brand .sub{font-size:11.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--faint)}
+  .clock{margin-left:auto;font:600 13px/1 ui-monospace,Consolas,monospace;color:var(--dim);letter-spacing:.06em}
+
+  .hero{
+    background:linear-gradient(180deg,var(--panel),var(--panel2));
+    border:1px solid var(--line);border-radius:14px;padding:22px 24px;position:relative;overflow:hidden;
+  }
+  .hero:before{
+    content:"";position:absolute;inset:0;
+    background:radial-gradient(600px 200px at 20% 0%,rgba(57,194,255,.10),transparent 70%);
+  }
+  .hero h2{margin:0 0 6px;font-size:26px;font-weight:680;letter-spacing:-.015em;position:relative}
+  .hero p{margin:0;color:var(--dim);position:relative}
+  .hero .feed{
+    margin-top:18px;display:flex;gap:22px;align-items:flex-end;position:relative;flex-wrap:wrap;
+  }
+  .stat .v{font:680 30px/1 ui-monospace,Consolas,monospace;letter-spacing:-.02em}
+  .stat .l{font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);margin-top:5px}
+  .v.gr{color:var(--ok)} .v.cy{color:var(--cyan)} .v.am{color:var(--amber)} .v.faint{color:var(--faint)}
+
+  /* the live motion trace */
+  .trace{
+    background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;
+  }
+  .trace .head{display:flex;align-items:baseline;gap:10px;margin-bottom:10px}
+  .trace .head b{font:650 11px/1 ui-monospace,Consolas,monospace;letter-spacing:.18em;text-transform:uppercase;color:var(--dim)}
+  .trace .head .now{margin-left:auto;font:650 12px/1 ui-monospace,Consolas,monospace;color:var(--cyan)}
+  .trace svg{display:block;width:100%;height:92px}
+  .bar{fill:var(--cyan);opacity:.85}
+  .bar.hot{fill:var(--amber)}
+  .barline{stroke:#3a2f12;stroke-width:1;stroke-dasharray:3 4}
+  .tracelabel{fill:var(--faint);font:10px ui-monospace,Consolas,monospace;letter-spacing:.1em}
+
+  /* ---- act list ---- */
+  .acts{display:flex;flex-direction:column;gap:9px}
+  .act{
+    display:flex;gap:13px;align-items:flex-start;padding:12px 15px;
+    background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    transition:border-color .3s, background .3s;
+  }
+  .act.live{border-color:var(--cyan);background:var(--panel2)}
+  .act.done{border-color:#1c3a2a}
+  .act .dot{
+    width:9px;height:9px;border-radius:50%;flex:none;margin-top:7px;background:var(--faint);
+  }
+  .act.live .dot{background:var(--cyan);box-shadow:0 0 12px var(--cyan);animation:p 1.1s infinite}
+  .act.done .dot{background:var(--ok);box-shadow:0 0 10px rgba(61,220,132,.6)}
+  @keyframes p{0%,100%{opacity:1}50%{opacity:.25}}
+  .act .body{flex:1;min-width:0}
+  .act .n{font:650 10px/1 ui-monospace,Consolas,monospace;letter-spacing:.16em;color:var(--faint);text-transform:uppercase}
+  .act .t{font-size:14.5px;font-weight:600;margin-top:3px}
+  .act .e{font-size:12.5px;color:var(--dim);margin-top:3px}
+  .act .v{
+    font:650 10px/1 ui-monospace,Consolas,monospace;letter-spacing:.14em;padding:5px 9px;
+    border-radius:999px;border:1px solid var(--line);color:var(--faint);flex:none;margin-top:2px;
+  }
+  .act.done .v{color:var(--ok);border-color:#1e4634;background:#0e2016}
+
+  /* ---- right: the feed ---- */
+  .side{border-left:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column}
+  .side .hd{padding:18px 20px;border-bottom:1px solid var(--line)}
+  .side .hd b{font:650 11px/1 ui-monospace,Consolas,monospace;letter-spacing:.18em;text-transform:uppercase;color:var(--dim)}
+  .feed-list{flex:1;overflow-y:auto;padding:12px}
+  .item{
+    background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px 13px;margin-bottom:9px;
+    animation:in .35s ease both;
+  }
+  @keyframes in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  .item .top{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+  .item .id{font:600 11.5px/1 ui-monospace,Consolas,monospace;color:var(--cyan)}
+  .item .st{margin-left:auto;font:650 9.5px/1 ui-monospace,Consolas,monospace;letter-spacing:.12em;
+    padding:4px 7px;border-radius:999px;color:var(--amber);border:1px solid #4a3712;background:#1d1506}
+  .item .why{font-size:12px;color:var(--dim);line-height:1.45}
+  .item .hash{
+    margin-top:7px;font:11px/1.4 ui-monospace,Consolas,monospace;color:var(--faint);
+    word-break:break-all;border-top:1px solid var(--line);padding-top:7px;
+  }
+  .item .hash b{color:var(--ok);font-weight:600}
+  .empty{padding:40px 22px;text-align:center;color:var(--faint);font-size:13px;line-height:1.6}
+
+  .foot{
+    padding:14px 20px;border-top:1px solid var(--line);
+    font:11px/1.5 ui-monospace,Consolas,monospace;color:var(--faint);letter-spacing:.05em;
+  }
+  .foot .ok{color:var(--ok)}
+
+  @media (max-width:1000px){ .app{grid-template-columns:1fr} .side{display:none} }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="main">
+    <div class="brand">
+      <div class="mark"></div>
+      <div>
+        <h1>VISION</h1>
+        <div class="sub">live operator console</div>
+      </div>
+      <div class="clock" id="clock">--:--:--</div>
+    </div>
+
+    <div class="hero">
+      <h2 id="heroTitle">Waiting for the capture path…</h2>
+      <p id="heroSub">The camera will announce itself as soon as pixels arrive.</p>
+      <div class="feed">
+        <div class="stat"><div class="v cy" id="sPics">0</div><div class="l">pictures read</div></div>
+        <div class="stat"><div class="v am" id="sClip">—</div><div class="l">clip</div></div>
+        <div class="stat"><div class="v gr" id="sInc">0</div><div class="l">incidents</div></div>
+        <div class="stat"><div class="v faint" id="sAi">absent</div><div class="l">AI plane</div></div>
+        <div class="stat"><div class="v faint" id="sElapsed">0.0s</div><div class="l">run</div></div>
+      </div>
+    </div>
+
+    <div class="trace">
+      <div class="head"><b>detector score</b><span class="tracelabel">threshold 0.50</span><span class="now" id="tNow">0.00</span></div>
+      <svg id="trace" viewBox="0 0 600 92" preserveAspectRatio="none">
+        <line class="barline" id="thrLine" x1="0" y1="46" x2="600" y2="46"></line>
+      </svg>
+    </div>
+
+    <div class="acts" id="acts"></div>
+  </div>
+
+  <div class="side">
+    <div class="hd"><b>incoming</b></div>
+    <div class="feed-list" id="feed"><div class="empty">Nothing yet.<br>The first incident will appear here the moment the detector fires.</div></div>
+    <div class="foot" id="foot">connecting…</div>
+  </div>
+</div>
+
+<script>
+var lastSeq = 0, lastData = null;
+
+function clock(){
+  var d = new Date();
+  document.getElementById('clock').textContent =
+    ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)+':'+('0'+d.getSeconds()).slice(-2);
+}
+setInterval(clock, 1000); clock();
+
+function render(d){
+  lastData = d;
+  // hero
+  var t = document.getElementById('heroTitle'), s = document.getElementById('heroSub');
+  if (d.pictures > 0){
+    t.textContent = 'Pixels are arriving from a live socket.';
+    s.textContent = 'A real RTSP stream, read end to end on this machine, with the AI plane switched off on purpose.';
+  }
+  document.getElementById('sPics').textContent = d.pictures;
+  document.getElementById('sInc').textContent  = d.incidents;
+  document.getElementById('sClip').textContent = d.clip || '—';
+  document.getElementById('sElapsed').textContent = (d.elapsed||0).toFixed(1)+'s';
+
+  // detector trace
+  var now = document.getElementById('tNow');
+  now.textContent = (d.score||0).toFixed(2);
+  now.style.color = (d.score||0) >= 0.50 ? 'var(--amber)' : 'var(--cyan)';
+
+  var svg = document.getElementById('trace');
+  svg.querySelectorAll('.bar').forEach(function(n){ n.remove(); });
+  var bars = d.scores || [];
+  var w = 600, h = 92, n = Math.max(bars.length, 1), bw = w/n;
+  bars.forEach(function(v,i){
+    var bh = Math.max(1.5, v*h);
+    var r = document.createElementNS('http://www.w3.org/2000/svg','rect');
+    r.setAttribute('class','bar'+(v>=0.5?' hot':''));
+    r.setAttribute('x',(i*bw).toFixed(2));
+    r.setAttribute('y',(h-bh).toFixed(2));
+    r.setAttribute('width',Math.max(1,bw-1.2).toFixed(2));
+    r.setAttribute('height',bh.toFixed(2));
+    svg.appendChild(r);
+  });
+
+  // acts
+  var box = document.getElementById('acts');
+  if (box.childElementCount !== (d.acts||[]).length){
+    box.innerHTML = '';
+    (d.acts||[]).forEach(function(a){
+      var el = document.createElement('div');
+      el.className = 'act' + (a.state==='done' ? ' done' : (a.state==='live' ? ' live' : ''));
+      el.innerHTML = '<div class="dot"></div><div class="body"><div class="n">'+a.n+'</div>'+
+                     '<div class="t">'+a.t+'</div><div class="e">'+(a.e||'')+'</div></div>'+
+                     '<div class="v">'+(a.state==='done'?(a.v||'DONE'):(a.state==='live'?'RUNNING':'QUEUED'))+'</div>';
+      box.appendChild(el);
+    });
+  } else {
+    [].forEach.call(box.children, function(el,i){
+      var a = d.acts[i];
+      el.className = 'act' + (a.state==='done' ? ' done' : (a.state==='live' ? ' live' : ''));
+      el.lastElementChild.textContent = a.state==='done'?(a.v||'DONE'):(a.state==='live'?'RUNNING':'QUEUED');
+    });
+  }
+}
+
+function poll(){
+  fetch('live.json?ts='+Date.now()).then(function(r){ return r.json(); }).then(render).catch(function(){
+    document.getElementById('foot').innerHTML = 'waiting for the demo to write <b>live.json</b>…';
+  });
+}
+poll(); setInterval(poll, 700);
+</script>
+</body>
+</html>
