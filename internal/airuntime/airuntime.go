@@ -138,6 +138,27 @@ type Evidence struct {
 	Data        []byte
 }
 
+// InvestigatorProfileSchema declares the field set the shipped investigate engine
+// emits: answer, citations, confidence. It mirrors runtime.INVESTIGATOR_SCHEMA in
+// deploy/ai-runtime/runtime.py and the INVESTIGATOR_PROFILE contract.
+//
+// The runtime validates the engine's output against the schema the caller sends
+// and degrades the response on a mismatch, so a request that sent no schema left
+// validate_output with an empty property set -- and every answer, however well
+// cited, degraded on "the profile schema declares no properties". That is why a
+// site could run a real engine and still never record a single non-degraded
+// observation. Sending this schema is what makes a grounded answer keepable; the
+// two copies are the same contract by design, and the Python suite is the
+// authority they are kept in step with.
+var InvestigatorProfileSchema = map[string]any{
+	"properties": map[string]any{
+		"answer":     map[string]any{"type": "string"},
+		"citations":  map[string]any{"type": "array"},
+		"confidence": map[string]any{"type": "number"},
+	},
+	"required": []any{"answer", "citations"},
+}
+
 // Request is one inference.
 type Request struct {
 	ObservationID string

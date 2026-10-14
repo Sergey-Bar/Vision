@@ -156,6 +156,11 @@ func (w *VLMWorker) Handle(ctx context.Context, j jobs.Job) error {
 		ObservationID: obsID,
 		ProfileID:     profileID,
 		Evidence:      evidenceList,
+		// The schema the shipped investigate engine answers in. Sending it is
+		// what stops validate_output refusing a grounded answer for having no
+		// declared field set; without it the plane recorded degraded no matter
+		// how good the engine was.
+		ProfileSchema: InvestigatorProfileSchema,
 	})
 
 	applied := applyResult(base, result)
