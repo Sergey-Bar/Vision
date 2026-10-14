@@ -4349,3 +4349,54 @@ rather than a safety net catching the bug. `jobs`, `evidencefetch`, `durability`
 `airuntime` suites are green with it. This change touches a core claim primitive —
 flagged for review under the control-diff rule even though it is a fix, not a
 weakening.
+
+## The 2026-10-14, third pass: the gates that had never been watched fail
+
+`internal/treestate`'s earnings test names gates no local record has ever shown
+failing, and `gate-earnings` (statuscheck) reported **eight never-red**, `nl-hits-resolve`,
+`nl-replays-without-model` and `boot` among them. The discipline is blunt about what that
+means — *"a gate nobody watched fail is a gate that proves nothing"* — so this pass
+red-checked the two that are Go-gated, by hand first and then in the table.
+
+**RC-26 — `every investigate hit resolves to an incident or an evidence reference, or the build fails`** (the name is on one line, unwrapped, so the tree-state transcript check's exact substring match finds it). `internal/investigate`'s resolve rule drops a hit that names neither
+and counts it as unresolved. Mutation `if !hit.Resolved() {` → `if false && !hit.Resolved() {`
+keeps the bare hit. Watched red:
+
+```
+FAIL: TestEveryHitResolvesToAnOpenableRow
+    hit evt-bare resolves to nothing: the gate is that any hit that does not resolve
+    to an incident or an evidence reference fails the build.
+```
+
+Restored — green.
+
+**RC-27 — `the same investigation replays its hits identically with and without the model`** (name on one line for the same reason). The narrator runs *after* the hits and sets only
+`Narrative`; that is invariant 3 on this surface — the answer is the answer whether or not
+the plane was there. Mutation `if n != nil {` → `if n != nil { run.Hits = nil` lets the
+narrator move the hits. Watched red:
+red:
+
+```
+FAIL: TestTheRunReplaysIdenticallyWithoutTheModel
+    the hits differ with and without the model
+```
+
+Restored — green. The mechanical `red-check` gate then proved **27 of 27**, both new
+controls among them.
+
+**And the table caught this pass's own drift.** Bumping the package count 87→88 (the e2e
+probe added `scripts/` as a package) left the roadmap-count red-check's `from` pointing at
+the string that was no longer there, so it reported NOT PROVED rather than pass — the exact
+failure its own comment documents ("a control whose target moves and which nobody notices
+is how a table becomes decorative; this one moved in public"). It moved in public twice
+now; the target was re-pointed to the current 88, and the gate proved it again.
+`AGENTS.md`'s red-check count is twenty-seven.
+
+What this pass does NOT claim: the executive-earnings "recorded red" list — that literal
+measure is a gate appearing in a record's `failedGates`, i.e. a genuine full-run failure,
+and an always-green gate never will; red-check's own table is rigorously incomplete by
+design ("twenty-seven controls proved" is the ceiling, not the floor). RC-26/RC-27 prove the
+two NL **controls** go red under mutation, which is the discipline's bar, not that the
+gates now carry red records. And `boot`, whose falsification is the gate reverting the
+dispatch fix and failing to serve `/v1/health` — that mechanism is different from the Go
+table and is the boot gate's own doing, not a table entry.
