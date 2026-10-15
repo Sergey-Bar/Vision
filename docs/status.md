@@ -4469,3 +4469,34 @@ reader assume otherwise. The `python` on this box has onnxruntime 1.30.0 **CPU**
 sidecar's runtime — and the shipped detector path does not use it, which the demo says on
 its first screen rather than in a footnote.
 
+### The 2026-10-15 merge pass: the full gate of record, and one gate catching what this one missed
+
+`contract` was merged into `main` — a pure fast-forward, because `origin/main` was already
+an ancestor of it — and both branches were pushed.
+
+**The root gate, in full, with the database live.** 31 gates, `urlSet=true`, 0 skipped, 0
+failed, run with `SP_TEST_DATABASE_URL` against a real Postgres on the documented port so
+the database-backed suites ran rather than declining. The migrations were applied from a
+clean cluster (`security-migrate up`, schema advanced to version 26). Every number quoted
+in this document was measured by this run: `scripts/run-verify.ps1`, exit 0.
+
+**The finding, which is the point of the entry.** The first full run failed on
+`internal/treestate`'s `TestEveryRedCheckEntryHasATranscript`: the seven controls added
+for the live relay were proved by the POC's own gate and recorded **nowhere**, because
+the root gate reads both tables and both transcript documents, and this session had only
+written into the POC's table. A control with no transcript is a control nobody can be
+asked to have watched, and the assertion is the thing that says so. The POC's
+`scripts/redcheck-transcript.ps1` regenerated
+`poc/active-monitoring/redcheck-transcripts.txt` — 89 controls, each with its baseline,
+its per-control failure and its restore check, and the generator refuses to write from a
+red baseline — and the root gate now passes on that too.
+
+What this pass does NOT claim: that a green branch here is an automated fact. There is no
+pull-request check in this repository — Actions cannot start jobs for this account — so
+every run quoted above names the command that ran and is a human claim about it, exactly
+as `AGENTS.md` says. And the earlier red baseline from the transcript generator was
+contention with a concurrently running gate, not a product defect; it is recorded here
+because "the generator said red once" is the kind of sentence that gets quoted later
+without its cause.
+
+

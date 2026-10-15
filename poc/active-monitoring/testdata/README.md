@@ -16,6 +16,26 @@ This directory is not decoration: an unlabelled measurement is a claim.
 | `labels.json` | — | the provenance record: source, licence, retention, expected windows |
 | `car-crossing.zones.json` | — | **PROPOSED** line for the `testsrc` case |
 | `bird-synthetic.zones.json` | — | **known-correct** line for the synthetic case |
+| `still/` + `still-groundtruth.json` | **`synthetic`**, same licence as this repository | the timing still set: one image, `injection-hostile.png`, and its manifest. `pocctl bench --images testdata/still` times the detector over it and writes the measured p99 that `pocctl preflight` multiplies |
+
+### `still/` exists to time a model, not to score one
+
+One frame, and that is deliberate rather than lazy — the two jobs are different and
+only one of them needs a labelled set. A **detection** benchmark needs many images with
+per-box ground truth and a licence per image; a **timing** set needs a frame the detector
+can decode, and the repo already has one: frame 0 of the injection fixture, whose
+`labels.json` row records that every pixel is a Go computation and no third-party
+material is in it. `boxes` is empty in the manifest because nothing is in the frame, and
+the bench says `negative frame, nothing drawn, nothing there` — unless the detector
+REFUSED the frame, which is a different sentence and the reason this set is small enough
+to read in one sitting.
+
+What it cannot measure is recall, and the manifest says so where it is read rather than
+in a footnote: the false-positive rate over real footage is a `pocctl bench --run`
+measurement over a finished run, and it stays NOT RUN until somebody marks which of the
+model's boxes are really objects. `pocctl bench` refuses to write a calibration from a
+run whose frames it could not decode, and prints the refusal rather than counting a
+refusal as a negative.
 
 ## The injection fixture is a security artefact, not a demo clip
 

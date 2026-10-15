@@ -77,6 +77,30 @@ cd poc/active-monitoring; .\scripts\verify.ps1
 Nothing merges between them. The POC does not import the platform's contracts, and
 the platform does not read the POC's.
 
+### And one thing the POC now does that the platform does not: it reads a real camera
+
+`scripts/live-demo.ps1` (repo root) stands the POC pipeline up against a **public
+relay of a real camera** — a YouTube live cam resolved with `yt-dlp`, read by ffmpeg,
+decoded by a GPU ONNX session — and the run records its source line as
+`live http stream (public relay of a real camera, NOT ours)`, because the camera is
+real and it is not ours. Four cameras are curated in
+[`poc/active-monitoring/cameras.json`](poc/active-monitoring/cameras.json), each with
+a recorded licence basis and a date a human resolved it live; `pocctl live list` prints
+the table and `pocctl live env <id>` prints the environment one camera produces.
+
+```powershell
+.\scripts\live-demo.ps1                 # box -> resolve -> calibrate -> rehearse -> preflight -> run
+```
+
+Measured on this machine on 2026-10-15: preflight all eleven checks green against the
+resolved camera, the source row printing the stream's own codec and frame rate, the
+detector row carrying a measured p99 (p50 13.9 ms, p99 16.4 ms over 40 CUDA
+inferences), and the source line recorded as a public relay. Two honest limits, both
+printed by the run itself rather than by this file: **the detection rate is NOT RUN**,
+because the pinned Model Zoo `yolov4n.onnx` is a multi-scale anchored head the
+in-process decoder refuses by design rather than guessing its anchors; and events go
+to `xpsim`, a simulator, which preflight's own row names.
+
 ## Run
 
 ```sh
