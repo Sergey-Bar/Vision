@@ -64,6 +64,29 @@ type Spec struct {
 	// nothing about a camera, and a report that says "camera" over a relay is
 	// claiming a piece of hardware nobody has.
 	Relay bool
+
+	// PublicRelay says this live source is a REAL CAMERA, streamed by somebody
+	// else, which this installation neither owns nor operates.
+	//
+	// It is a separate flag from Relay because the two say different things and
+	// a bool cannot say both. Relay's source is RECORDED material wearing a live
+	// transport: proving the path, proving nothing about a camera. A public
+	// relay is the opposite - a camera that really exists, really is live, and
+	// is not ours. The sentences are not interchangeable:
+	//
+	//	Relay=true        "relay of recorded material, NOT a camera"
+	//	PublicRelay=true  "public relay of a real camera, NOT ours"
+	//
+	// The second sentence is the honest label for a YouTube live cam, and the
+	// reason it exists as its own flag is that the Relay sentence printed over
+	// one would deny a camera that is demonstrably there, while "live camera"
+	// would claim hardware this repository does not have. Both are lies in
+	// opposite directions, which is why neither is used.
+	//
+	// Public and Relay cannot both be true: a source is either a recording
+	// re-published or a real camera relayed, and claiming both prints a camera
+	// over a recording. The configuration refuses the pair by name.
+	PublicRelay bool
 }
 
 // Live reports whether the source is a real-time one, as against recorded
@@ -259,6 +282,9 @@ func (s Spec) Label() string {
 	case KindLoop:
 		return "source: recorded loop (no live camera)"
 	case KindRTSP:
+		if s.PublicRelay {
+			return "source: live rtsp (public relay of a real camera, NOT ours)"
+		}
 		if s.Relay {
 			// D-5, in words, on every surface that prints a source. The
 			// parenthetical is the whole sentence and it is deliberately blunt:
@@ -269,6 +295,9 @@ func (s Spec) Label() string {
 		}
 		return "source: live rtsp camera"
 	case KindURL:
+		if s.PublicRelay {
+			return "source: live http stream (public relay of a real camera, NOT ours)"
+		}
 		if s.Relay {
 			return "source: live http stream (relay of recorded material, NOT a camera)"
 		}

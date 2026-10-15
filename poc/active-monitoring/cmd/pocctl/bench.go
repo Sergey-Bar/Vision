@@ -30,12 +30,14 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Sergey-Bar/vision-poc/internal/bench"
 	"github.com/Sergey-Bar/vision-poc/internal/config"
 	"github.com/Sergey-Bar/vision-poc/internal/ortdetect"
+	"github.com/Sergey-Bar/vision-poc/internal/soak"
 	"github.com/Sergey-Bar/vision-poc/internal/store"
 )
 
@@ -45,7 +47,7 @@ func cmdBench(args []string) error {
 		"model": "", "ort": "", "manifest": groundtruthManifest,
 		"match-iou": "0.5", "threads": "0", "emit": "0.05",
 		"nms-class": "0.45", "nms-global": "0.75", "max-boxes": "100",
-		"min-score": "0", "out": "",
+		"min-score": "0", "out": "", "frames": "",
 	}, args)
 	if err != nil {
 		return err
@@ -99,15 +101,24 @@ func benchImages(flags map[string]string) error {
 
 	// The session. A model that cannot be opened is a refusal by name, and it is
 	// made here rather than discovered per image.
+	//
+	// The four settings are resolved ONCE into locals and reused below, because
+	// the session's identity and the calibration record that describes it have
+	// to be the same four values. Two calls to envOr with different defaults is
+	// how a record ends up describing a build nobody ran.
+	benchLib := envOr("SP_POC_ORT_LIB", flags["ort"])
+	benchModel := envOr("SP_POC_DET_MODEL", flags["model"])
+	benchThreads := envInt("SP_POC_ORT_THREADS", flags["threads"], 4)
+	benchEP := envOr("SP_POC_ORT_EP", "cpu")
 	sess, err := ortdetect.Open(ortdetect.SessionConfig{
-		LibraryPath: envOr("SP_POC_ORT_LIB", flags["ort"]),
-		ModelPath:   envOr("SP_POC_DET_MODEL", flags["model"]),
-		Threads:     envInt("SP_POC_ORT_THREADS", flags["threads"], 4),
+		LibraryPath: benchLib,
+		ModelPath:   benchModel,
+		Threads:     benchThreads,
 		// A benchmark that ran on a different device than it printed is worse than no
 		// benchmark, so the bench takes the provider from the same variables the run
 		// does rather than defaulting. A typo is refused by name rather than treated
 		// as the CPU.
-		ExecutionProvider: envOr("SP_POC_ORT_EP", "cpu"),
+		ExecutionProvider: benchEP,
 		CUDADeviceID:      envInt("SP_POC_ORT_CUDA_DEVICE", "", 0),
 	})
 	if err != nil {
@@ -156,6 +167,7 @@ func benchImages(flags map[string]string) error {
 	droppedByClass := map[string]int{}
 	droppedFrames := 0
 	negativeFrames := 0
+	refusedFrames := 0
 
 	for _, img := range images {
 		rgb, w, h, err := readImageRGB(img.Path)
@@ -163,6 +175,30 @@ func benchImages(flags map[string]string) error {
 			return fmt.Errorf("bench: %s: %w", img.Path, err)
 		}
 		ans := det.Detect(0, rgb, w, h, ortdetect.Rect{})
+		// A REFUSED frame is not a negative one, and the difference is the whole
+		// value of this benchmark. `Detect` returns its refusal inside the Answer
+		// rather than as an error, so a loop that only looks at len(ans.Boxes)
+		// reads a frame the decoder could not decode as a frame where it found
+		// nothing. The classification, and the control behind it, live in
+		// bench_frames.go next to the test that fails when it is removed.
+		outcome, line := classifyAnswer(ans)
+		if outcome == OutcomeRefused {
+			refusedFrames++
+			fmt.Printf("  %-28s REFUSED, not measured: %s\n", img.Name, line)
+			continue
+		}
+		if outcome == OutcomeNegative {
+			// A negative frame with nothing drawn is the ONE combination that is
+			// unambiguously right, and it is worth saying out loud per image so a
+			// reader does not have to infer it from a row of zeros.
+			negativeFrames++
+			if len(img.Boxes) == 0 {
+				fmt.Printf("  %-28s negative frame, nothing drawn, nothing there\n", img.Name)
+				continue
+			}
+			// Nothing drawn and something there: the miss is measured by the
+			// frame's own metrics below, not swallowed as a negative.
+		}
 		dets := make([]bench.Detection, 0, len(ans.Boxes))
 		for _, b := range ans.Boxes {
 			dets = append(dets, bench.Detection{Frame: img.Name, Box: b})
@@ -170,7 +206,7 @@ func benchImages(flags map[string]string) error {
 		truth := make([]bench.GT, 0, len(img.Boxes))
 		for _, gb := range img.Boxes {
 			truth = append(truth, bench.GT{
-				Box:         bench.Box{Class: gb.Class, X1: gb.X1, Y1: gb.Y1, X2: gb.X2, Y2: gb.Y2},
+				Box:         bench.Box{Class: gb.Class, X1: gb.X1, Y1: gb.Y1, X2: gb.X2},
 				Class:       gb.Class,
 				Expressible: true,
 			})
@@ -186,13 +222,6 @@ func benchImages(flags map[string]string) error {
 		}
 		fc := bench.Measure(img.Name, dets, truth, opts)
 		frames = append(frames, fc)
-		if len(ans.Boxes) == 0 && len(truth) == 0 {
-			// A negative frame with nothing drawn is the ONE combination that is
-			// unambiguously right, and it is worth saying out loud per image so a
-			// reader does not have to infer it from a row of zeros.
-			fmt.Printf("  %-28s negative frame, nothing drawn, nothing there\n", img.Name)
-			continue
-		}
 		fmt.Printf("  %-28s gt %-4d det %-4d tp %-4d fp %-4d fn %-4d dropped %d\n",
 			img.Name, fc.GroundTruth, fc.Detected, fc.TruePositives,
 			fc.FalsePositives, fc.FalseNegatives, fc.Dropped)
@@ -204,14 +233,67 @@ func benchImages(flags map[string]string) error {
 	out := bench.Format(rep, opts)
 	fmt.Println()
 	fmt.Print(out)
+	if refusedFrames > 0 {
+		// The whole set refused, or some of it did, and the metrics above are
+		// over the frames that were measured. A benchmark whose subject refused
+		// is not a benchmark: it is a timing pass with a metrics display, and
+		// the line has to say so rather than let a reader divide by a
+		// denominator the decoder never produced.
+		fmt.Printf(`
+  %d of %d frame(s) were REFUSED and are NOT counted in the metrics above: a frame
+  the detector could not decode produced no boxes, and zero from a refusal is not
+  zero from a search. The metrics here are over the %d frame(s) that were measured.
+  The refusal is named per image above.
 
-	// The achievable rate IS available here, because the latency was measured.
-	if p99, ok := det.Latencies().P99(); ok {
-		fmt.Printf("\n  detector latency p50 %.1fms  p99 %.1fms over %d frames\n",
-			mustP50(det), p99, det.Latencies().Count())
-		if fps, ok := det.Latencies().AchievableFPS(); ok {
-			fmt.Printf("  achievable      %.1f fps on this machine, at %d threads\n",
-				fps, envInt("SP_POC_ORT_THREADS", "", 4))
+`, refusedFrames, len(images), len(images)-refusedFrames)
+	}
+
+	// The achievable rate, and the calibration record that carries it.
+	//
+	// Two passes, and they measure different things. The metrics pass above drove
+	// the detector once per image, so its latency window holds one sample per
+	// still — and on a GPU that first sample is the COLD one: measured on this
+	// machine at 600.9ms for a kernel that costs about 12ms once cuDNN has loaded
+	// and chosen its algorithms. A p99 over a sample set whose members are all
+	// cold starts is a gate that refuses every run on a machine that works, so
+	// the calibration is taken over a repeated pass and its first sample is
+	// DISCARDED rather than averaged away.
+	//
+	// 0 means "not asked for", and it is refused rather than read as a small
+	// number: `pocctl bench --frames 0` would otherwise write a calibration with
+	// no samples in it and preflight would refuse for a reason nobody caused.
+	timedFrames := envInt("SP_POC_BENCH_FRAMES", flags["frames"], defaultBenchFrames)
+	if flags["frames"] != "" {
+		n, err := strconv.Atoi(flags["frames"])
+		if err != nil || n < 0 {
+			return fmt.Errorf("bench: --frames %q is not a count. 0 means no timing pass; anything "+
+				"above it is how many repeated inferences the calibration is taken over", flags["frames"])
+		}
+		timedFrames = n
+	}
+	if timedFrames > 0 {
+		if len(images) == 0 {
+			return fmt.Errorf("bench: %s holds no images the manifest lists, so there is nothing to time", dir)
+		}
+		cal, line, err := timeDetector(det, images[0], timedFrames, benchModel, benchLib, benchThreads, benchEP, sess.Identity().SHA256)
+		if err != nil {
+			return err
+		}
+		fmt.Println()
+		fmt.Print(line)
+		root := flags["data-root"]
+		if root == "" {
+			root = strings.TrimSpace(os.Getenv("SP_POC_DATA_ROOT"))
+		}
+		if root == "" {
+			fmt.Println("  no --data-root and no SP_POC_DATA_ROOT, so the calibration was NOT recorded.")
+			fmt.Println("  `pocctl preflight`'s detector row will refuse until it is: re-run with")
+			fmt.Println("  --data-root <the run's data root>.")
+		} else if err := soak.WriteCalibration(root, cal); err != nil {
+			return err
+		} else {
+			fmt.Printf("  calibration recorded at %s — `pocctl preflight` reads it for the detector row.\n",
+				soak.CalibrationPath(root))
 		}
 	}
 	if flags["out"] != "" {
@@ -229,11 +311,71 @@ func benchImages(flags map[string]string) error {
 	return nil
 }
 
-func mustP50(d *ortdetect.Detector) float64 {
-	if v, ok := d.Latencies().P50(); ok {
-		return v
+// defaultBenchFrames is the timing pass's length when nothing says otherwise.
+//
+// Forty samples after a discarded warm-up gives a nearest-rank p99 at the
+// fortieth order statistic, which is the second slowest inference rather than
+// the single worst one. That is a number a frame rate can be planned against.
+const defaultBenchFrames = 40
+
+// timeDetector drives the detector over one still `count+1` times and returns
+// the calibration those samples describe, plus the lines that print it.
+//
+// The first inference is DISCARDED, not averaged and not reported. On a CUDA
+// session it is not an inference at all in any useful sense: it is cuDNN loading
+// and choosing its algorithms, measured here at 600.9ms against a steady-state
+// cost of about 12ms. Keeping it would write a calibration whose p99 refuses a
+// detector that demonstrably runs; dropping it silently would describe a
+// machine nobody benched. So it is dropped AND said so, in the output and in the
+// record.
+func timeDetector(det *ortdetect.Detector, img stillImage, count int,
+	model, lib string, threads int, ep, sha string) (soak.DetectorCalibration, string, error) {
+	rgb, w, h, err := readImageRGB(img.Path)
+	if err != nil {
+		return soak.DetectorCalibration{}, "", fmt.Errorf("bench: %s: %w", img.Path, err)
 	}
-	return 0
+	total := count + 1
+	lat := ortdetect.NewLatencies(total)
+	var p50, p99 float64
+	var fps float64
+	for i := 0; i < total; i++ {
+		start := time.Now()
+		_ = det.Detect(0, rgb, w, h, ortdetect.Rect{})
+		ms := float64(time.Since(start).Microseconds()) / 1000.0
+		if i == 0 {
+			// The warm-up: spent on cuDNN's load and algorithm selection on a
+			// CUDA session, and on the first-touch cost of everything on a CPU
+			// one. Kept out of the window and out of the record.
+			continue
+		}
+		lat.Observe(ms)
+	}
+	if v, ok := lat.P50(); ok {
+		p50 = v
+	}
+	if v, ok := lat.P99(); ok {
+		p99 = v
+	}
+	if v, ok := lat.AchievableFPS(); ok {
+		fps = v
+	}
+	cal := soak.DetectorCalibration{
+		Model:             model,
+		ModelSHA256:       sha,
+		Library:           lib,
+		Threads:           threads,
+		Input:             det.Session().Input().W,
+		ExecutionProvider: ep,
+		P50MS:             p50,
+		P99MS:             p99,
+		Frames:            lat.Count(),
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "  timing pass     %d inferences of %s, first one discarded as the warm-up\n",
+		lat.Count(), img.Name)
+	fmt.Fprintf(&b, "                  p50 %.1fms  p99 %.1fms  achievable %.1f fps at %d threads, %s\n",
+		p50, p99, fps, threads, ep)
+	return cal, b.String(), nil
 }
 
 // stillImage is one image the manifest knows about, on disk.

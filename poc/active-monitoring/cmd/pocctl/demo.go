@@ -358,8 +358,10 @@ func newestRunID(dataRoot string) string {
 //
 //   - a push target that is not the loopback simulator, because a demo that
 //     reports events and pushed them nowhere is the worst outcome available
-//   - `SP_POC_SOURCE_KIND=rtsp`, because a loop over a local file prints a source
-//     line that reads like a camera and is not one
+//   - `SP_POC_SOURCE_KIND=rtsp` (a camera this site operates) or `url` with
+//     `SP_POC_SOURCE_PUBLIC=true` (a public relay of a real camera, resolved by
+//     `pocctl live env`), because a loop over a local file prints a source line
+//     that reads like a camera and is not one
 //   - `SP_POC_VLM_REGION` with a key, because footage that has nowhere declared to
 //     go must not be sent anywhere at all
 func livePreconditions(root string) error {
@@ -379,9 +381,34 @@ func livePreconditions(root string) error {
 	require("SP_POC_SOURCE_KIND", "the source line cannot say what the run is reading")
 	require("SP_POC_SOURCE_ARG", "there is no source")
 	require("SP_POC_SOURCE_LICENCE", "a live source has no declared lawful basis, and this module will not record footage whose basis nobody can name")
-	if strings.TrimSpace(os.Getenv("SP_POC_SOURCE_KIND")) != "rtsp" {
-		missing = append(missing, "SP_POC_SOURCE_KIND\n           the live demo reads a CAMERA. With kind=loop the source line reads\n"+
-			"           `loop over recorded material` and a run against a recording is not a live demo")
+	// Which LIVE kinds are honest, and which sentence each one prints.
+	//
+	// `rtsp` is a camera this site operates, and `url` with SP_POC_SOURCE_PUBLIC=true
+	// is a public relay of a real camera somebody else runs — the YouTube live cams
+	// `pocctl live env` resolves. Both are live and both are labelled, and the two
+	// labels are different sentences because they are different facts:
+	//
+	//	rtsp                    "source: live rtsp camera"
+	//	url  + public=true      "source: live http stream (public relay of a real camera, NOT ours)"
+	//	url  + public=false     "source: live http stream"  — a camera this site exposes over http
+	//
+	// What is refused is `loop`, for the reason it always was: a run over recorded
+	// material is not a live demo, and its source line says so.
+	kind := strings.TrimSpace(os.Getenv("SP_POC_SOURCE_KIND"))
+	switch kind {
+	case "rtsp", "url":
+	default:
+		missing = append(missing, "SP_POC_SOURCE_KIND\n"+
+			"           the live demo reads a camera. With kind=loop the source line reads\n"+
+			"           `recorded loop (no live camera)` and a run against a recording is not a live\n"+
+			"           demo. `url` is also live, and with SP_POC_SOURCE_PUBLIC=true it is a public\n"+
+			"           relay of a real camera — `pocctl live env <id>` prints that environment.")
+	}
+	if kind == "url" && strings.EqualFold(strings.TrimSpace(os.Getenv("SP_POC_SOURCE_PUBLIC")), "true") {
+		fmt.Println("  SP_POC_SOURCE_KIND=url with SP_POC_SOURCE_PUBLIC=true: this is a PUBLIC RELAY of a")
+		fmt.Println("  real camera — resolved by `pocctl live env`. The camera is real, it is live, and it is")
+		fmt.Println("  NOT ours. The source line on every screen and in the report says exactly that.")
+		fmt.Println()
 	}
 	provider := strings.ToLower(strings.TrimSpace(os.Getenv("SP_POC_VLM_PROVIDER")))
 	switch provider {
@@ -1018,6 +1045,7 @@ func liveEnv(env []string) []string {
 	cleared := []string{
 		"SP_POC_MODE",
 		"SP_POC_SOURCE_KIND", "SP_POC_SOURCE_ARG", "SP_POC_SOURCE_RELAY",
+		"SP_POC_SOURCE_PUBLIC",
 		"SP_POC_SOURCE_LICENCE", "SP_POC_SOURCE_USER", "SP_POC_SOURCE_PASSWORD",
 		"SP_POC_XPROTECT_BASE_URL", "SP_POC_XPROTECT_CLIENT_ID", "SP_POC_XPROTECT_CLIENT_SECRET",
 		"SP_POC_XPROTECT_USERNAME", "SP_POC_XPROTECT_PASSWORD",
@@ -1348,6 +1376,13 @@ func demoEnv(root, dataRoot, clip, zones, model, anchors, simAddr, uiAddr string
 		// D-5, in the configuration as well as on the screen: the relay is
 		// declared here and nowhere else, and `source.Label` derives the sentence.
 		"SP_POC_SOURCE_RELAY=false",
+		// The demo's source is a local clip, so the public-relay flag is false
+		// and STATED rather than left unset. The flag is required precisely
+		// because the default is the dangerous one: a run that does not say
+		// whether the camera is somebody else's is a run whose source line
+		// claims nothing about hardware, in either direction. A run over a real
+		// public relay sets this through `pocctl live env`, not through here.
+		"SP_POC_SOURCE_PUBLIC=false",
 		// Required and not defaulted, so the demo has to say which trigger it is
 		// running. The demo is the ALARM trigger: the reference trigger needs a
 		// camera that was genuinely moved, covered and restored, and a demo that

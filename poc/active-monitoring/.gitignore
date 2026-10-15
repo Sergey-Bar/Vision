@@ -73,3 +73,7 @@ qa/fixtures/*.png
 qa/fixtures/*.rgb
 qa/fixtures/*.gray
 
+
+# A live-demo run's data root: the calibration record, the recording and the store.
+# It is a run's OUTPUT and never a source.
+/.live-demo/

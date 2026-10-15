@@ -2,6 +2,7 @@ package soak
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 )
@@ -109,5 +110,119 @@ func TestAClockThatIsDeclaredAndUnverifiedPassesWithACaveat(t *testing.T) {
 	}
 	if !strings.Contains(clockSourceNote(""), "no clock source was declared") {
 		t.Error("an absent clock does not say so plainly")
+	}
+}
+
+// --- the detector row's calibration -----------------------------------------
+
+// detectorInput is a detector run's preflight world, with the calibration the
+// caller names. Everything else is left empty on purpose: this file is about the
+// detector row, and the other rows failing is not its business.
+func detectorInput(cal *DetectorCalibration, p99 float64, note string) PreflightInput {
+	in := PreflightInput{
+		TriggerMode: "detector",
+		// Named, on disk, and with threads, so the row's own arithmetic is the
+		// only thing left to decide. The model is a file that exists on the
+		// machine running the test: the test's own binary.
+		DetectorModel:   os.Args[0],
+		DetectorLibrary: os.Args[0],
+		DetectorThreads: 4,
+		DetectorP99MS:   p99,
+		AIFPS:           5,
+		Calibration:     cal,
+		CalibrationNote: note,
+	}
+	return in
+}
+
+// TestTheDetectorRowPassesOnAMeasuredCalibration is the green half, asserted
+// here because the red half is the one that used to be permanent: the row was
+// fed no model, no library and no p99 by any caller, so EVERY detector run
+// failed a gate its own configuration had already satisfied.
+func TestTheDetectorRowPassesOnAMeasuredCalibration(t *testing.T) {
+	cal := testCalibration()
+	in := detectorInput(&cal, cal.P99MS, "")
+	if !detectorPreflightOK(in) {
+		t.Fatalf("a detector run with a measured calibration was refused: %s", detectorDetail(in))
+	}
+	if !strings.Contains(detectorMeasured(in), "det_p99=18.4ms") {
+		t.Fatalf("the measured line does not carry the calibration's number: %q", detectorMeasured(in))
+	}
+	if !strings.Contains(detectorMeasured(in), "calibrated") {
+		t.Fatalf("the measured line does not say the number came from a calibration: %q", detectorMeasured(in))
+	}
+}
+
+// TestTheDetectorRowRefusesAnAbsentCalibrationByName: a p99 of zero must not be
+// multiplied out into a pass, and the refusal must name the command that
+// produces one.
+func TestTheDetectorRowRefusesAnAbsentCalibrationByName(t *testing.T) {
+	in := detectorInput(nil, 0, "")
+	if detectorPreflightOK(in) {
+		t.Fatal("a detector run with no measured calibration passed; that is the multiplication by zero this gate exists to refuse")
+	}
+	detail := detectorDetail(in)
+	for _, want := range []string{"bench", "--data-root"} {
+		if !strings.Contains(detail, want) {
+			t.Errorf("the refusal does not name %q: %s", want, detail)
+		}
+	}
+}
+
+// TestTheDetectorRowRefusesACalibrationForAnotherBuild: the record exists and
+// says so, and the refusal names WHICH part differs — "run the bench again" is
+// wrong advice for a machine that ran it yesterday on a different library.
+func TestTheDetectorRowRefusesACalibrationForAnotherBuild(t *testing.T) {
+	cal := testCalibration()
+	in := detectorInput(&cal, 0, "it was measured at 16 thread(s) and this run declares 4")
+	if detectorPreflightOK(in) {
+		t.Fatal("a calibration for another build was applied")
+	}
+	detail := detectorDetail(in)
+	if !strings.Contains(detail, "16") || !strings.Contains(detail, "does not describe this run") {
+		t.Fatalf("the refusal does not name the part that differs: %s", detail)
+	}
+}
+
+// TestTheDetectorRowRefusesADetectorThatCannotHoldTheRate: the arithmetic is the
+// gate, and a slow detector must refuse rather than backpressure at minute three.
+func TestTheDetectorRowRefusesADetectorThatCannotHoldTheRate(t *testing.T) {
+	cal := testCalibration()
+	in := detectorInput(&cal, 400, "")
+	if detectorPreflightOK(in) {
+		t.Fatal("a 400ms detector at 5 fps passed: 2000ms of a 1000ms second is a run that blocks its own queue")
+	}
+	if !strings.Contains(detectorDetail(in), "Lower SP_POC_AI_FPS") {
+		t.Fatalf("the refusal does not name the lever: %s", detectorDetail(in))
+	}
+}
+
+// --- the AI row --------------------------------------------------------------
+
+// TestTheAIRowIsAboutTheRunThatHasAnAI: the shipped detector path has no
+// sidecar, and a row that fails a configuration it does not describe is a gate
+// that trains everyone to ignore it. `pocctl preflight` in detector mode used to
+// fail exactly that row forever.
+func TestTheAIRowIsAboutTheRunThatHasAnAI(t *testing.T) {
+	for _, mode := range []string{"detector", "novelty", ""} {
+		ok, detail, measured := aiBudget(context.Background(), PreflightInput{TriggerMode: mode})
+		if !ok {
+			t.Errorf("trigger %q has no sidecar and the AI row failed: %s", mode, detail)
+		}
+		if !strings.Contains(measured, "not applicable") {
+			t.Errorf("trigger %q reports %q; a row about a component the run does not start must say it does not apply", mode, measured)
+		}
+		if !strings.Contains(detail, "detector row above") {
+			t.Errorf("the not-applicable answer does not point at the row that holds the number: %s", detail)
+		}
+	}
+	// A declared sidecar that cannot be reached is still a refusal: somebody
+	// asked for the sidecar, so the budget was never measured.
+	ok, detail, _ := aiBudget(context.Background(), PreflightInput{TriggerMode: "sidecar"})
+	if ok {
+		t.Fatal("a declared sidecar with no client passed the budget row")
+	}
+	if !strings.Contains(detail, "SP_POC_TRIGGER_MODE=sidecar") {
+		t.Fatalf("the refusal does not name the variable: %s", detail)
 	}
 }

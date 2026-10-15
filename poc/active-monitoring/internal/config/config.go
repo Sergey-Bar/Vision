@@ -144,6 +144,23 @@ var schema = []field{
 	{Name: "SP_POC_SOURCE_RELAY", kind: kindBool,
 		Consequence: "the source line says `live rtsp camera` for a feed that is a recording being relayed, so a viewer is told a camera is connected when nothing is. The relay is what proves the rtsp PATH; it is not evidence of a camera",
 		Remedy:      "set SP_POC_SOURCE_RELAY=true for a recording re-published over rtsp, or SP_POC_SOURCE_RELAY=false for an actual camera"},
+	// The public relay: a real camera, streamed by somebody else. This is the
+	// YouTube live cam case, and it is a THIRD state rather than a refinement of
+	// the second because both refinements are lies: `Relay`'s sentence ("relay
+	// of recorded material, NOT a camera") denies a camera that is demonstrably
+	// there, and the plain live sentence ("live http stream") claims nothing
+	// false but says nothing about whose camera it is. The derived sentence is
+	// "public relay of a real camera, NOT ours", which is the only one of the
+	// three that is true.
+	//
+	// Required rather than defaulted, for SP_POC_SOURCE_RELAY's reason: the
+	// default is the dangerous one. An operator reading a public cam who leaves
+	// this unset gets a source line that does not say the camera is somebody
+	// else's, and the whole point of this module is not making a claim it cannot
+	// back - in either direction.
+	{Name: "SP_POC_SOURCE_PUBLIC", kind: kindBool,
+		Consequence: "the source line does not say the camera belongs to somebody else, so a run over a public relay reads as though this installation owns the hardware it is measuring",
+		Remedy:      "set SP_POC_SOURCE_PUBLIC=true for a public relay of a real camera (e.g. a YouTube live cam resolved by `pocctl live`), or false for a camera this site operates"},
 
 	// --- AI sidecar ---
 	//
@@ -610,6 +627,12 @@ type Config struct {
 	// labelled "live rtsp (relay of recorded material, NOT a camera)" and a camera
 	// is labelled "live rtsp camera".
 	SourceRelay bool
+	// SourcePublic says the live source is a REAL CAMERA relayed by somebody
+	// else: a YouTube live cam, a municipal open feed, anything whose camera
+	// exists and is not ours. The label it derives is "public relay of a real
+	// camera, NOT ours", and it is separate from SourceRelay because a bool
+	// cannot say both "this is a recording" and "this is a camera".
+	SourcePublic bool
 
 	AIAddr         string
 	AIModel        string
@@ -1012,6 +1035,7 @@ func Load(lookup Lookup) (Config, error) {
 	str(&cfg.SourceUser, "SP_POC_SOURCE_USER")
 	str(&cfg.SourcePassword, "SP_POC_SOURCE_PASSWORD")
 	boolean(&cfg.SourceRelay, "SP_POC_SOURCE_RELAY")
+	boolean(&cfg.SourcePublic, "SP_POC_SOURCE_PUBLIC")
 	str(&cfg.AIAddr, "SP_POC_AI_ADDR")
 	str(&cfg.AIModel, "SP_POC_AI_MODEL")
 	str(&cfg.SidecarScript, "SP_POC_SIDECAR_SCRIPT")
@@ -1427,6 +1451,25 @@ func (c Config) Validate() error {
 	if c.SourceRelay && !c.isLiveSource() {
 		add("SP_POC_SOURCE_RELAY",
 			"the run says it is relaying recorded material, and the source is %q, which reads a local file or nothing at all. A relay is a LIVE source by construction — a recording re-published over rtsp — so this pair of settings describes a thing that does not exist. Set SP_POC_SOURCE_KIND=rtsp, or set SP_POC_SOURCE_RELAY=false", c.SourceKind)
+	}
+
+	// A public relay is a live source by the same construction. A file on disk
+	// is not a camera somebody else owns, so the pair has nothing to describe.
+	if c.SourcePublic && !c.isLiveSource() {
+		add("SP_POC_SOURCE_PUBLIC",
+			"the run says the source is a public relay of a real camera, and the source is %q, which reads a local file. There is no camera in that sentence at all. Set SP_POC_SOURCE_KIND=rtsp or url, or set SP_POC_SOURCE_PUBLIC=false", c.SourceKind)
+	}
+
+	// The two relay flags cannot both be true, and the refusal is by name
+	// because the combination is a specific lie rather than a nonsense pair:
+	// SourceRelay's sentence denies a camera ("relay of recorded material, NOT
+	// a camera") and SourcePublic's asserts one ("public relay of a real
+	// camera"), so a run carrying both would print whichever won the branch
+	// order while having verbally claimed the opposite on the previous line.
+	// A source is one or the other, and which one it is has to be said.
+	if c.SourcePublic && c.SourceRelay {
+		add("SP_POC_SOURCE_PUBLIC",
+			"both SP_POC_SOURCE_PUBLIC and SP_POC_SOURCE_RELAY are true. They are different sentences about the same source: a relay of RECORDED material is not a camera, and a public relay of a real camera is. Both cannot be true of one stream, and a run that carries both prints whichever the label derived first. Set one to false")
 	}
 
 	// A LIVE source needs a recorded permission basis, and nothing else can supply

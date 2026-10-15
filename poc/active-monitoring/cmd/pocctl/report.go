@@ -104,9 +104,20 @@ type mark struct {
 	By      string `json:"by"`
 }
 
+// review is the human marking file, and `$comment` is DECLARED rather than
+// ignored — the same convention `syntheticReview` uses and for the same reason:
+// this struct is decoded STRICTLY, so a documented key the loader rejects is a
+// committed file the command cannot read.
+//
+// It did not, for a while: the struct had no `$comment` field, the decoder
+// refused the committed testdata/groundtruth.json with "unknown field
+// $comment", and every report printed `false positives: NOT RUN` with the FILE
+// blamed for a shape the loader itself could not read. The demo found it
+// because a demo that runs the report finds out what the report actually says.
 type review struct {
-	Schema int    `json:"schema"`
-	Marks  []mark `json:"marks"`
+	Comment []string `json:"$comment"`
+	Schema  int      `json:"schema"`
+	Marks   []mark   `json:"marks"`
 }
 
 // modelName is who verified this run's events, read from the environment the run

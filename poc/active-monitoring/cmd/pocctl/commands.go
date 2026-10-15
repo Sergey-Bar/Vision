@@ -91,6 +91,7 @@ func cmdPreflight(args []string) error {
 		fmt.Println("to prevent.")
 		return cfgErr
 	}
+	cal := calibrationFor(cfg)
 	spec, err := source.Parse(cfg.SourceKind, cfg.SourceArg)
 	if err != nil {
 		return err
@@ -140,10 +141,29 @@ func cmdPreflight(args []string) error {
 		ClockState:      flags["clock-state"],
 		PowerState:      power,
 		GateDPrevious:   gateD, RehearsalAge: gateDAge,
+		// The detector row's identity. This is the wiring that used to be
+		// missing: the schema REQUIRES SP_POC_DET_MODEL, SP_POC_ORT_LIB and
+		// SP_POC_ORT_THREADS, so a detector run cannot start without them, and
+		// preflight still built a row about a model nobody had named. Every
+		// detector run therefore failed a gate it had already satisfied, which
+		// is the shape of a gate nobody reads.
+		DetectorModel:   cfg.DetModel,
+		DetectorLibrary: cfg.ORTLib,
+		DetectorThreads: cfg.ORTThreads,
+		AIFPS:           cfg.AIFPS,
+		// The p99, from a MEASURED record rather than from a flag: a number an
+		// operator types is a number nobody measured.
+		Calibration:     cal.calibration,
+		CalibrationNote: cal.note,
+		DetectorP99MS:   cal.p99MS,
 	})
 	if probeErr != nil {
 		res.Summary = "preflight refuses to start: " + probeErr.Error()
 		res.Pass = false
+	}
+	if line := calibrationLine(cal); line != "" {
+		fmt.Println(line)
+		fmt.Println()
 	}
 	printPreflight(res)
 	if !res.Pass {

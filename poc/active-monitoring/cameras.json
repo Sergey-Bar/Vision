@@ -1,0 +1,103 @@
+{
+  "$comment": [
+    "The curated table of PUBLIC live cameras for the live demo.",
+    "",
+    "Every row is a real camera, run by somebody else, published publicly on YouTube.",
+    "That is what `public relay` means and it is the only claim any row makes: the",
+    "camera exists, it is live, and it is NOT ours. `internal/source` derives the",
+    "source sentence from that flag - 'public relay of a real camera, NOT ours' - and",
+    "no row here turns it into 'live camera'.",
+    "",
+    "WHAT A ROW IS NOT. It is not permission to record. `licence` records the PUBLIC",
+    "basis for watching the feed, which is that the operator published it for exactly",
+    "that; storing clips is a different act and is the operator's to permit, which is",
+    "why `SP_POC_SOURCE_LICENCE` is a required variable for every live source and why",
+    "every row below says in words that no written permission to store or republish",
+    "has been obtained. A run over these cameras records clips on THIS machine, and",
+    "`cleared_for_external_use: false` says a screenshot of the demo is a screenshot",
+    "of the camera, which it is.",
+    "",
+    "A camera with no row here is not thereby forbidden: add one, resolve it live,",
+    "record what the resolver returned and what ffprobe read, and the run will use",
+    "it. What is refused is the alternative - a URL with no row, which is a camera",
+    "with no recorded basis and no date anybody checked it."
+  ],
+  "cameras": [
+    {
+      "id": "times-square-north",
+      "name": "EarthCam Live: Times Square North 4K",
+      "place": "Times Square, Manhattan, New York City, USA",
+      "operator": "EarthCam",
+      "url": "https://www.youtube.com/watch?v=JQ_jwk_7OVE",
+      "licence": "EarthCam publishes this camera publicly on YouTube for viewing, and watching the feed is public. No written permission to store or republish clips has been obtained: the footage is EarthCam's and their published terms govern. The basis for a recorded run is whatever SP_POC_SOURCE_LICENCE states, and the clips stay on this machine.",
+      "verified": "2026-10-14",
+      "contains_people": "yes - a public square. People are the subject of the view, so a clip from it is personal data and is treated as such.",
+      "cleared_for_external_use": false,
+      "notes": [
+        "Resolved live on 2026-10-14 with `yt-dlp --js-runtimes node -g -f bestvideo` to an",
+        "HLS playlist on manifest.googlevideo.com, and read by ffprobe: h264, 1920x1080,",
+        "30 fps, live. That is the whole content of `verified`: a human ran it, on that",
+        "date, and the stream answered.",
+        "",
+        "Chosen for the demo because a busy public square produces the two things the",
+        "pipeline is measured on - pedestrians and vehicles - continuously, in daylight",
+        "and at night, without anybody staging anything."
+      ]
+    },
+    {
+      "id": "abbey-road",
+      "name": "EarthCam Live: Abbey Road Crossing (London, England)",
+      "place": "Abbey Road, London, England",
+      "operator": "EarthCam",
+      "url": "https://www.youtube.com/watch?v=zMCea32gpmg",
+      "licence": "EarthCam publishes this camera publicly on YouTube for viewing, and watching the feed is public. No written permission to store or republish clips has been obtained: the footage is EarthCam's and their published terms govern. The basis for a recorded run is whatever SP_POC_SOURCE_LICENCE states, and the clips stay on this machine.",
+      "verified": "2026-10-14",
+      "contains_people": "yes - a pedestrian crossing, which is the entire subject of the view.",
+      "cleared_for_external_use": false,
+      "notes": [
+        "Resolved live on 2026-10-14 to an HLS playlist on manifest.googlevideo.com and",
+        "read by ffprobe. Same procedure, same date, same result as the row above.",
+        "",
+        "The second camera because the demo shows at least two real tiles, and because a",
+        "zebra crossing is the clearest possible subject for the line-crossing and",
+        "presence modes: the line is somewhere a person really does cross."
+      ]
+    },
+    {
+      "id": "dublin-ireland",
+      "name": "EarthCam Live: Dublin, Ireland",
+      "place": "Dublin, Ireland",
+      "operator": "EarthCam",
+      "url": "https://www.youtube.com/watch?v=3nyPER2kzqk",
+      "licence": "EarthCam publishes this camera publicly on YouTube for viewing, and watching the feed is public. No written permission to store or republish clips has been obtained: the footage is EarthCam's and their published terms govern. The basis for a recorded run is whatever SP_POC_SOURCE_LICENCE states, and the clips stay on this machine.",
+      "verified": "2026-10-14",
+      "contains_people": "yes - a city street with continuous pedestrian traffic.",
+      "cleared_for_external_use": false,
+      "notes": [
+        "Resolved live on 2026-10-14 to an HLS playlist on manifest.googlevideo.com.",
+        "",
+        "Held as the third tile and as the fallback when one of the others is between",
+        "streams: a row that resolved on the verification date is a row that resolved",
+        "THEN, and the resolver's own error names which camera did not answer today."
+      ]
+    },
+    {
+      "id": "new-orleans-street",
+      "name": "EarthCam Live: New Orleans Street View",
+      "place": "New Orleans, Louisiana, USA",
+      "operator": "EarthCam",
+      "url": "https://www.youtube.com/watch?v=xqdukYhcGEU",
+      "licence": "EarthCam publishes this camera publicly on YouTube for viewing, and watching the feed is public. No written permission to store or republish clips has been obtained: the footage is EarthCam's and their published terms govern. The basis for a recorded run is whatever SP_POC_SOURCE_LICENCE states, and the clips stay on this machine.",
+      "verified": "2026-10-14",
+      "contains_people": "yes - a street view in a city where people are continuously present.",
+      "cleared_for_external_use": false,
+      "notes": [
+        "Resolved live on 2026-10-14 to an HLS playlist on manifest.googlevideo.com.",
+        "",
+        "The fourth tile. Four rather than two, so the demo survives one camera being",
+        "offline on the day: the run's first job is to prove the source line, and a",
+        "four-row table with one camera down still proves it."
+      ]
+    }
+  ]
+}

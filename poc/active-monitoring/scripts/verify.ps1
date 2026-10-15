@@ -1454,6 +1454,158 @@ file = 'internal\detect\engine.go'
       pkg  = './internal/soak'
       test = 'TestABlindState|TestAStateOutside|TestTheShareIsPrinted|TestAnUnmeasured'
       why  = 'the unanswered share collapses to 0% and the report states that the model was being served, on a run where a third of the detections were never answered at all. This is the platform''s invariant 3 seen from the module that is actually demonstrated, and the slice is the only place in the POC where the run-level arithmetic says so'
+    },
+    # --- the public relay, and the run's own honesty about whose camera it is
+    #
+    # `pocctl live` resolves the curated cameras in cameras.json to HLS playlists
+    # with yt-dlp, and the run that reads one is labelled "public relay of a real
+    # camera, NOT ours". That sentence is the whole honesty of the path, and it
+    # exists because the two sentences available before it are both lies about the
+    # same stream: `Relay`'s denies a camera that is demonstrably there, and the
+    # plain live sentence says nothing about whose hardware it is.
+    #
+    # The five controls below were hand-run in order on 2026-10-15: each mutated,
+    # each watched go RED, each restored and watched GREEN. They are only entered
+    # here now because of that order.
+    @{
+      # The label is DERIVED from the flag, and it is asserted as a sentence rather
+      # than as a substring: the test requires the ownership claim AND refuses the
+      # recording sentence. A label that loses "NOT ours" over a public camera
+      # claims hardware this installation does not own, which is the same defect
+      # class D-5 exists for, one direction over.
+      #
+      # The anchor matches BOTH live kinds on purpose: rtsp and url derive the
+      # same sentence from the same flag, and the mutation removes it from both.
+      # That is one control — "the public-relay sentence is derived" — and not two,
+      # and a table entry per kind would be one control counted twice.
+      name = 'a public relay is labelled somebody else''s camera'
+      file = 'internal\source\source.go'
+      from = '		if s.PublicRelay {'
+      to   = '		if false { // REDCHECK: the public-relay sentence was never derived'
+      pkg  = './internal/source'
+      test = 'TestAPublicRelayIsLabelledSomebodyElsesCamera'
+      why  = 'a run over a real camera streamed by somebody else prints as this site''s own hardware, or as a recording that is not there. Both are claims the module cannot back, in opposite directions, which is why the flag is separate from Relay and the sentence is derived from it'
+    },
+    @{
+      # A row in the curated table with no recorded licence basis is refused at
+      # load. A public feed being PUBLIC is not the same as being free to record:
+      # watching it live and storing clips of it are different acts, and the
+      # second is the operator's to permit. The refusal is what stops an operator
+      # adding a camera by pasting a URL, which is how the footage half of this
+      # table did its work.
+      name = 'a camera row with no recorded licence is refused'
+      file = 'internal\cams\cams.go'
+      from = '	if strings.HasPrefix(strings.ToUpper(lic), licenceUnrecorded) {'
+      to   = '	if false { // REDCHECK: a camera with no recorded licence resolved'
+      pkg  = './internal/cams'
+      test = 'TestARowWithNoRecordedLicenceIsRefused'
+      why  = 'the table stops being the place a basis is recorded and becomes a list of URLs. A run then records footage from a camera whose operator never said anyone may, and no artefact of the run says otherwise'
+    },
+    @{
+      # `SP_POC_SOURCE_PUBLIC` and `SP_POC_SOURCE_RELAY` are different sentences
+      # about one source — a recording is not a camera, and a public relay of a
+      # real camera is. A run carrying both prints whichever wins the branch order
+      # while having verbally claimed the opposite on the previous line, so the
+      # pair is refused by name at startup.
+      name = 'public-relay and recording-relay cannot both be claimed'
+      file = 'internal\config\config.go'
+      from = '	if c.SourcePublic && c.SourceRelay {'
+      to   = '	if false { // REDCHECK: one source claimed to be a recording and a camera'
+      pkg  = './internal/config'
+      test = 'TestPublicAndRelayCannotBothBeClaimed'
+      why  = 'the run''s source line asserts a camera and denies one in the same configuration, and the one that reaches the screen is whichever the label derived first'
+    },
+    # --- the calibration record: the only place a p99 may come from
+    #
+    # The detector's preflight row multiplies a MEASURED p99 by the declared frame
+    # rate, so a number typed anywhere but in a measured record is a gate that
+    # passes because somebody hoped. Two more controls belong to that record: one
+    # is that it is refused when it is not measured, and one is that a record from
+    # another build is refused rather than applied.
+    @{
+      # A calibration measured against a different model cannot describe this
+      # run's latency. The comparison is on the file, not on the path string, so
+      # the test covers both the mismatch and the "different spelling of the same
+      # file" case: without that second half the control would refuse a machine
+      # that benched the model it is about to run, from a different directory.
+      name = 'a calibration is applied only to the build it measured'
+      file = 'internal\soak\calibration.go'
+      from = '	if !samePath(c.Model, model) {'
+      to   = '	if false { // REDCHECK: another build''s p99 was applied to this one'
+      pkg  = './internal/soak'
+      test = 'TestACalibrationAppliesOnlyToTheBuildItMeasured'
+      why  = 'the detector row multiplies a p99 from a build nobody is running, so a run is cleared against a machine that was never measured — or refused against the one it is on'
+    },
+    @{
+      # The AI p99 row is about the run that HAS a per-frame model on the AI path.
+      # On the shipped detector path there is no sidecar, and the row used to fail
+      # every detector run forever: `pocctl preflight` in its shipped configuration
+      # refused a row about a component the run does not start, which is the exact
+      # defect W1-4 removed from the trigger row one row above. The not-applicable
+      # branch names the row that holds the number instead, and the sidecar path is
+      # still a refusal.
+      name = 'the AI row is about the run that has an AI'
+      file = 'internal\soak\preflight.go'
+      from = '	if in.TriggerMode != config.TriggerModeSidecar {'
+      to   = '	if false { // REDCHECK: a run with no sidecar failed the budget row'
+      pkg  = './internal/soak'
+      test = 'TestTheAIRowIsAboutTheRunThatHasAnAI'
+      why  = 'the detector run refuses at startup over a measurement that cannot exist for it. A gate that cannot pass on the shipped path is a gate that gets deleted, and the row that said so genuinely was'
+    },
+    # --- the keystore boundary, found by a flake --------------------------------
+    #
+    # This control was not written because somebody looked for it. It was written
+    # because the gate's own suite failed ONCE in fifteen runs on a test that had
+    # been green for months: `TestTheTrustedKeyIsRefusedWhenItIsAPublicKey...`
+    # drew a fresh random ed25519 key each run and parsed it as a raw trusted key,
+    # and roughly one run in twenty draws a key whose first or last byte is a byte
+    # `strings.TrimSpace` strips.
+    #
+    # The order of two branches decided whether a trusted key could be read at
+    # all: the raw 32-byte case sat AFTER the bytes had been through `string()`
+    # and `TrimSpace`, which is text handling applied to a binary key. About 5% of
+    # all keys begin or end with one of six whitespace bytes, and every one of
+    # those was trimmed to a different length and refused as "neither PEM, base64
+    # nor a raw 32-byte key" -- the trust decision, failing on the shape of the
+    # key's own randomness, intermittently.
+    #
+    # A defect that appears once in twenty runs is worse than a missing control,
+    # because a green run means nothing about the next one. So the test is now
+    # deterministic -- a key whose OWN first byte is a space -- and the branch
+    # order is the control.
+    @{
+      name = 'a raw trusted key is read by its bytes, not by its trimmed text'
+      file = 'internal\store\seal.go'
+      from = '	if len(raw) == ed25519.PublicKeySize {'
+      to   = '	if false { // REDCHECK: a raw trusted key was decided as text'
+      pkg  = './internal/store'
+      test = 'TestARawTrustedKeyIsReadByItsBytesAndNotByItsText'
+      why  = 'one trusted key in twenty cannot be read at all, and which ones fail depends on the key''s own randomness. A seal verified against a key the module refused to load is a ledger nobody can check, and the operator is told their file is not a key'
+    },
+    # --- the benchmark's two kinds of zero ------------------------------------
+    #
+    # Found by the live demo on 2026-10-15, and worth the paragraph because the
+    # symptom was the module's most honest output: `pocctl bench` printed
+    # `negative frame, nothing drawn, nothing there` for the committed still set,
+    # and it was FALSE. `Detect` returns its refusal INSIDE the Answer -- Boxes
+    # is empty either way -- so the metrics loop, which looked at len(ans.Boxes),
+    # read a frame the decoder refused to decode as a frame where it found
+    # nothing.
+    #
+    # The model on this machine is why nobody noticed: the pinned Model Zoo
+    # yolov4n.onnx is a multi-scale ANCHORED head and the in-process decoder
+    # reads only fused outputs, so EVERY frame was refused, and the benchmark's
+    # negative-frame line made a refusal look like a clean measurement. A
+    # false-positive rate over frames nobody decoded is a claim about nothing,
+    # phrased as a result.
+    @{
+      name = 'a refused frame is refused, not counted as a negative one'
+      file = 'cmd\pocctl\bench_frames.go'
+      from = '	if ans.Refusal != nil {'
+      to   = '	if false { // REDCHECK: a refused frame was read as a negative one'
+      pkg  = './cmd/pocctl'
+      test = 'TestARefusedFrameIsNotANegativeOne'
+      why  = 'the benchmark reports a clean measurement over frames the detector could not decode. Zero from a refusal and zero from a search are both the number 0, and only one of them is a measurement'
     }
   )
   Push-Location $PWD

@@ -160,6 +160,111 @@ runs the committed model in 241 ms, comfortably inside the 0.8 s frame interval.
 0.9 s figure came from a `yolov4.onnx` that is **not in this repository**, so it cannot
 be re-measured here and is no longer claimed.
 
+### The live relay: real cameras that are not ours
+
+`cameras.json` is the curated table of public live cameras, `pocctl live` is the
+command that reads it, and `SP_POC_SOURCE_PUBLIC=true` is the flag the run's own
+source sentence is derived from. All three exist because of one honesty problem:
+a YouTube live cam is a REAL camera streamed by SOMEBODY ELSE, and the two
+sentences available before this were both lies about it — `Relay`'s ("relay of
+recorded material, NOT a camera") denies a camera that is demonstrably there, and
+the plain live sentence says nothing about whose hardware it is.
+
+```powershell
+pocctl live list                       # the table: place, operator, licence, verified date
+pocctl live resolve --all              # yt-dlp -g -f bestvideo per row; a failure is named
+pocctl live env abbey-road             # the SP_POC_SOURCE_* lines one camera produces
+.\scripts\..\..\scripts\live-demo.ps1  # the whole path, one button (repo root)
+```
+
+Four EarthCam cameras, verified live **14.10.2026**: Times Square North 4K, the Abbey
+Road crossing, Dublin, and New Orleans Street. What was verified is exactly what a
+human did that day — resolved with `yt-dlp --js-runtimes node -g -f bestvideo` to an
+HLS playlist on `manifest.googlevideo.com`, and read with ffprobe (h264, 1920x1080,
+30 fps, live). A camera that answered on its verification date is a camera that may be
+offline today, and the resolver's error names which one.
+Two things the table refuses to do. A row with no recorded licence basis is refused at
+load: a public feed being PUBLIC is not the same as being free to record, so every row
+states the basis and states in words that no written permission to store clips exists,
+and `cleared_for_external_use` is false on every row — a screenshot of a run over these
+cameras is a screenshot of these cameras. And the two relay flags cannot both be true,
+because one source cannot be a recording and a camera at once.
+
+`-f bestvideo`, not `-f best`: `best` asks for a pre-merged file, and a segmented live
+stream has no such format, so it answers "Requested format is not available" against
+every YouTube live cam on earth. The pipeline reads frames and drops audio, so video-only
+is the correct selection anyway.
+
+**Preflight, green against a real camera, 15.10.2026.** All eleven rows, with the
+camera row reading the stream's own facts (h264 1920x1080 @ 30 fps, decode 9.32x real
+time) and the detector row carrying a measured p99. Reproduce it in this order:
+
+```powershell
+pocctl bench --images testdata\still --data-root <root>   # times the session, writes the calibration
+pocctl rehearse all                                       # gate D: seven fault classes
+pocctl live env abbey-road | Out-String                   # the camera's environment
+pocctl preflight
+```
+
+Two defects the calibration closed, both of the same shape — a gate that cannot pass is
+a gate nobody reads. The detector row was fed no model, no library and no p99 by ANY
+caller, so every detector run failed a row its own required configuration had already
+satisfied; and the AI p99 row required a sidecar client from a run that never starts
+one. The record itself is `<data-root>/detector-calibration.json`, written by the bench
+and refused by preflight when it is absent or when it describes a different build — the
+same model file, the same runtime library, the same thread count and the same input
+size, compared as files rather than as strings. The first sample of the timing pass is
+discarded as the CUDA warm-up: measured here at 600.9 ms for a kernel that costs
+13.7 ms once cuDNN has loaded, so a p99 over cold starts would refuse a detector that
+demonstrably runs.
+
+**The CUDA provider now puts its own directory on PATH.** On Windows the provider
+resolves `cudnn64_9.dll` through the process DLL search order, which covers the
+executable's directory, the system directories and PATH — not the directory beside
+`onnxruntime.dll`, which is where `fetch-runtime` put it. The consequence was a run
+that appended the CUDA provider successfully and then failed its first Conv node, which
+is exactly the silent-CPU-fallback shape the provider path claims to refuse.
+`ortdetect.PrependLibraryDirToPATH` closes it before the environment is initialised.
+
+### What the live path proved, and what it did not
+
+**What it proved.** The camera is real: `pocctl live resolve` turns a YouTube URL into an
+HLS playlist, ffmpeg reads it, and preflight's own row prints the stream's codec and
+frame rate. The run records the source line `live http stream (public relay of a real
+camera, NOT ours)` — the row in the store, which is the one the report and the log read.
+
+**What it did not.** The detection rate is NOT RUN, and the run says so in its own
+words:
+
+	frame 1: the detector refused to answer: this export is a multi-scale ANCHORED head
+	and the in-process decoder reads only fused outputs
+
+The pinned Model Zoo `yolov4n.onnx` (`defaultModelSHA256`, 257 MB) publishes three
+outputs of shape `[1 52 52 3 85]` — one tensor per stride with coordinates that are
+offsets from anchor boxes living in `yolov4-416.cfg`, which is not in the ONNX graph. The
+in-process decoder deliberately refuses that family, because guessing an anchor set
+produces boxes in the right place with the wrong sizes and every artefact would still
+say `fused`. The Python sidecar implements the anchored family, and the framedeg swing
+between them is the next decision a person makes: a fused export of the same weights, or
+the sidecar on the demo path with its cost stated rather than hidden. What this
+repository will not do is pick one quietly.
+
+Two things the demo caught while it was at it. `pocctl bench` printed
+`negative frame, nothing drawn, nothing there` over frames the decoder had refused,
+because `Detect` returns its refusal INSIDE the Answer and the loop looked at
+`len(ans.Boxes)` — two kinds of zero, printed as one. And `pocctl report` refused the
+committed `testdata/groundtruth.json` with `unknown field "$comment"`: the loader was
+strict and the struct was missing the key the file uses. Both are fixed, both are tests,
+and the second one had been printing NOT RUN at every report for as long as the header
+had been in the file.
+
+### What this path does NOT prove
+
+Not a week, and not a VMS. `$CaptureSeconds` seconds proves the source line and the
+detector and nothing about uptime, drift or the acceptance criteria. The events are
+pushed to xpsim, a simulator, and preflight's own row prints the word "simulator"
+rather than letting a reader assume otherwise.
+
 ### The two defects the GPU exposed
 
 Both were invisible until a session actually opened, and both are the same shape: a fact

@@ -254,6 +254,51 @@ func TestARelayIsNeverLabelledACamera(t *testing.T) {
 	}
 }
 
+// TestAPublicRelayIsLabelledSomebodyElsesCamera is the other half of D-5, and
+// the half the YouTube live-cam path needs.
+//
+// A public relay is a REAL camera that is NOT ours, and both of the existing
+// sentences are lies about it: `Relay`'s denies a camera that is demonstrably
+// there, and the plain live sentence claims nothing false while saying nothing
+// about whose hardware it is. The third sentence is the only true one, and it
+// is derived from its own flag precisely because a bool cannot say both.
+func TestAPublicRelayIsLabelledSomebodyElsesCamera(t *testing.T) {
+	for _, kind := range []string{"url", "rtsp"} {
+		arg := "https://manifest.googlevideo.com/x.m3u8"
+		if kind == "rtsp" {
+			arg = "rtsp://relay.example/street"
+		}
+		pub, err := Parse(kind, arg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pub.PublicRelay = true
+		got := pub.Label()
+		if !strings.Contains(got, "public relay of a real camera") || !strings.Contains(got, "NOT ours") {
+			t.Fatalf("%s public relay label is not the honest sentence: %q", kind, got)
+		}
+		// It must not read as either of the other two sentences. The first is
+		// the D-5 lie about a camera that exists; the second is the one that
+		// says nothing about ownership at all.
+		if strings.Contains(got, "NOT a camera") {
+			t.Fatalf("%s public relay is labelled as recorded material, which denies the camera in front of the viewer: %q", kind, got)
+		}
+		if kind == "rtsp" && got == "source: live rtsp camera" {
+			t.Fatalf("rtsp public relay is labelled as this site's own camera: %q", got)
+		}
+		if r := pub.LabelRedacted(); !strings.Contains(r, "NOT ours") {
+			t.Fatalf("the redacted label dropped the ownership claim, and the report prints that one: %q", r)
+		}
+	}
+	// Public and Relay are different flags saying different things, and the
+	// recorder relay keeps its own sentence: the two must not collapse.
+	rec, _ := Parse("rtsp", "rtsp://127.0.0.1:8554/street")
+	rec.Relay = true
+	if got := rec.Label(); !strings.Contains(got, "relay of recorded material") {
+		t.Fatalf("the recording relay lost its sentence to the public one: %q", got)
+	}
+}
+
 // --- probe ------------------------------------------------------------------
 
 type fakeRunner struct {

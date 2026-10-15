@@ -1,0 +1,42 @@
+{
+  "$comment": [
+    "The still set `pocctl bench --images` drives the detector over, and the provenance record for",
+    "every image in it.",
+    "",
+    "WHY THIS SET IS ONE IMAGE AND WHY THAT IS HONEST. It exists so the detector can be TIMED:",
+    "`pocctl bench --images` opens a real ONNX Runtime session, drives it over the stills, and",
+    "writes the measured p50/p99 to <data-root>/detector-calibration.json, which is where",
+    "`pocctl preflight` reads the number its detector row multiplies by the declared frame",
+    "rate. A detection benchmark needs a labelled set and a licence per image; a TIMING set needs",
+    "a frame the detector can decode, and the repo already has one: frame 0 of",
+    "`testdata/injection-hostile.mp4`, whose row in testdata/labels.json records that it is",
+    "synthetic, that every pixel is a Go computation, and that no third-party material is in it.",
+    "",
+    "WHAT IT DOES NOT DO. One negative frame cannot measure recall, and this manifest does not",
+    "claim it can: `boxes` is empty because nothing is in the frame, and the bench will say",
+    "`negative frame, nothing drawn, nothing there`. The false-positive rate over real footage",
+    "is a `pocctl bench --run` measurement over a finished run, and it stays NOT RUN until",
+    "somebody marks which of the model's boxes are really objects."
+  ],
+  "classes_file": "not applicable: the classes come from the model's ONNX metadata, and this still set adds none of its own",
+  "boxes_file": "not applicable: no box is annotated, and an empty list is a ground truth rather than a missing one",
+  "image_dir": "testdata/still",
+  "image_licence": "the same licence as this repository. There is no rights holder to ask: the frame is generated locally by `go run ./cmd/injectionfixture`, contains no third-party footage, no downloaded source and no copyrighted asset. testdata/labels.json records the row and the SHA-256 below is that row's.",
+  "annotation_licence": "the same licence as this repository, and the same reason: the annotations are the empty list this repository writes, over an image this repository drew.",
+  "attribution": "none required. No licence here imposes an attribution condition.",
+  "negatives": 1,
+  "fetched_at": "2026-10-15",
+  "images": [
+    {
+      "id": "injection-hostile.frame0",
+      "filename": "injection-hostile.png",
+      "sha256": "9C444D781998145E769E6B6C78C23B27E0BA24D66715E18148727164E2B9D5F0",
+      "original_url": "generated locally by `go run ./cmd/injectionfixture`; no third-party material and no network are involved at any point",
+      "author": "this repository",
+      "license": "the same licence as this repository",
+      "boxes": [],
+      "dropped_classes": [],
+      "note": "frame 0 of the committed injection fixture. It is a colour-bar pattern with one filled rectangle crossing a line, so the detector has something to look at and nothing to find: a still set for TIMING does not need a real scene, and one for SCORING must not be this one."
+    }
+  ]
+}

@@ -4400,3 +4400,72 @@ two NL **controls** go red under mutation, which is the discipline's bar, not th
 gates now carry red records. And `boot`, whose falsification is the gate reverting the
 dispatch fix and failing to serve `/v1/health` — that mechanism is different from the Go
 table and is the boot gate's own doing, not a table entry.
+
+## The 2026-10-15 live-demo pass: a real camera, two gates that could not pass, and a model that cannot be decoded
+
+`scripts/live-demo.ps1` (repo root) reads a **public relay of a real camera** end to end:
+`pocctl live resolve` turns a YouTube page into an HLS playlist with `yt-dlp`, `cmd/watch`
+reads it with ffmpeg, and the source line the run records is the one the plan asks for —
+`live http stream (public relay of a real camera, NOT ours)`. The cameras are four EarthCam
+rows in `poc/active-monitoring/cameras.json`, each resolved live and read with ffprobe on
+2026-10-14, each recording that **no written permission to store clips exists** and that
+`cleared_for_external_use` is false: a screenshot of this demo is a screenshot of somebody
+else's camera.
+
+**POC preflight, all eleven rows green against Abbey Road**, 2026-10-15. The camera row
+printed the stream's own facts (h264, 1920x1080, 30 fps, decode 9.32x real time) and the
+detector row a *measured* p99: p50 13.9 ms / p99 16.4 ms over 40 CUDA inferences at
+416x416, 4 threads, 82 ms of a 1000 ms second at `ai_fps=5`.
+
+Getting there needed two gates fixed that **could not pass on the shipped path**, which is
+the shape of gate nobody reads:
+
+- the detector preflight row was built with the model, library, threads and p99 **all
+  zero** by its only caller, so every detector run failed a row its own required schema
+  had already satisfied. The p99 now comes from a measured record
+  (`<data-root>/detector-calibration.json`, written by `pocctl bench --images`), refused
+  when absent and refused when it describes a different build — same model file, same
+  runtime library, same thread count, same input size, compared as files;
+- the AI p99 row required a sidecar client from a run that never starts one. It is now
+  three states, and the not-applicable one names the row that does hold the number.
+
+Two environment truths were found on the way and are now controlled: the CUDA provider
+resolves `cudnn64_9.dll` through PATH rather than beside the library, so a run appended
+the provider successfully and then failed its first Conv node (600.9 ms measured for a
+13.7 ms kernel) — `ortdetect.PrependLibraryDirToPATH` closes it; and a `watch.exe` older
+than its sources will happily demo yesterday's product, so the script rebuilds on staleness.
+
+**What the demo proved it could not do.** The detection rate is NOT RUN, in the run's own
+words: *"this export is a multi-scale ANCHORED head and the in-process decoder reads only
+fused outputs"*. The pinned Model Zoo `yolov4n.onnx` publishes three `[1 52 52 3 85]`
+outputs whose anchors live in the `.cfg`, and the Go decoder refuses that family on
+purpose rather than guessing. The frames were read and the session ran; the decode is the
+gap, and a fused export or the sidecar on the demo path is a decision for a person, not
+a quiet swap in a plan.
+
+The demo also caught two defects with the same shape as the ones it came to test:
+
+- `pocctl bench` printed `negative frame, nothing drawn, nothing there` over frames the
+  decoder had **refused** — `Detect` returns its refusal inside the Answer, and the loop
+  looked at `len(ans.Boxes)`. Two kinds of zero, printed as one.
+- `pocctl report` refused the committed `testdata/groundtruth.json` with
+  `unknown field "$comment"`: the loader was strict and the struct was missing the key the
+  file uses, so the criterion had been printing NOT RUN with the file blamed for the
+  loader's shape.
+- and `internal/store.ParseTrustedKey` decided a **raw 32-byte key** by trimming its bytes
+  as text, so about one trusted key in twenty was refused as "not a key at all",
+  depending on where its own randomness landed. The POC gate's suite caught it by going
+  flaky; the test is deterministic now, and **the branch order is the control**.
+
+Eighty-nine controls are in the POC's table now, seven of them added this session and each
+hand-run red before it was entered: the public-relay sentence, the camera table's licence
+refusal, the public/relay pair, the calibration's applies-check, the AI row's
+not-applicable branch, the keystore's raw-key-first order, and the benchmark's two kinds
+of zero. The POC gate ran the whole table green.
+
+What this pass does NOT claim: a week, a VMS, or a detection rate. Events went to `xpsim`,
+a simulator, and preflight's own row prints the word *simulator* rather than letting a
+reader assume otherwise. The `python` on this box has onnxruntime 1.30.0 **CPU** — the
+sidecar's runtime — and the shipped detector path does not use it, which the demo says on
+its first screen rather than in a footnote.
+

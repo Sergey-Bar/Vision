@@ -175,6 +175,15 @@ func Open(cfg SessionConfig) (*Session, error) {
 		}
 	}
 
+	// The runtime's own dependencies resolve through PATH, not beside the
+	// library: the CUDA provider loads cudnn64_9.dll that way on Windows, and
+	// the fetch-runtime bundle puts it in this directory. See the full story in
+	// library_path.go — a run that skips this appends the CUDA provider
+	// successfully and then fails its first Conv node, which is the one defect
+	// shape this package claims to refuse.
+	if err := PrependLibraryDirToPATH(cfg.LibraryPath); err != nil {
+		return nil, err
+	}
 	ort.SetSharedLibraryPath(cfg.LibraryPath)
 	if err := ort.InitializeEnvironment(); err != nil {
 		return nil, &Refusal{

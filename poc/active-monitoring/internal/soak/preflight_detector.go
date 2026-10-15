@@ -45,6 +45,9 @@ const detectorWhy = "a detector that cannot hold the declared frame rate does no
 // actionable: a reader needs the four numbers, not the verdict.
 func detectorMeasured(in PreflightInput) string {
 	if in.DetectorP99MS <= 0 {
+		if in.Calibration != nil {
+			return "a calibration exists but does not apply to this run: " + in.CalibrationNote
+		}
 		return "no p99 measured yet; the model and library are named but nothing has been timed"
 	}
 	rate := in.AIFPS
@@ -53,8 +56,12 @@ func detectorMeasured(in PreflightInput) string {
 		what = fmt.Sprintf("ai_fps=0 (every decoded frame, source %.3f fps)", in.SourceReport.FPS)
 		rate = int(in.SourceReport.FPS + 0.999)
 	}
-	return fmt.Sprintf("det_p99=%.1fms x %s = %.0fms of a 1000ms second, threads=%d",
-		in.DetectorP99MS, what, in.DetectorP99MS*float64(rate), in.DetectorThreads)
+	calibrated := ""
+	if in.Calibration != nil {
+		calibrated = fmt.Sprintf(" [calibrated %s over %d frames]", in.Calibration.MeasuredAt, in.Calibration.Frames)
+	}
+	return fmt.Sprintf("det_p99=%.1fms x %s = %.0fms of a 1000ms second, threads=%d%s",
+		in.DetectorP99MS, what, in.DetectorP99MS*float64(rate), in.DetectorThreads, calibrated)
 }
 
 // detectorPreflightOK is the gate itself.
@@ -121,8 +128,16 @@ func detectorDetail(in PreflightInput) string {
 		return "the measured p99 fits inside the declared rate: " + arithmetic
 	}
 	if in.DetectorP99MS <= 0 {
+		// Two different absences, and they are not the same sentence. A record
+		// that exists and does not apply names the part that differs, because
+		// "run the bench again" is wrong advice for a machine that ran it
+		// yesterday on a different library.
+		if in.CalibrationNote != "" {
+			return "the recorded calibration does not describe this run: " + in.CalibrationNote + ". " +
+				arithmetic
+		}
 		return "no inference latency has been measured, so the declared rate cannot be checked. " +
-			"Run `pocctl bench --images ...` or `pocctl demo --dry-run` to time the model first: " +
+			"Run `pocctl bench --images ... --data-root <the run's data root>` to time the model first: " +
 			"a detector that has never run is not an infinitely fast detector, and this gate will not " +
 			"pass by multiplying an absence by a rate. " + arithmetic
 	}

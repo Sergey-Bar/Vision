@@ -39,6 +39,7 @@ func complete(t *testing.T) map[string]string {
 		"SP_POC_SOURCE_KIND":        SourceLoop,
 		"SP_POC_SOURCE_ARG":         `testdata\car-crossing.mp4`,
 		"SP_POC_SOURCE_RELAY":       "false",
+		"SP_POC_SOURCE_PUBLIC":      "false",
 		"SP_POC_AI_ADDR":            "127.0.0.1:8099",
 		"SP_POC_AI_MODEL":           `models\yolov4n.onnx`,
 		"SP_POC_SIDECAR_SCRIPT":     `pyworker/server.py`,
@@ -809,6 +810,104 @@ func TestTheRelayFlagMustBeABoolean(t *testing.T) {
 	if !strings.Contains(err.Error(), "SP_POC_SOURCE_RELAY") {
 		t.Fatalf("a non-boolean relay flag was accepted: %v", err)
 	}
+}
+
+// --- the public relay: a real camera that is not ours ------------------------
+
+// TestAPublicRelayLoadsAndSaysSo: the YouTube live-cam path. A public relay is
+// live (the camera is real and real-time), it needs a recorded permission
+// basis like every other live source, and the flag reaches the Config so
+// `source.Label` can derive the one sentence that is true of it.
+func TestAPublicRelayLoadsAndSaysSo(t *testing.T) {
+	m := complete(t)
+	m["SP_POC_MODE"] = ModeLive
+	m["SP_POC_SOURCE_KIND"] = SourceURL
+	m["SP_POC_SOURCE_ARG"] = "https://manifest.googlevideo.com/api/manifest/hls_playlist/x/index.m3u8"
+	m["SP_POC_SOURCE_PUBLIC"] = "true"
+	m["SP_POC_SOURCE_LICENCE"] = "published publicly by the operator for viewing; no written permission to store"
+	cfg, err := Load(lookupFrom(m))
+	if err != nil {
+		t.Fatalf("a declared public relay over https must load: %v", err)
+	}
+	if !cfg.SourcePublic {
+		t.Fatal("SourcePublic is false; the source line would say nothing about whose camera this is")
+	}
+	if !cfg.IsLiveSource() {
+		t.Fatal("a public relay is a live source: the camera is real and real-time")
+	}
+	// The licence rule does not relax for a public camera. "It is on YouTube" is
+	// not a permission to store clips of it, which is the whole reason
+	// SP_POC_SOURCE_LICENCE exists.
+	delete(m, "SP_POC_SOURCE_LICENCE")
+	err = mustFail(t, m)
+	if !strings.Contains(err.Error(), "SP_POC_SOURCE_LICENCE") {
+		t.Fatalf("a public relay with no recorded basis was accepted: %v", err)
+	}
+}
+
+// TestAPublicRelayOfSomethingThatIsNotLiveIsRefused: a file on disk is not a
+// camera somebody else owns, so the pair describes nothing.
+func TestAPublicRelayOfSomethingThatIsNotLiveIsRefused(t *testing.T) {
+	m := complete(t)
+	m["SP_POC_SOURCE_PUBLIC"] = "true"
+	err := mustFail(t, m)
+	if !strings.Contains(err.Error(), "SP_POC_SOURCE_PUBLIC") {
+		t.Fatalf("public=true over kind=loop was accepted: %v", err)
+	}
+}
+
+// TestPublicAndRelayCannotBothBeClaimed: the two flags are different sentences
+// about the same source — one denies a camera and the other asserts one — so a
+// run carrying both would print whichever won the branch order while having
+// claimed the opposite on the previous line. The pair is refused by name.
+func TestPublicAndRelayCannotBothBeClaimed(t *testing.T) {
+	m := complete(t)
+	m["SP_POC_MODE"] = ModeLive
+	m["SP_POC_SOURCE_KIND"] = SourceURL
+	m["SP_POC_SOURCE_ARG"] = "https://manifest.googlevideo.com/x/index.m3u8"
+	m["SP_POC_SOURCE_PUBLIC"] = "true"
+	m["SP_POC_SOURCE_RELAY"] = "true"
+	m["SP_POC_SOURCE_LICENCE"] = "published publicly by the operator for viewing"
+	err := mustFail(t, m)
+	if !strings.Contains(err.Error(), "SP_POC_SOURCE_PUBLIC") || !strings.Contains(err.Error(), "SP_POC_SOURCE_RELAY") {
+		t.Fatalf("the public+relay pair was accepted or refused without naming both flags: %v", err)
+	}
+}
+
+// TestThePublicFlagMustBeABoolean: one spelling on the wire, for the relay
+// flag's reason.
+func TestThePublicFlagMustBeABoolean(t *testing.T) {
+	m := complete(t)
+	m["SP_POC_SOURCE_PUBLIC"] = "yes"
+	err := mustFail(t, m)
+	if !strings.Contains(err.Error(), "SP_POC_SOURCE_PUBLIC") {
+		t.Fatalf("a non-boolean public flag was accepted: %v", err)
+	}
+}
+
+// TestThePublicFlagIsRequiredBySchema: it is required rather than defaulted to
+// false because the default is the dangerous one — an operator reading a public
+// camera who leaves it unset gets a source line that does not say the camera is
+// somebody else's.
+func TestThePublicFlagIsRequiredBySchema(t *testing.T) {
+	m := complete(t)
+	delete(m, "SP_POC_SOURCE_PUBLIC")
+	if missing := RequiredUnder(lookupFrom(m)); !contains(missing, "SP_POC_SOURCE_PUBLIC") {
+		t.Fatalf("SP_POC_SOURCE_PUBLIC is not required; a run that does not say whether the camera is somebody else's is a run whose source line claims nothing about hardware")
+	}
+	err := mustFail(t, m)
+	if !strings.Contains(err.Error(), "SP_POC_SOURCE_PUBLIC") {
+		t.Fatalf("the refusal does not name SP_POC_SOURCE_PUBLIC: %v", err)
+	}
+}
+
+func contains(list []string, want string) bool {
+	for _, v := range list {
+		if v == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestUIServerRefusesNonLoopback(t *testing.T) {

@@ -322,12 +322,31 @@ func ReadSeal(path string) (Seal, error) {
 	return seal, nil
 }
 
-// ParseTrustedKey reads a trusted public key from a file.
+// ParseTrustedKey reads the public half: PEM, base64, or a raw 32-byte key.
 //
-// PEM and a bare 32-byte binary are both accepted, because those are the two forms
-// an operator will actually have: `openssl genpkey` produces one and
-// `go run` writes the other.
+// All three are accepted because those are the three forms an operator will
+// actually have: `openssl genpkey` writes the PEM, `go run` writes the base64,
+// and the raw 32 bytes is what a fingerprint printout gives you.
+//
+// The RAW case is checked FIRST, on the bytes, and the order is the control.
+//
+// It was last, after the bytes had been through `string()` and
+// `strings.TrimSpace` — which is text handling applied to a binary key. A raw
+// key is 32 random bytes, and about 5% of them begin or end with one of the six
+// bytes TrimSpace considers whitespace; every one of those was trimmed to a
+// different length and refused as "neither PEM, base64 nor a raw 32-byte key".
+// The trust decision — WHICH key may verify seals — failing on the shape of the
+// key's own randomness, intermittently, is not a control this module accepts.
+// The gate's own test caught it by being flaky, which is how most
+// probabilistic defects announce themselves.
+//
+// PEM and base64 are TEXT forms and keep their trimming; a PEM block is 200+
+// bytes and base64 of a key is 44 characters, so a 32-byte input can only be a
+// raw key and the two cannot be confused.
 func ParseTrustedKey(raw []byte) (ed25519.PublicKey, error) {
+	if len(raw) == ed25519.PublicKeySize {
+		return ed25519.PublicKey(raw), nil
+	}
 	trimmed := strings.TrimSpace(string(raw))
 	if strings.Contains(trimmed, "BEGIN") {
 		block, _ := pemDecode([]byte(trimmed))

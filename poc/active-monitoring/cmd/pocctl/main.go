@@ -43,6 +43,8 @@ func main() {
 		err = cmdBrief(os.Args[2:])
 	case "preflight":
 		err = cmdPreflight(os.Args[2:])
+	case "live":
+		err = cmdLive(os.Args[2:])
 	case "rehearse":
 		err = cmdRehearse(os.Args[2:])
 	case "report":
@@ -105,6 +107,9 @@ func usage() {
   search <text>            search what the model SAID, with its clip ref and attribution
   brief                    one line per hour for a run: what happened, and what was never asked
   preflight                the full preflight table; refuses to start by name
+  live list|resolve|env    the curated public-relay cameras (real cameras, run by somebody
+                             else): the table, the yt-dlp resolve, and the SP_POC_SOURCE_*
+                             lines one camera produces for the watch daemon
   rehearse [all|<fault>]   inject each rehearsable provider fault against xpsim and record what happened
   soak start               preflight + gate D; refuses to launch a week on code that has not been rehearsed
   soak status              the live state of the newest run, read from the store

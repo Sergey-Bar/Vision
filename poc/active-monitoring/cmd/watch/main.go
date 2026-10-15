@@ -157,6 +157,11 @@ func run() error {
 	spec.User = cfg.SourceUser
 	spec.Password = cfg.SourcePassword
 	spec.Relay = cfg.SourceRelay
+	// A public relay of a real camera: YouTube's live cams, a municipal open
+	// feed. Derives the source sentence "public relay of a real camera, NOT
+	// ours" on the screen, in the log and in the report — the only one of the
+	// three sentences that is true of a stream whose camera is somebody else's.
+	spec.PublicRelay = cfg.SourcePublic
 	if spec.Live() {
 		// `Label()` already begins with "source: ", so the prefix is not added
 		// here. It was, and the log read `source: source: live rtsp camera`.

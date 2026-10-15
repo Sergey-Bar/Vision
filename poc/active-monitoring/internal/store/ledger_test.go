@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -467,6 +468,74 @@ func TestTheTrustedKeyIsRefusedWhenItIsAPublicKeyUsedForSigning(t *testing.T) {
 	}
 	if got, err := ParseTrustedKey(pub); err != nil || !got.Equal(pub) {
 		t.Fatalf("a raw 32-byte public key was not read: %v", err)
+	}
+}
+
+// TestARawTrustedKeyIsReadByItsBytesAndNotByItsText is the deterministic half
+// of the test above, and the one that catches the defect the random key only
+// caught once in fifteen runs.
+//
+// A raw trusted key is 32 random bytes. Deciding it through `string()` and
+// `strings.TrimSpace` is TEXT handling applied to a binary key: about 5% of all
+// keys begin or end with one of the six bytes TrimSpace considers whitespace,
+// and every one of those was trimmed to a different length and refused as
+// "neither PEM, base64 nor a raw 32-byte key". THE TRUST DECISION, failing on the
+// shape of the key's own randomness, intermittently, is not a control this module
+// accepts — and an intermittent one is worse than a missing one, because a green
+// run means nothing about the next.
+//
+// So the cases below are built, not drawn: a key whose first byte is a space and
+// whose last is a newline, a key that is the 0xFF end of the byte range, and a
+// key beginning with the 0x00 that ends up in one key in a thousand. Every one of
+// them is a legitimate trusted key that the trimmed-text path refused.
+func TestARawTrustedKeyIsReadByItsBytesAndNotByItsText(t *testing.T) {
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+
+	// The key's OWN bytes are whitespace at both ends. Trimming them produces a
+	// 30-byte key and the refusal "neither PEM, base64 nor a raw 32-byte key",
+	// which is a trust decision failing on the shape of the key's randomness.
+	shaped := append([]byte{}, pub...)
+	shaped[0] = ' '
+	shaped[len(shaped)-1] = '\n'
+	got, err := ParseTrustedKey(shaped)
+	if err != nil {
+		t.Fatalf("a 32-byte key whose own first byte is a space was refused as text: %v", err)
+	}
+	if !got.Equal(ed25519.PublicKey(shaped)) {
+		t.Fatal("the trusted key read back is not the bytes on disk; that is a seal verified against the wrong key")
+	}
+
+	// Any 32 bytes ARE a raw key. The check is a LENGTH check, and deciding
+	// otherwise would be a guess about what randomness looks like.
+	for _, c := range []struct {
+		name string
+		key  ed25519.PublicKey
+	}{
+		{"all 0xFF", ed25519.PublicKey(bytes.Repeat([]byte{0xFF}, ed25519.PublicKeySize))},
+		{"leading 0x00", append(ed25519.PublicKey{0x00}, append([]byte{}, pub[1:]...)...)},
+		{"random", pub},
+	} {
+		if _, err := ParseTrustedKey(c.key); err != nil {
+			t.Errorf("%s: a 32-byte input was refused: %v", c.name, err)
+		}
+	}
+
+	// A 32-byte key with whitespace ROUND it is a file a tool wrote, and the
+	// padding is not the key: reading the key underneath it is correct, and what
+	// must never happen is a DIFFERENT key coming out. The trimmed path and the
+	// raw path agree on this input, which is the second reason the fix is the
+	// branch ORDER and not a removal of the trimming.
+	wrapped := append(append([]byte(" \t"), pub...), '\n')
+	got, err = ParseTrustedKey(wrapped)
+	if err != nil || !got.Equal(pub) {
+		t.Fatalf("whitespace-padded bytes did not read back as the key they wrap: %v", err)
+	}
+
+	// 31 and 33 bytes are neither, and are refused rather than guessed at.
+	for _, n := range []int{ed25519.PublicKeySize - 1, ed25519.PublicKeySize + 1} {
+		if _, err := ParseTrustedKey(make([]byte, n)); err == nil {
+			t.Errorf("a %d-byte input was accepted as a trusted key", n)
+		}
 	}
 }
 

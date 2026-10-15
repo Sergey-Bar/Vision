@@ -98,6 +98,12 @@ type PreflightInput struct {
 	// A P99MS of zero means no calibration has been measured, and the gate says so
 	// rather than passing on a multiplication by zero.
 	DetectorP99MS float64
+	// Calibration is the measured record the p99 came from, and CalibrationNote
+	// is why it could not be used when it could not. Both are here so the row
+	// can print WHICH build was timed against WHICH is about to run, rather
+	// than a bare "no p99" that sends its reader to a profiler.
+	Calibration     *DetectorCalibration
+	CalibrationNote string
 	// AIFPS is SP_POC_AI_FPS. Zero means EVERY DECODED FRAME, and the measured
 	// source FPS stands in for it — refusing the spelling here would have made the
 	// most demanding mode unexpressable, and the arithmetic is the same either way.
@@ -268,6 +274,22 @@ func Preflight(ctx context.Context, in PreflightInput) (PreflightResult, error) 
 		Measured: in.SimURL, Detail: whoDetail})
 
 	// 9. The AI p99 inside the declared budget, measured over 30 frames.
+	//
+	// The row applies to the run that HAS a per-frame model on the AI path — the
+	// sidecar. On the shipped detector path the per-frame model is the in-process
+	// detector, and its measured p99 is the row above, against the same declared
+	// budget. Requiring a sidecar client from a run that never starts one is the
+	// defect this row carried for a while: `pocctl preflight` in the shipped mode
+	// failed a row about a component the run does not have, which is the exact
+	// shape of bug W1-4 removed from the trigger row above it.
+	//
+	// So it is three states, and each says which one it is in: measured (a
+	// sidecar that answers), impossible (a declared sidecar that does not answer),
+	// and not-applicable (no sidecar in this run, with the detector row named as
+	// the one that holds the number). A row that reports "not applicable, and
+	// here is the row that does apply" is honest; a row that fails a
+	// configuration it does not describe is a gate that trains everyone to
+	// ignore it.
 	p99OK, p99Detail, p99Measured := aiBudget(ctx, in)
 	add(Check{Name: "AI p99 inside the declared budget", Pass: p99OK,
 		Why:      "AC6 will fail automatically if it is not, but finding it here means lowering --ai-fps before a week is spent rather than after",
@@ -485,10 +507,31 @@ func pushTargetIdentified(ctx context.Context, simURL string) (bool, string) {
 }
 
 func aiBudget(ctx context.Context, in PreflightInput) (bool, string, string) {
+	if in.TriggerMode != config.TriggerModeSidecar {
+		return true, "this run's per-frame model is the " + triggerNoun(in.TriggerMode) +
+				", and its measured p99 is the detector row above; there is no sidecar round trip to measure, " +
+				"and a row about a component the run does not start is a row that cannot pass for the right reason",
+			"not applicable (no sidecar on this path)"
+	}
 	if in.Client == nil {
-		return false, "no sidecar client, so the AI latency budget was never measured", "not measured"
+		return false, "SP_POC_TRIGGER_MODE=sidecar and no sidecar client was supplied, so the AI latency budget was never measured", "not measured"
 	}
 	return true, "the run measures p99 continuously and AC6 scores it; preflight reports whether the sidecar is answering at all", "measured during the run"
+}
+
+// triggerNoun names the trigger in one word, for a sentence that has to read as
+// English rather than as an enum.
+func triggerNoun(mode string) string {
+	switch mode {
+	case config.TriggerModeDetector:
+		return "in-process detector"
+	case config.TriggerModeNovelty:
+		return "novelty engine"
+	case "":
+		return "declared trigger"
+	default:
+		return mode + " trigger"
+	}
 }
 
 func gateDGreen(in PreflightInput) (bool, string) {
