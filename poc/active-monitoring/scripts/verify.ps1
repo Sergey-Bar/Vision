@@ -1530,7 +1530,7 @@ file = 'internal\detect\engine.go'
       # that benched the model it is about to run, from a different directory.
       name = 'a calibration is applied only to the build it measured'
       file = 'internal\soak\calibration.go'
-      from = '	if !samePath(c.Model, model) {'
+      from = '	if !samePath(c.Model, b.Model) {'
       to   = '	if false { // REDCHECK: another build''s p99 was applied to this one'
       pkg  = './internal/soak'
       test = 'TestACalibrationAppliesOnlyToTheBuildItMeasured'
@@ -1573,6 +1573,16 @@ file = 'internal\detect\engine.go'
     # because a green run means nothing about the next one. So the test is now
     # deterministic -- a key whose OWN first byte is a space -- and the branch
     # order is the control.
+    #
+    # The same test went red once more, when the pending work was re-gated: the
+    # PADDED case in it still drew its key at random, so whenever that key's own
+    # first or last byte was whitespace the padding and the key were the same
+    # byte and trimming ate one of the key's own bytes. That file is genuinely
+    # ambiguous -- " \t" + a key starting with a space cannot be told from a
+    # 31-byte key with different padding -- so the case now BUILDS a key with
+    # non-whitespace boundary bytes and asserts that the ambiguous file is
+    # refused rather than decoded into somebody's choice of window. The mutation
+    # below still turns the suite red on the first case.
     @{
       name = 'a raw trusted key is read by its bytes, not by its trimmed text'
       file = 'internal\store\seal.go'
@@ -1606,6 +1616,61 @@ file = 'internal\detect\engine.go'
       pkg  = './cmd/pocctl'
       test = 'TestARefusedFrameIsNotANegativeOne'
       why  = 'the benchmark reports a clean measurement over frames the detector could not decode. Zero from a refusal and zero from a search are both the number 0, and only one of them is a measurement'
+    },
+    # --- the anchors: nine numbers a clean clone cannot decode without -----
+    #
+    # The shipped export is a multi-scale ANCHORED head and the ONNX file does
+    # not carry the model's own anchor boxes - they are the [anchors] section of
+    # yolov4-416.cfg, which the exporter resolved and left behind. Before
+    # 2026-10-15 nothing in the repository wrote them: `fetch-model` left the
+    # operator to hand-copy nine numbers into a gitignored path, and a clean
+    # clone's sidecar refused every frame with a sentence that was true and
+    # useless at the moment it was needed. The committed copy is now the source
+    # of truth and the fetch writes it, digest-checked, from the provenance
+    # record.
+    @{
+      name = 'the anchors file is nine pairs that divide into three scales'
+      file = 'cmd\pocctl\anchors.go'
+      from = '	if per == 0 || len(pairs)%3 != 0 {'
+      to   = '	if false { // REDCHECK: the anchors'' three-scale check was removed'
+      pkg  = './cmd/pocctl'
+      test = 'TestAMalformedAnchorsFileIsRefused'
+      why  = 'a malformed anchors file decodes boxes in the right place with the WRONG SIZES, which is the one wrong answer nobody can catch by looking at a picture. The counts below hand it eight pairs and ten, and both were accepted when the check was removed'
+    },
+    @{
+      name = 'the anchors bytes are the pinned ones, or they are refused'
+      file = 'cmd\pocctl\anchors.go'
+      from = '	if got := hex.EncodeToString(sum[:]); got != defaultAnchorsSHA256 {'
+      to   = '	if got := hex.EncodeToString(sum[:]); got != "" { // REDCHECK: the anchors'' pinned digest check was removed'
+      pkg  = './cmd/pocctl'
+      test = 'TestTheAnchorsBytesAreThePinnedOnes'
+      why  = 'a digest nobody has watched refuse anything is a comment. The test hands the verifier a one-anchor-changes copy and a one-byte-longer copy, and both matched the pin when the comparison was removed'
+    },
+    # --- the calibration record, one axis longer ---------------------------
+    #
+    # There are two paths a frame reaches a model on and they cost different
+    # numbers by a factor nobody should guess: the in-process session, whose
+    # p99 the CUDA bench measured at 16.4 ms on this box, and the Python
+    # sidecar, whose p99 is a loopback round trip plus a CPU decode. The record
+    # always carried model, library, threads and input; the trigger axis says
+    # WHICH PATH measured it, and Applies refuses the borrow BY NAME.
+    @{
+      name = 'a calibration measured on one trigger is not applied to the other'
+      file = 'internal\soak\calibration.go'
+      from = '	if c.Trigger != b.Trigger {'
+      to   = '	if false { // REDCHECK: the calibration''s trigger check was removed'
+      pkg  = './internal/soak'
+      test = 'TestACalibrationFromOnePathIsNotAppliedToTheOther'
+      why  = 'a detector p99 applied to a sidecar run is a number with the wrong path: it would clear a loopback round trip at in-process rates, which is the exact failure the two-path record exists to end. The refusal names both paths and the bench that produces the right one, and that is what disappeared'
+    },
+    @{
+      name = 'the sidecar timing pass discards its warm-up'
+      file = 'cmd\pocctl\bench_sidecar.go'
+      from = '		if i == 0 {'
+      to   = '		if false { // REDCHECK: the sidecar''s warm-up was measured'
+      pkg  = './cmd/pocctl'
+      test = 'TestTheSidecarTimingPassDiscardsItsWarmUp'
+      why  = 'the first HTTP round trip pays the worker''s own lazy state - connection setup, the first allocation, and on a CUDA session the provider''s algorithm selection. A calibration that kept it would write a p99 that refuses a sidecar which demonstrably answers'
     }
   )
   Push-Location $PWD

@@ -15,11 +15,27 @@ func testCalibration() DetectorCalibration {
 		Threads:           4,
 		Input:             640,
 		ExecutionProvider: "cuda",
+		Trigger:           TriggerDetector,
 		P50MS:             7.1,
 		P99MS:             18.4,
 		Frames:            120,
 		MeasuredAt:        "2026-10-14T20:00:00Z",
 	}
+}
+
+// testSidecarCalibration is the same record measured on the OTHER path: a
+// loopback round trip plus a Python decode, which is a different number by a
+// factor nobody should guess.
+func testSidecarCalibration() DetectorCalibration {
+	c := testCalibration()
+	c.Trigger = TriggerSidecar
+	c.Library = "CPUExecutionProvider"
+	c.Threads = 0
+	c.Address = "http://127.0.0.1:8099"
+	c.P50MS = 41.2
+	c.P99MS = 63.8
+	c.ExecutionProvider = "CPUExecutionProvider"
+	return c
 }
 
 // TestACalibrationRoundTripsThroughTheDataRoot is the boring half, asserted
@@ -84,7 +100,17 @@ func TestAnAbsentCalibrationNamesTheCommandThatProducesOne(t *testing.T) {
 // label, which is the defect class this repository exists to end.
 func TestACalibrationAppliesOnlyToTheBuildItMeasured(t *testing.T) {
 	c := testCalibration()
-	if err := c.Applies(c.Model, c.Library, c.Threads, c.Input); err != nil {
+	build := func(mutate func(*CalibrationBuild)) CalibrationBuild {
+		b := CalibrationBuild{
+			Trigger: TriggerDetector, Model: c.Model, Library: c.Library,
+			Threads: c.Threads, Input: c.Input,
+		}
+		if mutate != nil {
+			mutate(&b)
+		}
+		return b
+	}
+	if err := c.Applies(build(nil)); err != nil {
 		t.Fatalf("the record does not apply to the build it measured: %v", err)
 	}
 	// When both files really exist, the file system is the authority: the same
@@ -110,22 +136,23 @@ func TestACalibrationAppliesOnlyToTheBuildItMeasured(t *testing.T) {
 	// The run reads them by a path relative to a working directory that is the
 	// temp dir itself, so the two spellings name one file.
 	t.Chdir(dir)
-	if err := onDisk.Applies(rel.Model, rel.Library, rel.Threads, rel.Input); err != nil {
+	if err := onDisk.Applies(build(func(b *CalibrationBuild) {
+		b.Model, b.Library = rel.Model, rel.Library
+	})); err != nil {
 		t.Fatalf("the same file under two spellings was treated as two builds: %v", err)
 	}
 	for _, tc := range []struct {
-		name           string
-		model, library string
-		threads, input int
-		want           string
+		name   string
+		mutate func(*CalibrationBuild)
+		want   string
 	}{
-		{"another model", filepath.FromSlash(`C:\poc\models\yolov4-tiny.onnx`), c.Library, c.Threads, c.Input, "yolov4-tiny"},
-		{"another library", c.Model, filepath.FromSlash(`C:\poc\models\onnxruntime-cpu.dll`), c.Threads, c.Input, "onnxruntime-cpu"},
-		{"another thread count", c.Model, c.Library, 16, c.Input, "16"},
-		{"another input size", c.Model, c.Library, c.Threads, 320, "320"},
+		{"another model", func(b *CalibrationBuild) { b.Model = filepath.FromSlash(`C:\poc\models\yolov4-tiny.onnx`) }, "yolov4-tiny"},
+		{"another library", func(b *CalibrationBuild) { b.Library = filepath.FromSlash(`C:\poc\models\onnxruntime-cpu.dll`) }, "onnxruntime-cpu"},
+		{"another thread count", func(b *CalibrationBuild) { b.Threads = 16 }, "16"},
+		{"another input size", func(b *CalibrationBuild) { b.Input = 320 }, "320"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			err := c.Applies(tc.model, tc.library, tc.threads, tc.input)
+			err := c.Applies(build(tc.mutate))
 			if err == nil {
 				t.Fatalf("the record was applied to a different build")
 			}
@@ -133,6 +160,130 @@ func TestACalibrationAppliesOnlyToTheBuildItMeasured(t *testing.T) {
 				t.Fatalf("the refusal does not name the part that differs (%q): %v", tc.want, err)
 			}
 		})
+	}
+}
+
+// TestACalibrationFromOnePathIsNotAppliedToTheOther is the trigger axis, and it
+// is the one the plan writes a whole phase for: the in-process session and the
+// Python sidecar cost different numbers by a factor nobody should guess, so a
+// record from one applied to a run on the other is a p99 with the wrong path.
+//
+// The refusal names BOTH paths and the bench that would produce the right one,
+// because "the calibration is for a different build" sends the operator to
+// re-time a session that was never the subject.
+func TestACalibrationFromOnePathIsNotAppliedToTheOther(t *testing.T) {
+	det := testCalibration()
+	side := testSidecarCalibration()
+	sideBuild := CalibrationBuild{
+		Trigger: TriggerSidecar, Model: side.Model, Library: side.Library,
+		Threads: side.Threads, Input: side.Input, Address: side.Address,
+	}
+	// The sidecar record applies to a sidecar run, and the detector record
+	// does not — even though every other field a detector build would compare
+	// happens to be satisfiable.
+	err := det.Applies(sideBuild)
+	if err == nil {
+		t.Fatal("a DETECTOR calibration was applied to a sidecar run")
+	}
+	for _, want := range []string{"detector trigger", "sidecar trigger", "--trigger sidecar"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not say %q: %v", want, err)
+		}
+	}
+	// And the other direction: a sidecar p99 must not clear a detector row.
+	err = side.Applies(CalibrationBuild{
+		Trigger: TriggerDetector, Model: det.Model, Library: det.Library,
+		Threads: det.Threads, Input: det.Input,
+	})
+	if err == nil {
+		t.Fatal("a SIDECAR calibration was applied to a detector run")
+	}
+	// A record that predates the field applies to NEITHER path: it does not
+	// say which one measured it, and that is the refusal rather than a guess.
+	legacy := testCalibration()
+	legacy.Trigger = ""
+	err = legacy.Applies(CalibrationBuild{
+		Trigger: TriggerDetector, Model: det.Model, Library: det.Library,
+		Threads: det.Threads, Input: det.Input,
+	})
+	if err == nil {
+		t.Fatal("a record with no trigger was applied to a run")
+	}
+	if !strings.Contains(err.Error(), "(unrecorded)") {
+		t.Errorf("the refusal does not say the record carries no trigger: %v", err)
+	}
+	// The sidecar record DOES apply to the sidecar build it measured — the
+	// control is about the axis, not about refusing sidecar records.
+	if err := side.Applies(sideBuild); err != nil {
+		t.Fatalf("the sidecar record does not apply to the sidecar build it measured: %v", err)
+	}
+	// And the address is part of that build: a different sidecar is a
+	// different machine, and the loopback hop is part of the number.
+	err = side.Applies(func() CalibrationBuild {
+		b := sideBuild
+		b.Address = "http://127.0.0.1:8098"
+		return b
+	}())
+	if err == nil {
+		t.Fatal("a calibration measured against one sidecar was applied to another")
+	}
+	// Two spellings of one address are one sidecar: the scheme prefix is not
+	// a fact about the machine.
+	if err := side.Applies(func() CalibrationBuild {
+		b := sideBuild
+		b.Address = "127.0.0.1:8099"
+		return b
+	}()); err != nil {
+		t.Fatalf("the same sidecar under two spellings was treated as two machines: %v", err)
+	}
+}
+
+// TestACalibrationMustSayWhichPathMeasuredIt: the write refuses a record with
+// no trigger, because a p99 that does not say which path measured it cannot be
+// applied to either one.
+func TestACalibrationMustSayWhichPathMeasuredIt(t *testing.T) {
+	for _, tc := range []struct{ name, trigger string }{
+		{"absent", ""},
+		{"unknown", "gpu"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := testCalibration()
+			c.Trigger = tc.trigger
+			if err := WriteCalibration(t.TempDir(), c); err == nil {
+				t.Fatalf("a calibration with trigger %q was written", tc.trigger)
+			} else if !strings.Contains(err.Error(), "WHICH path") {
+				t.Fatalf("the refusal does not say what the field is for: %v", err)
+			}
+		})
+	}
+	// The sidecar trigger is a first-class value, not an extension of the
+	// detector one.
+	c := testSidecarCalibration()
+	if err := WriteCalibration(t.TempDir(), c); err != nil {
+		t.Fatalf("a sidecar calibration was refused: %v", err)
+	}
+}
+
+// TestTheSidecarRecordSurvivesItsOwnFile: the two new fields are part of the
+// record, and a record that loses its address on the way through the file is a
+// record that will refuse the run it was measured for.
+func TestTheSidecarRecordSurvivesItsOwnFile(t *testing.T) {
+	root := t.TempDir()
+	want := testSidecarCalibration()
+	if err := WriteCalibration(root, want); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	got, err := LoadCalibration(root)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if got.Trigger != TriggerSidecar || got.Address != want.Address || got.P99MS != want.P99MS {
+		t.Fatalf("the record did not survive its own file: %+v", got)
+	}
+	// And the rendered line names the path: a reader comparing two runs has to
+	// see which one was a loopback round trip.
+	if line := got.Describe(); !strings.Contains(line, "sidecar at http://127.0.0.1:8099") {
+		t.Fatalf("the described record does not name the sidecar path: %q", line)
 	}
 }
 

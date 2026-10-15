@@ -4455,7 +4455,11 @@ The demo also caught two defects with the same shape as the ones it came to test
 - and `internal/store.ParseTrustedKey` decided a **raw 32-byte key** by trimming its bytes
   as text, so about one trusted key in twenty was refused as "not a key at all",
   depending on where its own randomness landed. The POC gate's suite caught it by going
-  flaky; the test is deterministic now, and **the branch order is the control**.
+  flaky; the test is deterministic now, and **the branch order is the control**. The
+  padded case in the same test still drew its key at random, and went red once more when
+  the next session re-gated the tree: a padded file whose key's own bytes are whitespace
+  is ambiguous, and no trim can recover it. That case is built now and asserts the
+  refusal, so the test is deterministic in fact rather than in intent.
 
 Eighty-nine controls are in the POC's table now, seven of them added this session and each
 hand-run red before it was entered: the public-relay sentence, the camera table's licence
@@ -4498,5 +4502,157 @@ as `AGENTS.md` says. And the earlier red baseline from the transcript generator 
 contention with a concurrently running gate, not a product defect; it is recorded here
 because "the generator said red once" is the kind of sentence that gets quoted later
 without its cause.
+
+## 2026-10-15, second pass: the client-facing path, end to end — and the three fixes it needed
+
+The plan of record is `.kilo/plans/client-demo-end-to-end.md` (the "demo path finished"
+milestone). Its seven acts are the box, resolve, calibrate, rehearse, preflight, run,
+prove, mark and report. Three defects stood between the demo and that path, and all three
+were the same shape: a fact this module records and does not act on.
+
+### 1. The anchors: a clean clone could not decode a frame, and nothing in the repository wrote the file
+
+The shipped model is the ONNX Model Zoo `yolov4n.onnx` (sha256 `1881fe9c506c…`,
+257,470,589 bytes, pinned in `defaultModelSHA256`), which is the YOLOv4-416 export: a
+three-output multi-scale **anchored** head. The in-process decoder refuses that family by
+design (`internal/ortdetect/decode.go`'s `errAnchored`), and the Python sidecar decodes it
+fully — against the model's nine anchor boxes, which live in the `[anchors]` section of
+`yolov4-416.cfg` and NOT in the ONNX graph. On 2026-10-15 the file `models/
+yolov4n.anchors.txt` did not exist on this box, `models/` is gitignored, and NOTHING in the
+repository wrote it: `pocctl fetch-model` left an operator to hand-copy nine numbers, and
+`config.Load` refuses a missing one by name. A clean clone's sidecar therefore loaded the
+weights and refused every frame with a sentence that was true and useless at the moment it
+was needed — "a checkout cannot lose the decoder silently".
+
+What closed it, in the order the provenance chain requires:
+
+- The model's own configuration is now a committed record:
+  `pyworker/fixtures/yolov4n.anchors.txt` — the nine pairs in stride order (3/3/3), with
+  their provenance in the header. Its `sha256` is `ca1e768b83115385…` over 2,401 bytes.
+- `pyworker/fixtures/yolov4n.licence.json`'s new `anchors` object names the `.cfg` as its
+  source, MIT as the publisher states it, and records **why it is transcription and not
+  inference**: the tensor shape cannot separate v4 from v5 (both are anchored at three
+  scales), the `.cfg` can. The object also carries the file's digest and the committed
+  copy's path (`anchors.committed_copy`), so a checkout can tell whether it holds the
+  boxes the sidecar was measured with.
+- `cmd/pocctl/anchors.go` (new) carries the committed copy and a pinned digest; `pocctl
+  fetch-model` — and `pocctl bootstrap`, which delegates to it — writes the file as the
+  model's sibling and checks what it wrote against the pin. The trigger is the IDENTIFIED
+  bytes: `sum == defaultModelSHA256`. An operator who fetched a different export is told
+  the anchors were NOT written and why, and a destination that is not an `.onnx` path is
+  refused. `bootstrap`'s no-download branch writes them too, because that is the branch
+  this box had the gap on.
+
+Two red-checks prove it, both hand-run red first and then entered in the POC table (93
+controls now, transcripts regenerated): "the anchors file is nine pairs that divide into
+three scales" (mutate the Go side of `load_anchors`' scale check; an eight-pair and a
+ten-pair file are both accepted when it is gone) and "the anchors bytes are the pinned
+ones, or they are refused" (mutate the digest comparison; a one-anchor-changes copy and a
+one-byte-longer copy both match the pin when it is gone).
+
+**The proof on real footage.** The sidecar was started against `models/yolov4n.onnx` and
+its anchors file, `pocctl live resolve` resolved the four curated EarthCam rows to live
+HLS playlists, and one frame of the resolved Times Square North relay was captured with
+ffmpeg. The sidecar timing pass then drove 40 round trips of that real frame through the
+worker: **p50 322.6 ms, p99 471.5 ms** (CPUExecutionProvider, 416x416), recorded as a
+sidecar calibration. That is the number a client-facing run is scored against, and it is
+measured on their footage rather than on a synthetic set.
+
+### 2. The calibration record did not say which path measured it, and there are two paths
+
+There are two ways a frame reaches a model in this module: the in-process ONNX session,
+whose p99 the CUDA bench measured at 16.4 ms on this box, and the Python sidecar, whose
+p99 is a loopback round trip plus a CPU decode. The record carried model, library, threads
+and input; it did not carry the PATH. A detector p99 applied to a sidecar run is a number
+with the wrong label — it would clear a loopback round trip at in-process rates.
+
+What closed it:
+
+- `DetectorCalibration` gained a `trigger` field (`detector` | `sidecar`) and the
+  `address` the sidecar record was measured against; `WriteCalibration` REFUSES a record
+  with no trigger, so a p99 that does not say which path measured it cannot exist.
+  `Applies` takes a `CalibrationBuild` and refuses a cross-path record by name, with both
+  paths and the bench that produces the right one.
+- `pocctl bench --images … --trigger sidecar --ai-addr …` (new pass in
+  `cmd/pocctl/bench_sidecar.go`) drives the worker's own HTTP endpoint over the still set,
+  discards the first round trip as the warm-up (the worker's lazy state plus the connection
+  setup — the same discipline the in-process pass applies), and writes the SAME record
+  with `trigger=sidecar`. A refused round trip is a WALL, not a sample: the client reports
+  its refusals inside the Result with a latency, so a loop that only collected latencies
+  would measure the cost of failing and call it the cost of answering.
+- Preflight resolves the sidecar path's record against what the SIDECAR ITSELF reports
+  (its loaded model, its providers, its input) plus the run's address. The AI p99 row —
+  three-state, so a run with no sidecar cannot fail it — multiplies the measured sidecar
+  number when there is one, fails with the lever named when it does not fit, and passes as
+  "recorded, but for another build" or "measured during the run" when there is none. The
+  budget is explicitly NOT the lever, in the row's own words.
+
+**The measured consequence, printed rather than tuned.** On this box the sidecar's
+measured p99 (471.5 ms) does not fit inside the declared rate (ai_fps=5 → 2357 ms of a
+1000 ms second), and the row says so and names the lever: lower `SP_POC_AI_FPS`, or a
+fused export decoded in-process. AC6 failing is the demo working. What was not done:
+`SP_POC_AI_BUDGET_MS` was not raised to make it pass, and the in-process calibration was
+not lent to the sidecar path.
+
+Two red-checks: "a calibration measured on one trigger is not applied to the other"
+(mutate the trigger comparison; the detector p99 clears a sidecar run) and "the sidecar
+timing pass discards its warm-up" (mutate the discard; the p99 becomes the warm-up's
+cost).
+
+### 3. The live demo had no prove, no mark, and an artefact that was a slide
+
+`scripts/live-demo.ps1` now takes `-TriggerMode sidecar`, and the plan's acts are all
+there in order. On the sidecar path the box act starts the worker (with a named failure if
+its `/healthz` never answers, and the exact command to read its stderr by hand), the
+calibrate act drives the worker's endpoint, preflight runs against the sidecar's
+calibration, and the verdict prints the measured loopback cost rather than a footnote. The
+PROVE act replays one recorded execution of the run that just finished — the run id read
+from its own banner, not guessed — and requires zero provider calls. The MARK act writes
+the review sheet, parses one tag from it, and either prints the two mark commands for a
+person to run after looking at the clip, or (with `-MarkVerdict`) writes one verdict with
+the DEMO's author printed beside it, because a mark made by the script is a demonstration
+of the write path and not a person's opinion. The artefact is one file:
+`dist/live-demo/report.html` carries the AC table quoted from the report's own JSON, the
+run's source line, the calibration line, the camera row, the licence row, the two "what
+this does not prove" lines, and the run's still embedded as base64 so it travels with the
+file. A run that produced no frame says NOT RUN in the artefact rather than showing a
+broken image.
+
+One gap the proof run caught before it shipped: `SP_POC_AI_ANCHORS` is required by the
+schema in sidecar mode, and the first sidecar preflight refused on it — the same refusal
+a user would have met, found on this box in the act it belongs to.
+
+### Two defects the proof run itself found, both of the same shape
+
+The demo's REPORT act reads `pocctl report --json` for the artefact's acceptance table,
+and running that against a real run printed a prose line — `false positives: 0/2
+(precision 1.00), marked by Sergey on …` — in front of the document. The marking
+sentence is printed by the functions that APPLY the human marks, which run as part of
+building the report, so `--json` was a JSON document with a sentence on top. The lines
+now go to a writer the json branch discards; their content is in the JSON as the report's
+own `false_positives` row, and a run with no marks prints no prose at all.
+
+The PROVE act read `prove`'s own verdict, and running it found the same shape one layer
+down: with `SP_POC_VLM_PROVIDER=none` the counter is never wired, and `prove` printed
+`provider calls  0 (measured, not asserted)` on the line above the beat that says
+`no counter was supplied, so the property is UNMEASURED rather than true` — a measurement
+nobody took, asserted two lines above the truth. `FormatReplay` now distinguishes
+UNMEASURED from zero, and the demo's prove act scores prove's EXIT CODE rather than a
+phrase in its output, so a failed replay cannot be read as a passed one.
+
+### What this pass does NOT claim
+
+- Not a week, and not a VMS. Events go to xpsim, a simulator, and the run prints that
+  word. The cameras are EarthCam's, no written permission to store clips exists, and
+  `cleared_for_external_use` is false on every row.
+- Not a false-positive rate. Nobody looked at a frame. The demo's mark, if one is asked
+  for, is authored by the demo and the report says so.
+- Not a GPU sidecar. The measured 471.5 ms is the CPUExecutionProvider: the python on
+  this box has onnxruntime 1.30.0 CPU, and the sidecar path's own runtime is named in the
+  box act rather than assumed.
+- The one-frame sidecar measurement is over a REAL relay frame, but the manifest it was
+  driven through (the still set's, whose labels describe the committed synthetic set) is
+  not that frame's provenance: the numbers are a measured cost and not an accuracy claim,
+  and they are recorded here with that sentence attached.
 
 

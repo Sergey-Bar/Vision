@@ -185,6 +185,24 @@ pocctl live env abbey-road             # the SP_POC_SOURCE_* lines one camera pr
 .\scripts\..\..\scripts\live-demo.ps1  # the whole path, one button (repo root)
 ```
 
+The demo's acts, in the order the plan names them: **the box** (the tools, the
+weights, the runtime, and the sidecar's own runtime when that is this run's
+path), **resolve** (a curated row becomes a live playlist), **calibrate** (the
+timing pass for the path this run uses), **rehearse** (fault day, then a smoke
+run over the committed clip), **preflight** (the eleven rows, against the
+calibration this run will use), **run** (`watch` over the relay until Ctrl-C),
+**prove** (`pocctl prove` on a recorded execution of *this* run: stored facts
+in, decision out, zero provider calls), **mark** (the review sheet, and one
+verdict whose author is stated), **report** (AC1–AC6 scored from the run's own
+JSON, and a one-file artefact in `dist/live-demo/` that carries the AC table,
+the source line, the calibration line, the camera row, the licence row, the two
+"what this does not prove" lines and the run's still, embedded).
+
+`-TriggerMode sidecar` runs the same path with the Python worker as the trigger:
+it starts the worker beside the model's anchors file, calibrates through the
+worker's own endpoint, preflights against the sidecar's calibration, and prints
+the measured loopback cost in the verdict rather than in a footnote.
+
 Four EarthCam cameras, verified live **14.10.2026**: Times Square North 4K, the Abbey
 Road crossing, Dublin, and New Orleans Street. What was verified is exactly what a
 human did that day — resolved with `yt-dlp --js-runtimes node -g -f bestvideo` to an
@@ -252,10 +270,34 @@ outputs of shape `[1 52 52 3 85]` — one tensor per stride with coordinates tha
 offsets from anchor boxes living in `yolov4-416.cfg`, which is not in the ONNX graph. The
 in-process decoder deliberately refuses that family, because guessing an anchor set
 produces boxes in the right place with the wrong sizes and every artefact would still
-say `fused`. The Python sidecar implements the anchored family, and the framedeg swing
-between them is the next decision a person makes: a fused export of the same weights, or
-the sidecar on the demo path with its cost stated rather than hidden. What this
-repository will not do is pick one quietly.
+say `fused`. The Python sidecar implements the anchored family.
+
+**2026-10-15: the sidecar path is now runnable end to end, and the two things a
+clean clone could not do are both closed.** The anchors file did not exist on this
+box and nothing in the repository wrote it: `models/` is gitignored, `demo`'s
+`anchorsPathFor` derives `<model>.anchors.txt`, and `config.Load` refuses a missing
+one — so a clean clone reached the worker's refusal with nine numbers nobody had
+written. The committed copy is now `pyworker/fixtures/yolov4n.anchors.txt` (the
+`[anchors]` section of `yolov4-416.cfg`, transcribed, with its provenance and
+SHA-256 recorded in that fixture's `anchors` object in `yolov4n.licence.json`), and
+`pocctl fetch-model` — and `pocctl bootstrap`, which delegates to it — writes it
+beside the weights and checks what it wrote against the pin. The same discipline
+the weights are fetched with, applied to the model's own configuration: the file is
+identified by content, not by a name.
+
+The path's own cost is measured rather than asserted, because it is a different
+number by a factor nobody should guess. `pocctl bench --images <dir> --data-root
+<root> --trigger sidecar --ai-addr http://127.0.0.1:8099` drives the worker's own
+HTTP endpoint over the still set, discards the first round trip as the warm-up,
+refuses to record a p99 over refused round trips, and writes the SAME calibration
+record with the trigger field naming the path that measured it. `Applies` compares
+the axis and refuses a detector record applied to a sidecar run by name; preflight's
+AI p99 row — three-state, so a run with no sidecar cannot fail it — multiplies the
+sidecar's measured number when there is one. And `scripts/live-demo.ps1` takes
+`-TriggerMode sidecar`, which starts the worker, calibrates through it, preflights
+against the sidecar's calibration, runs the relay through it, and prints the
+loopback cost in the verdict rather than in a footnote. The framedeg decision the
+sentence above named is therefore a measured choice, made by a person, on this box.
 
 Two things the demo caught while it was at it. `pocctl bench` printed
 `negative frame, nothing drawn, nothing there` over frames the decoder had refused,

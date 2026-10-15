@@ -91,7 +91,16 @@ func cmdPreflight(args []string) error {
 		fmt.Println("to prevent.")
 		return cfgErr
 	}
-	cal := calibrationFor(cfg)
+	free, _ := recorder.Free(cfg.DataRoot)
+	aic, aierr := ai.New(cfg.AIAddr, cfg.AIDeadline)
+	if aierr != nil {
+		aic = nil
+	}
+	// The calibration is resolved AFTER the client, because the sidecar path's
+	// record is resolved against what the sidecar itself reports — the model
+	// it loaded, the providers it runs on, the input it letterboxes to — and
+	// that is a probe, not a guess.
+	cal := calibrationFor(cfg, aic)
 	spec, err := source.Parse(cfg.SourceKind, cfg.SourceArg)
 	if err != nil {
 		return err
@@ -105,11 +114,6 @@ func cmdPreflight(args []string) error {
 		facts = soak.StreamFacts{Codec: rep.VideoStream.Codec, Width: rep.VideoStream.Width,
 			Height: rep.VideoStream.Height, FPS: rep.VideoStream.FPS,
 			BitRateBps: rep.BitRateBps, Assumed: rep.Disk.Assumed, DecodeRealTime: rep.Decode.Realtime}
-	}
-	free, _ := recorder.Free(cfg.DataRoot)
-	aic, aierr := ai.New(cfg.AIAddr, cfg.AIDeadline)
-	if aierr != nil {
-		aic = nil
 	}
 	power := flags["power-state"]
 	if power == "" {
@@ -153,9 +157,17 @@ func cmdPreflight(args []string) error {
 		AIFPS:           cfg.AIFPS,
 		// The p99, from a MEASURED record rather than from a flag: a number an
 		// operator types is a number nobody measured.
-		Calibration:     cal.calibration,
-		CalibrationNote: cal.note,
-		DetectorP99MS:   cal.p99MS,
+		//
+		// One record, two paths, and each row is handed the side it measures:
+		// the detector row reads the detector path's p99 and the AI row reads
+		// the sidecar path's. A run on one path simply has nothing resolved
+		// for the other, and the row that does not apply says so.
+		Calibration:            cal.calibration,
+		CalibrationNote:        cal.note,
+		DetectorP99MS:          cal.detectorP99MS(),
+		SidecarP99MS:           cal.sidecarP99MS(),
+		SidecarCalibration:     cal.sidecarCalibration(),
+		SidecarCalibrationNote: cal.sidecarNote(),
 	})
 	if probeErr != nil {
 		res.Summary = "preflight refuses to start: " + probeErr.Error()
@@ -478,6 +490,14 @@ func cmdReport(args []string) error {
 	run, err := st.RunByID(c, id)
 	if err != nil {
 		return err
+	}
+	// A JSON report is a document, not a conversation: the marking sentence is
+	// the human output's job and its content is already in the JSON as the
+	// report's own false_positives row. This was not the case until the demo's
+	// artefact parsed `--json` output for its acceptance table and met a prose
+	// line at the top.
+	if flags["json"] == "true" {
+		humanOut = io.Discard
 	}
 	rep, err := reportFor(st, run, c)
 	if err != nil {

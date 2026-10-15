@@ -92,9 +92,34 @@ func detectorPreflightOK(in PreflightInput) bool {
 // not be able to disagree — and two copies of a threshold is two places to change
 // one of them.
 func detectorArithmetic(in PreflightInput) (ok bool, arithmetic string) {
+	return frameRateArithmetic(in.DetectorP99MS, in)
+}
+
+// sidecarArithmetic is the same one comparison for the sidecar path.
+//
+// The cost is different — a loopback round trip plus a Python decode — and the
+// threshold is the same, which is the point: the bounded queue blocks rather
+// than dropping frames whichever process is behind it, so a sidecar that
+// cannot hold the declared rate produces the same backpressure and fails AC1
+// the same way.
+//
+// The noun in the printed sentence is relabelled. The sentence comes from the
+// shared comparison ([ortdetect.Latencies.HoldsFrameRate]), whose "det_p99"
+// names the in-process session's number; on this path the number is the
+// sidecar's, and a row that printed the wrong noun while quoting the right
+// number would be read as the detector's measurement all the same.
+func sidecarArithmetic(in PreflightInput) (ok bool, arithmetic string) {
+	ok, arithmetic = frameRateArithmetic(in.SidecarP99MS, in)
+	return ok, strings.ReplaceAll(arithmetic, "det_p99", "sidecar p99")
+}
+
+// frameRateArithmetic is the comparison itself, over a p99 whichever path
+// measured it. One function so the two rows cannot disagree about the
+// arithmetic, and so the lever named in either refusal is the same lever.
+func frameRateArithmetic(p99MS float64, in PreflightInput) (ok bool, arithmetic string) {
 	l := ortdetect.NewLatencies(1)
-	if in.DetectorP99MS > 0 {
-		l.Observe(in.DetectorP99MS)
+	if p99MS > 0 {
+		l.Observe(p99MS)
 	}
 	return l.HoldsFrameRate(in.AIFPS, in.SourceReport.FPS)
 }

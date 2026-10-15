@@ -488,6 +488,11 @@ func TestTheTrustedKeyIsRefusedWhenItIsAPublicKeyUsedForSigning(t *testing.T) {
 // whose last is a newline, a key that is the 0xFF end of the byte range, and a
 // key beginning with the 0x00 that ends up in one key in a thousand. Every one of
 // them is a legitimate trusted key that the trimmed-text path refused.
+//
+// The padded case went red once more after this test was written — it too drew
+// its key at random, and the ambiguity is real when the key's own bytes are
+// whitespace — so that case is built now as well, and the unresolvable file it
+// describes is asserted to be refused rather than decoded.
 func TestARawTrustedKeyIsReadByItsBytesAndNotByItsText(t *testing.T) {
 	pub, _, _ := ed25519.GenerateKey(rand.Reader)
 
@@ -525,10 +530,30 @@ func TestARawTrustedKeyIsReadByItsBytesAndNotByItsText(t *testing.T) {
 	// must never happen is a DIFFERENT key coming out. The trimmed path and the
 	// raw path agree on this input, which is the second reason the fix is the
 	// branch ORDER and not a removal of the trimming.
-	wrapped := append(append([]byte(" \t"), pub...), '\n')
+	//
+	// The key here is BUILT with non-whitespace boundary bytes, and that is
+	// load-bearing: the first version of this case drew its key at random, so
+	// whenever the key's own first or last byte was whitespace the padding and
+	// the key were the same byte, trimming ate one of the key's own bytes, and
+	// this case went red — the defect the whole test is about, reproduced by the
+	// test itself, on about one run in twenty.
+	padded := append(ed25519.PublicKey{}, pub...)
+	padded[0] = 'A'
+	padded[len(padded)-1] = 'Z'
+	wrapped := append(append([]byte(" \t"), padded...), '\n')
 	got, err = ParseTrustedKey(wrapped)
-	if err != nil || !got.Equal(pub) {
+	if err != nil || !got.Equal(padded) {
 		t.Fatalf("whitespace-padded bytes did not read back as the key they wrap: %v", err)
+	}
+
+	// And the file that cannot be resolved is REFUSED, not decoded into
+	// somebody's choice of 32-byte window: `shaped` begins with a space and ends
+	// with a newline, so with the same padding around it no trim can return the
+	// key, and a reader that guessed would be a seal verified against a key
+	// nobody wrote down.
+	ambiguous := append([]byte(" \t"), append(append([]byte{}, shaped...), '\n')...)
+	if decoded, err := ParseTrustedKey(ambiguous); err == nil {
+		t.Fatalf("a padded file whose key's own bytes are whitespace was decoded into a key anyway (%d bytes); trimming cannot tell the padding from the key, so refusal is the only honest answer", len(decoded))
 	}
 
 	// 31 and 33 bytes are neither, and are refused rather than guessed at.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +15,17 @@ import (
 	"github.com/Sergey-Bar/vision-poc/internal/soak"
 	"github.com/Sergey-Bar/vision-poc/internal/store"
 )
+
+// humanOut is where the marking sentence goes while a report is built.
+//
+// The sentence is printed by the functions that APPLY the human marks, which
+// run as part of building the report — including a report that is about to be
+// printed as JSON. A JSON document with a prose line in front of it is not a
+// JSON document, and the demo's artefact (and any other machine caller) reads
+// this command's `--json` output with a JSON parser. `cmdReport`'s json branch
+// points this at io.Discard; the marking line's content is IN the JSON either
+// way, as the report's own false_positives row.
+var humanOut io.Writer = os.Stdout
 
 // storedDetectorTally is the run's detector arithmetic, read from the store.
 //
@@ -185,7 +197,7 @@ func applyGroundTruth(st *store.Store, runID string, c context.Context) *soak.Hu
 		// An empty list is valid, and it means NOT RUN. It does NOT mean zero
 		// false positives, and the printed sentence says so in full rather than
 		// abbreviated, because this is the one line that keeps the report honest.
-		fmt.Println("false positives: NOT RUN: no human marked any event in testdata/groundtruth.json")
+		fmt.Fprintln(humanOut, "false positives: NOT RUN: no human marked any event in testdata/groundtruth.json")
 		return nil
 	}
 
@@ -198,7 +210,7 @@ func applyGroundTruth(st *store.Store, runID string, c context.Context) *soak.Hu
 	applied := 0
 	for _, k := range ordered {
 		if err := st.MarkGroundTruth(c, runID, k.Tag, k.Verdict, k.By, k.Note); err != nil {
-			fmt.Printf("  NOT APPLIED — %v\n", err)
+			fmt.Fprintf(humanOut, "  NOT APPLIED — %v\n", err)
 			continue
 		}
 		applied++
@@ -209,11 +221,11 @@ func applyGroundTruth(st *store.Store, runID string, c context.Context) *soak.Hu
 
 	tp, fp, measured, err := st.Precision(c, runID)
 	if err != nil {
-		fmt.Printf("false positives: NOT RUN: the review could not be counted: %v\n", err)
+		fmt.Fprintf(humanOut, "false positives: NOT RUN: the review could not be counted: %v\n", err)
 		return nil
 	}
 	if !measured {
-		fmt.Println("false positives: NOT RUN: no mark in testdata/groundtruth.json matched an event this run pushed")
+		fmt.Fprintln(humanOut, "false positives: NOT RUN: no mark in testdata/groundtruth.json matched an event this run pushed")
 		return nil
 	}
 	if applied != tp+fp {
@@ -221,10 +233,10 @@ func applyGroundTruth(st *store.Store, runID string, c context.Context) *soak.Hu
 		// what was asked for. Silently dropping a mark that matched nothing would
 		// let a precision figure be printed for a smaller review than the file
 		// holds, which is the failure this whole mechanism exists to prevent.
-		fmt.Printf("  %d of %d mark(s) did not match an event this run pushed and were NOT counted\n", len(ordered)-applied, len(ordered))
+		fmt.Fprintf(humanOut, "  %d of %d mark(s) did not match an event this run pushed and were NOT counted\n", len(ordered)-applied, len(ordered))
 	}
 	precision := float64(tp) / float64(tp+fp)
-	fmt.Printf("false positives: %d/%d (precision %.2f), marked by %s\n", fp, tp+fp, precision, orUnstated(by))
+	fmt.Fprintf(humanOut, "false positives: %d/%d (precision %.2f), marked by %s\n", fp, tp+fp, precision, orUnstated(by))
 	return &soak.HumanMarking{Examined: tp + fp, False: fp, By: by, When: time.Now().UTC(), Note: note}
 }
 
@@ -237,7 +249,7 @@ func applyGroundTruth(st *store.Store, runID string, c context.Context) *soak.Hu
 func markingFromMarks(st *store.Store, runID string, c context.Context, marks []store.GroundTruthMark, source string) *soak.HumanMarking {
 	tp, fp, measured, err := st.Precision(c, runID)
 	if err != nil || !measured {
-		fmt.Println("false positives: NOT RUN: the recorded marks could not be counted, so no rate is printed")
+		fmt.Fprintln(humanOut, "false positives: NOT RUN: the recorded marks could not be counted, so no rate is printed")
 		return nil
 	}
 	by, note, when := "", "", time.Time{}
@@ -252,7 +264,7 @@ func markingFromMarks(st *store.Store, runID string, c context.Context, marks []
 		when = time.Now().UTC()
 	}
 	precision := float64(tp) / float64(tp+fp)
-	fmt.Printf("false positives: %d/%d (precision %.2f), marked by %s on %s — %d mark(s) from %s\n",
+	fmt.Fprintf(humanOut, "false positives: %d/%d (precision %.2f), marked by %s on %s — %d mark(s) from %s\n",
 		fp, tp+fp, precision, orUnstated(by), when.Format("2006-01-02"), len(marks), source)
 	return &soak.HumanMarking{Examined: tp + fp, False: fp, By: by, When: when, Note: note}
 }

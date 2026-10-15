@@ -529,6 +529,11 @@ func fetchModelTo(url, out, expected string, pinnedByOperator, fromDefault bool)
 		"  For the model this repository ships, that record is pyworker/fixtures/yolov4n.licence.json\n"+
 		"  and it now names the origin and the page's stated licence (MIT) beside this digest.\n",
 		out, soak.Bytes(size))
+	// The anchors, written beside the weights when the bytes that arrived are
+	// the IDENTIFIED model. A clean clone used to stop here with weights it
+	// could not decode: the anchors live in the model's .cfg, not in the ONNX
+	// file, and nothing in the repository wrote them. See anchors.go.
+	fmt.Println(anchorsNoteForFetch(out, sum))
 	return nil
 }
 

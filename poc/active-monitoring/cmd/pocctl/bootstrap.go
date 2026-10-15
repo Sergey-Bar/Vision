@@ -211,6 +211,16 @@ func bootstrapModel(root, model string) error {
 		case sum == defaultModelSHA256:
 			fmt.Printf("  PASS  %s is on disk and matches the pinned digest (%s).\n", model, soak.Bytes(size))
 			fmt.Println("        No download was needed.")
+			// The anchors, in the branch that downloads nothing. This box had
+			// exactly that gap: the weights on disk, the anchors nowhere,
+			// because nothing that put the weights there wrote them. The
+			// sidecar refused by name at load and the demo could not decode a
+			// frame. See cmd/pocctl/anchors.go.
+			p, aerr := writeAnchorsBeside(model)
+			if aerr != nil {
+				return fmt.Errorf("the weights are the identified model but their anchors file is not: %w", aerr)
+			}
+			fmt.Printf("  PASS  %s is the model's [anchors] section, digest-checked.\n", p)
 			fmt.Println()
 			return nil
 		default:

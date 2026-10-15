@@ -19,6 +19,25 @@
   "shape_measured_by": "pyworker/probe_model.py",
   "shape_record": "pyworker/fixtures/yolov4n.contract.json",
 
+  "anchors": {
+    "file": "models/yolov4n.anchors.txt",
+    "committed_copy": "pyworker/fixtures/yolov4n.anchors.txt",
+    "bytes": 2401,
+    "sha256": "ca1e768b83115385416d39e9481e26e9a365c3b9394390888c71a55c4b38ca2a",
+    "recorded_on": "2026-10-15",
+    "what_it_is": "The nine anchor boxes the yolov4-416 head decodes against, one `width,height` per line, grouped by the session's output order — finest stride first. They are part of the MODEL's own configuration and the ONNX export does not embed them, so a sidecar cannot decode these weights without them.",
+    "source": {
+      "file": "yolov4-416.cfg",
+      "section": "[anchors]",
+      "cfg": "the configuration file these weights were trained with, named by this record's origin.attribution_the_page_names (the darknet repository it lists); the six pairs and three pairs per group below are its [anchors] section transcribed in stride order",
+      "anchors_section_spelling": "10,13,  16,30,  33,23,  30,61,  62,45,  59,119,  116,90,  156,198,  373,326",
+      "why_this_is_transcription_and_not_inference": "The tensor shape cannot separate v4 from v5, because both are anchored at three scales; the .cfg can, and it says v4. So this file restates a fact the configuration already holds, in the order the model's own outputs publish — a provenance chain from the weights to a named file, not a guess from a shape.",
+      "not_the_shipped_weights": "Nothing about the anchors was inferred from the ONNX graph. A mismatched anchor set produces boxes in the right place with the wrong sizes, which is the one wrong answer nobody can catch by looking, so both readers of this file — pyworker's load_anchors and pocctl's own check — REFUSE a file whose count does not divide into three scales and whose digest is not this one."
+    },
+    "licence": "The same MIT record as the weights above, by the same reasoning: the anchors are the configuration the weights were trained with, published by the same project, under the licence that project states. The attribution lines above travel with them.",
+    "how_it_reaches_a_clean_clone": "`pocctl fetch-model` (and `pocctl bootstrap`, which delegates to it) writes this file as the model's sibling, from the committed copy at committed_copy, and checks what it wrote against the sha256 above — the same discipline the weights are fetched with. A checkout therefore gets the exact boxes the sidecar was measured with, and a drifted or hand-edited file is refused by name rather than decoded with."
+  },
+
   "origin": {
     "established": "2026-10-11",
     "how": "MEASURED, not guessed. The weights on this machine were hashed (SHA-256, 257,470,589 bytes) and the ONNX Model Zoo's yolov4 asset was downloaded and hashed: identical. Two byte streams, one digest. Nothing in this repository had to be believed for that to be true.",

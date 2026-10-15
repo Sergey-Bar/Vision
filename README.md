@@ -89,17 +89,23 @@ a recorded licence basis and a date a human resolved it live; `pocctl live list`
 the table and `pocctl live env <id>` prints the environment one camera produces.
 
 ```powershell
-.\scripts\live-demo.ps1                 # box -> resolve -> calibrate -> rehearse -> preflight -> run
+.\scripts\live-demo.ps1                 # box -> resolve -> calibrate -> rehearse -> preflight -> run -> prove -> mark -> report
+.\scripts\live-demo.ps1 -TriggerMode sidecar
+                                         # the same path with the Python worker as the trigger
 ```
 
 Measured on this machine on 2026-10-15: preflight all eleven checks green against the
 resolved camera, the source row printing the stream's own codec and frame rate, the
 detector row carrying a measured p99 (p50 13.9 ms, p99 16.4 ms over 40 CUDA
-inferences), and the source line recorded as a public relay. Two honest limits, both
+inferences), and the source line recorded as a public relay. Three honest limits, all
 printed by the run itself rather than by this file: **the detection rate is NOT RUN**,
 because the pinned Model Zoo `yolov4n.onnx` is a multi-scale anchored head the
-in-process decoder refuses by design rather than guessing its anchors; and events go
-to `xpsim`, a simulator, which preflight's own row names.
+in-process decoder refuses by design rather than guessing its anchors (the Python
+sidecar decodes that family, and `-TriggerMode sidecar` runs the pipeline through it
+with its own loopback p99 measured rather than borrowed); events go to `xpsim`, a
+simulator, which preflight's own row names; and the false-positive rate is NOT RUN
+until a person marks an event — the demo's own mark, if asked for one, carries the
+demo's name as its author.
 
 ## Run
 

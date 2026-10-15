@@ -104,6 +104,21 @@ type PreflightInput struct {
 	// than a bare "no p99" that sends its reader to a profiler.
 	Calibration     *DetectorCalibration
 	CalibrationNote string
+	// SidecarP99MS is the MEASURED loopback p99 from a sidecar calibration —
+	// the same record shape as the detector's, measured over the sidecar's own
+	// HTTP endpoint. It is zero when no sidecar calibration was recorded, and
+	// the AI row says so rather than passing on an absence.
+	//
+	// The two records live in ONE file (the data root's
+	// `detector-calibration.json`) because they are the same fact measured two
+	// ways; the record's own trigger field says which way, and Applies refuses
+	// a record from the other path.
+	SidecarP99MS float64
+	// SidecarCalibration and SidecarCalibrationNote are the record and its
+	// refusal, so the AI row can print WHICH sidecar was timed when it cannot
+	// use the number.
+	SidecarCalibration     *DetectorCalibration
+	SidecarCalibrationNote string
 	// AIFPS is SP_POC_AI_FPS. Zero means EVERY DECODED FRAME, and the measured
 	// source FPS stands in for it — refusing the spelling here would have made the
 	// most demanding mode unexpressable, and the arithmetic is the same either way.
@@ -516,7 +531,42 @@ func aiBudget(ctx context.Context, in PreflightInput) (bool, string, string) {
 	if in.Client == nil {
 		return false, "SP_POC_TRIGGER_MODE=sidecar and no sidecar client was supplied, so the AI latency budget was never measured", "not measured"
 	}
-	return true, "the run measures p99 continuously and AC6 scores it; preflight reports whether the sidecar is answering at all", "measured during the run"
+	// A sidecar calibration recorded and applied: the REAL thing, measured over
+	// the sidecar's own endpoint with its warm-up discarded, and checked with
+	// the same arithmetic the detector row uses. The run still measures p99
+	// continuously and AC6 still scores it — this row is the early warning,
+	// which is the whole reason it exists.
+	if in.SidecarP99MS > 0 {
+		ok, arithmetic := sidecarArithmetic(in)
+		// The record's own Describe sentence already names the sidecar and its
+		// address, so it is printed once. A reader comparing a detector row's
+		// line with a sidecar row's line should see the same sentence shape
+		// with the path substituted, not the path twice.
+		measured := "a sidecar calibration was applied"
+		if in.SidecarCalibration != nil {
+			measured = in.SidecarCalibration.Describe()
+		}
+		if !ok {
+			return false, "the measured sidecar p99 does not fit inside the declared rate: " + arithmetic + ". " +
+					"Lower SP_POC_AI_FPS, or a smaller SP_POC_AI_INPUT_WIDTH (the sidecar letterboxes to its " +
+					"model's own input, so a smaller one is a model property, not a flag), or a fused export " +
+					"decoded in-process. The budget is not the lever: raising SP_POC_AI_BUDGET_MS until the " +
+					"row passes is the demo congratulating itself.",
+				measured
+		}
+		return true, "the measured sidecar p99 fits inside the declared rate: " + arithmetic, measured
+	}
+	// A record exists and does not describe this run: the note names the part
+	// that differs, so the operator knows whether to re-run the bench or fix
+	// a variable. It is not a failure — a calibration nobody recorded is not
+	// a calibration that failed, and the distinction is the row's.
+	if in.SidecarCalibration != nil && in.SidecarCalibrationNote != "" {
+		return true, "a sidecar calibration is recorded but does not describe this run: " + in.SidecarCalibrationNote +
+				". The run measures p99 continuously and AC6 scores it; record one with " +
+				"`pocctl bench --images <dir> --data-root <the run's data root> --trigger sidecar`",
+			"recorded, but for another build"
+	}
+	return true, "no sidecar calibration is recorded; the run measures p99 continuously and AC6 scores it", "measured during the run"
 }
 
 // triggerNoun names the trigger in one word, for a sentence that has to read as

@@ -77,6 +77,13 @@ type ReplayReport struct {
 	// ProviderCalls is how many HTTP requests the provider's client made during
 	// the replay. It is zero by construction and measured anyway.
 	ProviderCalls int64
+	// ProviderCallsMeasured says whether a counter was wired at all, because
+	// ProviderCalls is 0 whether the client made no requests or whether nobody
+	// was counting. Printing "0 (measured, not asserted)" over a nil counter is
+	// the reassuring-unmeasured-zero this module exists to end: the header said
+	// a measurement was taken and the beat two lines below said none was. A
+	// machine reading this header gets a claim nobody made.
+	ProviderCallsMeasured bool
 	// LedgerFrom and LedgerTo are the chain range this detection's rows sit in.
 	LedgerFrom int64
 	LedgerTo   int64
@@ -170,6 +177,7 @@ func Replay(ctx context.Context, in ReplayInput) (ReplayReport, error) {
 
 	if in.Calls != nil {
 		rep.ProviderCalls = in.Calls() - before
+		rep.ProviderCallsMeasured = true
 	}
 
 	failed := 0
@@ -393,9 +401,17 @@ func FormatReplay(rep ReplayReport) string {
 		fmt.Fprintf(&b, "  at              %s\n", rep.At.Format(time.RFC3339))
 	}
 	b.WriteString("  provider calls  ")
-	if rep.ProviderCalls == 0 {
+	switch {
+	case !rep.ProviderCallsMeasured:
+		// The property was not measured, so the line says UNMEASURED rather
+		// than zero. A counter is wired only when a provider exists, and a
+		// replay over a run whose provider is `none` cannot have its calls
+		// counted — which is not the same claim as having counted them and
+		// found none.
+		b.WriteString("UNMEASURED — no counter was supplied, so this is not a claim that zero were made\n")
+	case rep.ProviderCalls == 0:
 		b.WriteString("0 (measured, not asserted)\n")
-	} else {
+	default:
 		b.WriteString(fmt.Sprintf("%d  <-- THIS IS NOT A REPLAY\n", rep.ProviderCalls))
 	}
 	fmt.Fprintf(&b, "  ledger          seq %d..%d  %s\n", rep.LedgerFrom, rep.LedgerTo, rep.ChainRep.Reason)

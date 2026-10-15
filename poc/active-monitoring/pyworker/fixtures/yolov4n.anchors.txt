@@ -1,0 +1,52 @@
+# Darknet anchor boxes for the YOLOv4-416 export shipped as models/yolov4n.onnx
+#
+# PROVENANCE. These are the [anchors] section of `yolov4-416.cfg`, the
+# configuration file the model was trained with. They are part of the MODEL, not
+# of this decoder, and the ONNX export does not embed them — the exporter
+# resolved the cfg at build time and left the boxes behind. That is transcription
+# of a recorded fact, not an inference from a tensor shape: the shape alone
+# cannot separate v4 from v5, because both are anchored at three scales; the cfg
+# can, and it says v4.
+#
+# The weights' own record is pyworker/fixtures/yolov4n.licence.json, beside this
+# file: byte-identified by SHA-256 (257,470,589 bytes, the ONNX Model Zoo's
+# validated yolov4 asset), MIT as the publisher states it. The anchors' own row
+# is that record's `anchors` object — same source, same licence, and a SHA-256
+# of THIS file, so any checkout can tell whether it holds the boxes the sidecar
+# was measured with.
+#
+# The file in models/ was NAMED yolov8n.onnx until 2026-10-03 and was NOT a
+# YOLOv8. `pocctl model-probe` measured it: producer `tf2onnx`, 416x416 NHWC
+# input, three outputs of shape (N, 52, 52, 3, 85), and an empty metadata map.
+# That is the YOLOv4 three-scale darknet head. The zoo's own page publishes the
+# same shapes for this asset, and the anchors recorded here are the FULL
+# yolov4-416 set — three independent checks on one identity, all recorded in the
+# licence file.
+#
+# ORDER. One `width,height` per line, grouped by the session's output order, which
+# is FINEST STRIDE FIRST. For a 416 input that is stride 8 (52x52), stride 16
+# (26x26), stride 32 (13x13). `load_anchors` refuses a file whose length does not
+# divide into three scales, and refuses a file whose per-scale count disagrees
+# with the model's own tensor, because a mismatched anchor set produces boxes in
+# the right place with the wrong sizes — the one wrong answer nobody can catch by
+# looking.
+#
+# A YOLOv8 (Ultralytics) export needs NONE of this: it publishes a single fused
+# output with final coordinates. SP_POC_AI_ANCHORS is only read for an anchored
+# export, and pointing SP_POC_AI_MODEL at a fused export makes this file
+# irrelevant.
+
+# stride 8, grid 52x52, masks 0,1,2
+10,13
+16,30
+33,23
+
+# stride 16, grid 26x26, masks 3,4,5
+30,61
+62,45
+59,119
+
+# stride 32, grid 13x13, masks 6,7,8
+116,90
+156,198
+373,326

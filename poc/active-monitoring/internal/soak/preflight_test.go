@@ -5,6 +5,9 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/Sergey-Bar/vision-poc/internal/ai"
 )
 
 // TestPreflightAndTheCapabilityTableAgreeOnTheDecoder is the bug this test
@@ -224,5 +227,84 @@ func TestTheAIRowIsAboutTheRunThatHasAnAI(t *testing.T) {
 	}
 	if !strings.Contains(detail, "SP_POC_TRIGGER_MODE=sidecar") {
 		t.Fatalf("the refusal does not name the variable: %s", detail)
+	}
+}
+
+// TestTheAIRowMeasuresTheSidecarThatIsThere: the three states of the AI row on
+// the sidecar path, all of them honest.
+//
+// A run with a MEASURED sidecar calibration gets the real thing — the loopback
+// p99 multiplied by the declared rate with the same arithmetic the detector row
+// uses — and a run whose measured cost does not fit fails with the lever named.
+// A run with a record for another build is told which axis differs and passes,
+// because a calibration that did not apply is not a measurement that failed. A
+// run with no record at all passes with "measured during the run" rather than
+// being scored against an absence.
+func TestTheAIRowMeasuresTheSidecarThatIsThere(t *testing.T) {
+	client, err := ai.New("http://127.0.0.1:8099", time.Second)
+	if err != nil {
+		t.Fatalf("ai.New: %v", err)
+	}
+	base := PreflightInput{
+		TriggerMode: "sidecar", Client: client, AIFPS: 5,
+		SourceReport: StreamFacts{FPS: 30},
+		SidecarCalibration: &DetectorCalibration{
+			Trigger: TriggerSidecar, Address: "http://127.0.0.1:8099",
+			P50MS: 41.2, P99MS: 63.8, Frames: 40, Input: 416,
+		},
+	}
+
+	// The measured thing: p99 63.8ms at 5 fps is well inside a second.
+	fits := base
+	fits.SidecarP99MS = 63.8
+	ok, detail, measured := aiBudget(context.Background(), fits)
+	if !ok {
+		t.Fatalf("a sidecar whose measured p99 fits failed: %s", detail)
+	}
+	if !strings.Contains(detail, "fits inside the declared rate") {
+		t.Errorf("the answer does not report the arithmetic: %s", detail)
+	}
+	if !strings.Contains(measured, "sidecar at http://127.0.0.1:8099") {
+		t.Errorf("the measured line does not name the sidecar it was measured at: %s", measured)
+	}
+	if !strings.Contains(measured, "p99 63.8ms") {
+		t.Errorf("the measured line does not carry the measured number: %s", measured)
+	}
+
+	// The same measured number at a declared rate that does not fit: the row
+	// fails and names the lever, and the budget is explicitly NOT the lever.
+	toofast := base
+	toofast.SidecarP99MS = 63.8
+	toofast.AIFPS = 100
+	ok, detail, _ = aiBudget(context.Background(), toofast)
+	if ok {
+		t.Fatal("a sidecar whose measured p99 does not fit the declared rate passed")
+	}
+	for _, want := range []string{"SP_POC_AI_FPS", "SP_POC_AI_BUDGET_MS"} {
+		if !strings.Contains(detail, want) {
+			t.Errorf("the refusal does not name the lever (%s): %s", want, detail)
+		}
+	}
+
+	// Recorded, but for another build: the note is printed and the row passes.
+	other := base
+	other.SidecarCalibrationNote = "it was measured on the detector trigger and this run is on the sidecar trigger"
+	ok, detail, measured = aiBudget(context.Background(), other)
+	if !ok {
+		t.Fatalf("a record that does not apply failed the run: %s", detail)
+	}
+	if !strings.Contains(detail, "detector trigger") || !strings.Contains(measured, "recorded, but for another build") {
+		t.Errorf("the row does not say the record is for another build: %s / %s", detail, measured)
+	}
+
+	// No record at all: passes as measured-during-the-run, and never scores
+	// against an absence.
+	none := PreflightInput{TriggerMode: "sidecar", Client: client, AIFPS: 5}
+	ok, _, measured = aiBudget(context.Background(), none)
+	if !ok {
+		t.Fatal("a run with no sidecar calibration failed")
+	}
+	if !strings.Contains(measured, "measured during the run") {
+		t.Errorf("the absent case reports %q", measured)
 	}
 }

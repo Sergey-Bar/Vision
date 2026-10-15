@@ -46,6 +46,11 @@ func TestTheModelPinIsAnHTTPSURLAndA64CharacterDigest(t *testing.T) {
 // and the failure it produces is a specific one: a judge fetches the pinned URL,
 // the bytes match the pin, and the record beside them names a different origin —
 // or worse, a record that says NOT RECORDED while the code claims provenance.
+//
+// The ANCHORS row is the same check for the second pinned digest: the model's
+// `[anchors]` section is the file a clean clone cannot decode without, and its
+// pin (`defaultAnchorsSHA256`), the bytes the binary embeds and the licence
+// record's `anchors.sha256` are three records of one fact.
 func TestTheModelPinAgreesWithTheLicenceRecord(t *testing.T) {
 	path := filepath.Join("..", "..", "pyworker", "fixtures", "yolov4n.licence.json")
 	raw, err := os.ReadFile(path)
@@ -58,6 +63,10 @@ func TestTheModelPinAgreesWithTheLicenceRecord(t *testing.T) {
 		Origin struct {
 			URL string `json:"url"`
 		} `json:"origin"`
+		Anchors struct {
+			SHA256        string `json:"sha256"`
+			CommittedCopy string `json:"committed_copy"`
+		} `json:"anchors"`
 	}
 	if err := json.Unmarshal(raw, &rec); err != nil {
 		t.Fatalf("%s is not readable as the licence record: %v", path, err)
@@ -70,6 +79,16 @@ func TestTheModelPinAgreesWithTheLicenceRecord(t *testing.T) {
 	if got := strings.TrimSpace(rec.Origin.URL); got != defaultModelURL {
 		t.Errorf("the licence record's origin.url is %q and the fetch pin is %q. The origin the code will "+
 			"fetch from and the origin the record names are the same claim", got, defaultModelURL)
+	}
+	if got := strings.ToLower(strings.TrimSpace(rec.Anchors.SHA256)); got != defaultAnchorsSHA256 {
+		t.Errorf("the licence record's anchors.sha256 is %q and the fetch's anchors pin is %q. They "+
+			"describe the same file, and `fetch-model` writes the pinned one: a judge whose clone "+
+			"receives one and whose record names the other is told a provenance that did not arrive",
+			got, defaultAnchorsSHA256)
+	}
+	if got := strings.TrimSpace(rec.Anchors.CommittedCopy); got == "" {
+		t.Error("the licence record's anchors row names no committed copy, so a clean clone has nowhere " +
+			"to be told the anchors come from")
 	}
 }
 

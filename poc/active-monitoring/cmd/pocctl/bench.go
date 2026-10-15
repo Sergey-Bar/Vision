@@ -48,6 +48,12 @@ func cmdBench(args []string) error {
 		"match-iou": "0.5", "threads": "0", "emit": "0.05",
 		"nms-class": "0.45", "nms-global": "0.75", "max-boxes": "100",
 		"min-score": "0", "out": "", "frames": "",
+		// Which path the calibration describes: the in-process detector (the
+		// shipped default) or the Python sidecar's endpoint. One record file
+		// with a trigger field saying which path measured it, because preflight
+		// refuses one path's p99 applied to the other rather than clearing a
+		// run against a session it never opens.
+		"trigger": "", "ai-addr": "",
 	}, args)
 	if err != nil {
 		return err
@@ -85,6 +91,23 @@ func refusesToOpenModel(lib, model string) bool {
 // recorded, and running a benchmark over material whose terms nobody wrote down
 // produces numbers this project may not publish.
 func benchImages(flags map[string]string) error {
+	// The two paths, one command. The trigger decides which endpoint the frames
+	// go to before anything is opened: the sidecar pass must not load an ONNX
+	// Runtime (a sidecar bench that opened a CUDA session would measure a
+	// machine the sidecar path never uses), and the detector pass has no
+	// sidecar to talk to. An absent value is the schema's structural default
+	// — the in-process detector — and an unrecognised one is refused rather
+	// than guessed.
+	switch trigger := envOr("SP_POC_TRIGGER_MODE", flags["trigger"]); trigger {
+	case "", config.TriggerModeDetector:
+		// the in-process pass below
+	case config.TriggerModeSidecar:
+		return benchSidecar(flags)
+	default:
+		return fmt.Errorf("bench: trigger %q is not a path this module measures: the in-process "+
+			"detector (%s) or the sidecar (%s). The novelty engine's cost is a frame interval and "+
+			"carries no per-frame p99 to record", trigger, config.TriggerModeDetector, config.TriggerModeSidecar)
+	}
 	dir := flags["images"]
 	if _, err := os.Stat(dir); err != nil {
 		return fmt.Errorf("bench: the still set is not readable: %w", err)

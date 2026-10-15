@@ -162,6 +162,30 @@ func TestAReplayWithNoCounterSaysThePropertyIsUnmeasured(t *testing.T) {
 	if rep.Verdict == "PASS" {
 		t.Fatal("the replay PASSED with the zero-call property unmeasured")
 	}
+	// And the printed REPORTS says so. The header used to read "0 (measured,
+	// not asserted)" over a nil counter — a measurement nobody took, printed
+	// two lines above the beat that said as much — which is the
+	// reassuring-unmeasured-zero this module exists to end.
+	line := FormatReplay(rep)
+	if !strings.Contains(line, "UNMEASURED — no counter was supplied") {
+		t.Fatalf("the printed report claims a measured zero with no counter: %s", line)
+	}
+	if strings.Contains(line, "0 (measured, not asserted)") {
+		t.Fatalf("the printed report still says the zero was measured: %s", line)
+	}
+	// With a counter wired, the same line goes back to being a measured zero.
+	st2, id2, calls := recorderFixture(t)
+	rep2, err := Replay(context.Background(), ReplayInput{Store: st2, Detection: id2, Calls: calls.Calls})
+	if err != nil {
+		t.Fatal(err)
+	}
+	line2 := FormatReplay(rep2)
+	if !strings.Contains(line2, "0 (measured, not asserted)") {
+		t.Fatalf("a replay WITH a counter does not print its measured zero: %s", line2)
+	}
+	if strings.Contains(line2, "UNMEASURED — no counter") {
+		t.Fatalf("a replay with a wired counter prints UNMEASURED: %s", line2)
+	}
 }
 
 // TestAReplayFailsWhenTheProviderCounterMoves is RC-4's test.
