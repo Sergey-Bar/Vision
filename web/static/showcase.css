@@ -696,3 +696,101 @@ details .split { margin-top: 8px; }
   .ask-cta-row .btn { width: 100%; justify-content: center; }
   .kpi-rail { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* ==========================================================================
+   UI-SKILLS / APLLE-NETFLix MARKET PASS — minimal, charcoal+blue, VMS feel.
+   ========================================================================== */
+
+/* charcoail<|end|>blue base already applied by tokens above */
+
+.nav {
+    position: sticky; top: 0; z-index: 40;
+    display: flex; align-items: center; gap: 22px;
+    height: 56px; padding: 0 24px;
+    background: color-mix(in srgb, var(--surface-0) 78%, transparent);
+    backdrop-filter: saturate(180%) blur(22px);
+    -webkit-backdrop-filter: saturate(180%) blur(22px);
+    border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+    margin: 0;
+}
+.nav .brand { font-weight: 600; letter-spacing: -0.01em; font-size: 15px; gap: 8px; }
+.nav .links { gap: 4px; margin-left: auto; }
+.nav .links a { padding: 6px 10px; border-radius: 6px; font-weight: 500; font-size: 13px; line-height: 1; color: var(--ink-2); }
+.nav .links a:hover { color: var(--ink-1); background: color-mix(in srgb, var(--surface-2) 60%, transparent); }
+.nav .links a[aria-current="page"] { color: var(--ink-1); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+
+/* bottom tab bar — native app chrome on small screens */
+@media (max-width: 767px) {
+  body { padding-bottom: 68px; }
+  .bottom-tabs { display: flex; }
+  .nav .links { gap: 2px; }
+  .nav .links a { padding: 4px 6px; font-size: 11px; }
+}
+.bottom-tabs {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+    display: none; height: 56px; padding-bottom: env(safe-area-inset-bottom, 0px);
+    background: color-mix(in srgb, var(--surface-0) 78%, transparent);
+    backdrop-filter: saturate(180%) blur(22px);
+    border-top: 1px solid var(--line);
+    justify-content: space-around; align-items: center;
+    overflow-x: auto; scrollbar-width: none;
+}
+.bottom-tabs a {
+    flex: 1; min-width: 60px; height: 44px; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 2px;
+    font-size: 10px; letter-spacing: .02em; color: var(--ink-3); text-decoration: none;
+    border-radius: 8px; transition: color .16s, background .16s;
+}
+.bottom-tabs a[aria-current="page"] { color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.bottom-tabs span { font-weight: 500; }
+
+/* Tile / card minimal refinements */
+.tile, .card, .finding, .rec {
+    background: var(--surface-1);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    transition: transform .18s cubic-bezier(.2,.75,.25,1), box-shadow .18s, background .18s, border-color .16s;
+}
+.tile:hover, .card:hover { transform: translateY(-2px); border-color: var(--line-strong); }
+.tile:focus-visible, .card:focus-visible, button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 12px; }
+.tile h3, .card h2 { letter-spacing: -0.01em; font-weight: 600; }
+
+/* KPI rail tiles look like Finance/iOS stat tiles */
+.kpi, .kpi-rail .kpi { text-align: left; padding: 16px 18px; }
+.kpi .v, .kpi-rail .v { font-size: 1.9rem; font-weight: 700; letter-spacing: -0.02em; line-height: 1.05; color: var(--ink-1); }
+.kpi .k, .kpi-rail .k { font-size: 11px; color: var(--ink-2); text-transform: none; letter-spacing: 0; margin-top: 6px; }
+.kpi .src { font-size: 10.5px; color: var(--ink-3); margin-top: 8px; font-family: var(--mono); }
+
+/* Hero polish for app-first framing */
+.hero { position: relative; padding: 60px 40px 40px; max-width: 1180px; margin: 0 auto; text-align: left; }
+.hero h1 { font-size: clamp(34px, 5.2vw, 64px); line-height: 1.02; font-weight: 700; letter-spacing: -0.03em; max-width: 16ch; margin-bottom: 18px; }
+.hero .lead { font-size: 1.05rem; line-height: 1.62; color: var(--ink-2); max-width: 64ch; }
+
+/* Tap affordances (Apple 44pt, VMS touch) */
+button, .btn, .pill, .tile, .chip { min-height: 44px; min-width: 44px; }
+@media (min-width: 768px) { button, .btn, .pill, .tile, .chip { min-height: 32px; min-width: 0; } }
+
+/* motion: one orchestrated entrance */
+@media (prefers-reduced-motion: no-preference) {
+  .ask-reveal, .tile, .kbd { animation: ask-rise 520ms cubic-bezier(.2,.75,.25,1) both; animation-delay: var(--d, 0ms); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ask-reveal, .tile, .kbd { animation: none !important; opacity: 1; transform: none; }
+}
+
+/* Apple-like focus ring */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+/* Netflix-style rail scrolling (already tiles; allow horizontal scroll on wide) */
+@media (min-width: 1025px) { .tiles { display: flex; gap: 16px; overflow-x: auto; scrollbar-width: none; } .tiles::-webkit-scrollbar { display:none; } .tiles .tile { flex: 0 0 280px; min-height: 200px; } }
+
+
+@media (max-width: 767px) {
+  .nav { display: none !important; }
+  body { padding-bottom: 76px; }
+  .bottom-tabs { display: flex; }
+}
+@media (min-width: 768px) {
+  .bottom-tabs { display: none; }
+  .nav .links a { white-space: nowrap; }
+}

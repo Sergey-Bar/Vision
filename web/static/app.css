@@ -1,53 +1,50 @@
 /* ==========================================================================
-   VISION design system.
+   VISION design system — charcoal + blue, VMS-grade.
    --------------------------------------------------------------------------
-   One file, shared by every page of the console. Before this existed there were
-   two dark themes in the repository: index.html carried GitHub's #0d1117 and
-   fleet.css carried Tailwind slate's #0f172a, so the two pages were both dark
-   and neither looked like the same product. A console with two palettes is a
-   console that has been designed twice, which is the thing a design system
-   exists to prevent.
+   One file, shared by every page of the console. We deliberately kept the OLD
+   green palette out of the codebase's CSS: the primary action is now blue, sea/
+   charcoal base, and state colours are SEMANTIC (ok=green, warn=amber,
+   bad=red) rather than aesthetic.
 
-   The rules here are the three that make the difference between a developer
-   console and an operator surface:
+   Borrowed guidance (see docs/threat-model §UI):
+     - ui-skills.com playbook: 44px+ targets, tabular-nums for data, visible
+       focus rings, text-balance for headings, aspect-ratio on media, no CLS.
+     - Apple HIG: 8pt grid, Dynamic Type via rem/em, one action per primary
+       row, accessibility labels.
+     - Netflix: rail of posters, hero, bottom Tab Bar pattern.
+     - VMS market ground truth: tile/dense video walls, alarms always red,
+       navigation invisible until needed.
 
-     1. ONE accent. Green is the primary action and nothing else. Red is never
-        a button colour, only a state. A page with three bright colours has no
-        hierarchy, and a reader has to guess which one to click.
-     2. Every state has a NAME and a COLOUR, and the five verification states
-        are spelled out rather than counted. `duplicate` and `suppressed` are
-        the two an operator asks about when they suspect the rules are eating
-        incidents; they are not a footnote.
-     3. Numbers that are not measurements say so. "No incident in this window
-        has both an opened row and a disposition" is a sentence, and it is
-        rendered as one wherever the data is absent rather than as a 0 that
-        reads as a clean week.
-
-   Nothing here is decorative: motion is 120ms and only on state changes, and
-   focus is always visible because the console is operated by keyboard.
+   Rules:
+     1. One action accent: blue. Red is never a button, only an alarm/state.
+     2. Surfaces: 4 layers (base, card, elevated, overlay). Five is unnamed.
+     3. Text: 3 levels. A fourth is unreadable.
+     4. Motion: 150-220ms, ease-out on enter, spring on tap. Always honour
+        prefers-reduced-motion. No decorative infinite spins.
    ========================================================================== */
 
+@import url("https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap");
+
 :root {
-  /* Surfaces, from behind the content to in front of it. Four is enough; a
-     fifth is a surface nobody can name. */
-  --surface-0: #0b1220;
-  --surface-1: #111a2b;
-  --surface-2: #16233a;
-  --surface-3: #1d2d49;
+  /* Charcoal scale — four layers, OLED-safe. */
+  --surface-0: #050607;
+  --surface-1: #0b0e14;
+  --surface-2: #11161f;
+  --surface-3: #1a2030;
 
-  /* Text, three levels. A fourth level is text nobody can read. */
-  --ink-1: #eaf0f8;
-  --ink-2: #9fb0c7;
-  --ink-3: #6b7f9a;
+  /* Text — three levels, high contrast. */
+  --ink-1: #f2f4f7;
+  --ink-2: #a6adba;
+  --ink-3: #626976;
 
-  /* One accent, and the one place the product name appears. */
-  --accent: #2f9e5c;
-  --accent-strong: #3bb56c;
-  --accent-ink: #04140a;
+  /* Action accent: blue (replaces the legacy green action accent). */
+  --accent: #3d8bff;
+  --accent-strong: #6ea8ff;
+  --accent-ink: #020614;
 
-  /* The line. Used for every boundary, and for nothing else. */
-  --line: #24344f;
-  --line-strong: #31456a;
+  /* The line. */
+  --line: #1e232d;
+  --line-strong: #2c3240;
 
   /* State colours. A state is a fact about the data, never an action. */
   --ok: #3ba55d;
@@ -58,8 +55,8 @@
   --radius: 10px;
   --radius-sm: 6px;
   --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 8px 24px rgb(0 0 0 / 24%);
-  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
-  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --font: "Instrument Sans", -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
   /* Motion, one duration. A console that animates at three speeds feels like
      three consoles. */
