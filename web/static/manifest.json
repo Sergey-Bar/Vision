@@ -1,0 +1,24 @@
+{
+  "name": "VISION — Operator Console",
+  "short_name": "VISION",
+  "description": "Operator console for verified video evidence: ask in free text, replay stored clips, draft rules, read the ledger.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0a0d12",
+  "theme_color": "#0a0d12",
+  "categories": ["security", "productivity", "utilities"],
+  "icons": [
+    { "src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Ask", "short_name": "Ask", "description": "Free-text console", "url": "/ask", "icons": [{"src":"/static/icon-192.png","sizes":"192x192"}] },
+    { "name": "Chief", "short_name": "Chief", "description": "Chief of Security brief", "url": "/chief", "icons": [{"src":"/static/icon-192.png","sizes":"192x192"}] },
+    { "name": "Trust", "short_name": "Trust", "description": "Verify the ledger yourself", "url": "/trust", "icons": [{"src":"/static/icon-192.png","sizes":"192x192"}] }
+  ],
+  "display_override": ["standalone", "fullscreen", "minimal-ui"],
+  "launch_handler": { "client_mode": "auto" },
+  "prefer_related_applications": false
+}

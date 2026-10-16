@@ -653,3 +653,23 @@ body.theme-ask .ask-examples span:hover { background: var(--accent); color: #0a0
 
 body.theme-ask .ask-status { color: var(--ink-2); font-family: "IBM Plex Mono", monospace; font-size: .82rem; }
 body.theme-ask .ask-status:empty { display: none; }
+`n
+/* ---------- app-shell (standalone PWA) ----------------------------------- */
+@media (display-mode: standalone), (display-mode: fullscreen) {
+  body { overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }
+  .nav { border-radius: 0; box-shadow: none; }
+  html, body { background: #000000; }
+  .wrap { padding-top: 6px !important; padding-bottom: 34px !important; }
+}
+@media (display-mode: standalone) {
+  .install-hint { display: none; }
+}
+body.theme-ask .perf-hint {
+  position: fixed; bottom: 12px; right: 12px; z-index: 90;
+  background: color-mix(in srgb, var(--surface-1) 92%, transparent);
+  backdrop-filter: blur(8px); border: 1px solid var(--line); border-radius: 999px;
+  padding: 6px 12px; font-size: .72rem; color: var(--ink-2);
+  font-family: "IBM Plex Mono", monospace; opacity: 0; pointer-events: none;
+  transition: opacity .2s; user-select: none;
+}
+body.theme-ask .perf-hint.show { opacity: 1; pointer-events: auto; }

@@ -3,6 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#0a0d12">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="VISION">
+    <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
     <title>VISION — Census</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232f9e5c'/%3E%3Cpath d='M16 7l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10v-4z' fill='none' stroke='%2304140a' stroke-width='2'/%3E%3C/svg%3E">
     <link rel="stylesheet" href="/static/app.css">
@@ -76,5 +83,6 @@
 </main>
 
 <script src="/static/census.js"></script>
+<script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("/static/sw.js").catch(function(){});});}</script>
 </body>
 </html>

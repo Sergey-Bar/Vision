@@ -3,6 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="manifest" href="/static/manifest.json">
+  <meta name="theme-color" content="#0a0d12">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="VISION">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
   <link rel="icon" href="data:,">
   <title>Vision Live YouTube Analytics POC</title>
   <link rel="stylesheet" href="/static/live.css">
@@ -106,5 +113,6 @@
     </section>
   </main>
   <script src="/static/live.js?v=4"></script>
+<script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("/static/sw.js").catch(function(){});});}</script>
 </body>
 </html>
