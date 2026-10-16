@@ -482,7 +482,7 @@ body.theme-ask {
     --line: #252b38;
     --ink-1: #f1ead9;
     --ink-2: #9aa3b2;
-    font-family: "Bricolage Grotesque", "Inter", system-ui, sans-serif;
+    font-family: "Instrument Sans", system-ui, sans-serif;
     background:
         radial-gradient(900px 500px at 12% -8%, rgba(244,196,71,0.10), transparent 60%),
         radial-gradient(700px 400px at 88% 12%, rgba(118,195,255,0.06), transparent 60%),
@@ -490,7 +490,7 @@ body.theme-ask {
 }
 
 body.theme-ask h1, body.theme-ask h2, body.theme-ask h3, body.theme-ask h4 {
-    font-family: "Bricolage Grotesque", "Inter", system-ui, sans-serif;
+    font-family: "Instrument Sans", system-ui, sans-serif;
     font-weight: 600;
     letter-spacing: -0.015em;
     color: var(--ink-1);
@@ -523,13 +523,17 @@ body.theme-ask .nav {
 
 body.theme-ask .ask-hero { position: relative; overflow: hidden; min-height: 220px; }
 body.theme-ask .ask-hero::before {
-    content: ""; position: absolute; inset: -40% -10%; pointer-events: none;
-    background: conic-gradient(from 0deg at 20% 0%, rgba(244,196,71,.08), transparent 25%, transparent 75%, rgba(118,195,255,.05) 100%);
-    filter: blur(90px); opacity: .7;
-    animation: ask-spin 48s linear infinite;
+    content: ""; position: absolute; inset: -30% -20%; pointer-events: none;
+    background: radial-gradient(60% 55% at 38% 0%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 70%);
+    opacity: .55;
 }
-@media (prefers-reduced-motion: reduce) { body.theme-ask .ask-hero::before { animation: none; } }
-@keyframes ask-spin { to { transform: rotate(360deg); } }
+/* modern minimal polish per UI-Skills playbook: balance headings, tabular data, 44px targets, focus ring */
+body.theme-ask * { text-wrap: pretty; }
+body.theme-ask h1, body.theme-ask .ask-headline { text-wrap: balance; }
+body.theme-ask .k, body.theme-ask .num, body.theme-ask [class*="count"], body.theme-ask table td:nth-child(2) { font-variant-numeric: tabular-nums; }
+body.theme-ask button, body.theme-ask a, body.theme-ask input { min-height: 44px; }
+@media (min-width: 721px) { body.theme-ask button, body.theme-ask a { min-height: auto; } }
+body.theme-ask :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent); }
 
 body.theme-ask .ask-hero h1 {
     font-size: clamp(30px, 4vw, 52px); line-height: 1.02; font-weight: 700;
