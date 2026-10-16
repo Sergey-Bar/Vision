@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VISION — Pipeline</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232f9e5c'/%3E%3Cpath d='M16 7l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10v-4z' fill='none' stroke='%2304140a' stroke-width='2'/%3E%3C/svg%3E">
+    <link rel="stylesheet" href="/static/app.css">
+    <link rel="stylesheet" href="/static/showcase.css">
+</head>
+<body>
+
+<nav class="nav">
+    <a class="brand" href="/">
+        <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#2f9e5c"/><path d="M16 7l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10v-4z" fill="none" stroke="#04140a" stroke-width="2"/></svg>
+        VISION
+    </a>
+    <div class="links">
+        <a href="/">Home</a>
+        <a href="/live">Live</a>
+        <a href="/pipeline" aria-current="page">Pipeline</a>
+        <a href="/trust">Trust</a>
+        <a href="/operations">Operations</a>
+        <a href="/console">Console</a>
+        <a href="/lab">Lab</a>
+        <a href="/ask">Ask</a>
+        <a href="/chief">Chief</a>
+        <a href="/census">Census</a>
+    </div>
+</nav>
+
+<main class="wrap">
+
+    <header class="page-head">
+        <h1>Pipeline — one event, from arrival to ledger</h1>
+        <p>
+            Not a diagram of the pipeline: the pipeline's own documents. Each incident below was
+            written by <span class="mono">scripts/demo.ps1</span> as it ran, and the journey on
+            the right is rendered from those files — including the incidents that were decided
+            <b>without any AI answer at all</b>, because that case is the product's hardest
+            honesty requirement and it should be the most visible one here.
+        </p>
+    </header>
+
+    <div class="split">
+        <section class="card">
+            <h2>The journey</h2>
+            <p class="sub" id="journey-source">Pick an incident on the right.</p>
+            <ol class="journey" id="journey"></ol>
+        </section>
+        <section class="card">
+            <h2>The incidents on this machine</h2>
+            <p class="sub">Written by <span class="mono">dist/demo</span>’s last run. Newest first.</p>
+            <div class="pick" id="pick"><p class="sub">reading…</p></div>
+        </section>
+    </div>
+
+    <h2 class="section-title">Why the pipeline stays quiet</h2>
+    <div class="split">
+        <section class="card">
+            <h2>Quiet is the design, and it is measured</h2>
+            <table class="tbl">
+                <tr><th>measured behaviour</th><th>the number, and its source</th></tr>
+                <tr>
+                    <td><b>500 blindness events became one alarm</b></td>
+                    <td class="num">500 → 1<br><span class="why">aggregation over an absence window; the flood is one row an operator can act on</span></td>
+                </tr>
+                <tr>
+                    <td><b>A moved camera withholds its events</b></td>
+                    <td class="num">sustained frames<br><span class="why">one frame of movement is not a camera move — the view-change gate is red-checked from both directions</span></td>
+                </tr>
+                <tr>
+                    <td><b>A track announces once</b></td>
+                    <td class="num">1 per dwell<br><span class="why">the per-track latch: one object, one event, not one per frame</span></td>
+                </tr>
+                <tr>
+                    <td><b>An unasked window is not searchable</b></td>
+                    <td class="num">refused<br><span class="why">the search names what it could not see rather than returning “nothing found”</span></td>
+                </tr>
+            </table>
+            <p class="sub">Numbers quoted from <span class="mono">docs/status.md</span>, measured 2026-10-15 on this repository’s own suites.</p>
+        </section>
+        <section class="card">
+            <h2>The state machine, in its own words</h2>
+            <p class="sub">The verification state machine is golden-tested: fixture → canonical → verification → incident, byte-stable.</p>
+            <div class="note info">
+                <b>A decision with no observation is a question, not a claim.</b>
+                The AI plane was never asked, so the incident is raised as a
+                <span class="mono">query</span> severity for an operator, carries
+                <span class="mono">decidedWithoutAiObservation: true</span>, and its observation row
+                says <span class="mono">degraded</span> with the reason. It is never rendered as
+                “nothing was found” — that rendering is the one failure this product must never commit.
+            </div>
+            <div class="note">
+                <b>What is NOT RUN here.</b> Detection accuracy on the relay footage: the pinned
+                model is a multi-scale anchored export and the in-process decoder refuses it by
+                name; the sidecar decodes it, and nobody has measured accuracy on that footage.
+                The census page carries this row so it cannot be forgotten. <a href="/census">→ census</a>
+            </div>
+        </section>
+    </div>
+
+    <footer class="foot">
+        The documents on this page live in <span class="mono">dist/demo/</span> and are read
+        directly — this page holds no copy of them and no summary of its own. Re-run
+        <span class="mono">scripts/demo.ps1</span> and this page shows the new run.
+    </footer>
+</main>
+
+<script src="/static/pipeline.js"></script>
+</body>
+</html>

@@ -79,6 +79,57 @@ func (s *Store) RunByID(ctx context.Context, id string) (*Run, error) {
 	return scanRun(row)
 }
 
+// RunSummary is one run with the number of detections it recorded.
+type RunSummary struct {
+	Run        Run
+	Detections int
+}
+
+// ListRuns returns every run, newest first.
+//
+// The detection count is part of the row rather than a second query per run: a
+// list whose counts were fetched one at a time would read two different versions
+// of the store while the pipeline is writing to it, and would print a count that
+// disagrees with the run beside it.
+func (s *Store) ListRuns(ctx context.Context) ([]RunSummary, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT r.id,r.label,r.mode,r.source_kind,r.source_arg,r.push_base_url,r.push_is_vms,r.clock_source,r.started_at,r.target_seconds,r.ended_at,r.note,
+		(SELECT count(*) FROM detections d WHERE d.run_id=r.id)
+		FROM runs r ORDER BY r.started_at DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("store: cannot read the runs: %w", err)
+	}
+	defer rows.Close()
+	out := make([]RunSummary, 0)
+	for rows.Next() {
+		// The scan mirrors scanRun above field for field, including the NULL
+		// handling for ended_at: a run that never ended must come back with a nil
+		// EndedAt and not with a zero time, which would print as 0001-01-01.
+		var r Run
+		var started string
+		var ended sql.NullString
+		var note sql.NullString
+		var isVMS int
+		var detections int
+		if err := rows.Scan(&r.ID, &r.Label, &r.Mode, &r.SourceKind, &r.SourceArg, &r.PushBaseURL, &isVMS, &r.ClockSource, &started, &r.TargetSeconds, &ended, &note, &detections); err != nil {
+			return nil, fmt.Errorf("store: cannot read a run: %w", err)
+		}
+		t, err := time.Parse(time.RFC3339Nano, started)
+		if err != nil {
+			return nil, fmt.Errorf("store: run %s has an unreadable start time %q: %w", r.ID, started, err)
+		}
+		r.StartedAt = t
+		r.PushIsVMS = isVMS != 0
+		if ended.Valid {
+			if v, err := time.Parse(time.RFC3339Nano, ended.String); err == nil {
+				r.EndedAt = &v
+			}
+		}
+		r.Note = note.String
+		out = append(out, RunSummary{Run: r, Detections: detections})
+	}
+	return out, rows.Err()
+}
+
 type rowScanner interface{ Scan(...any) error }
 
 func scanRun(row rowScanner) (*Run, error) {

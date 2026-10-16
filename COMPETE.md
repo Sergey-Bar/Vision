@@ -153,6 +153,8 @@ The other limits, stated the same way:
 | what the gate found, and what it could not | [`docs/status.md`](docs/status.md), "The 2026-10-04 pass…" |
 | the threats, and what is not designed | [`docs/threat-model.md`](docs/threat-model.md) §4 |
 | the five invariants and why | [`AGENTS.md`](AGENTS.md) |
+| the live surfaces, on one hub | [`scripts/showcase.ps1`](scripts/showcase.ps1) |
+| the narration and the rehearsal's findings | [`docs/showcase/`](docs/showcase/) |
 | one screen | [`docs/one-pager.md`](docs/one-pager.md) |
 
 ---

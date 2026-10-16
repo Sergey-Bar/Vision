@@ -54,14 +54,37 @@ func main() {
 	http.HandleFunc("/api/incident", handleIncident(securityctlPath, repoRoot))
 	http.HandleFunc("/api/explain", handleExplain(securityctlPath, repoRoot))
 	registerLiveRoutes(repoRoot)
+	registerShowcaseRoutes(repoRoot)
+	registerRundocRoutes(repoRoot)
+	registerAskRoutes(repoRoot)
+	registerChiefRoutes(repoRoot)
+	registerReplayRoutes(repoRoot)
 
-	// Main page
+	// The hub is the front door: it is the page that answers "what is this and
+	// what has it actually run" before anyone knows which command to type. The
+	// console moves one step back, to /console, where it is still exactly what
+	// it was.
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" && r.URL.Path != "/index.html" {
+		if r.URL.Path != "/" {
 			http.NotFound(w, r)
 			return
 		}
+		http.ServeFile(w, r, filepath.Join(repoRoot, "web", "static", "hub.html"))
+	})
+	http.HandleFunc("/console", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, filepath.Join(repoRoot, "web", "static", "index.html"))
+	})
+	http.HandleFunc("/pipeline", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, filepath.Join(repoRoot, "web", "static", "pipeline.html"))
+	})
+	http.HandleFunc("/trust", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, filepath.Join(repoRoot, "web", "static", "trust.html"))
+	})
+	http.HandleFunc("/lab", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, filepath.Join(repoRoot, "web", "static", "lab.html"))
+	})
+	http.HandleFunc("/census", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, filepath.Join(repoRoot, "web", "static", "census.html"))
 	})
 
 	// The operator surface. It is a page, not a tab on the console, because the

@@ -29,9 +29,9 @@ import (
 // verdict still goes through `pocctl mark`, which refuses a tag the run never
 // pushed, so the rate cannot be inflated by marking events nobody saw.
 //
-//	pocctl review --data-root <root> [--out <file.html>]
+//	pocctl review --data-root <root> [--out <file.html>] [--json]
 func cmdReview(args []string) error {
-	flags, err := flagSet("review", map[string]string{"data-root": "", "run": "", "out": "", "limit": "200"}, args)
+	flags, err := flagSet("review", map[string]string{"data-root": "", "run": "", "out": "", "limit": "200", "json": boolSpec}, args)
 	if err != nil {
 		return err
 	}
@@ -65,6 +65,24 @@ func cmdReview(args []string) error {
 	dets, err := st.Reviewable(ctx, runID, limit)
 	if err != nil {
 		return err
+	}
+	// The JSON page is a document rather than the sheet: it is printed instead of
+	// the HTML, and a run that pushed nothing is an empty page (`"rows": []`)
+	// rather than a refusal, because an empty table is a thing the consumer has
+	// to render. A run id that is not in the store is still refused by name: a
+	// typo must not read as a run that recorded nothing.
+	if flags["json"] == "true" {
+		if len(dets) == 0 {
+			if _, err := st.RunByID(ctx, runID); err != nil {
+				return fmt.Errorf("run %s is not in this store, so there is no page to print: %w", runID, err)
+			}
+		}
+		b, err := jsonMarshalIndent(reviewJSON(root, runID, dets))
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(b))
+		return nil
 	}
 	if len(dets) == 0 {
 		return fmt.Errorf("run %s recorded no pushed events; there is nothing to review and nothing to mark", runID)
@@ -143,6 +161,73 @@ type reviewRow struct {
 	// rather than hidden, because a rate computed over the events somebody looked
 	// at and the count of events there were is a number a judge will check.
 	Marked string
+}
+
+// reviewJSONRow is one row of the review page as JSON.
+//
+// `score` is the float and `box` is [X1,Y1,X2,Y2] in the same normalised 0..1
+// coordinates the page shows, because the consumer draws the box: a formatted
+// string would be a number the consumer has to parse back into the number it
+// already was. `clipRef` is omitted when a detection has no clip, and `verdict`,
+// `markedBy` and `markedAt` when nobody has judged it — "nobody looked" and
+// "somebody said false_positive" must not print the same.
+type reviewJSONRow struct {
+	DetectionID string     `json:"detectionId"`
+	At          string     `json:"at"`
+	Class       string     `json:"class"`
+	Family      string     `json:"family"`
+	Score       float64    `json:"score"`
+	Box         [4]float64 `json:"box"`
+	Tag         string     `json:"tag"`
+	ClipRef     string     `json:"clipRef,omitempty"`
+	Verdict     string     `json:"verdict,omitempty"`
+	MarkedBy    string     `json:"markedBy,omitempty"`
+	MarkedAt    string     `json:"markedAt,omitempty"`
+}
+
+type reviewJSONDoc struct {
+	DataRoot    string          `json:"dataRoot"`
+	Run         string          `json:"run"`
+	GeneratedAt string          `json:"generatedAt"`
+	Count       int             `json:"count"`
+	Judged      int             `json:"judged"`
+	Rows        []reviewJSONRow `json:"rows"`
+}
+
+// reviewJSON assembles the document from the same store query the HTML sheet
+// renders, so the two surfaces cannot disagree about what happened. `Rows` is
+// built with make so a run with no pushed events prints `"rows": []` and never
+// `null`: a consumer that has to handle both is a consumer that will handle one.
+func reviewJSON(root, runID string, dets []store.Reviewable) reviewJSONDoc {
+	doc := reviewJSONDoc{
+		DataRoot:    root,
+		Run:         runID,
+		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
+		Count:       len(dets),
+		Rows:        make([]reviewJSONRow, 0, len(dets)),
+	}
+	for _, d := range dets {
+		row := reviewJSONRow{
+			DetectionID: d.DetectionID,
+			At:          d.At.UTC().Format(time.RFC3339),
+			Class:       d.Class,
+			Family:      d.Family,
+			Score:       d.Score,
+			Box:         [4]float64{d.X1, d.Y1, d.X2, d.Y2},
+			Tag:         d.Tag,
+			ClipRef:     d.ClipRef,
+			Verdict:     d.Verdict,
+			MarkedBy:    d.MarkedBy,
+		}
+		if !d.MarkedAt.IsZero() {
+			row.MarkedAt = d.MarkedAt.UTC().Format(time.RFC3339)
+		}
+		if row.Verdict != "" {
+			doc.Judged++
+		}
+		doc.Rows = append(doc.Rows, row)
+	}
+	return doc
 }
 
 const reviewCSS = `

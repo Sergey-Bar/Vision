@@ -33,6 +33,8 @@ func main() {
 		err = cmdMark(os.Args[2:])
 	case "review":
 		err = cmdReview(os.Args[2:])
+	case "runs":
+		err = cmdRuns(os.Args[2:])
 	case "search":
 		err = cmdSearch(os.Args[2:])
 	case "unsearchable":
@@ -104,6 +106,7 @@ func usage() {
   mark <tag>               record a human verdict on one pushed event; this is what makes AC6 measurable
   adjudicate               apply the committed MACHINE-DEFINABLE verdicts (testdata/groundtruth.synthetic.json)
   review                    a page of every pushed event, its clip and its mark command
+  runs                      every run in the store, newest first, with its detection count
   search <text>            search what the model SAID, with its clip ref and attribution
   brief                    one line per hour for a run: what happened, and what was never asked
   preflight                the full preflight table; refuses to start by name

@@ -289,7 +289,7 @@ class ConversationalSearch:
                 args,
             ).fetchall()
         
-        if not total_obs or total_obs[0] == 0:
+        if not total_obs:
             return ConversationalResponse(
                 state="unavailable",
                 answer="No stored observations match your criteria.",
@@ -297,8 +297,8 @@ class ConversationalSearch:
                 results=[]
             )
         
-        total_observations = total_obs[0]
-        total_unique_tracks = total_obs[1] if len(total_obs) > 1 else 0
+        total_observations = total_obs
+        total_unique_tracks = unique_tracks
         
         # Build answer
         time_ref = "today" if start_time and start_time.date() == datetime.now(timezone.utc).date() else \
@@ -327,10 +327,10 @@ class ConversationalSearch:
             for row in rows:
                 detailed_results.append(SearchResult(
                     citation=f"obs:{row['observation_id']}",
-                    videoId=row["video_id"],
-                    observedAt=row["observed_at"],
+                    video_id=row["video_id"],
+                    observed_at=row["observed_at"],
                     frame=row["frame_no"],
-                    trackId=row["track_id"],
+                    track_id=row["track_id"],
                     label=row["label"],
                     category=row["category"],
                     zone=row["zone"],
@@ -509,7 +509,7 @@ class ConversationalSearch:
                 args,
             ).fetchone()
             
-            if not total_observations or total_observations[0] == 0:
+            if not total_observations:
                 return ConversationalResponse(
                     state="unavailable",
                     answer="No stored observation supports that answer.",
@@ -552,7 +552,7 @@ class ConversationalSearch:
         citations = [f"obs:{row['observation_id']}" for row in rows]
         
         if any(word in question.lower() for word in ("count", "how many", "сколько")):
-            answer = f"Found {unique_tracks[0] if isinstance(unique_tracks, tuple) else unique_tracks} unique track(s) across {total_observations[0] if isinstance(total_observations, tuple) else total_observations} matching stored observation(s)."
+            answer = f"Found {unique_tracks} unique track(s) across {total_observations} matching stored observation(s)."
         else:
             answer_parts = []
             for i, row in enumerate(rows[:5]):  # Show top 5 in answer
@@ -570,10 +570,10 @@ class ConversationalSearch:
         for row in rows:
             results.append(SearchResult(
                 citation=f"obs:{row['observation_id']}",
-                videoId=row["video_id"],
-                observedAt=row["observed_at"],
+                video_id=row["video_id"],
+                observed_at=row["observed_at"],
                 frame=row["frame_no"],
-                trackId=row["track_id"],
+                track_id=row["track_id"],
                 label=row["label"],
                 category=row["category"],
                 zone=row["zone"],
@@ -605,8 +605,8 @@ class ConversationalSearch:
             metadata={
                 "query_tokens": tokens,
                 "temporal_constraint": start_time.isoformat() if start_time else None,
-                "total_observations": total_observations[0] if isinstance(total_observations, tuple) else total_observations,
-                "unique_tracks": unique_tracks[0] if isinstance(unique_tracks, tuple) else unique_tracks
+                "total_observations": total_observations,
+                "unique_tracks": unique_tracks
             }
         )
 

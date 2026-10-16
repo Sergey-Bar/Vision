@@ -382,23 +382,38 @@ func timeDetector(det *ortdetect.Detector, img stillImage, count int,
 	if v, ok := lat.AchievableFPS(); ok {
 		fps = v
 	}
-	cal := soak.DetectorCalibration{
-		Model:             model,
-		ModelSHA256:       sha,
-		Library:           lib,
-		Threads:           threads,
-		Input:             det.Session().Input().W,
-		ExecutionProvider: ep,
-		P50MS:             p50,
-		P99MS:             p99,
-		Frames:            lat.Count(),
-	}
+	cal := detectorCalibration(model, sha, lib, threads, det.Session().Input().W, ep, p50, p99, lat.Count())
 	var b strings.Builder
 	fmt.Fprintf(&b, "  timing pass     %d inferences of %s, first one discarded as the warm-up\n",
 		lat.Count(), img.Name)
 	fmt.Fprintf(&b, "                  p50 %.1fms  p99 %.1fms  achievable %.1f fps at %d threads, %s\n",
 		p50, p99, fps, threads, ep)
 	return cal, b.String(), nil
+}
+
+// detectorCalibration is the record the in-process timing pass writes.
+//
+// It is a function because the record is a CLAIM about which path measured the
+// number, and it is checked as one: WriteCalibration refuses a record whose
+// trigger is neither path. The detector pass - the half that ran every inference
+// - forgot to stamp it, so `pocctl bench --trigger detector` measured a p99,
+// printed it, and then wrote nothing; the refusal surfaced two acts later in
+// `scripts/live-demo.ps1` as a preflight row that could not pass for the right
+// reason. Built here rather than inline so a test can hold the record without
+// opening a session, and the omission fails a test instead of a demo.
+func detectorCalibration(model, sha, lib string, threads, input int, ep string, p50, p99 float64, frames int) soak.DetectorCalibration {
+	return soak.DetectorCalibration{
+		Trigger:           soak.TriggerDetector,
+		Model:             model,
+		ModelSHA256:       sha,
+		Library:           lib,
+		Threads:           threads,
+		Input:             input,
+		ExecutionProvider: ep,
+		P50MS:             p50,
+		P99MS:             p99,
+		Frames:            frames,
+	}
 }
 
 // stillImage is one image the manifest knows about, on disk.

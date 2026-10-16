@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VISION — Ask</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232f9e5c'/%3E%3Cpath d='M16 7l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10v-4z' fill='none' stroke='%2304140a' stroke-width='2'/%3E%3C/svg%3E">
+    <link rel="stylesheet" href="/static/app.css">
+    <link rel="stylesheet" href="/static/showcase.css">
+</head>
+<body>
+
+<nav class="nav">
+    <a class="brand" href="/">
+        <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#2f9e5c"/><path d="M16 7l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10v-4z" fill="none" stroke="#04140a" stroke-width="2"/></svg>
+        VISION
+    </a>
+    <div class="links">
+        <a href="/">Home</a>
+        <a href="/live">Live</a>
+        <a href="/pipeline">Pipeline</a>
+        <a href="/trust">Trust</a>
+        <a href="/operations">Operations</a>
+        <a href="/lab">Lab</a>
+        <a href="/ask" aria-current="page">Ask</a>
+        <a href="/chief">Chief</a>
+        <a href="/census">Census</a>
+    </div>
+</nav>
+
+<main class="wrap ask-wrap">
+
+    <header class="hero ask-hero">
+        <div class="eyebrow">free text / closed vocabulary / no upload</div>
+        <h1>Ask it in plain words. It answers from the record, or it refuses.</h1>
+        <p class="sub" style="max-width:78ch">
+            One input. A sentence enters it and what comes out is a reading of a file this machine
+            already wrote, or a rule drafted in the product’s own language and compiled by its own
+            compiler, or a refusal said plainly. The words go nowhere else: they select an intent,
+            they never reach a shell, a path, a database or a model. A refused sentence is not a
+            failure — it is the second sentence this page knows how to print.
+        </p>
+    </header>
+
+    <section class="card ask-card">
+        <form id="ask-form" class="ask-form">
+            <input id="ask-q" class="ask-input" type="text" autocomplete="off"
+                   placeholder="someone is running on the fence at night" spellcheck="false">
+            <button class="btn primary" id="ask-submit" type="submit">Resolve</button>
+        </form>
+        <div class="ask-examples sub">
+            try: <span data-q="show me the last detection">show me the last detection</span> ·
+            <span data-q="make a rule for someone running on the fence at night">make a rule for someone running on the fence at night</span> ·
+            <span data-q="is the ledger intact">is the ledger intact</span> ·
+            <span data-q="cameras">cameras</span> ·
+            <span data-q="brief me">brief me</span> ·
+            <span data-q="how many runs">how many runs</span>
+        </div>
+        <div id="ask-status" class="ask-status" aria-live="polite"></div>
+    </section>
+
+    <section id="ask-result" class="ask-result" hidden></section>
+
+</main>
+
+<footer class="foot">
+    <b>How to read “no model needed”.</b> The control behind that claim (red-check RC-30 and friends)
+    is built so the ask page answers with nothing more than stored facts, the POC’s own tool and the
+    repository’s own rule compiler. Attaching a model later only changes what is narrated, never what
+    is found: the sentence, the draft and the verdict are written before it speaks.
+</footer>
+
+<script src="/static/ask.js"></script>
+</body>
+</html>

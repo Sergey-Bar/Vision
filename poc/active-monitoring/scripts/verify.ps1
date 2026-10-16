@@ -1671,6 +1671,24 @@ file = 'internal\detect\engine.go'
       pkg  = './cmd/pocctl'
       test = 'TestTheSidecarTimingPassDiscardsItsWarmUp'
       why  = 'the first HTTP round trip pays the worker''s own lazy state - connection setup, the first allocation, and on a CUDA session the provider''s algorithm selection. A calibration that kept it would write a p99 that refuses a sidecar which demonstrably answers'
+    },
+    # --- the detector half of the same record ------------------------------
+    #
+    # The trigger axis above is enforced on WRITE and not only on apply:
+    # WriteCalibration refuses a record that does not say which path measured
+    # it. The detector pass built its record without one, so it ran every
+    # inference, printed a p50/p99, and then wrote nothing at all. Found by
+    # running `scripts/live-demo.ps1 -TriggerMode detector`: the calibrate act
+    # printed the timing pass and the preflight act two acts later refused a
+    # calibration that had never been written.
+    @{
+      name = 'the detector timing pass says which path measured it'
+      file = 'cmd\pocctl\bench.go'
+      from = 'Trigger:           soak.TriggerDetector,'
+      to   = 'Trigger:           "", // REDCHECK: the detector pass stopped saying which path measured it'
+      pkg  = './cmd/pocctl'
+      test = 'TestTheDetectorTimingPassSaysWhichPathMeasuredIt'
+      why  = 'the record must say WHICH path measured the p99, and the writer refuses one that does not. With the line gone the bench runs every inference and writes nothing, and the failure lands two acts later in the live demo as a preflight row that cannot pass for the right reason'
     }
   )
   Push-Location $PWD

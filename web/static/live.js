@@ -109,7 +109,7 @@ async function refreshClips() {
     const body = await response.json();
     drawList(els.recentClips, (body.clips || []).slice(0, 10), clip => `<a class="item clipLink" href="${escapeHtml(clip.uri)}" target="_blank" rel="noopener"><b>${new Date(clip.observedAt).toLocaleString()}</b><small>${escapeHtml(clip.videoId)} · ${Number(clip.metadata.durationSeconds || 0).toFixed(1)}s · SHA-256 ${escapeHtml(clip.sha256.slice(0, 12))}…</small></a>`, 'No completed alert clips yet.');
   } catch (error) {
-    els.recentClips.textContent = `Clip catalog unavailable: ${error.message}`;
+    els.recentClips.textContent = 'NOT RUN — the clip catalog is a lab tool server endpoint (tools/), not attached to this showcase surface.';
   }
 }
 
@@ -124,7 +124,7 @@ async function refreshCritical() {
       start(true);
     }));
   } catch (error) {
-    els.criticalStreams.textContent = `Critical ranking unavailable: ${error.message}`;
+    els.criticalStreams.textContent = 'NOT RUN — the critical-stream ranking is a lab tool server endpoint (tools/), not attached to this showcase surface.';
   }
 }
 
@@ -145,7 +145,7 @@ async function askChat() {
     els.chatAnswer.textContent = `${body.answer}${citations ? `\nSources: ${citations}` : ''}`;
   } catch (error) {
     els.chatAnswer.classList.add('muted');
-    els.chatAnswer.textContent = `Chat unavailable: ${error.message}`;
+    els.chatAnswer.textContent = 'NOT RUN — grounded chat is a lab tool server endpoint (tools/), not attached to this showcase surface.';
   } finally {
     els.chatSend.disabled = false;
   }

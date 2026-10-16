@@ -1,0 +1,277 @@
+{
+  "schema": "vision/showcase-census/v1",
+  "generated": "2026-10-15",
+  "note": "Every row names a command or a file that exists in this repository today. A grade is one of: Live (run it from the showcase now), Recorded (a dated artefact or measurement on this machine), NOT RUN (deliberately not exercised; the reason is the next sentence), Lab (a Python tool that is explicitly outside the gate path).",
+  "rows": [
+    {
+      "area": "Eyes",
+      "capability": "A real camera resolved to a live stream",
+      "proof": "pocctl live resolve",
+      "artefact": "dist/live-demo/",
+      "surface": "/live",
+      "grade": "Recorded",
+      "note": "EarthCam public relays resolved with yt-dlp to HLS playlists and read by ffmpeg. Four rows answered on 2026-10-15; the run's own banner names the camera and its licence."
+    },
+    {
+      "area": "Eyes",
+      "capability": "Eleven preflight checks against a resolved camera",
+      "proof": "pocctl preflight",
+      "artefact": "dist/live-demo/preflight.log.log",
+      "surface": "/live",
+      "grade": "Recorded",
+      "note": "11 rows, all green on the run of 2026-10-15 21:09 - the run whose report and transcript the hub serves. The source row prints what the stream itself is (h264 1920x1080 @ 30.000 fps, decode 6.42x real time) rather than an assumption about it. Two runs earlier the same day refused here by name: a value the pipeline would otherwise guess, and a calibration the bench had not written - a defect in the bench itself, fixed and recorded in docs/status.md. The refusals are kept in dist/showcase/sidecar-refusals/ rather than tuned away."
+    },
+    {
+      "area": "Eyes",
+      "capability": "In-process detector timing on CUDA",
+      "proof": "pocctl bench",
+      "artefact": "docs/status.md",
+      "surface": "/live",
+      "grade": "Recorded",
+      "note": "p50 13.9 ms / p99 16.4 ms over 40 CUDA inferences at 416x416, 4 threads — 82 ms of a 1000 ms second at ai_fps=5."
+    },
+    {
+      "area": "Eyes",
+      "capability": "Sidecar decode of the anchored yolov4n export",
+      "proof": "pocctl bench --trigger sidecar",
+      "artefact": "docs/status.md; dist/showcase/sidecar-refusals/",
+      "surface": "/live",
+      "grade": "Recorded",
+      "note": "p50 322.6 ms / p99 471.5 ms over the loopback round trip, recorded against a real relay frame (CPUExecutionProvider). Re-measured 2026-10-15 on this box, two runs, both preserved: p50 691.8-694.4 ms, p99 809.3-829.7 ms. Either way it does not fit ai_fps=5; and at ai_fps=2, the lowest rate the tracking arithmetic accepts, the throughput gate refuses the run by name - 809.3 ms x 2 > 1000 ms. The lever the refusal names is the declared rate, and the refusals are kept rather than tuned away."
+    },
+    {
+      "area": "Eyes",
+      "capability": "Crop pass: a 40 px object arrives at 8.7 px whole-frame and 83.2 px cropped",
+      "proof": "pocctl detector --selftest",
+      "artefact": "poc/active-monitoring/docs/measurements.md",
+      "surface": "/live",
+      "grade": "Recorded",
+      "note": "Factor 9.6, computed from the letterbox's own geometry so it cannot drift from the code. 8.7 px is below the floor at which any detector is reliable; 83.2 px is not. This row claims the arithmetic, not that the detector found the object."
+    },
+    {
+      "area": "Eyes",
+      "capability": "Detection quality on footage",
+      "proof": "internal/evaluation against testdata/labels.json",
+      "artefact": "poc/active-monitoring/docs/measurements.md §0.6.3",
+      "surface": "/census",
+      "grade": "NOT RUN",
+      "note": "Not yet measured, and the file says so. When published it must say plainly that it is not mAP and cannot be: a handful of labelled instances supports precision and recall, not mean average precision."
+    },
+    {
+      "area": "Eyes",
+      "capability": "A camera row with no recorded licence is refused",
+      "proof": "go test ./internal/cams",
+      "artefact": "poc/active-monitoring/redcheck-transcripts.txt",
+      "surface": "/live",
+      "grade": "Recorded",
+      "note": "Red-checked: remove the refusal and the suite goes red. cleared_for_external_use is false on every relay row, and the showcase stores no relay footage."
+    },
+    {
+      "area": "Eyes",
+      "capability": "Text in the frame is evidence, never an instruction",
+      "proof": "go test ./internal/vlm/ ./internal/injectionfixture/",
+      "artefact": "poc/active-monitoring/docs/JUDGE.md §6",
+      "surface": "/trust",
+      "grade": "Recorded",
+      "note": "Four attacks rendered into the picture itself; the output shape is closed, so no injected sentence can introduce a fifth verdict. What it does NOT prove: that a particular model refuses to comply — that needs a live call, and the report says NOT RUN."
+    },
+    {
+      "area": "Mind",
+      "capability": "Novelty pass at 1080p, pure Go, measured",
+      "proof": "go test -run TestTheNoveltyPassCostAt1080pIsMeasured ./internal/novelty/",
+      "artefact": "poc/active-monitoring/docs/measurements.md §0.5.1",
+      "surface": "/operations",
+      "grade": "Recorded",
+      "note": "p50 3.507 ms over 2,000 frames — 1.17x the assumption the scale arithmetic made, so the arithmetic stands. 8.8% of one core per camera at 25 decoded frames per second."
+    },
+    {
+      "area": "Mind",
+      "capability": "A novelty rate that cannot propose is refused by name",
+      "proof": "go test ./internal/novelty",
+      "artefact": "poc/active-monitoring/docs/measurements.md §0.6.5",
+      "surface": "/operations",
+      "grade": "Recorded",
+      "note": "SP_POC_NOVELTY_FPS=1 is refused and the message says a 1.5 s dwell would be proposed once. The gate also reports the rate it actually achieved."
+    },
+    {
+      "area": "Mind",
+      "capability": "A moved camera declares ONE integrity event and suppresses presence, counted",
+      "proof": "go test ./internal/detect ./internal/novelty",
+      "artefact": "poc/active-monitoring/docs/measurements.md §0.6.4",
+      "surface": "/operations",
+      "grade": "Recorded",
+      "note": "Two frames of sustain, illumination AND spread together. Counters exist so the silence is legible: view_changes, view_tracks_dropped, suppressed events, suppressed frames."
+    },
+    {
+      "area": "Mind",
+      "capability": "A crop-sourced sighting uses the lower bar; a stricter bar on a better measurement is refused",
+      "proof": "go test ./internal/config ./internal/detect",
+      "artefact": "poc/active-monitoring/docs/measurements.md §0.6.1",
+      "surface": "/operations",
+      "grade": "Recorded",
+      "note": "Crop 2 frames, whole-frame 3. A two-sample bird found whole-frame produces nothing — asserted directly, not inferred."
+    },
+    {
+      "area": "Mind",
+      "capability": "Absence aggregated: 500 crossings produce ONE alarm carrying 500",
+      "proof": "go test -run TestFiveHundredUnaskedProposalsProduceOneEvent ./internal/soak",
+      "artefact": "poc/active-monitoring/docs/JUDGE.md §5",
+      "surface": "/pipeline",
+      "grade": "Recorded",
+      "note": "Each crossing keeps its own event with its own measured box — the crossing happened; only the verdict is missing. The blindness is what aggregates. Never 500 alarms."
+    },
+    {
+      "area": "Mind",
+      "capability": "Fixture → canonical → verification → incident is byte-stable",
+      "proof": "go test ./internal/... (golden)",
+      "artefact": "dist/demo/inc_*.incident.json",
+      "surface": "/pipeline",
+      "grade": "Recorded",
+      "note": "The incident decided with no AI observation carries reasonCode ai_plane_absent, severity query, and decidesWithoutAiObservation: true. It is a question for an operator, not a claim that anything happened."
+    },
+    {
+      "area": "Mind",
+      "capability": "Rule language: lint, simulate, activate, roll back",
+      "proof": "securityctl rules lint | simulate",
+      "artefact": "rules/builtin/bundle.yaml",
+      "surface": "/console",
+      "grade": "Recorded",
+      "note": "Bundles are untrusted input and are treated as such: compile, semantic validation, simulation against fixtures, signed activation, rollback. The lint gate runs the bundle on every verification."
+    },
+    {
+      "area": "Mind",
+      "capability": "A budget refusal is not a provider failure",
+      "proof": "go test ./internal/soak",
+      "artefact": "poc/active-monitoring/docs/measurements.md §0.6.2",
+      "surface": "/pipeline",
+      "grade": "Recorded",
+      "note": "An event proposed, budget-refused and never asked is not_asked, not degraded. The two have different owners, and the run records which happened."
+    },
+    {
+      "area": "Trust",
+      "capability": "The audit ledger is append-only and hash-chained; an edit is located and the demonstration restores it",
+      "proof": "pocctl audit ledger --tamper",
+      "artefact": "poc/active-monitoring/internal/store/ledger.go",
+      "surface": "/trust",
+      "grade": "Live",
+      "note": "Edits one byte, prints FAIL for the broken state, restores the byte and the triggers, verifies a third time. Not a claim that the database is tamper-proof: a claim that an edit is detected, located by row number, and survives a restart."
+    },
+    {
+      "area": "Trust",
+      "capability": "Checkpoint seals: ed25519 over the chain head",
+      "proof": "pocctl audit seal | audit seals --trusted-key <file>",
+      "artefact": "poc/active-monitoring/internal/store/seal.go",
+      "surface": "/trust",
+      "grade": "Recorded",
+      "note": "The raw-key-first branch order is itself a red-checked control, and the padded-key case is built rather than drawn so it cannot pass by luck."
+    },
+    {
+      "area": "Trust",
+      "capability": "A decision replays from stored facts with zero provider calls",
+      "proof": "pocctl prove",
+      "artefact": "dist/showcase/prove/",
+      "surface": "/trust",
+      "grade": "Recorded",
+      "note": "Three-valued on this machine, and the page shows which case you are in. The newest run recorded no detections, so prove refuses by name - a proof of nothing is not a proof; the last run with detections (2026-10-01) replays from stored facts and grades its own replay: PASS on the region, the verdict shape, the output hash and the chain; FAIL on a trigger recomputed under a changed threshold, on a chain with no seal file, and on zero provider calls, which is UNMEASURED because no counter was supplied. UNMEASURED is not zero and a FAIL is not hidden. Both transcripts are in dist/showcase/prove/."
+    },
+    {
+      "area": "Trust",
+      "capability": "The route table's probe never clears its own Unverified flag",
+      "proof": "securityctl adapter-probe",
+      "artefact": "docs/status.md",
+      "surface": "/trust",
+      "grade": "Recorded",
+      "note": "Definition-of-done item 1, and the only open product item a person with a real installation can move today. The probe records; a human decides."
+    },
+    {
+      "area": "Trust",
+      "capability": "tenant_id is never read from a request body; RLS on every site-scoped table",
+      "proof": "go test ./internal/... (rls-canary gate)",
+      "artefact": "dist/verification/",
+      "surface": "/trust",
+      "grade": "Recorded",
+      "note": "Writes with no tenant context refused, writes at the wrong site refused, the right scope accepted — per table, every table, on every run."
+    },
+    {
+      "area": "Trust",
+      "capability": "kill −9 mid-ingest leaves no loss, no duplicate side effect",
+      "proof": "go test ./internal/lifecycle ./internal/evidence",
+      "artefact": "docs/status.md",
+      "surface": "/trust",
+      "grade": "Recorded",
+      "note": "The fault-injection drills are a definition-of-done item, not a nice-to-have. The helper processes that appear in every skip list are those drills' children, and the skip audit declares them."
+    },
+    {
+      "area": "Trust",
+      "capability": "Evidence paths are hash-derived; traversal, NUL and symlink escapes are refused",
+      "proof": "go test ./internal/evidence ./internal/safename",
+      "artefact": "poc/active-monitoring/redcheck-transcripts.txt",
+      "surface": "/trust",
+      "grade": "Recorded",
+      "note": "The path-traversal segment regex was the sixth control ever red-checked, and the attempt found that nothing tested it — the missing test case fell out of the attempt."
+    },
+    {
+      "area": "Trust",
+      "capability": "Releases are built, signed and verified against a trusted key",
+      "proof": "securityctl build-release | verify-release",
+      "artefact": "docs/status.md",
+      "surface": "/trust",
+      "grade": "Recorded",
+      "note": "A release asset in either archive format is read; a checkpoint seal verified with a nil key was one of the defects the suite caught and now refuses."
+    },
+    {
+      "area": "Platform",
+      "capability": "Migrations are forward-only and expand/contract ship separately",
+      "proof": "securityctl migrate up | status",
+      "artefact": "migrations/",
+      "surface": "/operations",
+      "grade": "Recorded",
+      "note": "A contract step may never be bundled with the expand step that makes it safe, and no applied migration is ever edited."
+    },
+    {
+      "area": "Platform",
+      "capability": "The gate itself: 31 root gates, 94 POC controls, every control watched failing",
+      "proof": "scripts/verify.ps1 and poc/active-monitoring/scripts/verify.ps1",
+      "artefact": "dist/verification/",
+      "surface": "/trust",
+      "grade": "Live",
+      "note": "Read live on /trust, from the newest verification record and the POC transcript. No CI exists on this account and the record says so in its own ci field."
+    },
+    {
+      "area": "Platform",
+      "capability": "The product console: server-rendered, no client-side JavaScript",
+      "proof": "docker compose --profile core up",
+      "artefact": "internal/api/templates/",
+      "surface": "https://localhost:8443",
+      "grade": "Recorded",
+      "note": "The CSP is a security control the console does not trade for convenience. It is a different surface from this showcase, which is a development and demonstration UI."
+    },
+    {
+      "area": "Lab",
+      "capability": "Live server, camera fleet health and configuration",
+      "proof": "py tools/live_poc_server.py | tools/camera_fleet.py",
+      "artefact": "tools/",
+      "surface": "/lab",
+      "grade": "Lab",
+      "note": "The Python prototype of the live surface. Real, runnable, and named as a lab demo on every card."
+    },
+    {
+      "area": "Lab",
+      "capability": "Autonomous operator and conversational search over clips",
+      "proof": "py tools/autonomous_operator.py | tools/conversational_search.py",
+      "artefact": "tools/",
+      "surface": "/lab",
+      "grade": "Lab",
+      "note": "An agent proposes dispositions; a human still signs. Search answers with the clip it came from or says it could not see that window."
+    },
+    {
+      "area": "Lab",
+      "capability": "Behavioural learning from the operator's own acknowledgements",
+      "proof": "py tools/behavioral_learning.py",
+      "artefact": "tools/",
+      "surface": "/lab",
+      "grade": "Lab",
+      "note": "The noise figure moves for the reason the operator gave, not for a guess. Tested where tests exist, trusted nowhere they do not."
+    }
+  ]
+}

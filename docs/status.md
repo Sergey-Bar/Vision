@@ -4544,7 +4544,7 @@ What closed it, in the order the provenance chain requires:
   this box had the gap on.
 
 Two red-checks prove it, both hand-run red first and then entered in the POC table (93
-controls now, transcripts regenerated): "the anchors file is nine pairs that divide into
+controls at that point, transcripts regenerated): "the anchors file is nine pairs that divide into
 three scales" (mutate the Go side of `load_anchors`' scale check; an eight-pair and a
 ten-pair file are both accepted when it is gone) and "the anchors bytes are the pinned
 ones, or they are refused" (mutate the digest comparison; a one-anchor-changes copy and a
@@ -4655,4 +4655,188 @@ phrase in its output, so a failed replay cannot be read as a passed one.
   not that frame's provenance: the numbers are a measured cost and not an accuracy claim,
   and they are recorded here with that sentence attached.
 
+## The 2026-10-15 showcase pass: the half of the live path a passing gate cannot see
 
+The showcase presents this module through its own artefacts - the run report, the
+transcript, the ledger - under a rule that a page may not restate a number the artefact
+does not carry. Producing those artefacts meant running both trigger paths from the
+script a presenter actually types, and that found three defects. Every one of them
+lived where a passing gate cannot look: the gate tests the controls in its table, and
+these were in the half of the path that only exists while a run is underway.
+
+### The detector timing pass ran every inference and wrote nothing
+
+`pocctl bench --trigger detector` is the half of the calibration that measures the
+in-process ONNX session. It ran all forty inferences, printed
+`p50 16.2ms p99 22.4ms achievable 58.0 fps at 4 threads, cuda`, and then
+`WriteCalibration` refused the record:
+
+```
+pocctl: refusing to write a calibration with trigger "(none)": the record must say WHICH
+path measured it (detector or sidecar), because a p99 from the in-process detector
+applied to a sidecar run is a number with the wrong label
+```
+
+The trigger field is required on write, and the sidecar pass stamps it; the detector
+pass never did, so the only command that can produce a detector calibration could not
+write one. The failure surfaced two acts later in `scripts/live-demo.ps1`'s preflight,
+as a row that could not pass for the right reason - `the recorded calibration does not
+describe this run: no measured calibration at ...detector-calibration.json` - which is
+why the script now also stops in the act that produces the record instead of at the
+gate that multiplies it.
+
+The fix builds the record in `detectorCalibration` and stamps `soak.TriggerDetector` on
+it. A function rather than an inline literal for the same reason `classifyAnswer` was
+extracted: a test can hold the record without opening a session, so removing the line
+fails a test instead of a demo. It is the ninety-fourth control in the POC table and
+asserts both halves - the trigger field and the writer's own gate accepting the record.
+Both transcripts, hand-run:
+
+```
+$ go test ./cmd/pocctl/ -run TestTheDetectorTimingPassSaysWhichPathMeasuredIt -count=1   # baseline
+ok      github.com/Sergey-Bar/vision-poc/cmd/pocctl      1.243s
+
+$ Trigger: soak.TriggerDetector -> Trigger: ""   (hand mutation, cmd/pocctl/bench.go)
+--- FAIL: TestTheDetectorTimingPassSaysWhichPathMeasuredIt (0.00s)
+    bench_calibration_test.go:27: the detector timing pass wrote trigger ""; the record must
+        say WHICH path measured the p99 ("detector" or "sidecar"), and this pass is the detector's
+FAIL    github.com/Sergey-Bar/vision-poc/cmd/pocctl      1.234s
+```
+
+Restored: green. The demo was re-run after the fix and preflight passed all eleven
+checks on the detector path - the run whose report and transcript the hub serves.
+
+### The script that drives the run had three defects of its own
+
+`scripts/live-demo.ps1` is the file a presenter runs. Three of its lines were wrong in
+ways only a run shows:
+
+- The detector branch called `pocctl bench` without `--trigger detector`, so the
+  calibration record was refused for the reason above. One flag.
+- `SP_POC_SCORE_THRESHOLD` was set on the detector branch only, so the sidecar
+  preflight refused on a value the pipeline would otherwise guess:
+  `SP_POC_SCORE_THRESHOLD: not set; without it there is no approved class threshold`.
+  Set before the branch, where both paths read it.
+- The sidecar anchors path was spelled `"$AIModel.anchors.txt"`, which for
+  `yolov4n.onnx` names `yolov4n.onnx.anchors.txt` - a file that does not exist - while
+  the Go side's `anchorsBeside` strips `.onnx` and appends `.anchors.txt`. Now derived
+  by the same rule on both sides, so the two spellings cannot disagree again.
+
+A fourth finding is a presentation bug with a real cause: the demo's acceptance table
+printed `@{ID=AC4; ...}.Missing` to the console. In Windows PowerShell 5.1 a property
+access inside an expandable string - `" - $a.Missing"` - renders the object's
+`ToString()` followed by the literal text; only `" - $($a.Missing)"` renders the value.
+The artefact was correct because its HTML row already used `$()`. A sweep for the
+pattern over every `.ps1` in the repository found this one site and nothing else.
+
+### The hub serves its own run reports, and the name is the whole input
+
+The showcase hub links the artefacts it quotes, so `web/rundoc.go` serves four
+documents by name - `live-report`, `live-transcript`, `poc-report`, `poc-dashboard`.
+The handler's whole input surface is the allowlist key: no path parameter, no join with
+the request, no cleaning, so `..`, an absolute path or a NUL byte is a 404 before any
+file is opened, by construction rather than by a check. The natural spelling of such a
+handler is one line away from the dangerous one - `filepath.Join(root, name)` instead of
+`root` plus the key's own `rel` - so the control is red-checked by making that
+replacement, and the test places a decoy file exactly where a request-spelled path would
+look. RC-28 in the root table is
+`a served document comes from its allowlist key, not from the request`. Both
+transcripts, hand-run:
+
+```
+$ go test ./web/ -count=1     # baseline (the whole package)
+ok      github.com/Sergey-Bar/vision/web      2.992s
+
+$ filepath.FromSlash(rundocDocs[name].rel) -> filepath.FromSlash(name)   (hand mutation, web/rundoc.go)
+--- FAIL: TestRundocServesTheDocumentsItNames (0.01s)
+    rundoc_test.go:47: poc-report: served "the file a request-spelled path would have served",
+        want "document poc-report" - the document named by the key, not the file at the
+        request's spelling
+FAIL    github.com/Sergey-Bar/vision/web      2.284s
+
+$ go test ./web/ -run TestRundocServesTheDocumentsItNames -count=1     # restored
+ok      github.com/Sergey-Bar/vision/web      6.225s
+```
+
+While wiring that page up, the hub's status endpoint was asked the question a reader
+asks - how many root controls are there - and it answered thirty-four. The table holds
+twenty-eight. The counter matched `name = '` anywhere on a line, and the gate's skip
+records carry `name = 'red-check'` mid-line, so six records that are the opposite of a
+control were counted beside it. The counter now requires the line to begin with the
+assignment, and the status endpoint reports the table's own number: RC-29,
+`the hub counts the controls in this table, not the skip records beside it`. Both
+transcripts, hand-run:
+
+```
+$ go test ./web/ -run TestTheRootControlCountLeavesOutRecordsThatAreNotControls -count=1   # baseline
+ok      github.com/Sergey-Bar/vision/web      0.886s
+
+$ strings.HasPrefix(strings.TrimSpace(line), "name = '") -> strings.Contains(line, "name = '")   (hand mutation, web/showcase.go)
+--- FAIL: TestTheRootControlCountLeavesOutRecordsThatAreNotControls (0.00s)
+    showcase_test.go:214: counted 3 root controls in a table of 2 with a skip record beside it;
+        a skip record is not a control
+FAIL    github.com/Sergey-Bar/vision/web      0.938s
+```
+
+Restored: green. The same looking-at-the-page that produced that count found the second
+of the hub's own defects: the gate column on `/trust` and the proof and artefact
+columns on `/census` printed `[object HTMLElement]`. The pages' `el()` helper sets
+`textContent`, so a call shaped `el("td", null, el("code", null, x))` renders
+`String(element)` into the cell - three cells on two pages had grown the shape through
+copying each other. Each page now builds those cells with a `codeCell` helper that
+appends the element, and `TestNoScriptPassesAnElementAsText` scans every page script
+for the shape, so the scan covers the pages that were not fixed by hand as well as the
+ones that were. RC-30 in the root table is
+`a script never passes an element where el() wants text`. Both transcripts, hand-run:
+
+```
+$ go test ./web/ -run TestNoScriptPassesAnElementAsText -count=1   # baseline
+ok      github.com/Sergey-Bar/vision/web      0.993s
+
+$ tr.appendChild(codeCell(row.name)); -> tr.appendChild(el("td", null, el("code", null, row.name)));   (hand mutation, web/static/trust.js)
+--- FAIL: TestNoScriptPassesAnElementAsText (0.00s)
+    staticjs_test.go:33: static/trust.js:66: tr.appendChild(el("td", null, el("code", null, row.name))); // REDCHECK RC-30: an element as text
+          el() sets textContent, so an element passed as its text argument renders as [object HTMLElement]; append the element to the cell instead
+FAIL    github.com/Sergey-Bar/vision/web      0.895s
+```
+
+Restored: green. `AGENTS.md`'s red-check counts were corrected against the tables
+themselves while doing this: the root table holds thirty-three entries and the POC
+module ninety-four, where the document had said eighty-one for the POC half.
+
+**What this pass does not claim: a passing sidecar live run.** On this box the sidecar's
+measured round trip cannot hold the rate the tracking arithmetic demands. At
+`SP_POC_AI_FPS=1`, the tracking gate refuses by name - a crossing-sized object yields 2
+samples where `SP_POC_TRACK_MIN_FRAMES` requires 3, and the refusal names the two legal
+levers. At `SP_POC_AI_FPS=2`, the lowest rate that satisfies it, the throughput gate
+refuses: the sidecar's measured p99 on this run was 809.3 ms and `809.3 x 2 > 1000`. The
+refusals from both runs are kept in `dist/showcase/sidecar-refusals/` rather than tuned
+away, and the recorded sidecar number in this document remains the one measured against
+a real relay frame. A run cleared against the other path's number is the exact failure
+the trigger field exists to refuse; the demo refusing to start is that refusal working.
+The served detector-path report says in its own words that the in-process decoder refuses
+the anchored export, scores AC2/AC3/AC4 as NOT RUN rather than as zero, and its prove
+act refused by name because the run has no detections - a proof of nothing is not a
+proof.
+
+
+
+
+---
+
+### Red-checks added for the free-text console surface (RC-31, RC-32, RC-33)
+
+Three controls were hand-run on Windows before they were entered into the table:
+
+- RC-31, the clip a replay serves is the clip its stored row names, and never a file the request names:
+  mutation `m := replayClipRe.FindStringSubmatch(row.ClipRef)` => `m := replayClipRe.FindStringSubmatch(r.URL.Query().Get("ref"))`, watched `TestAskReplayServesOnlyTheRowItNames` fail status 409 instead of 200; restored, watched it go green. Transcript recorded here: a replay serves the clip its stored row names, and never a file the request names.
+
+- RC-32, a rule the page drafts is born disabled and a human activates it:
+  mutation `b.WriteString("    enabled: false\n")` => `b.WriteString("    enabled: true\n")`, watched `TestAskRuleDraftCompiledAndDisabled` fail on the enabled line; restored, watched it go green. Transcript recorded here: a rule the page drafts is born disabled; a human activates it.
+
+- RC-33, a first sighting is not a baseline; a baseline needs five minutes of the same scene:
+  mutation `const chiefBaselineMinMinutes = 5` => `const chiefBaselineMinMinutes = 1`, watched `TestChiefBaselineNeedsMinutesBeforeItIsABaseline` fail (baseline ran on three minutes); restored, watched it go green. Transcript recorded here: a first sighting is not a baseline; a baseline needs five minutes of the same scene.
+
+## Counts
+
+The root table now holds thirty-three entries and the POC module ninety-four.

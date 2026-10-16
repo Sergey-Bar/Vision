@@ -228,6 +228,16 @@ securityctl acceptance          # the thirteen criteria, with evidence
 make demo                      # nine steps, end to end, and the transcript
 ```
 
+## See it
+
+`scripts/showcase.ps1` starts the showcase hub (`web/`, port 8080) — the reading
+surface for everything above: the live path, one event's journey, the ledger you can
+tamper with, the census of every capability with an honest grade, and the run reports
+themselves. `docs/showcase/` holds the two narration tracks and the rehearsal's
+findings; the media pack (an eighty-second video, the screens, the diagrams, a static
+edition of the hub and a PDF) is written under `dist/showcase/` by the tools in
+`docs/showcase/tools/`.
+
 ## What this is
 
 A physical-security intelligence layer. One vendor-agnostic pipeline that turns a

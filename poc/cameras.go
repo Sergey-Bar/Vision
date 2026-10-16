@@ -398,7 +398,9 @@ func (s *StreamIngest) cameraFrameLoop(ctx context.Context, c *cameraRuntime, ca
 			s.detectMu.Lock()
 			res := client.Detect(ctx, seq, frame, frameW, frameH)
 			s.detectMu.Unlock()
-			s.inferLat.Add(res.Latency)
+			if s.inferLat != nil {
+				s.inferLat.Add(res.Latency)
+			}
 			s.recordAIState(res)
 
 			var dets []frameObject

@@ -1273,6 +1273,92 @@ Invoke-Gate 'red-check' {
             pkg  = './internal/investigate'
             why  = 'invariant 3 on this surface: if the hit list moves when a model is attached, then the answer depends on the model, and a plane that is down is a plane that changed the investigation. A narrator may colour the prose; it may never move what the investigation found'
         }
+        @{
+            # rc-28: the showcase hub serves this repository's own run reports by
+            # name, and the name is the WHOLE input - there is no path parameter
+            # and no join with the request. The natural spelling of such a
+            # handler is one line away from the dangerous one, so the test puts
+            # a decoy file exactly where a request-spelled path would look, and
+            # asserts that the allowlist's file is what a reader is served.
+            #
+            # Hand-run before it was entered, on Windows: the indirection
+            # replaced with the request name, watched
+            # TestRundocServesTheDocumentsItNames fail on the decoy's bytes;
+            # restored; watched it go green. Both transcripts are in
+            # docs/status.md.
+            name = 'a served document comes from its allowlist key, not from the request'
+            file = 'web/rundoc.go'
+            from = 'filepath.Join(repoRoot, filepath.FromSlash(rundocDocs[name].rel))'
+            to   = 'filepath.Join(repoRoot, filepath.FromSlash(name)) // REDCHECK RC-28: the request name reached the filesystem'
+            test = 'TestRundocServesTheDocumentsItNames'
+            pkg  = './web'
+            why  = 'the indirection is the whole control: the request selects a key and the file comes from the table beside it. With it gone the handler serves the path the caller spells, and the red run serves the decoy - a file placed exactly where such a path looks - instead of the run report the key names. Every document this page serves was written by a run of this repository; the next one would be whatever the URL said'
+        }
+        @{
+            # rc-29: the hub prints how many controls this table holds, read out of
+            # this file rather than typed in. The counter matched `name = '`
+            # anywhere on a line, and the gate's skip records - six of them -
+            # carry `name = 'red-check'` mid-line, so the page said thirty-four
+            # where the table holds twenty-nine. The line must begin with the
+            # assignment; a skip record is not a control.
+            #
+            # Hand-run before it was entered, on Windows: the anchored check
+            # replaced with the unanchored one, watched the fixture test count a
+            # skip record as a control; restored; watched it go green. Both
+            # transcripts are in docs/status.md.
+            name = 'the hub counts the controls in this table, not the skip records beside it'
+            file = 'web/showcase.go'
+            from = 'if strings.HasPrefix(strings.TrimSpace(line), "name = ''") {'
+            to   = 'if strings.Contains(line, "name = ''") { // REDCHECK RC-29: a skip record counts as a control'
+            test = 'TestTheRootControlCountLeavesOutRecordsThatAreNotControls'
+            pkg  = './web'
+            why  = 'a number a page prints about this table has to be the table. The count stops at the next gate and skips the entries of that gate - that is the boundary a reader uses - and it must also skip the skip records this gate writes, which carry the same text for a different purpose. Left unanchored the page reports a control count no table here contains, and an inflated gate count is the same class of defect as a stale one: a number that reads as coverage'
+        }
+        @{
+            # rc-30: script text rendered as [object HTMLElement] is the same
+            # class of defect as a stale count - a page printing a value it does
+            # not have. Three cells did it: the gate column on /trust and the
+            # proof and artefact columns on /census.
+            #
+            # Hand-run before it was entered, on Windows: the element restored as
+            # a text argument in web/static/trust.js, watched
+            # TestNoScriptPassesAnElementAsText fail naming the line; restored;
+            # watched it go green. Both transcripts are in docs/status.md.
+            name = 'a script never passes an element where el() wants text'
+            file = 'web/static/trust.js'
+            from = 'tr.appendChild(codeCell(row.name));'
+            to   = 'tr.appendChild(el("td", null, el("code", null, row.name))); // REDCHECK RC-30: an element as text'
+            test = 'TestNoScriptPassesAnElementAsText'
+            pkg  = './web'
+            why  = 'el() sets textContent, so String(element) is the literal [object HTMLElement] and the cell renders that instead of the gate name. The helper that appends the element exists so the shape cannot come back, and the scan covers every page script rather than the one that was fixed, because three cells on two pages had already grown the same shape'
+        }
+﻿        @{
+            name = 'a replay serves the clip its stored row names, and never a file the request names'
+            file = 'web/replay.go'
+            from = 'm := replayClipRe.FindStringSubmatch(row.ClipRef)'
+            to   = 'm := replayClipRe.FindStringSubmatch(r.URL.Query().Get("ref")) // REDCHECK RC-31: the request named the file'
+            test = 'TestAskReplayServesOnlyTheRowItNames'
+            pkg  = './web'
+            why  = 'the handler does not read a "ref" parameter from the request: it re-reads the stored review sheet, finds the row the request named by detection id, and opens the reference THAT ROW carries, through the evidence store, which hashes the bytes against the content-addressed filename. A file the request spelled out cannot be served from this handler because the handler never spells one. Sagraments over the wire cannot become filenames; the verification that caught the path traversal case years ago applies here unchanged'
+        }
+        @{
+            name = 'a rule the page drafts is born disabled; a human activates it'
+            file = 'web/ask.go'
+            from = 'b.WriteString("    enabled: false\n")'
+            to   = 'b.WriteString("    enabled: true\n") // REDCHECK RC-32: a draft is born enabled'
+            test = 'TestAskRuleDraftCompiledAndDisabled'
+            pkg  = './web'
+            why  = 'a draft is not a rule until somebody signs it: enabled: false is the line that keeps every draft the ask page produces from matching anything on the bus. The design invariant is that the page that authors cannot be the page that activates; lifting the line produces a bundle that compiles and looks identical and starts matching immediately. The only control left would be the human who reads the preview, and reading a rule is not approving one'
+        }
+        @{
+            name = 'a first sighting is not a baseline; a baseline needs five minutes of the same scene'
+            file = 'web/chief.go'
+            from = 'const chiefBaselineMinMinutes = 5'
+            to   = 'const chiefBaselineMinMinutes = 1 // REDCHECK RC-33: a first sighting is a baseline'
+            test = 'TestChiefBaselineNeedsMinutesBeforeItIsABaseline'
+            pkg  = './web'
+            why  = 'the animal example in the product story: one fox in one frame is a sighting, not an event. A deviation needs a baseline to deviate from, and a baseline needs minutes of the same scene. Lowering the floor to one turns a single frame into a pattern, and the chief would announce three impossible things from it. The control is not the arithmetic; it is the refusal to declare one too soon'
+        }
     )
 
 # A file the red-check writes, which something else on this machine may be

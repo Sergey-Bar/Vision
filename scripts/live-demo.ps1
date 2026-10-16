@@ -83,6 +83,17 @@ param(
     [ValidateSet('detector','sidecar')]
     [string]$TriggerMode = 'detector',
 
+    # The rate this run DECLARES it asks the model at, in frames per second.
+    # The preflight AI row is one comparison - measured p99 x ai_fps < 1000 - and
+    # the gate's own refusal names SP_POC_AI_FPS as a lever rather than a knob:
+    # lowering it declares a lower duty cycle, which the screen, the log and the
+    # report then all state, and the comparison is still the gate's. The default
+    # is the module's own 5. The sidecar on a CPU measures a p99 near half a
+    # second and cannot hold 5, so a sidecar run here declares the rate it can
+    # hold and keeps every number true; raising SP_POC_AI_BUDGET_MS instead is
+    # the demo congratulating itself, which the refusal says in those words.
+    [int]$AiFps = 5,
+
     # The sidecar's address and the model it must be serving, on the sidecar
     # path. The demo starts its own worker, so these name where to start it
     # rather than where to find a running one. The anchors file is the model's
@@ -258,8 +269,14 @@ if ($TriggerMode -eq 'sidecar') {
 # this script checks the same thing in the same words.
 # ---------------------------------------------------------------------------
 $script:sidecarProc = $null
+# The anchors file belongs to the model BY BASE NAME: `yolov4n.onnx`'s anchors
+# are `yolov4n.anchors.txt`, which is where `pocctl fetch-model` writes them and
+# how `anchorsBeside` in cmd/pocctl/demo.go resolves them. This line used to
+# spell the path `"$AIModel.anchors.txt"` - a second spelling that agreed with
+# neither, so the sidecar path refused at act 0 with the file sitting right
+# there. One derivation, used by both act 0 and SP_POC_AI_ANCHORS below.
+$anchors = if ($AIModel.EndsWith('.onnx')) { $AIModel.Substring(0, $AIModel.Length - 5) + '.anchors.txt' } else { "$AIModel.anchors.txt" }
 if ($TriggerMode -eq 'sidecar') {
-    $anchors = "$AIModel.anchors.txt"
     if (-not (Test-Path -LiteralPath $anchors)) {
         Say "$anchors is MISSING, and this run cannot decode a frame without it."
         Say '  The pinned Model Zoo yolov4n.onnx is a multi-scale ANCHORED head: its anchor boxes'
@@ -359,6 +376,13 @@ if (-not (Test-Path -LiteralPath $script:pocctl)) {
     Say "pocctl is not built at $($script:pocctl); the gate builds it, and this script refuses to guess where one might be."
     Exit-Demo 1
 }
+# The approval bar belongs to the RUN, not to the trigger path: without it
+# preflight refuses with "without it there is no approved class threshold, so
+# every box would be both kept and dropped depending on who asked". It is set
+# here, once, because the sidecar branch used to not set it at all - so
+# `-TriggerMode sidecar` refused at its previous act with every other
+# prerequisite in place, and the detector branch carried the only copy.
+$env:SP_POC_SCORE_THRESHOLD = '0.45'
 if ($TriggerMode -eq 'sidecar') {
     if (-not $DataRoot) { $DataRoot = Join-Path $poc ('.live-demo\{0:yyyyMMdd-HHmmss}' -f (Get-Date)) }
     $env:SP_POC_DATA_ROOT  = $DataRoot
@@ -394,16 +418,29 @@ if ($TriggerMode -eq 'sidecar') {
     $env:SP_POC_ORT_THREADS = '4'
     $env:SP_POC_DET_INPUT  = '416'
     $env:SP_POC_DET_SCORE  = '0.05'
-    $env:SP_POC_SCORE_THRESHOLD = '0.45'
     if (-not $DataRoot) { $DataRoot = Join-Path $poc ('.live-demo\{0:yyyyMMdd-HHmmss}' -f (Get-Date)) }
     $env:SP_POC_DATA_ROOT  = $DataRoot
     New-Item -ItemType Directory -Force -Path $DataRoot | Out-Null
     Dim "data root  $DataRoot"
     Dim '           (one directory per run: a re-run never overwrites the run it is compared against)'
 
-    $bench = & $script:pocctl bench --images (Join-Path $poc 'testdata\still') --data-root $DataRoot 2>&1
+    # `--trigger detector` is not decoration: the calibration record must say which
+    # path measured it and WriteCalibration refuses a record that does not, so this
+    # call without it ran every inference and then wrote nothing - and the refusal
+    # surfaced two acts later as a preflight row that could not pass for the right
+    # reason. One word, and the act that produces the record owns the failure.
+    $bench = & $script:pocctl bench --images (Join-Path $poc 'testdata\still') --data-root $DataRoot --trigger detector 2>&1
     Log 'bench.log' $bench
-    $bench | Select-String -Pattern 'timing pass|p50|calibration|licence' | ForEach-Object { Say $_.Line }
+    $bench | Select-String -Pattern 'timing pass|p50|calibration|licence|refus' | ForEach-Object { Say $_.Line }
+    $benchOk = ($LASTEXITCODE -eq 0) -and ($bench | Select-String -Pattern 'p99\s+[0-9.]+ms')
+    if (-not $benchOk) {
+        Say 'the in-process timing pass did not record a p99, and its reason is above.'
+        Say '  The record is what preflight multiplies; without it every later act would fail'
+        Say '  on a row that cannot pass for the right reason, so the demo stops here, in the'
+        Say '  act whose whole job was to produce it.'
+        AddResult "1" "CALIBRATE" "a measured in-process p99 over the still set" "see bench.log" "REFUSED" "the record preflight multiplies must be a real inference"
+        Exit-Demo 1
+    }
     Push-Act '03' 'Calibrate' 'The detector''s p99 is measured, not asserted.' '' 'done'
 }
 
@@ -450,7 +487,7 @@ $cfg = [ordered]@{
     SP_POC_TRIGGER_MODE=$TriggerMode
     SP_POC_DET_NMS_CLASS='0.45'; SP_POC_DET_NMS_GLOBAL='0.75'; SP_POC_DET_MAX_BOXES='100'
     SP_POC_CAMERA_INTEGRITY='false'; SP_POC_VLM_PROVIDER='none'
-    SP_POC_AI_FPS='5'; SP_POC_AI_DEADLINE_MS='800ms'; SP_POC_AI_BUDGET_MS='800ms'
+    SP_POC_AI_FPS="$AiFps"; SP_POC_AI_DEADLINE_MS='800ms'; SP_POC_AI_BUDGET_MS='800ms'
     SP_POC_AI_BACKPRESSURE_MS='5s'; SP_POC_AI_INPUT_WIDTH='640'
     SP_POC_MIN_BOX_AREA='0.0005'; SP_POC_GHOST_MIN_SCORE='0.10'; SP_POC_TRACK_MIN_FRAMES='3'
     SP_POC_MAX_BOXES_DRAWN='12'; SP_POC_BOX_LOG_FRAMES='20000'; SP_POC_REPORT_METRICS='events'
@@ -476,7 +513,7 @@ if ($TriggerMode -eq 'sidecar') {
     $cfg['SP_POC_AI_ADDR'] = $AIAddr
     $cfg['SP_POC_AI_MODEL'] = $AIModel
     $cfg['SP_POC_SIDECAR_SCRIPT'] = 'pyworker\server.py'
-    $cfg['SP_POC_AI_ANCHORS'] = "$AIModel.anchors.txt"
+    $cfg['SP_POC_AI_ANCHORS'] = $anchors
 }
 foreach ($k in $cfg.Keys) { Set-Item -Path "env:$k" -Value $cfg[$k] }
 
@@ -751,7 +788,11 @@ Say ''
 if ($acRows.Count -gt 0) {
     Say "  the acceptance criteria, from the report's own JSON: $acPassed passed, $acFailed failed, $acNotRun NOT RUN"
     foreach ($a in $acRows) {
-        $extra = if ($a.Missing) { " - $a.Missing" } else { '' }
+        # The $() is load-bearing: PowerShell 5.1 renders `"$a.Missing"` as the
+        # object's own ToString() followed by a literal `.Missing`, which is how
+        # this table printed @{ID=AC4; ...}.Missing for a whole run before anyone
+        # read the console instead of the artefact.
+        $extra = if ($a.Missing) { " - $($a.Missing)" } else { '' }
         Dim ("    {0,-5} {1,-8} {2}{3}" -f $a.ID, $a.Verdict, $a.Name, $extra)
     }
 }

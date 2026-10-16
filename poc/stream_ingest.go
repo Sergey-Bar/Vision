@@ -523,7 +523,7 @@ func (s *StreamIngest) resolveHLSURL(ctx context.Context, watchURL string) (stri
 	if _, err := exec.LookPath("yt-dlp"); err != nil {
 		return "", fmt.Errorf("yt-dlp is not on PATH: %w", err)
 	}
-	cmd := exec.CommandContext(ctx, "yt-dlp", "-f", "best[height<=720]/best", "-g", watchURL)
+	cmd := exec.CommandContext(ctx, "yt-dlp", "--no-warnings", "--js-runtimes", "node", "--extractor-args", "youtube:player_client=mweb", "-f", "best[height<=720]/best", "-g", watchURL)
 	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("yt-dlp could not resolve %s: %w", watchURL, err)

@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VISION — Trust</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232f9e5c'/%3E%3Cpath d='M16 7l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10v-4z' fill='none' stroke='%2304140a' stroke-width='2'/%3E%3C/svg%3E">
+    <link rel="stylesheet" href="/static/app.css">
+    <link rel="stylesheet" href="/static/showcase.css">
+</head>
+<body>
+
+<nav class="nav">
+    <a class="brand" href="/">
+        <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#2f9e5c"/><path d="M16 7l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10v-4z" fill="none" stroke="#04140a" stroke-width="2"/></svg>
+        VISION
+    </a>
+    <div class="links">
+        <a href="/">Home</a>
+        <a href="/live">Live</a>
+        <a href="/pipeline">Pipeline</a>
+        <a href="/trust" aria-current="page">Trust</a>
+        <a href="/operations">Operations</a>
+        <a href="/console">Console</a>
+        <a href="/lab">Lab</a>
+        <a href="/ask">Ask</a>
+        <a href="/chief">Chief</a>
+        <a href="/census">Census</a>
+    </div>
+</nav>
+
+<main class="wrap">
+
+    <header class="page-head">
+        <h1>Trust — and how to test it yourself</h1>
+        <p>
+            “We can show you the evidence” and “you can check our evidence without trusting us”
+            are different claims, and only the second survives a sceptic. This page shows the
+            gate’s own record of itself, names what that record does <b>not</b> cover, and lets
+            you run two commands that make the first claim falsifiable on this machine.
+        </p>
+    </header>
+
+    <div class="split">
+        <section class="card">
+            <h2>The verification record</h2>
+            <p class="sub">Read from the newest <span class="mono">dist/verification/verify-*.json</span> — the file the gate writes at the end of a run.</p>
+            <div id="gatebox"><p class="sub">reading…</p></div>
+        </section>
+        <section class="card">
+            <h2>What that record does NOT cover</h2>
+            <p class="sub">Quoted verbatim from the record's own <span class="mono">excluded</span> list. A record read as “everything is verified” would be a misreading of it.</p>
+            <div id="excluded"><p class="sub">reading…</p></div>
+        </section>
+    </div>
+
+    <h2 class="section-title">The red-check: a control is a control only if it was watched failing</h2>
+    <div class="split">
+        <section class="card">
+            <h2>Root table — <span class="mono">scripts/verify.ps1</span></h2>
+            <div id="root-red"><p class="sub">reading…</p></div>
+        </section>
+        <section class="card">
+            <h2>POC module — <span class="mono">poc/active-monitoring</span></h2>
+            <div id="poc-red"><p class="sub">reading…</p></div>
+        </section>
+    </div>
+
+    <h2 class="section-title">Run it here</h2>
+    <section class="card">
+        <h2>Make the claims falsifiable</h2>
+        <p class="sub">
+            Three fixed commands of the POC binary, against the newest demo data root on this
+            machine. No argument, path or command comes from this page — the request chooses
+            <em>which</em> of the three runs and nothing else. If the binary or a data root is
+            missing, the answer is <b>NOT RUN</b> with the reason, not an error wall.
+        </p>
+        <div class="btn-row">
+            <button class="btn" id="btn-verify" type="button">Recompute the ledger chain</button>
+            <button class="btn" id="btn-tamper" type="button">Tamper one row, then restore it</button>
+            <button class="btn primary" id="btn-prove" type="button">Replay the newest decision — zero provider calls</button>
+        </div>
+        <div id="run-result"></div>
+    </section>
+
+    <h2 class="section-title">The invariants these commands stand on</h2>
+    <section class="card">
+        <table class="tbl">
+            <tr><th>invariant</th><th>what would break it</th><th>what catches that here</th></tr>
+            <tr>
+                <td><b>Zero accepted event loss</b></td>
+                <td>a row that never reaches a terminal state, or a duplicate side effect after a crash</td>
+                <td>the kill −9 fault-injection drills; the “detection terminal-state guard” control, removed and watched failing</td>
+            </tr>
+            <tr>
+                <td><b>Decisions replay from stored facts</b></td>
+                <td>a replay that re-inferred anything, or called a provider again</td>
+                <td><span class="mono">pocctl prove</span> — run it above; RC-4, the zero-provider-calls control</td>
+            </tr>
+            <tr>
+                <td><b>A missing observation is never a negative one</b></td>
+                <td>an absence rendered as “nothing found”, a degraded row without its reason</td>
+                <td>RC-1 at parse time and at write time; the degraded-observation refusal, both directions</td>
+            </tr>
+            <tr>
+                <td><b>The ledger is append-only and hash-chained</b></td>
+                <td>an edited row, a deleted row, a chain check reduced to a length test</td>
+                <td>RC-2 and RC-3; the tamper button above</td>
+            </tr>
+            <tr>
+                <td><b>tenant_id is never read from a request body</b></td>
+                <td>a query that trusts the body, a write with no tenant context</td>
+                <td>the RLS canary gate — every site-scoped table, write accepted/refused by scope</td>
+            </tr>
+        </table>
+    </section>
+
+    <footer class="foot">
+        <b>How to read a green line here.</b> The record is a <em>local run</em> — there is no CI on
+        this account, and the record says so in its own <span class="mono">ci</span> field. It names
+        the commit it ran against and whether the worktree was dirty at the time. The POC module is
+        a second Go module and is excluded from the root record; its own gate and its own 93-control
+        transcript are quoted above.
+    </footer>
+</main>
+
+<script src="/static/trust.js"></script>
+</body>
+</html>

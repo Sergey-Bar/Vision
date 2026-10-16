@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import os
+from dataclasses import asdict
 from pathlib import Path
 import re
 import sqlite3
@@ -459,7 +460,7 @@ def app(store: KnowledgeStore | None = None) -> web.Application:
         # Create task for the async chat function and wait for it
         chat_task = asyncio.create_task(conversational_search.chat(question, video_id, limit))
         result = await chat_task
-        return web.json_response(result)
+        return web.json_response(asdict(result))
     
     search_app.router.add_post("/chat", search_chat_handler)
     search_app.router.add_get("/health", lambda r: web.json_response({"status": "ok", "service": "conversational_search"}))
