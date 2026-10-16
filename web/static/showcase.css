@@ -673,3 +673,22 @@ body.theme-ask .perf-hint {
   transition: opacity .2s; user-select: none;
 }
 body.theme-ask .perf-hint.show { opacity: 1; pointer-events: auto; }
+
+/* ---------- home page restructure ---------- */
+.ask-cta-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+.kpi-rail { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin: 22px 0; }
+.kpi-rail .kpi { background: var(--surface-1); border: 1px solid var(--line); border-radius: 6px; padding: 14px 16px; }
+.kpi-rail .k .v { font-size: 1.05rem; font-weight: 600; color: var(--ink-1); }
+.kpi-rail .k .k { font-size: .78rem; color: var(--ink-2); }
+.details-drawer { padding: 8px 18px 18px; }
+.details-drawer summary { cursor: pointer; list-style: none; font-size: .85rem; font-weight: 500; color: var(--ink-2); letter-spacing: .05em; text-transform: uppercase; padding: 14px 0; display: flex; align-items: center; gap: 10px; }
+.details-drawer summary::before { content: "+"; font-size: 1.5rem; line-height: 1; color: var(--accent); width: 22px; text-align: center; }
+details[open] .details-drawer > summary::before { content: "-"; content: "-"; }
+.details-drawer summary::-webkit-details-marker { display: none; marker: none; }
+details .split { margin-top: 8px; }
+
+@media (max-width: 640px) {
+  .ask-cta-row { flex-direction: column; }
+  .ask-cta-row .btn { width: 100%; justify-content: center; }
+  .kpi-rail { grid-template-columns: repeat(2, 1fr); }
+}
