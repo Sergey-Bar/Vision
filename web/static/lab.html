@@ -4,14 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="manifest" href="/static/manifest.json">
-    <meta name="theme-color" content="#0a0d12">
+    <meta name="theme-color" content="#060809">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="VISION">
     <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
     <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
     <title>VISION — Lab</title>
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232f9e5c'/%3E%3Cpath d='M16 7l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10v-4z' fill='none' stroke='%2304140a' stroke-width='2'/%3E%3C/svg%3E">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232563eb'/%3E%3Cpath d='M16 7l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10v-4z' fill='none' stroke='%23ffffff' stroke-width='2'/%3E%3C/svg%3E">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/app.css">
     <link rel="stylesheet" href="/static/showcase.css">
 </head>
@@ -19,7 +22,7 @@
 
 <nav class="nav">
     <a class="brand" href="/">
-        <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#2f9e5c"/><path d="M16 7l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10v-4z" fill="none" stroke="#04140a" stroke-width="2"/></svg>
+        <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#2563eb"/><path d="M16 7l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10v-4z" fill="none" stroke="#ffffff" stroke-width="2"/></svg>
         VISION
     </a>
     <div class="links">
@@ -80,7 +83,7 @@
             <h3>Conversational search</h3>
             <p><span class="mono">tools/conversational_search.py</span> — ask questions over
                recorded clips in plain language and get grounded answers with the clip they came
-               from, or an explicit “could not see that window”.</p>
+               from, or an explicit "could not see that window".</p>
             <div class="row"><span class="chip lab">lab demo</span><span class="go mono">py tools/conversational_search.py</span></div>
         </div>
         <div class="tile">
@@ -95,8 +98,8 @@
             <div class="glyph"><svg viewBox="0 0 24 24"><path d="M3 12s3-5 9-5 9 5 9 5-3 5-9 5-9-5-9-5z"/><circle cx="12" cy="12" r="2.2"/><path d="M21 5l-6 6"/></svg></div>
             <h3>YouTube live detector</h3>
             <p><span class="mono">tools/youtube_live_detector.py</span> — the earliest probe:
-               point it at a public livestream and watch detections appear. It is where the “real
-               camera, not a fixture” requirement was first met — with a companion test.</p>
+               point it at a public livestream and watch detections appear. It is where the "real
+               camera, not a fixture" requirement was first met — with a companion test.</p>
             <div class="row"><span class="chip lab">lab demo</span><span class="go mono">py tools/youtube_live_detector.py</span></div>
         </div>
     </div>
@@ -135,7 +138,7 @@
 
 <script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("/static/sw.js").catch(function(){});});}</script>
 <nav class="bottom-tabs" aria-label="Primary">
-    <a href="/" aria-current="page"><span>Home</span></a>
+    <a href="/"><span>Home</span></a>
     <a href="/ask"><span>Ask</span></a>
     <a href="/chief"><span>Chief</span></a>
     <a href="/trust"><span>Trust</span></a>

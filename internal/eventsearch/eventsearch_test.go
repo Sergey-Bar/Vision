@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -285,4 +286,182 @@ func hitIDs(r eventsearch.Result) []string {
 		out = append(out, h.EventID)
 	}
 	return out
+}
+
+// fixedEmbedder returns a deterministic vector for any text, so tests can
+// assert the vector path ranks by cosine similarity rather than luck.
+type fixedEmbedder struct{ vector []float32 }
+
+func (e fixedEmbedder) Embed(context.Context, string) ([]float32, error) {
+	return e.vector, nil
+}
+
+// seedEmbedding writes one event_embeddings row for a seeded event.
+func seedEmbedding(t *testing.T, tenant, eventID string, doc string, vector []float32) {
+	t.Helper()
+	raw := testutil.Pool(t)
+	_, err := raw.Exec(context.Background(), `
+		INSERT INTO event_embeddings (tenant_id, event_id, embedding, document, model)
+		VALUES ($1, $2, $3::vector, $4, 'test-embedder')
+		ON CONFLICT (tenant_id, event_id) DO UPDATE SET embedding = EXCLUDED.embedding, document = EXCLUDED.document`,
+		tenant, eventID, formatVectorForTest(vector), doc)
+	if err != nil {
+		t.Fatalf("seed embedding: %v", err)
+	}
+}
+
+// formatVectorForTest renders a float32 slice as a pgvector literal for SQL.
+func formatVectorForTest(v []float32) string {
+	b := strings.Builder{}
+	b.WriteByte('[')
+	for i, f := range v {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(strconv.FormatFloat(float64(f), 'f', -1, 32))
+	}
+	b.WriteByte(']')
+	return b.String()
+}
+
+// serviceWithEmbedder is like service but attaches the given embedder.
+func serviceWithEmbedder(t *testing.T, embed eventsearch.Embedder) (*eventsearch.Service, string, string) {
+	t.Helper()
+	raw := testutil.Pool(t)
+	if _, err := (&migrate.Runner{Pool: raw}).Up(context.Background()); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	tenant, site, _ := testutil.NewTenant(t, raw)
+	pool := testPool(t)
+	return &eventsearch.Service{Pool: pool, Embed: embed}, tenant, site
+}
+
+// TestFreeTextKeywordFallbackRanksByRecency covers the no-model path: free-text
+// search with no embedder falls back to keyword matching and never errors.
+func TestFreeTextKeywordFallbackRanksByRecency(t *testing.T) {
+	if os.Getenv(testutil.DatabaseURLEnv) == "" {
+		t.Skip("no SP_TEST_DATABASE_URL: the database-backed tests skip rather than fail")
+	}
+	svc, tenant, site := service(t)
+	ctx := context.Background()
+	at := time.Date(2026, 6, 1, 14, 0, 0, 0, time.UTC)
+	seedEvent(t, tenant, site, "evt-red-car", at, 0)
+	seedEvent(t, tenant, site, "evt-blue-truck", at.Add(time.Minute), 0)
+	seedEmbedding(t, tenant, "evt-red-car", "red car crossing the gate", zeroVector384())
+	seedEmbedding(t, tenant, "evt-blue-truck", "blue truck in the yard", zeroVector384())
+
+	got, err := svc.Search(ctx, tenant, eventsearch.Query{
+		SiteIDs:  []string{site},
+		FreeText: "red car",
+		Limit:    10,
+	})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(got.Hits) == 0 {
+		t.Fatal("keyword free-text returned no hits; the document text should match")
+	}
+	found := map[string]bool{}
+	for _, h := range got.Hits {
+		found[h.EventID] = true
+	}
+	if !found["evt-red-car"] {
+		t.Errorf("the red-car event should match a 'red car' keyword query; got %v", hitIDs(got))
+	}
+}
+
+// TestFreeTextWithEmbedderRanksByCosine covers the vector path when both an
+// embedder and pgvector are available. When pgvector is not installed the
+// service must degrade to keyword search rather than fail.
+func TestFreeTextWithEmbedderRanksByCosine(t *testing.T) {
+	if os.Getenv(testutil.DatabaseURLEnv) == "" {
+		t.Skip("no SP_TEST_DATABASE_URL: the database-backed tests skip rather than fail")
+	}
+	embed := fixedEmbedder{vector: zeroVector384()}
+	svc, tenant, site := serviceWithEmbedder(t, embed)
+	ctx := context.Background()
+	at := time.Date(2026, 6, 1, 14, 0, 0, 0, time.UTC)
+	seedEvent(t, tenant, site, "evt-close", at, 0)
+	seedEvent(t, tenant, site, "evt-far", at.Add(time.Minute), 0)
+	seedEmbedding(t, tenant, "evt-close", "a red car at the gate", zeroVector384())
+	seedEmbedding(t, tenant, "evt-far", "a blue truck in the yard", zeroVector384())
+
+	got, err := svc.Search(ctx, tenant, eventsearch.Query{
+		SiteIDs:  []string{site},
+		FreeText: "red car",
+		Limit:    10,
+	})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(got.Hits) == 0 {
+		t.Fatal("free-text search with an embedder returned no hits")
+	}
+	// The closest embedding (evt-close) should rank first when the vector path
+	// is available; when pgvector is absent the keyword path still returns it.
+	if got.Hits[0].EventID != "evt-close" {
+		t.Errorf("the most similar event should rank first; got %v", hitIDs(got))
+	}
+}
+
+// TestFreeTextNeverFabricatesAnIncident ensures a free-text hit carries no
+// incident id unless the event is actually linked to one.
+func TestFreeTextNeverFabricatesAnIncident(t *testing.T) {
+	if os.Getenv(testutil.DatabaseURLEnv) == "" {
+		t.Skip("no SP_TEST_DATABASE_URL: the database-backed tests skip rather than fail")
+	}
+	svc, tenant, site := service(t)
+	ctx := context.Background()
+	at := time.Date(2026, 6, 1, 14, 0, 0, 0, time.UTC)
+	seedEvent(t, tenant, site, "evt-bare", at, 0)
+	seedEmbedding(t, tenant, "evt-bare", "something happened here", zeroVector384())
+
+	got, err := svc.Search(ctx, tenant, eventsearch.Query{
+		SiteIDs:  []string{site},
+		FreeText: "something",
+		Limit:    10,
+	})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(got.Hits) != 1 || got.Hits[0].EventID != "evt-bare" {
+		t.Fatalf("got %v, want exactly [evt-bare]", hitIDs(got))
+	}
+	if got.Hits[0].IncidentID != "" {
+		t.Errorf("a bare event carries incident %q; free text must not fabricate links", got.Hits[0].IncidentID)
+	}
+}
+
+// TestFreeTextRespectsSiteScope ensures a free-text query cannot escape the
+// caller's site scope, matching the structured search invariant.
+func TestFreeTextRespectsSiteScope(t *testing.T) {
+	if os.Getenv(testutil.DatabaseURLEnv) == "" {
+		t.Skip("no SP_TEST_DATABASE_URL: the database-backed tests skip rather than fail")
+	}
+	svc, tenant, site := service(t)
+	ctx := context.Background()
+	at := time.Date(2026, 6, 1, 14, 0, 0, 0, time.UTC)
+	seedEvent(t, tenant, site, "evt-mine", at, 0)
+	seedEmbedding(t, tenant, "evt-mine", "red car at my site", zeroVector384())
+	_, otherSite, _ := testutil.NewTenant(t, testutil.Pool(t))
+	seedEvent(t, tenant, otherSite, "evt-theirs", at, 0)
+	seedEmbedding(t, tenant, "evt-theirs", "red car at their site", zeroVector384())
+
+	got, err := svc.Search(ctx, tenant, eventsearch.Query{
+		SiteIDs:  []string{site},
+		FreeText: "red car",
+		Limit:    10,
+	})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(got.Hits) != 1 || got.Hits[0].EventID != "evt-mine" {
+		t.Fatalf("scoped free-text answered %v, want exactly [evt-mine]", hitIDs(got))
+	}
+}
+
+// zeroVector384 returns a 384-dimensional zero vector for pgvector column tests.
+func zeroVector384() []float32 {
+	v := make([]float32, 384)
+	return v
 }

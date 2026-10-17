@@ -227,7 +227,6 @@ var (
 
 		"internal/checkpoint.SealOnce": {Symbol: "internal/checkpoint.SealOnce", Why: "UNWIRED. The single-interval seal entry point nothing calls. Its range sibling SealRange was one of the nine dead exports that started this gate; this is the same cluster. Close it by having the scheduler call it, or delete it"},
 
-		"internal/clock.Present": {Symbol: "internal/clock.Present", Why: "TEST-ONLY. The gap presence predicate used in tests to assert window coverage. Not called from production code; the correlator uses AssessGap's Gap.Kind and Gap.Covered directly"},
 		"internal/clock.Partial": {Symbol: "internal/clock.Partial", Why: "TEST-ONLY. The partial-window predicate used in tests. Not called from production code"},
 
 		"internal/bundles.ErrNotStored": {Symbol: "internal/bundles.ErrNotStored", Why: "sentinel: the bundle store returns it for a version it does not hold, and the console's rules screen renders the reason so an operator at a site with no network can tell a missing version from a refused activation"},
@@ -263,8 +262,6 @@ var (
 
 		"internal/deadexport.FilesParsed":     {Symbol: "internal/deadexport.FilesParsed", Why: "TEST-ONLY. This gate's own accessor, read by its own test. The gate reported itself before it reported anything else, which is the only honest way to introduce one. It stays because the test's floor on the walk is the control that catches a walk which stopped working"},
 		"internal/deadexport.SymbolsDeclared": {Symbol: "internal/deadexport.SymbolsDeclared", Why: "TEST-ONLY. The other half of that floor: a walk that reaches nothing reports no symbols, and both numbers are asserted together so neither can pass alone"},
-
-		"internal/detector.Baseline": {Symbol: "internal/detector.Baseline", Why: "TEST-ONLY. The coded-size baseline the framerate detector measures against. Nothing outside the detector reads it, so a camera's baseline is set once by a test and never re-measured by the product"},
 
 		"internal/evidence.Exists":         {Symbol: "internal/evidence.Exists", Why: "TEST-ONLY. Whether a stored reference is present. The console's evidence list and the retention sweep should both ask it; neither does, so a fetch can be reported for a reference the store was never told about"},
 		"internal/evidence.StagingResidue": {Symbol: "internal/evidence.StagingResidue", Why: "TEST-ONLY. What the staging directory still holds after a crash. It should be what `securityctl doctor` reports: a crash mid-fetch leaves footage staged for ever and nothing surfaces it"},

@@ -10,7 +10,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"time"
+
+	"github.com/Sergey-Bar/vision/internal/dbx"
 )
 
 func main() {
@@ -32,12 +35,18 @@ func main() {
 		// recover at its head, and log.Fatal would exit past it. gocritic says
 		// so, and it is right that a nil-root exit is not worth taking the
 		// panic handler with it.
-		log.Print("cannot find the repository: no securityctl.exe above the working directory. Start the console from the repository root, or build it with `go build -o securityctl.exe ./cmd/securityctl`")
+		log.Print("cannot find the repository: no pocctl.exe under poc/active-monitoring/bin/ and no securityctl.exe above the working directory. Start the console from the repository root, or build it with `go build -o pocctl.exe ./poc/active-monitoring/cmd/pocctl`")
 		return
 	}
 	log.Printf("Repo root: %s", repoRoot)
 
 	securityctlPath := mustSecurityctl(repoRoot)
+
+	// The database pool, when a test/database URL is configured. The new
+	// free-text search and chat surfaces read the canonical record directly
+	// instead of shelling out; everything else still runs the CLI binary.
+	pool := openDatabasePool()
+	defer pool.Close()
 
 	// Static files
 	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir(filepath.Join(repoRoot, "web", "static")))))
@@ -53,6 +62,38 @@ func main() {
 	http.HandleFunc("/api/efficiency", handleEfficiency(securityctlPath, repoRoot))
 	http.HandleFunc("/api/incident", handleIncident(securityctlPath, repoRoot))
 	http.HandleFunc("/api/explain", handleExplain(securityctlPath, repoRoot))
+
+	// Free-text search and grounded chat read the canonical record directly.
+	registerSearchRoutes(repoRoot, pool)
+	registerChatRoutes(repoRoot, pool)
+	registerClipsAndCriticalRoutes(repoRoot, pool)
+
+	// The SPA lives under web/static/spa (built by `npm run build` in web/spa).
+	// Its assets are served by the /static/ handler above; its index.html is the
+	// single entry point for every non-API route. Old HTML pages (hub, console,
+	// pipeline, trust, lab, census, operations, ask, live, fleet, chief) redirect
+	// to / so there is one operator surface.
+	spaIndex := filepath.Join(repoRoot, "web", "static", "spa", "index.html")
+	spaHandler := func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, spaIndex)
+	}
+	for _, p := range []string{"/", "/console", "/pipeline", "/trust", "/lab", "/census", "/operations", "/ask", "/live", "/fleet", "/chief"} {
+		http.HandleFunc(p, func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/" {
+				http.Redirect(w, r, "/", http.StatusMovedPermanently)
+				return
+			}
+			spaHandler(w, r)
+		})
+	}
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		spaHandler(w, r)
+	})
+
 	registerLiveRoutes(repoRoot)
 	registerShowcaseRoutes(repoRoot)
 	registerRundocRoutes(repoRoot)
@@ -60,43 +101,9 @@ func main() {
 	registerChiefRoutes(repoRoot)
 	registerReplayRoutes(repoRoot)
 
-	// The hub is the front door: it is the page that answers "what is this and
-	// what has it actually run" before anyone knows which command to type. The
-	// console moves one step back, to /console, where it is still exactly what
-	// it was.
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" {
-			http.NotFound(w, r)
-			return
-		}
-		http.ServeFile(w, r, filepath.Join(repoRoot, "web", "static", "hub.html"))
-	})
-	http.HandleFunc("/console", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, filepath.Join(repoRoot, "web", "static", "index.html"))
-	})
-	http.HandleFunc("/pipeline", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, filepath.Join(repoRoot, "web", "static", "pipeline.html"))
-	})
-	http.HandleFunc("/trust", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, filepath.Join(repoRoot, "web", "static", "trust.html"))
-	})
-	http.HandleFunc("/lab", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, filepath.Join(repoRoot, "web", "static", "lab.html"))
-	})
-	http.HandleFunc("/census", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, filepath.Join(repoRoot, "web", "static", "census.html"))
-	})
-
-	// The operator surface. It is a page, not a tab on the console, because the
-	// console answers "run this and show me the output" and this answers "where
-	// does my system stay quiet" — different questions, different readers.
-	http.HandleFunc("/operations", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, filepath.Join(repoRoot, "web", "static", "operations.html"))
-	})
-
 	port := "8080"
 	log.Printf("Starting web UI on http://localhost:%s", port)
-	log.Printf("Using securityctl at: %s", securityctlPath)
+	log.Printf("Using binary at: %s", securityctlPath)
 	server := &http.Server{
 		Addr:              ":" + port,
 		ReadHeaderTimeout: 5 * time.Second,
@@ -109,17 +116,40 @@ func serveOrFatal(server *http.Server) {
 }
 
 func mustSecurityctl(repoRoot string) string {
-	path := filepath.Join(repoRoot, "securityctl.exe")
-	if _, err := os.Stat(path); err != nil {
-		log.Fatalf("securityctl.exe not found at: %s", path)
+	if p := pocctlAt(repoRoot); p != "" {
+		return p
 	}
-	return path
+	if p := securityctlAt(repoRoot); p != "" {
+		return p
+	}
+	log.Fatalf("neither pocctl.exe under poc/active-monitoring/bin/ nor securityctl.exe was found at: %s", repoRoot)
+	return ""
+}
+
+func pocctlAt(dir string) string {
+	name := "pocctl"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	p := filepath.Join(dir, "poc", "active-monitoring", "bin", name)
+	if _, err := os.Stat(p); err == nil {
+		return p
+	}
+	return ""
+}
+
+func securityctlAt(dir string) string {
+	p := filepath.Join(dir, "securityctl.exe")
+	if _, err := os.Stat(p); err == nil {
+		return p
+	}
+	return ""
 }
 
 func findRepoRoot() string {
 	dir, _ := os.Getwd()
 	for {
-		if _, err := os.Stat(filepath.Join(dir, "securityctl.exe")); err == nil {
+		if pocctlAt(dir) != "" || securityctlAt(dir) != "" {
 			if _, err := os.Stat(filepath.Join(dir, "cmd")); err == nil {
 				return dir
 			}
@@ -274,4 +304,23 @@ func handleRulesSimulate(securityctlPath, repoRoot string) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(output)
 	}
+}
+
+// openDatabasePool opens the canonical-record pool when SP_DATABASE_URL is
+// configured, and returns nil otherwise. A fatal configuration error exits
+// immediately, so no deferred close is pending in this function.
+func openDatabasePool() *dbx.Pool {
+	dsn := os.Getenv("SP_DATABASE_URL")
+	if dsn == "" {
+		return nil
+	}
+	cfg := dbx.DefaultConfig()
+	if err := cfg.ApplyDSN(dsn); err != nil {
+		log.Fatalf("database: %v", err)
+	}
+	pool, err := dbx.Open(context.Background(), cfg, os.Getenv("SP_DATABASE_PASSWORD"))
+	if err != nil {
+		log.Fatalf("database: open pool: %v", err)
+	}
+	return pool
 }

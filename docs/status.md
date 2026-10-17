@@ -2974,7 +2974,7 @@ literal was touched.
 
 ### Migrations
 
-Schema version is now 26 — the compatibility window in `migrations/compat.json`.
+Schema version is now 27 — the compatibility window in `migrations/compat.json`.
 
 The newest migration is `0026_camera_adjacency.expand.sql`: the C3 camera
 adjacency table, site-scoped, with the RLS policy derived isolation expects and

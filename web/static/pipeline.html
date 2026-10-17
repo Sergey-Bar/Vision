@@ -4,14 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="manifest" href="/static/manifest.json">
-    <meta name="theme-color" content="#0a0d12">
+    <meta name="theme-color" content="#060809">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="VISION">
     <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
     <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
     <title>VISION — Pipeline</title>
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232f9e5c'/%3E%3Cpath d='M16 7l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10v-4z' fill='none' stroke='%2304140a' stroke-width='2'/%3E%3C/svg%3E">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232563eb'/%3E%3Cpath d='M16 7l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10v-4z' fill='none' stroke='%23ffffff' stroke-width='2'/%3E%3C/svg%3E">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/app.css">
     <link rel="stylesheet" href="/static/showcase.css">
 </head>
@@ -19,7 +22,7 @@
 
 <nav class="nav">
     <a class="brand" href="/">
-        <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#2f9e5c"/><path d="M16 7l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10v-4z" fill="none" stroke="#04140a" stroke-width="2"/></svg>
+        <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#2563eb"/><path d="M16 7l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10v-4z" fill="none" stroke="#ffffff" stroke-width="2"/></svg>
         VISION
     </a>
     <div class="links">
@@ -57,7 +60,7 @@
         </section>
         <section class="card">
             <h2>The incidents on this machine</h2>
-            <p class="sub">Written by <span class="mono">dist/demo</span>’s last run. Newest first.</p>
+            <p class="sub">Written by <span class="mono">dist/demo</span>'s last run. Newest first.</p>
             <div class="pick" id="pick"><p class="sub">reading…</p></div>
         </section>
     </div>
@@ -82,10 +85,10 @@
                 </tr>
                 <tr>
                     <td><b>An unasked window is not searchable</b></td>
-                    <td class="num">refused<br><span class="why">the search names what it could not see rather than returning “nothing found”</span></td>
+                    <td class="num">refused<br><span class="why">the search names what it could not see rather than returning "nothing found"</span></td>
                 </tr>
             </table>
-            <p class="sub">Numbers quoted from <span class="mono">docs/status.md</span>, measured 2026-10-15 on this repository’s own suites.</p>
+            <p class="sub">Numbers quoted from <span class="mono">docs/status.md</span>, measured 2026-10-15 on this repository's own suites.</p>
         </section>
         <section class="card">
             <h2>The state machine, in its own words</h2>
@@ -96,7 +99,7 @@
                 <span class="mono">query</span> severity for an operator, carries
                 <span class="mono">decidedWithoutAiObservation: true</span>, and its observation row
                 says <span class="mono">degraded</span> with the reason. It is never rendered as
-                “nothing was found” — that rendering is the one failure this product must never commit.
+                "nothing was found" — that rendering is the one failure this product must never commit.
             </div>
             <div class="note">
                 <b>What is NOT RUN here.</b> Detection accuracy on the relay footage: the pinned
@@ -117,7 +120,7 @@
 <script src="/static/pipeline.js"></script>
 <script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("/static/sw.js").catch(function(){});});}</script>
 <nav class="bottom-tabs" aria-label="Primary">
-    <a href="/" aria-current="page"><span>Home</span></a>
+    <a href="/"><span>Home</span></a>
     <a href="/ask"><span>Ask</span></a>
     <a href="/chief"><span>Chief</span></a>
     <a href="/trust"><span>Trust</span></a>

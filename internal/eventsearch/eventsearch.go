@@ -34,11 +34,25 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Sergey-Bar/vision/internal/dbx"
+	"github.com/jackc/pgx/v5"
 )
+
+// Embedder turns a free-text query into a vector the record can be searched by.
+//
+// Nil means no embedding model is configured, and free-text search degrades to
+// the keyword path rather than failing. A real implementation (a local
+// sentence-transformers model, or a Python sidecar) satisfies this interface
+// and is wired in at service construction; the search surface itself never
+// depends on a particular model.
+type Embedder interface {
+	Embed(ctx context.Context, text string) ([]float32, error)
+}
 
 // Query is one structured search.
 //
@@ -46,6 +60,10 @@ import (
 // the caller's scope rather than a filter: the handler resolves it from the
 // principal, so a query that crossed a site boundary would have to be
 // constructed by a caller that had already decided to.
+//
+// `FreeText` turns the search into a semantic/keyword search over the event
+// record rather than a structured field match. When set, the structured fields
+// still narrow the result (site, window) and the free text ranks it.
 type Query struct {
 	SiteIDs       []string
 	EventType     string
@@ -57,6 +75,8 @@ type Query struct {
 	To            time.Time
 	Limit         int
 	Cursor        string
+	// FreeText is one free-text query. Empty means structured search only.
+	FreeText string
 }
 
 // Hit is one canonical event that matched.
@@ -86,6 +106,12 @@ type Result struct {
 // Service searches the canonical record.
 type Service struct {
 	Pool *dbx.Pool
+	// Embed is the embedding model, when one is configured. Nil degrades
+	// free-text search to the keyword path rather than failing.
+	Embed Embedder
+
+	hasVector     *bool // lazily probed: is pgvector installed in the target database?
+	hasVectorOnce sync.Once
 }
 
 // DefaultLimit and MaxLimit bound the page. A search that returned everything
@@ -121,9 +147,51 @@ SELECT e.event_id, e.site_id, e.event_type, e.device_id, e.zone_id,
    AND ($7 = '' OR ie.incident_id = $7)
    AND ($8::timestamptz IS NULL OR e.normalized_at >= $8)
    AND ($9::timestamptz IS NULL OR e.normalized_at <= $9)
-   AND ($10::timestamptz IS NULL OR (e.normalized_at, e.event_id) < ($10::timestamptz, $11))
+    AND ($10::timestamptz IS NULL OR (e.normalized_at, e.event_id) < ($10::timestamptz, $11))
  ORDER BY e.normalized_at DESC, e.event_id DESC
  LIMIT $12`
+
+// freeTextVectorSQL ranks events by cosine distance to the query embedding.
+//
+// `em.embedding <=> $5::vector` is cosine distance: smaller is more similar, so
+// ascending order surfaces the most similar events first. The structured fields
+// (site, window) still narrow the candidate set before ranking.
+const freeTextVectorSQL = `
+SELECT e.event_id, e.site_id, e.event_type, e.device_id, e.zone_id,
+       e.correlation_id, e.observed_at, e.normalized_at,
+       ie.incident_id
+  FROM event_embeddings em
+  JOIN canonical_events e
+    ON e.tenant_id = em.tenant_id AND e.event_id = em.event_id
+  LEFT JOIN incident_events ie
+    ON ie.tenant_id = e.tenant_id AND ie.event_id = e.event_id
+ WHERE em.tenant_id = $1
+   AND ($2::text[] IS NULL OR e.site_id = ANY($2::text[]))
+   AND ($3::timestamptz IS NULL OR e.normalized_at >= $3)
+   AND ($4::timestamptz IS NULL OR e.normalized_at <= $4)
+ ORDER BY em.embedding <=> $5::vector
+ LIMIT $6`
+
+// freeTextKeywordSQL is the fallback when no embedding model or pgvector is
+// available. It matches the query's words against the stored document text and
+// ranks by recency, which is the honest "we cannot rank by meaning" answer.
+const freeTextKeywordSQL = `
+SELECT e.event_id, e.site_id, e.event_type, e.device_id, e.zone_id,
+       e.correlation_id, e.observed_at, e.normalized_at,
+       ie.incident_id
+  FROM event_embeddings em
+  JOIN canonical_events e
+    ON e.tenant_id = em.tenant_id AND e.event_id = em.event_id
+  LEFT JOIN incident_events ie
+    ON ie.tenant_id = e.tenant_id AND ie.event_id = e.event_id
+ WHERE em.tenant_id = $1
+   AND ($2::text[] IS NULL OR e.site_id = ANY($2::text[]))
+   AND ($3::timestamptz IS NULL OR e.normalized_at >= $3)
+   AND ($4::timestamptz IS NULL OR e.normalized_at <= $4)
+   AND (to_tsvector('english', em.document) @@ plainto_tsquery('english', $5)
+        OR em.document ILIKE '%' || $5 || '%')
+ ORDER BY e.normalized_at DESC, e.event_id DESC
+ LIMIT $6`
 
 // Search answers one query as one page.
 //
@@ -163,6 +231,9 @@ func (s *Service) Search(ctx context.Context, tenant string, q Query) (Result, e
 	// the tenant and nothing else, and a search that asked for site-a while
 	// holding site-b's context would be answered by the policy instead of by
 	// this service — a right answer for the wrong reason.
+	if q.FreeText != "" {
+		return s.freeTextSearch(ctx, tenant, q, limit, sites, from, to)
+	}
 	rows, err := s.Pool.WithSites(tenant, "eventsearch", sites).Query(ctx, searchSQL,
 		tenant, sites, q.EventType, q.DeviceID, q.ZoneID, q.CorrelationID,
 		q.IncidentID, from, to, cursorAt, cursorID, limit+1)
@@ -197,6 +268,115 @@ func (s *Service) Search(ctx context.Context, tenant string, q Query) (Result, e
 		out.NextCursor = encodeCursor(last.NormalizedAt, last.EventID)
 	}
 	return out, nil
+}
+
+// freeTextSearch answers a free-text query over the event record.
+//
+// Every hit still resolves through `canonical_events`, so a free-text hit is as
+// citable as a structured one. When an embedding model and pgvector are both
+// available the results rank by cosine similarity; otherwise they fall back to
+// keyword matching over the stored document text. Neither path fabricates
+// incidents: an event with no incident link carries an empty incident id.
+func (s *Service) freeTextSearch(ctx context.Context, tenant string, q Query, limit int, sites []string, from, to any) (Result, error) {
+	vector, useVector, err := s.queryVector(ctx, q.FreeText)
+	if err != nil {
+		return Result{}, fmt.Errorf("eventsearch: free text: %w", err)
+	}
+	if useVector {
+		rows, err := s.Pool.WithSites(tenant, "eventsearch", sites).Query(ctx, freeTextVectorSQL,
+			tenant, sites, from, to, formatVector(vector), limit)
+		if err != nil {
+			return Result{}, fmt.Errorf("eventsearch: free text vector: %w", err)
+		}
+		defer rows.Close()
+		return s.scanFreeText(rows, limit)
+	}
+	rows, err := s.Pool.WithSites(tenant, "eventsearch", sites).Query(ctx, freeTextKeywordSQL,
+		tenant, sites, from, to, q.FreeText, limit)
+	if err != nil {
+		return Result{}, fmt.Errorf("eventsearch: free text keyword: %w", err)
+	}
+	defer rows.Close()
+	return s.scanFreeText(rows, limit)
+}
+
+// queryVector embeds the free text and reports whether pgvector is available.
+//
+// pgvector is probed once and cached: when it is absent the keyword path is
+// used even if an embedding model is configured, and no query ever fails
+// because the extension was not installed.
+func (s *Service) queryVector(ctx context.Context, text string) ([]float32, bool, error) {
+	available, err := s.vectorAvailable(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	if !available || s.Embed == nil {
+		return nil, false, nil
+	}
+	vector, err := s.Embed.Embed(ctx, text)
+	if err != nil {
+		return nil, false, fmt.Errorf("embed: %w", err)
+	}
+	return vector, true, nil
+}
+
+func (s *Service) vectorAvailable(ctx context.Context) (bool, error) {
+	s.hasVectorOnce.Do(func() {
+		var n int
+		err := s.Pool.QueryRow(ctx, `SELECT 1 FROM pg_extension WHERE extname='vector'`).Scan(&n)
+		if err != nil {
+			s.hasVector = ptr(false)
+			return
+		}
+		s.hasVector = ptr(true)
+	})
+	if s.hasVector == nil {
+		return false, errors.New("eventsearch: pgvector probe did not run")
+	}
+	return *s.hasVector, nil
+}
+
+func ptr(b bool) *bool { return &b }
+
+func (s *Service) scanFreeText(rows pgx.Rows, limit int) (Result, error) {
+	defer rows.Close()
+	hits := make([]Hit, 0, limit)
+	for rows.Next() {
+		var h Hit
+		var incidentID *string
+		if err := rows.Scan(&h.EventID, &h.SiteID, &h.EventType, &h.DeviceID,
+			&h.ZoneID, &h.CorrelationID, &h.ObservedAt, &h.NormalizedAt, &incidentID); err != nil {
+			return Result{}, fmt.Errorf("eventsearch: scan: %w", err)
+		}
+		if incidentID != nil {
+			h.IncidentID = *incidentID
+		}
+		hits = append(hits, h)
+		if len(hits) >= limit {
+			break
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return Result{}, fmt.Errorf("eventsearch: iterate: %w", err)
+	}
+	return Result{Hits: hits}, nil
+}
+
+// formatVector renders a float32 vector as a pgvector literal.
+//
+// The caller generates the floats, so there is no injection surface: the value
+// is cast to `vector` by PostgreSQL and never concatenated raw.
+func formatVector(v []float32) string {
+	b := strings.Builder{}
+	b.WriteByte('[')
+	for i, f := range v {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(strconv.FormatFloat(float64(f), 'f', -1, 32))
+	}
+	b.WriteByte(']')
+	return b.String()
 }
 
 // cleanSites normalises the caller's scope for the SQL.

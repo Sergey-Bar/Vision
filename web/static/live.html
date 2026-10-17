@@ -4,122 +4,149 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="manifest" href="/static/manifest.json">
-  <meta name="theme-color" content="#0a0d12">
+  <meta name="theme-color" content="#050505">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="VISION">
   <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
   <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
-  <link rel="icon" href="data:,">
-  <title>Vision Live YouTube Analytics POC</title>
-  <link rel="stylesheet" href="/static/live.css">
+  <title>VISION — Live Analytics</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232563eb'/%3E%3Cpath d='M16 7l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10v-4z' fill='none' stroke='%23ffffff' stroke-width='2'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/ui.css">
 </head>
 <body>
-  <main class="shell">
-    <header class="topbar">
-      <div>
-        <h1>Live YouTube Analytics POC</h1>
-        <p>Times Square stream, object categorization, no-zone alerts, smart metadata search.</p>
-        <p style="opacity:.72;font-size:14px">This page is the lab-grade live analytics surface, driven by the
-          Python detector in <code>tools/</code>. The security POC's own live gate &mdash; resolve, preflight, watch,
-          ledger &mdash; is a terminal run (<code>scripts/live-demo.ps1</code>) whose report and transcript open from
-          here: <a href="/rundoc/live-report">run report</a> &middot; <a href="/rundoc/live-transcript">transcript</a>.
-          On a day it refused, it refused by name, and the refusals are kept in the census rather than tuned away.</p>
+  <div class="ui-shell">
+    <header class="ui-topbar">
+      <a class="ui-brand" href="/">
+        <span class="mark"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#2563eb"/><path d="M16 7l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10v-4z" fill="none" stroke="#ffffff" stroke-width="2"/></svg></span>
+        VISION
+      </a>
+      <nav class="ui-nav">
+        <a href="/">Showcase</a>
+        <a href="/console">Console</a>
+        <a href="/ask">Ask</a>
+        <a href="/trust">Trust</a>
+        <a href="/live" aria-current="page">Live</a>
+      </nav>
+      <div class="ui-spacer"></div>
+      <div class="ui-system">
+        <div class="stat"><span>LIVE</span><span class="dot" id="systemDot"></span></div>
       </div>
-      <div style="display:flex;gap:14px">
-        <a href="/" class="link">Showcase</a>
-        <a href="/console" class="link">Console</a>
-      </div>
+      <button class="ui-cta primary" id="startBtn">Start Analysis</button>
     </header>
 
-    <section class="controls card">
-      <label>YouTube live URL
-        <input id="youtubeUrl" value="https://www.youtube.com/watch?v=JQ_jwk_7OVE">
-      </label>
-      <label>Smart search
-        <input id="search" placeholder="red car, person, taxi, no-zone">
-      </label>
-      <label>Operating profile
-        <select id="profile">
-          <option value="maximum" selected>Maximum accuracy · native 1920</option>
-          <option value="realtime">Maximum realtime · 1280</option>
-        </select>
-      </label>
-      <button id="startBtn">Start Real Analysis</button>
-    </section>
+    <main class="ui-hero">
+      <header class="ui-hero-head">
+        <div class="ui-kicker"><span class="dot"></span>Live YouTube Analytics &bull; POC</div>
+        <h1 class="ui-title">See what the camera sees.</h1>
+        <p class="ui-subtitle">Object categorization, no-zone alerts, and grounded video knowledge. Driven by the Python detector in <code>tools/</code>. Every frame is analyzed live; missing evidence is reported as unavailable, never guessed.</p>
+        <div class="ui-actions">
+          <input id="youtubeUrl" type="text" value="https://www.youtube.com/watch?v=JQ_jwk_7OVE" placeholder="YouTube live URL" style="flex:1;max-width:420px;background:rgba(0,0,0,0.35);border:1px solid var(--line);color:var(--ink);border-radius:var(--radius-lg);padding:10px 14px;font:inherit;font-size:14px;outline:none;">
+          <input id="search" type="text" placeholder="red car, person, taxi, no-zone" style="max-width:260px;background:rgba(0,0,0,0.35);border:1px solid var(--line);color:var(--ink);border-radius:var(--radius-lg);padding:10px 14px;font:inherit;font-size:14px;outline:none;">
+          <label style="margin:0 8px;display:flex;align-items:center;gap:6px;color:var(--ink-soft);font-family:var(--font-mono);font-size:11px;">
+            <input id="profile" type="radio" value="maximum" checked style="accent-color:var(--accent);"> Maximum accuracy &middot; 1920
+          </label>
+          <label style="margin:0;display:flex;align-items:center;gap:6px;color:var(--ink-soft);font-family:var(--font-mono);font-size:11px;">
+            <input type="radio" value="realtime" style="accent-color:var(--accent);"> Maximum realtime &middot; 1280
+          </label>
+        </div>
+      </header>
 
-    <section class="grid">
-      <div class="videoWrap card">
-        <h2>YouTube Live Source</h2>
-        <div class="sourceStage">
-          <iframe id="player" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
-        </div>
-        <h2 class="analysisTitle">Synchronized Analyzed Frame</h2>
-        <div class="videoStage">
-          <img id="analysisFrame" alt="Live frame being analyzed by YOLO">
-          <svg id="overlay" viewBox="0 0 1000 562" preserveAspectRatio="none"></svg>
-        </div>
-        <div class="statusLine"><span id="status">idle</span><span id="backend">backend: none</span><span id="performance">-- ms · -- FPS</span><span id="clock">--</span></div>
+      <div class="ui-grid">
+        <section class="ui-stage-wrap" style="flex:1;">
+          <div class="ui-stage-label">CAM-01 &bull; North Gate</div>
+          <div class="ui-stage">
+            <div class="ui-stage-placeholder" id="playerPlaceholder">Source not connected</div>
+            <iframe id="player" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
+            <img id="analysisFrame" alt="Live frame being analyzed by YOLO">
+            <svg id="overlay" viewBox="0 0 1000 562" preserveAspectRatio="none"></svg>
+            <div class="ui-stage-badge"><span class="light"></span>LIVE</div>
+            <div class="ui-hud">
+              <div class="ui-cam">
+                <span class="ui-cam-name">North Gate</span>
+                <span class="ui-cam-meta" id="camMeta">— &bull; — &bull; —</span>
+              </div>
+              <div id="uiHudMeta" style="font-family:var(--font-mono);font-size:11px;color:rgba(255,255,255,0.7);">—</div>
+            </div>
+          </div>
+          <div class="ui-status">
+            <span id="status" class="ui-chip">idle</span>
+            <span id="backend">backend: none</span>
+            <span id="performance">— ms &middot; — FPS</span>
+            <span id="clock">—</span>
+          </div>
+        </section>
+
+        <aside class="ui-metrics">
+          <div class="ui-metric-panel">
+            <div class="ui-section-head">
+              <span class="label">Real-Time Counts</span>
+              <span class="value" id="people">0</span>
+            </div>
+            <div class="ui-metric"><span class="name">People</span><span class="big" id="people">0</span></div>
+            <div class="ui-metric"><span class="name">Vehicles</span><span class="big" id="vehicles">0</span></div>
+            <div class="ui-metric"><span class="name">Animals</span><span class="big" id="animals">0</span></div>
+            <div class="ui-metric"><span class="name">Other</span><span class="big" id="other">0</span></div>
+            <div class="ui-metric"><span class="name">Unique tracks</span><span class="big subtle" id="uniqueTracks">0</span></div>
+            <div class="ui-metric"><span class="name">In no-zone</span><span class="big" id="restrictedCount">0</span></div>
+            <div class="ui-metric"><span class="name">Avg confidence</span><span class="big subtle" id="averageConfidence">0%</span></div>
+            <div class="ui-metric"><span class="name">Frame occupancy</span><span class="big subtle" id="occupancy">0%</span></div>
+          </div>
+
+          <div class="ui-card">
+            <h3>Rule Violation Alerts</h3>
+            <div class="ui-list" id="alerts">
+              <div class="ui-empty">No alerts yet.</div>
+            </div>
+          </div>
+
+          <div class="ui-card">
+            <h3>Search Hits</h3>
+            <div class="ui-list" id="hits">
+              <div class="ui-empty">Search the last 60 seconds without restarting analysis.</div>
+            </div>
+          </div>
+
+          <div class="ui-card">
+            <h3>Critical Streams</h3>
+            <div class="ui-list" id="criticalStreams">
+              <div class="ui-empty">No stored stream risk yet.</div>
+            </div>
+          </div>
+
+          <div class="ui-card">
+            <h3>Event Clips</h3>
+            <div class="ui-list" id="recentClips">
+              <div class="ui-empty">No completed alert clips yet.</div>
+            </div>
+          </div>
+
+          <div class="ui-card knowledge">
+            <h3>Ask Stored Video Knowledge</h3>
+            <p>Grounded answers only. Every answer cites stored observations; missing evidence is reported as unavailable.</p>
+            <div class="ui-chat-row">
+              <input id="chatQuestion" placeholder="Which red vehicles entered the restricted zone?">
+              <button class="ui-cta primary" id="chatSend">Ask</button>
+            </div>
+            <div id="chatAnswer" style="min-height:58px;white-space:pre-wrap;font-family:var(--font-mono);font-size:13px;color:var(--ink-soft);border-top:1px solid var(--line);margin-top:12px;padding-top:10px;">No question asked yet.</div>
+          </div>
+
+          <div class="ui-card">
+            <h3>Live Categorization</h3>
+            <div class="ui-detections" id="detections"></div>
+          </div>
+        </aside>
       </div>
+    </main>
 
-      <aside class="side">
-        <div class="metrics card">
-          <h2>Real-Time Counts</h2>
-          <div class="metric"><strong id="people">0</strong><span>People</span></div>
-          <div class="metric"><strong id="vehicles">0</strong><span>Vehicles</span></div>
-          <div class="metric"><strong id="animals">0</strong><span>Animals</span></div>
-          <div class="metric"><strong id="other">0</strong><span>Other</span></div>
-          <div class="metric"><strong id="uniqueTracks">0</strong><span>Unique tracks</span></div>
-          <div class="metric"><strong id="restrictedCount">0</strong><span>In no-zone</span></div>
-          <div class="metric"><strong id="averageConfidence">0%</strong><span>Avg confidence</span></div>
-          <div class="metric"><strong id="occupancy">0%</strong><span>Frame occupancy</span></div>
-        </div>
+    <div class="ui-toast" id="uiToast">Analysis started</div>
+  </div>
 
-        <div class="card">
-          <h2>Rule Violation Alerts</h2>
-          <div id="alerts" class="list muted">No alerts yet.</div>
-        </div>
-
-        <div class="card">
-          <h2>Search Hits</h2>
-          <div id="hits" class="list muted">Search the last 60 seconds without restarting analysis.</div>
-        </div>
-
-        <div class="card">
-          <h2>Critical Streams</h2>
-          <div id="criticalStreams" class="list muted">No stored stream risk yet.</div>
-        </div>
-
-        <div class="card">
-          <h2>Event Clips</h2>
-          <div id="recentClips" class="list muted">No completed alert clips yet.</div>
-        </div>
-      </aside>
-    </section>
-
-    <section class="card knowledge">
-      <h2>Ask Stored Video Knowledge</h2>
-      <p>Grounded answers only. Every answer cites stored observations; missing evidence is reported as unavailable.</p>
-      <div class="chatRow">
-        <input id="chatQuestion" placeholder="Which red vehicles entered the restricted zone?">
-        <button id="chatSend">Ask</button>
-      </div>
-      <div id="chatAnswer" class="item muted">No question asked yet.</div>
-    </section>
-
-    <section class="card">
-      <h2>Live Categorization</h2>
-      <div id="detections" class="detections"></div>
-    </section>
-  </main>
-  <script src="/static/live.js?v=4"></script>
-<script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("/static/sw.js").catch(function(){});});}</script>
-<nav class="bottom-tabs" aria-label="Primary">
-    <a href="/" aria-current="page"><span>Home</span></a>
-    <a href="/ask"><span>Ask</span></a>
-    <a href="/chief"><span>Chief</span></a>
-    <a href="/trust"><span>Trust</span></a>
-    <a href="/live"><span>Live</span></a>
-</nav>
+  <script src="/static/live.js?v=7"></script>
+  <script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("/static/sw.js").catch(function(){});});}</script>
 </body>
 </html>

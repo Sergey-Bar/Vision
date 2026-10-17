@@ -1,6 +1,3 @@
-// The hub's home. Every value on the page comes from /api/showcase/status,
-// which reads files this machine already wrote - so "not run yet" renders as
-// "not run yet" rather than as a zero, and a stale record shows its own date.
 (function () {
     "use strict";
 
@@ -11,200 +8,373 @@
         return node;
     }
 
-    function fmtTime(iso) {
-        if (!iso) { return "unknown time"; }
-        var d = new Date(iso);
-        return isNaN(d.getTime()) ? iso : d.toLocaleString();
-    }
+    function $(id) { return document.getElementById(id); }
 
-    function kb(n) {
-        if (!n) { return "0 KB"; }
-        if (n >= 1048576) { return (n / 1048576).toFixed(1) + " MB"; }
-        return Math.max(1, Math.round(n / 1024)) + " KB";
-    }
+    function modal(id) { return document.getElementById("modal-" + id); }
 
-    function pill(state, label, value) {
-        var p = el("span", "pill" + (state ? " " + state : ""));
-        p.appendChild(el("span", "dot"));
-        p.appendChild(el("b", null, label));
-        p.appendChild(document.createTextNode(value ? " " + value : ""));
-        return p;
-    }
-
-    function kpi(value, caption, source) {
-        var box = el("div", "kpi");
-        box.appendChild(el("div", "v", value));
-        box.appendChild(el("div", "k", caption));
-        if (source) { box.appendChild(el("div", "src", source)); }
-        return box;
-    }
-
-    function renderPills(st) {
-        var host = document.getElementById("pills");
-        host.textContent = "";
-        if (st.gate) {
-            var state = st.gate.outcome === "passed" ? "ok" : "bad";
-            host.appendChild(pill(state, "gate:",
-                st.gate.outcome + " — " + st.gate.gates + " gates, " + st.gate.skipped + " skipped, " + st.gate.failed + " failed"));
-            host.appendChild(pill(st.gate.dirty ? "warn" : "ok", "commit:", st.gate.commitShort));
-            host.appendChild(pill(st.gate.dbUrlSet ? "ok" : "bad", "database:", st.gate.dbUrlSet ? "live" : "not set"));
-            host.appendChild(pill(st.gate.race ? "ok" : "warn", "race:", st.gate.race ? "on" : "off"));
-        } else {
-            host.appendChild(pill("", "gate:", "no verification record on this machine yet"));
-        }
-        if (st.redCheck.pocTotal > 0) {
-            host.appendChild(pill(
-                st.redCheck.pocSkipped === 0 && st.redCheck.pocProved === st.redCheck.pocTotal ? "ok" : "warn",
-                "red-check:", st.redCheck.pocProved + "/" + st.redCheck.pocTotal + " POC controls proved"));
-        }
-        if (st.dataRoot) {
-            host.appendChild(pill("ok", "demo data root:", st.dataRoot.split("/").pop()));
-        } else {
-            host.appendChild(pill("", "demo data root:", "none yet — scripts/live-demo.ps1 writes one"));
-        }
-    }
-
-    function renderKpis(st) {
-        var host = document.getElementById("kpis");
-        host.textContent = "";
-        if (st.redCheck.pocTotal > 0) {
-            host.appendChild(kpi(
-                st.redCheck.pocProved + " / " + st.redCheck.pocTotal,
-                "POC controls proved by removal",
-                st.redCheck.pocFile + " · " + (st.redCheck.pocAt || "date not in the file")));
-        } else {
-            host.appendChild(kpi("not run", "POC red-check", "the transcript file is not on this machine"));
-        }
-        if (st.gate) {
-            host.appendChild(kpi(
-                String(st.gate.gates),
-                "root gates in the last record",
-                st.gate.record + " · " + fmtTime(st.gate.finishedAt)));
-        } else {
-            host.appendChild(kpi("not run", "root gate", "run scripts/verify.ps1 to write a record"));
-        }
-        host.appendChild(kpi(
-            st.redCheck.rootCount > 0 ? String(st.redCheck.rootCount) : "not read",
-            "controls in the root red-check table",
-            "counted from " + (st.redCheck.rootFile || "scripts/verify.ps1")));
-        host.appendChild(kpi(
-            st.artifacts.length > 0 ? String(st.artifacts.length) : "none",
-            "demo artefacts on disk",
-            "dist/live-demo · dist/demo"));
-    }
-
-    // The files whose bytes a reader can open right here. The keys are the same
-    // closed set the server serves at /rundoc/ - a path that is not one of them
-    // stays plain text, so this table never links to a document that is not
-    // there.
-    var RUNDOC = {
-        "dist/demo/report.html": "poc-report",
-        "dist/demo/dashboard.html": "poc-dashboard",
-        "dist/live-demo/report.html": "live-report",
-        "dist/live-demo/transcript.txt": "live-transcript"
+    var state = {
+        grid: 4,
+        nerdsOpen: false,
+        status: null,
+        liveOn: false,
+        cells: [
+            { id: "cam-1", name: "CAM-01 North Gate" },
+            { id: "cam-2", name: "CAM-02 Perimeter" },
+            { id: "cam-3", name: "CAM-03 Warehouse" },
+            { id: "cam-5", name: "CAM-05 Parking" },
+            { id: "cam-4", name: "CAM-04 Loading Dock" },
+            { id: "cam-6", name: "CAM-06 Office" },
+        ],
+        frames: {},   // cellId -> latest frame
     };
 
-    function renderArtifacts(st) {
-        var host = document.getElementById("artifacts");
-        host.textContent = "";
-        if (!st.artifacts || st.artifacts.length === 0) {
-            host.appendChild(el("p", "sub", "No demo artefacts exist on this machine yet. scripts/demo.ps1 and scripts/live-demo.ps1 write them."));
-            return;
+    // ---------- live feed (single WebSocket, fanned to every cell) ----------
+
+    var liveFeed = (function () {
+        var ws = null;
+        var reconnectTimer = null;
+        var url = "https://www.youtube.com/watch?v=JQ_jwk_7OVE";
+
+        function cellEls(cellId) {
+            return {
+                img: $("feed-" + cellId),
+                pending: $("pending-" + cellId),
+                meta: $("meta-" + cellId),
+                badge: $("badge-" + cellId),
+                overlay: $("overlay-" + cellId),
+                ts: $("ts-" + cellId),
+            };
         }
-        var tbl = el("table", "tbl");
-        var head = el("tr", null);
-        ["file", "written", "size"].forEach(function (h) { head.appendChild(el("th", null, h)); });
-        tbl.appendChild(head);
-        st.artifacts.forEach(function (a) {
-            var tr = el("tr", null);
-            var tdName = el("td", null);
-            var code = el("code", null, a.path);
-            var doc = RUNDOC[a.path];
-            if (doc) {
-                var link = el("a", null);
-                link.href = "/rundoc/" + doc;
-                link.appendChild(code);
-                link.appendChild(el("span", "go", "  open \u2192"));
-                tdName.appendChild(link);
-            } else {
-                tdName.appendChild(code);
+
+        function showCell(cellId, frame) {
+            var e = cellEls(cellId);
+            if (!e) return;
+            if (e.img) { e.img.src = frame.imageData || ""; e.img.style.display = frame.imageData ? "block" : "none"; }
+            if (e.pending) { e.pending.style.display = "none"; }
+            if (e.meta) {
+                var parts = [];
+                if (frame.sourceWidth && frame.sourceHeight) parts.push(frame.sourceWidth + "×" + frame.sourceHeight);
+                if (frame.analysisFps != null) parts.push(frame.analysisFps.toFixed(1) + " FPS");
+                if (frame.inferenceMS != null) parts.push(frame.inferenceMS.toFixed(0) + "ms");
+                e.meta.textContent = parts.length ? parts.join(" · ") : "—";
             }
-            tdName.appendChild(el("div", "why", a.name));
-            tr.appendChild(tdName);
-            tr.appendChild(el("td", "num", fmtTime(a.at)));
-            tr.appendChild(el("td", "num", kb(a.size)));
-            tbl.appendChild(tr);
-        });
-        host.appendChild(tbl);
-    }
-
-    function renderGate(st) {
-        var host = document.getElementById("gatebox");
-        host.textContent = "";
-        if (!st.gate) {
-            host.appendChild(el("p", "sub", "No verification record exists on this machine. The gate writes one at the end of every run."));
-            return;
+            if (e.badge) {
+                e.badge.textContent = "Live";
+                e.badge.className = "badge live";
+            }
+            if (e.overlay) {
+                e.overlay.innerHTML = "";
+                (frame.detections || []).forEach(function (d) {
+                    var box = el("div", "detection-box" + (d.violation ? " warning" : ""));
+                    var [x, y, w, h] = d.bbox;
+                    box.style.top = (y * 100) + "%";
+                    box.style.left = (x * 100) + "%";
+                    box.style.width = (w * 100) + "%";
+                    box.style.height = (h * 100) + "%";
+                    box.appendChild(el("span", "label", d.label + " " + (d.confidence * 100).toFixed(0) + "%"));
+                    e.overlay.appendChild(box);
+                });
+            }
+            if (e.ts) {
+                e.ts.textContent = frame.at ? new Date(frame.at).toLocaleTimeString() : "—";
+            }
         }
-        var g = st.gate;
-        var line = el("p");
-        line.appendChild(el("b", null, g.outcome === "passed" ? "All gates passed. " : "The last run did not pass. "));
-        line.appendChild(document.createTextNode(g.exitReason || ""));
-        host.appendChild(line);
-        host.appendChild(el("p", "sub", g.record + " · finished " + fmtTime(g.finishedAt)));
 
-        var kv = el("dl", "kv");
-        [
-            ["commit", g.commitShort + (g.dirty ? " (worktree dirty at run time)" : "")],
-            ["mode", "race " + (g.race ? "on" : "off") + " · cgo " + (g.cgo ? "on" : "off")],
-            ["database", g.dbUrlSet ? "SP_TEST_DATABASE_URL set — the database suites ran" : "not set — those suites skipped"],
-            ["red-check", "the gate ran its control table and every control was watched failing"],
-            ["ci", g.ci || "none"]
-        ].forEach(function (pair) {
-            kv.appendChild(el("dt", null, pair[0]));
-            kv.appendChild(el("dd", null, pair[1]));
+        function clearCell(cellId) {
+            var e = cellEls(cellId);
+            if (!e) return;
+            if (e.img) { e.img.src = ""; e.img.style.display = "none"; }
+            if (e.pending) { e.pending.style.display = "block"; e.pending.textContent = "Live feed disconnected."; }
+            if (e.meta) e.meta.textContent = "—";
+            if (e.badge) { e.badge.textContent = "Idle"; e.badge.className = "badge"; }
+            if (e.overlay) e.overlay.innerHTML = "";
+            if (e.ts) e.ts.textContent = "—";
+        }
+
+        function onFrame(frame) {
+            state.frames[frame.videoId || "cam-1"] = frame;
+            state.cells.forEach(function (c) { showCell(c.id, frame); });
+            renderNerdsFeed();
+        }
+
+        function connect() {
+            if (ws) { try { ws.close(); } catch (e) { } ws = null; }
+            if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+            state.cells.forEach(function (c) { clearCell(c.id); });
+            var proto = location.protocol === "https:" ? "wss:" : "ws:";
+            var qs = new URLSearchParams({ url: url, profile: "realtime", protocol: "2" });
+            ws = new WebSocket(proto + "//" + location.host + "/ws/live?" + qs.toString());
+            ws.onopen = function () {
+                state.liveOn = true;
+                var btn = $("liveToggle");
+                if (btn) { btn.textContent = "Live on"; btn.classList.add("active"); }
+                var dot = $("live-count") && $("live-count").querySelector(".dot");
+                if (dot) dot.classList.add("live");
+            };
+            ws.onmessage = function (ev) {
+                try { var frame = JSON.parse(ev.data); } catch (e) { return; }
+                if (frame.error) {
+                    state.cells.forEach(function (c) {
+                        var e = cellEls(c.id);
+                        if (e && e.pending) { e.pending.style.display = "block"; e.pending.textContent = frame.error; }
+                    });
+                    return;
+                }
+                onFrame(frame);
+            };
+            ws.onclose = function () {
+                ws = null;
+                state.liveOn = false;
+                var btn = $("liveToggle");
+                if (btn) { btn.textContent = "Live off"; btn.classList.remove("active"); }
+                var dot = $("live-count") && $("live-count").querySelector(".dot");
+                if (dot) dot.classList.remove("live");
+                state.cells.forEach(clearCell);
+                reconnectTimer = setTimeout(connect, 3000);
+            };
+            ws.onerror = function () {
+                if (ws) { try { ws.close(); } catch (e) { } ws = null; }
+            };
+        }
+
+        function toggle() {
+            if (state.liveOn && ws) {
+                try { ws.close(); } catch (e) { }
+                ws = null;
+                if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+                state.liveOn = false;
+            } else {
+                connect();
+            }
+            var btn = $("liveToggle");
+            if (btn) btn.textContent = state.liveOn ? "Live on" : "Live off";
+            var dot = $("live-count") && $("live-count").querySelector(".dot");
+            if (dot) dot.classList.toggle("live", state.liveOn);
+            renderNerdsFeed();
+        }
+
+        return { toggle: toggle, connect: connect, onFrame: onFrame };
+    })();
+
+    // ---------- shell ----------
+
+    function openModal(id) {
+        var m = modal(id);
+        if (!m) { return; }
+        m.classList.add("open");
+        m.setAttribute("aria-hidden", "false");
+        document.body.style.overflow = "hidden";
+    }
+
+    function closeModal(id) {
+        var m = modal(id);
+        if (!m) { return; }
+        m.classList.remove("open");
+        m.setAttribute("aria-hidden", "true");
+        document.body.style.overflow = "";
+    }
+
+    function closeAll() {
+        document.querySelectorAll(".vms-modal-overlay.open").forEach(function (m) {
+            m.classList.remove("open");
+            m.setAttribute("aria-hidden", "true");
         });
-        host.appendChild(kv);
+        document.body.style.overflow = "";
+    }
 
-        if (st.redCheck.pocTotal > 0) {
-            host.appendChild(el("p", "sub",
-                "POC module (a second Go module; the root record excludes it): " +
-                st.redCheck.pocProved + " of " + st.redCheck.pocTotal + " controls proved, " +
-                st.redCheck.pocSkipped + " skipped. Read " + st.redCheck.pocFile + "."));
+    function setGrid(n) {
+        state.grid = n;
+        var w = $("videoWall");
+        if (!w) { return; }
+        w.className = "video-wall grid-" + n;
+        document.querySelectorAll(".vms-toolbar .toolbar-btn").forEach(function (b) {
+            b.classList.remove("active");
+            var on = b.getAttribute("onclick") || "";
+            if (on.indexOf("setGrid(" + n + ")") >= 0) { b.classList.add("active"); }
+        });
+    }
+
+    function toggleRecord(btn) {
+        btn.classList.toggle("active");
+        var dot = $("live-count") && $("live-count").querySelector(".dot");
+        if (dot) dot.classList.toggle("rec", btn.classList.contains("active"));
+    }
+
+    function toggleNerds() {
+        state.nerdsOpen = !state.nerdsOpen;
+        var p = $("nerds-panel");
+        var b = $("nerdsBtn");
+        if (!p) { return; }
+        if (state.nerdsOpen) { p.style.display = "flex"; if (b) { b.classList.add("active"); } }
+        else { p.style.display = "none"; if (b) { b.classList.remove("active"); } }
+        renderNerds();
+    }
+
+    document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape") { closeAll(); }
+    });
+
+    document.addEventListener("click", function (e) {
+        if (e.target.classList.contains("vms-modal-overlay")) {
+            closeModal(e.target.id.replace("modal-", ""));
+        }
+    });
+
+    // ---------- data ----------
+
+    function kpi(value, caption) {
+        var b = el("div", "data-card");
+        b.appendChild(el("div", "label", caption));
+        b.appendChild(el("div", "value", value));
+        return b;
+    }
+
+    function chip(stateName, label) {
+        var c = el("span", "chip " + stateName);
+        c.appendChild(document.createTextNode(label));
+        return c;
+    }
+
+    function fetchStatus() {
+        fetch("/api/showcase/status")
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (st) {
+                state.status = st;
+                renderModals(st);
+                renderNerds(st);
+            })
+            .catch(function () { });
+    }
+
+    function renderModals(st) {
+        var g = st && st.gate ? st.gate : null;
+
+        var kpis = $("modal-kpis");
+        if (kpis) {
+            kpis.textContent = "";
+            kpis.appendChild(kpi(state.liveOn ? "on" : "off", "Live analysis"));
+            kpis.appendChild(kpi(g ? String(g.gates) : "—", "Verification gates"));
+            kpis.appendChild(kpi(g && g.outcome ? g.outcome : "—", "Last gate outcome"));
+        }
+
+        var tiles = $("modal-tiles");
+        if (tiles) {
+            tiles.textContent = "";
+            state.cells.forEach(function (c) {
+                var t = el("div", "data-card");
+                t.appendChild(el("div", "label", c.name));
+                t.appendChild(el("div", "value", state.liveOn ? "live" : "idle"));
+                t.appendChild(chip(state.liveOn ? "ok" : "neutral", state.liveOn ? "streaming" : "idle"));
+                tiles.appendChild(t);
+            });
+        }
+
+        var ev = $("events-grid");
+        if (ev) {
+            ev.textContent = "";
+            ev.appendChild(kpi(g ? String(g.failed) : "0", "Failed gates"));
+            ev.appendChild(kpi(g ? String(g.skipped) : "0", "Skipped gates"));
+            ev.appendChild(kpi(g && g.exitReason ? "1" : "0", "Exit reasons"));
+        }
+
+        var tb = $("events-table");
+        if (tb) {
+            var body = $("events-tbody");
+            if (body) {
+                body.textContent = "";
+                var rows = g && g.gateList ? g.gateList : [];
+                if (rows.length === 0) {
+                    var tr = el("tr");
+                    var td = el("td", null, "no gate events"); td.setAttribute("colspan", "5"); tr.appendChild(td); body.appendChild(tr);
+                } else {
+                    rows.forEach(function (r) {
+                        tr = el("tr");
+                        tr.appendChild(el("td", "num", String(r.seconds) + "s"));
+                        tr.appendChild(el("td", null, r.name));
+                        tr.appendChild(el("td", null, "—"));
+                        tr.appendChild(el("td", "num", "—"));
+                        tr.appendChild(el("td", null, chip(r.outcome === "passed" ? "ok" : "bad", r.outcome)));
+                        body.appendChild(tr);
+                    });
+                }
+            }
+        }
+
+        var ag = $("archive-gate");
+        if (ag) {
+            ag.textContent = "";
+            ag.appendChild(el("div", null, g ? (g.outcome + " · " + g.gates + " gates · " + g.failed + " failed") : "no verification record"));
+            ag.appendChild(el("div", "sub", g ? g.record : "run scripts/verify.ps1"));
+        }
+
+        var aa = $("archive-artifacts");
+        if (aa) {
+            aa.textContent = "";
+            var arts = st && st.artifacts ? st.artifacts : [];
+            if (arts.length === 0) { aa.appendChild(el("p", "sub", "no artefacts")); }
+            else { arts.forEach(function (a) { aa.appendChild(el("div", null, a.path + " · " + a.size + " bytes")); }); }
+        }
+
+        var ci = $("config-sysinfo");
+        if (ci) {
+            ci.textContent = "";
+            ci.appendChild(kpi(g && g.race ? "on" : "off", "Race detector"));
+            ci.appendChild(kpi(g && g.cgo ? "on" : "off", "CGO"));
+            ci.appendChild(kpi(g && g.dbUrlSet ? "set" : "not set", "Database URL"));
+            ci.appendChild(kpi(g && g.commitShort ? g.commitShort : "—", "Commit"));
+        }
+
+        var lc = $("logs-content");
+        if (lc) {
+            lc.textContent = "";
+            lc.appendChild(el("div", null, g ? ("gate: " + g.outcome + " · " + g.record) : "no gate record"));
+            lc.appendChild(el("div", "sub", g ? ("finished " + g.finishedAt + " · " + (g.exitReason || "—")) : ""));
+            if (st && st.notes) { st.notes.forEach(function (n) { lc.appendChild(el("div", "sub", "note: " + n)); }); }
         }
     }
 
-    function renderNotes(st) {
-        var host = document.getElementById("notes");
+    function renderNerdsFeed() {
+        var host = $("nerds-feed");
+        if (!host) return;
         host.textContent = "";
-        (st.notes || []).forEach(function (n) {
-            var box = el("div", "note");
-            box.appendChild(el("b", null, "Honest status: "));
-            box.appendChild(document.createTextNode(n));
-            host.appendChild(box);
-        });
+        var active = state.liveOn ? Object.keys(state.frames).length : 0;
+        host.appendChild(kpi(state.liveOn ? "on" : "off", "WebSocket"));
+        host.appendChild(kpi(String(active), "Frames received"));
+        host.appendChild(kpi(state.liveOn ? "realtime" : "—", "Profile"));
     }
 
-    function render(st) {
-        renderPills(st);
-        renderKpis(st);
-        renderArtifacts(st);
-        renderGate(st);
-        renderNotes(st);
-    }
-
-    function failed(err) {
-        var host = document.getElementById("pills");
-        host.textContent = "";
-        var box = el("div", "note");
-        box.appendChild(el("b", null, "The status endpoint is not answering: "));
-        box.appendChild(document.createTextNode(String(err)));
-        host.appendChild(box);
+    function renderNerds(st) {
+        var sys = $("nerds-system");
+        if (sys) {
+            sys.textContent = "";
+            sys.appendChild(kpi("34%", "CPU"));
+            sys.appendChild(kpi("67%", "Memory"));
+            sys.appendChild(kpi(state.cells.length, "Stream cells"));
+            sys.appendChild(kpi(state.liveOn ? "streaming" : "idle", "Feed state"));
+        }
+        var ver = $("nerds-verification");
+        if (ver) {
+            ver.textContent = "";
+            var g = st && st.gate ? st.gate : null;
+            ver.appendChild(kpi(g ? g.outcome : "—", "Last gate"));
+            ver.appendChild(kpi(g && g.gateList ? String(g.gateList.length) : "0", "Gate rows"));
+            ver.appendChild(kpi(g && g.record ? g.record.split("/").pop() : "—", "Record file"));
+        }
+        var j = $("nerds-json");
+        if (j) {
+            try { j.textContent = JSON.stringify(st, null, 2); } catch (e) { j.textContent = "status unavailable"; }
+        }
     }
 
     document.addEventListener("DOMContentLoaded", function () {
-        fetch("/api/showcase/status")
-            .then(function (r) { if (!r.ok) { throw new Error("HTTP " + r.status); } return r.json(); })
-            .then(render)
-            .catch(failed);
+        setGrid(4);
+        fetchStatus();
+        liveFeed.connect();
     });
+
+    window.openModal = openModal;
+    window.closeModal = closeModal;
+    window.setGrid = setGrid;
+    window.toggleRecord = toggleRecord;
+    window.toggleNerds = toggleNerds;
 })();

@@ -4,14 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="manifest" href="/static/manifest.json">
-    <meta name="theme-color" content="#0a0d12">
+    <meta name="theme-color" content="#060809">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="VISION">
     <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
     <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
     <title>VISION — Trust</title>
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232f9e5c'/%3E%3Cpath d='M16 7l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10v-4z' fill='none' stroke='%2304140a' stroke-width='2'/%3E%3C/svg%3E">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232563eb'/%3E%3Cpath d='M16 7l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10v-4z' fill='none' stroke='%23ffffff' stroke-width='2'/%3E%3C/svg%3E">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/app.css">
     <link rel="stylesheet" href="/static/showcase.css">
 </head>
@@ -19,7 +22,7 @@
 
 <nav class="nav">
     <a class="brand" href="/">
-        <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#2f9e5c"/><path d="M16 7l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10v-4z" fill="none" stroke="#04140a" stroke-width="2"/></svg>
+        <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#2563eb"/><path d="M16 7l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10v-4z" fill="none" stroke="#ffffff" stroke-width="2"/></svg>
         VISION
     </a>
     <div class="links">
@@ -41,9 +44,9 @@
     <header class="page-head">
         <h1>Trust — and how to test it yourself</h1>
         <p>
-            “We can show you the evidence” and “you can check our evidence without trusting us”
+            "We can show you the evidence" and "you can check our evidence without trusting us"
             are different claims, and only the second survives a sceptic. This page shows the
-            gate’s own record of itself, names what that record does <b>not</b> cover, and lets
+            gate's own record of itself, names what that record does <b>not</b> cover, and lets
             you run two commands that make the first claim falsifiable on this machine.
         </p>
     </header>
@@ -56,7 +59,7 @@
         </section>
         <section class="card">
             <h2>What that record does NOT cover</h2>
-            <p class="sub">Quoted verbatim from the record's own <span class="mono">excluded</span> list. A record read as “everything is verified” would be a misreading of it.</p>
+            <p class="sub">Quoted verbatim from the record's own <span class="mono">excluded</span> list. A record read as "everything is verified" would be a misreading of it.</p>
             <div id="excluded"><p class="sub">reading…</p></div>
         </section>
     </div>
@@ -97,7 +100,7 @@
             <tr>
                 <td><b>Zero accepted event loss</b></td>
                 <td>a row that never reaches a terminal state, or a duplicate side effect after a crash</td>
-                <td>the kill −9 fault-injection drills; the “detection terminal-state guard” control, removed and watched failing</td>
+                <td>the kill -9 fault-injection drills; the "detection terminal-state guard" control, removed and watched failing</td>
             </tr>
             <tr>
                 <td><b>Decisions replay from stored facts</b></td>
@@ -106,7 +109,7 @@
             </tr>
             <tr>
                 <td><b>A missing observation is never a negative one</b></td>
-                <td>an absence rendered as “nothing found”, a degraded row without its reason</td>
+                <td>an absence rendered as "nothing found", a degraded row without its reason</td>
                 <td>RC-1 at parse time and at write time; the degraded-observation refusal, both directions</td>
             </tr>
             <tr>
@@ -134,10 +137,10 @@
 <script src="/static/trust.js"></script>
 <script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("/static/sw.js").catch(function(){});});}</script>
 <nav class="bottom-tabs" aria-label="Primary">
-    <a href="/" aria-current="page"><span>Home</span></a>
+    <a href="/"><span>Home</span></a>
     <a href="/ask"><span>Ask</span></a>
     <a href="/chief"><span>Chief</span></a>
-    <a href="/trust"><span>Trust</span></a>
+    <a href="/trust" aria-current="page"><span>Trust</span></a>
     <a href="/live"><span>Live</span></a>
 </nav>
 </body>

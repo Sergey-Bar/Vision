@@ -448,14 +448,19 @@ const verificationBlockMarker = "**Verification:**"
 // verificationBlock returns the current-state claim: the paragraph introduced by
 // the marker, up to the first blank line. A blank line ends it because the
 // document separates prose paragraphs that way, and the numbers being checked are
-// always within the first one.
+// always within the first one. Both Unix (`\n\n`) and Windows (`\r\n\r\n`)
+// line endings are recognised.
 func verificationBlock(s string) (string, bool) {
 	i := strings.Index(s, verificationBlockMarker)
 	if i < 0 {
 		return "", false
 	}
 	rest := s[i:]
-	if end := strings.Index(rest, "\n\n"); end >= 0 {
+	end := strings.Index(rest, "\r\n\r\n")
+	if end < 0 {
+		end = strings.Index(rest, "\n\n")
+	}
+	if end >= 0 {
 		rest = rest[:end]
 	}
 	return rest, true

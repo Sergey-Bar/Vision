@@ -4,129 +4,447 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="manifest" href="/static/manifest.json">
-    <meta name="theme-color" content="#0a0d12">
+    <meta name="theme-color" content="#0a0c0f">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="VISION">
     <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
     <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
-    <title>VISION — Showcase</title>
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232f9e5c'/%3E%3Cpath d='M16 7l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10v-4z' fill='none' stroke='%2304140a' stroke-width='2'/%3E%3C/svg%3E">
+    <title>VISION — VMS</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232563eb'/%3E%3Cpath d='M16 7l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10v-4z' fill='none' stroke='%23ffffff' stroke-width='2'/%3E/svg%3E">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/app.css">
     <link rel="stylesheet" href="/static/showcase.css">
 </head>
 <body>
 
-<nav class="nav">
-    <a class="brand" href="/">
-        <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#2f9e5c"/><path d="M16 7l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10v-4z" fill="none" stroke="#04140a" stroke-width="2"/></svg>
-        VISION
-    </a>
-    <div class="links">
-        <a href="/" aria-current="page">Home</a>
-        <a href="/ask">Ask</a>
-        <a href="/chief">Chief</a>
-        <a href="/trust">Trust</a>
-        <a href="/live">Live</a>
-        <a href="/pipeline">Pipeline</a>
-        <a href="/operations">Ops</a>
-        <a href="/lab">Lab</a>
-        <a href="/census">Census</a>
-    </div>
-</nav>
-
-<main class="wrap ask-wrap">
-
-    <header class="hero ask-hero">
-        <span class="eyebrow">Operator Console — machine's own record</span>
-        <h1>What your cameras held.<br>What the system decided.</h1>
-        <p class="lead ask-hero-lead">
-            Every claim here is read from a file on this disk — runs, gate results, red-check transcripts,
-            the signed chain. Nothing is typed in by hand, and nothing below a real command will tell you
-            "verified" unless it actually passed.
-        </p>
-        <div class="pills" id="pills"><span class="pill"><span class="dot"></span>reading this machine's records…</span></div>
-        <div class="ask-cta-row">
-            <a class="btn primary" href="/ask">Ask the console (free text)</a>
-            <a class="btn" href="/chief">Chief of Security brief</a>
+<div class="vms-layout">
+    <!-- Top Bar -->
+    <header class="vms-topbar">
+        <a class="brand" href="/">
+            <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#2563eb"/><path d="M16 7l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10v-4z" fill="none" stroke="#ffffff" stroke-width="2"/></svg>
+            VISION
+        </a>
+        <nav class="vms-tabs" role="tablist" aria-label="Main">
+            <button class="vms-tab active" role="tab" aria-selected="true" data-tab="dashboard" onclick="openModal('dashboard')">Dashboard</button>
+            <button class="vms-tab" role="tab" aria-selected="false" data-tab="events" onclick="openModal('events')">Events</button>
+            <button class="vms-tab" role="tab" aria-selected="false" data-tab="archive" onclick="openModal('archive')">Archive</button>
+            <button class="vms-tab" role="tab" aria-selected="false" data-tab="configuration" onclick="openModal('configuration')">Configuration</button>
+            <button class="vms-tab" role="tab" aria-selected="false" data-tab="settings" onclick="openModal('settings')">Settings</button>
+            <button class="vms-tab" role="tab" aria-selected="false" data-tab="logs" onclick="openModal('logs')">Logs</button>
+        </nav>
+        <div class="spacer"></div>
+        <div class="vms-system-stats">
+            <div class="stat">
+                <span class="label">CPU</span>
+                <div class="bar"><div class="fill" style="width: 34%"></div></div>
+                <span class="value">34%</span>
+            </div>
+            <div class="stat">
+                <span class="label">Memory</span>
+                <div class="bar"><div class="fill" style="width: 67%"></div></div>
+                <span class="value">67%</span>
+            </div>
         </div>
+        <button class="icon-btn" aria-label="Notifications" onclick="openModal('events')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        </button>
+        <button class="icon-btn" aria-label="Help" onclick="openModal('settings')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        </button>
+        <button class="icon-btn" aria-label="User" onclick="openModal('settings')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        </button>
     </header>
 
-    <section class="kpi-rail" id="kpis"></section>
-
-    <h2 class="section-title">Surfaces</h2>
-    <section class="tiles" id="surface-tiles">
-        <a class="tile" href="/ask">
-            <h3>Ask</h3>
-            <p>Free-text console — drafts rules, replays stored clips, reads record, ledger, perimeter. A refusal, when due, is explicit.</p>
-            <span class="chip plain">free text / closed vocab</span>
-        </a>
-        <a class="tile" href="/chief">
-            <h3>Chief of Security</h3>
-            <p>Both records, one reading: restricted-zone stream detection, dark minutes, missing verdicts, the baseline warning.</p>
-            <span class="chip plain">insights / guidance</span>
-        </a>
-        <a class="tile" href="/trust">
-            <h3>Trust</h3>
-            <p>Recompute the ledger, tamper one row and watch the chain break, replay a decision with zero provider calls.</p>
-            <span class="chip recorded">reproducible</span>
-        </a>
-        <a class="tile" href="/live">
-            <h3>Live analytics</h3>
-            <p>Lab-grade YouTube stream, detections, clips, grounded answers — plus the security POC's own live gate report.</p>
-            <span class="chip lab">lab demo</span>
-        </a>
-        <a class="tile" href="/pipeline">
-            <h3>Pipeline</h3>
-            <p>One event end-to-end: what arrived, what was decided, what evidence stands under it.</p>
-            <span class="chip recorded">from its own files</span>
-        </a>
-        <a class="tile" href="/census">
-            <h3>Census</h3>
-            <p>Every capability graded live / recorded / not run — the honesty table.</p>
-            <span class="chip plain">graded</span>
-        </a>
-        <a class="tile" href="/operations">
-            <h3>Operations</h3>
-            <p>Signal versus noise: measured suppression, dwell, escalation.</p>
-            <span class="chip recorded">measured</span>
-        </a>
-    </section>
-
-    <details class="card details-drawer">
-        <summary>On-disk evidence, gate report &amp; red-check (advanced)</summary>
-        <div class="split">
-            <section class="card">
-                <h2>The evidence files</h2>
-                <div id="artifacts"><p class="sub">reading…</p></div>
-            </section>
-            <section class="card">
-                <h2>The gate &amp; the red-check</h2>
-                <div id="gatebox"><p class="sub">reading…</p></div>
-            </section>
+    <!-- Sidebar -->
+    <aside class="vms-sidebar">
+        <div class="search-box">
+            <input type="text" placeholder="Search cameras..." aria-label="Search cameras">
         </div>
-        <div id="notes" style="margin-top:16px"></div>
-    </details>
+        <div class="nav-section">
+            <div class="section-header">
+                <span>Collections</span>
+                <button class="add-btn" aria-label="Add collection">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                </button>
+            </div>
+            <a class="nav-item" href="#" onclick="openModal('archive'); return false;">
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                <span class="label">All Cameras</span>
+                <span class="count">12</span>
+            </a>
+            <a class="nav-item" href="#" onclick="openModal('events'); return false;">
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                <span class="label">Detections</span>
+                <span class="count">3</span>
+            </a>
+            <a class="nav-item" href="#" onclick="openModal('archive'); return false;">
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                <span class="label">Recent Activity</span>
+            </a>
+        </div>
+        <div class="nav-section">
+            <div class="section-header">
+                <span>Cameras</span>
+            </div>
+            <a class="nav-item active" href="#">
+                <span class="status-dot online"></span>
+                <span class="label">CAM-01 North Gate</span>
+            </a>
+            <a class="nav-item" href="#">
+                <span class="status-dot online"></span>
+                <span class="label">CAM-02 Perimeter</span>
+            </a>
+            <a class="nav-item" href="#">
+                <span class="status-dot online"></span>
+                <span class="label">CAM-03 Warehouse</span>
+            </a>
+            <a class="nav-item" href="#">
+                <span class="status-dot offline"></span>
+                <span class="label">CAM-04 Loading Dock</span>
+            </a>
+            <a class="nav-item" href="#">
+                <span class="status-dot online"></span>
+                <span class="label">CAM-05 Parking</span>
+            </a>
+            <a class="nav-item" href="#">
+                <span class="status-dot idle"></span>
+                <span class="label">CAM-06 Office</span>
+            </a>
+        </div>
+        <div class="nav-section">
+            <div class="section-header">
+                <span>Views</span>
+            </div>
+            <a class="nav-item" href="#" onclick="openModal('dashboard'); return false;">
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                <span class="label">Grid View</span>
+            </a>
+            <a class="nav-item" href="#" onclick="openModal('archive'); return false;">
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+                <span class="label">Map View</span>
+            </a>
+        </div>
+    </aside>
 
-    <footer class="foot">
-        <b>What this is not.</b> No CI runs here; GitHub Actions cannot start a job on this account, so a green
-        branch is a human claim about a command that ran on this machine — the gate record's own
-        <span class="mono">ci</span> field says so. Relay footage is somebody else's; we keep the
-        measurements and re-trigger live. The AI plane is a simulator (xpsim) and we say so.
-    </footer>
-</main>
+    <!-- Main Content -->
+    <main class="vms-main">
+        <!-- Toolbar -->
+        <div class="vms-toolbar">
+            <div class="toolbar-group">
+                <button class="toolbar-btn" onclick="setGrid(1)" aria-label="1x1 grid">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+                    1×1
+                </button>
+                <button class="toolbar-btn active" onclick="setGrid(2)" aria-label="1x2 grid">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="3" x2="12" y2="21"/></svg>
+                    1×2
+                </button>
+                <button class="toolbar-btn" onclick="setGrid(4)" aria-label="2x2 grid">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="3" x2="12" y2="21"/><line x1="3" y1="12" x2="21" y2="12"/></svg>
+                    2×2
+                </button>
+                <button class="toolbar-btn" onclick="setGrid(6)" aria-label="2x3 grid">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/><line x1="3" y1="12" x2="21" y2="12"/></svg>
+                    2×3
+                </button>
+                <button class="toolbar-btn" onclick="setGrid(9)" aria-label="3x3 grid">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/></svg>
+                    3×3
+                </button>
+            </div>
+            <div class="toolbar-separator"></div>
+            <div class="toolbar-group">
+                <button class="toolbar-btn" onclick="openModal('archive')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+                    Add to Bookmarks
+                </button>
+                <button class="toolbar-btn" onclick="openModal('events')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                    Export To
+                </button>
+                <button class="toolbar-btn" onclick="toggleRecord(this)">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                    Record
+                </button>
+                <button class="toolbar-btn danger" onclick="openModal('events')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                    Alarm
+                </button>
+            </div>
+            <div class="toolbar-separator"></div>
+            <div class="toolbar-group">
+                <button class="toolbar-btn" id="liveToggle" onclick="liveFeed.toggle()" aria-label="Live analysis">Live off</button>
+                <button class="toolbar-btn" id="nerdsBtn" onclick="toggleNerds()" aria-label="Data for nerds">Data for nerds</button>
+            </div>
+            <div class="spacer"></div>
+            <div class="live-count">
+                <span class="dot"></span>
+                <span id="liveCountText">0 Live</span>
+            </div>
+        </div>
+
+        <!-- Video Wall -->
+        <div class="video-wall grid-4" id="videoWall">
+            <div class="video-cell" data-cell="cam-1">
+                <div class="feed-stage">
+                    <img class="feed" id="feed-cam-1" alt="CAM-01 North Gate">
+                    <div class="feed-pending" id="pending-cam-1">Starting live analysis…</div>
+                </div>
+                <div class="hud">
+                    <div class="cam-info">
+                        <span class="cam-name">CAM-01 North Gate</span>
+                        <span class="cam-meta" id="meta-cam-1">— · — · —</span>
+                    </div>
+                    <div class="status-badges" id="badges-cam-1">
+                        <span class="badge" id="badge-cam-1">Idle</span>
+                    </div>
+                </div>
+                <div class="overlay" id="overlay-cam-1"></div>
+                <div class="controls">
+                    <button class="ctrl-btn">Snapshot</button>
+                    <button class="ctrl-btn">Zoom</button>
+                    <button class="ctrl-btn">Audio</button>
+                </div>
+                <div class="timestamp" id="ts-cam-1">—</div>
+            </div>
+            <div class="video-cell" data-cell="cam-2">
+                <div class="feed-stage">
+                    <img class="feed" id="feed-cam-2" alt="CAM-02 Perimeter">
+                    <div class="feed-pending" id="pending-cam-2">Starting live analysis…</div>
+                </div>
+                <div class="hud">
+                    <div class="cam-info">
+                        <span class="cam-name">CAM-02 Perimeter</span>
+                        <span class="cam-meta" id="meta-cam-2">— · — · —</span>
+                    </div>
+                    <div class="status-badges" id="badges-cam-2">
+                        <span class="badge" id="badge-cam-2">Idle</span>
+                    </div>
+                </div>
+                <div class="overlay" id="overlay-cam-2"></div>
+                <div class="controls">
+                    <button class="ctrl-btn">Snapshot</button>
+                    <button class="ctrl-btn">Zoom</button>
+                    <button class="ctrl-btn">Audio</button>
+                </div>
+                <div class="timestamp" id="ts-cam-2">—</div>
+            </div>
+            <div class="video-cell" data-cell="cam-3">
+                <div class="feed-stage">
+                    <img class="feed" id="feed-cam-3" alt="CAM-03 Warehouse">
+                    <div class="feed-pending" id="pending-cam-3">Starting live analysis…</div>
+                </div>
+                <div class="hud">
+                    <div class="cam-info">
+                        <span class="cam-name">CAM-03 Warehouse</span>
+                        <span class="cam-meta" id="meta-cam-3">— · — · —</span>
+                    </div>
+                    <div class="status-badges" id="badges-cam-3">
+                        <span class="badge" id="badge-cam-3">Idle</span>
+                    </div>
+                </div>
+                <div class="overlay" id="overlay-cam-3"></div>
+                <div class="controls">
+                    <button class="ctrl-btn">Snapshot</button>
+                    <button class="ctrl-btn">Zoom</button>
+                    <button class="ctrl-btn">Audio</button>
+                </div>
+                <div class="timestamp" id="ts-cam-3">—</div>
+            </div>
+            <div class="video-cell" data-cell="cam-5">
+                <div class="feed-stage">
+                    <img class="feed" id="feed-cam-5" alt="CAM-05 Parking">
+                    <div class="feed-pending" id="pending-cam-5">Starting live analysis…</div>
+                </div>
+                <div class="hud">
+                    <div class="cam-info">
+                        <span class="cam-name">CAM-05 Parking</span>
+                        <span class="cam-meta" id="meta-cam-5">— · — · —</span>
+                    </div>
+                    <div class="status-badges" id="badges-cam-5">
+                        <span class="badge" id="badge-cam-5">Idle</span>
+                    </div>
+                </div>
+                <div class="overlay" id="overlay-cam-5"></div>
+                <div class="controls">
+                    <button class="ctrl-btn">Snapshot</button>
+                    <button class="ctrl-btn">Zoom</button>
+                    <button class="ctrl-btn">Audio</button>
+                </div>
+                <div class="timestamp" id="ts-cam-5">—</div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<!-- Modal: Dashboard -->
+<div class="vms-modal-overlay" id="modal-dashboard">
+    <div class="vms-modal">
+        <div class="vms-modal-header">
+            <h2>Dashboard</h2>
+            <button class="close-btn" onclick="closeModal('dashboard')" aria-label="Close">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+        </div>
+        <div class="vms-modal-body">
+            <div class="modal-kpis" id="modal-kpis"></div>
+            <div class="modal-section">
+                <h3>Surfaces</h3>
+                <div class="modal-tiles" id="modal-tiles"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Events -->
+<div class="vms-modal-overlay" id="modal-events">
+    <div class="vms-modal">
+        <div class="vms-modal-header">
+            <h2>Events & Detections</h2>
+            <button class="close-btn" onclick="closeModal('events')" aria-label="Close">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+        </div>
+        <div class="vms-modal-body">
+            <div class="data-grid" id="events-grid"></div>
+            <div class="modal-section">
+                <h3>Recent Detections</h3>
+                <table class="data-table" id="events-table">
+                    <thead><tr><th>Time</th><th>Camera</th><th>Object</th><th>Confidence</th><th>Status</th></tr></thead>
+                    <tbody id="events-tbody"><tr><td colspan="5">Start live analysis to see detections.</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Archive -->
+<div class="vms-modal-overlay" id="modal-archive">
+    <div class="vms-modal">
+        <div class="vms-modal-header">
+            <h2>Archive & Evidence</h2>
+            <button class="close-btn" onclick="closeModal('archive')" aria-label="Close">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+        </div>
+        <div class="vms-modal-body">
+            <div class="modal-section">
+                <h3>Verification Record</h3>
+                <div id="archive-gate"></div>
+            </div>
+            <div class="modal-section">
+                <h3>Evidence Files</h3>
+                <div id="archive-artifacts"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Configuration -->
+<div class="vms-modal-overlay" id="modal-configuration">
+    <div class="vms-modal">
+        <div class="vms-modal-header">
+            <h2>Configuration</h2>
+            <button class="close-btn" onclick="closeModal('configuration')" aria-label="Close">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+        </div>
+        <div class="vms-modal-body">
+            <div class="modal-section">
+                <h3>Rule Bundle</h3>
+                <div style="display:flex;gap:8px;margin-bottom:12px">
+                    <button class="btn primary" onclick="runRulesLint()">Lint bundle</button>
+                    <button class="btn secondary" onclick="runRulesSimulate()">Simulate</button>
+                </div>
+                <div id="config-rules-out" class="out">Pick an action.</div>
+            </div>
+            <div class="modal-section">
+                <h3>System Info</h3>
+                <div id="config-sysinfo"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Settings -->
+<div class="vms-modal-overlay" id="modal-settings">
+    <div class="vms-modal">
+        <div class="vms-modal-header">
+            <h2>Settings</h2>
+            <button class="close-btn" onclick="closeModal('settings')" aria-label="Close">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+        </div>
+        <div class="vms-modal-body">
+            <div class="modal-section">
+                <h3>About</h3>
+                <p style="color:var(--ink-2);font-size:13px;line-height:1.6">
+                    VISION is a Video Management System for AI-powered surveillance.
+                    Every claim is read from a file on this disk — runs, gate results,
+                    red-check transcripts, the signed chain.
+                </p>
+            </div>
+            <div class="modal-section">
+                <h3>Links</h3>
+                <div style="display:flex;gap:8px;flex-wrap:wrap">
+                    <a class="btn secondary" href="/trust">Trust & Verification</a>
+                    <a class="btn secondary" href="/census">Census</a>
+                    <a class="btn secondary" href="/ask">Ask Console</a>
+                    <a class="btn secondary" href="/chief">Chief of Security</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Logs -->
+<div class="vms-modal-overlay" id="modal-logs">
+    <div class="vms-modal">
+        <div class="vms-modal-header">
+            <h2>System Logs</h2>
+            <button class="close-btn" onclick="closeModal('logs')" aria-label="Close">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+        </div>
+        <div class="vms-modal-body">
+            <div class="modal-section">
+                <h3>Recent Activity</h3>
+                <div id="logs-content"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Data for nerds panel — hidden until opened from the toolbar -->
+<div id="nerds-panel" class="nerds-panel">
+    <div class="nerds-header">
+        <span class="nerds-title">Data for nerds</span>
+        <button class="nerds-close" onclick="toggleNerds()">✕</button>
+    </div>
+    <div class="nerds-body">
+        <div class="nerds-section">
+            <div class="nerds-label">Live feed</div>
+            <div class="data-grid" id="nerds-feed"></div>
+        </div>
+        <div class="nerds-section">
+            <div class="nerds-label">System</div>
+            <div class="data-grid" id="nerds-system"></div>
+        </div>
+        <div class="nerds-section">
+            <div class="nerds-label">Verification</div>
+            <div class="data-grid" id="nerds-verification"></div>
+        </div>
+        <div class="nerds-section">
+            <div class="nerds-label">Status record (raw)</div>
+            <pre id="nerds-json" class="nerds-json"></pre>
+        </div>
+    </div>
+</div>
 
 <script src="/static/hub.js"></script>
-<script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("/static/sw.js").catch(function(){});});}</script>
-<nav class="bottom-tabs" aria-label="Primary">
-    <a href="/" aria-current="page"><span>Home</span></a>
-    <a href="/ask"><span>Ask</span></a>
-    <a href="/chief"><span>Chief</span></a>
-    <a href="/trust"><span>Trust</span></a>
-    <a href="/live"><span>Live</span></a>
-</nav>
 </body>
 </html>

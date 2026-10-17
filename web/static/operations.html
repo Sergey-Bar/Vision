@@ -1,29 +1,33 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="manifest" href="/static/manifest.json">
-<meta name="theme-color" content="#0a0d12">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="VISION">
-<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
-<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
-<title>VISION &mdash; Operations</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232f9e5c'/%3E%3Cpath d='M16 7l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10v-4z' fill='none' stroke='%2304140a' stroke-width='2'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="/static/app.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#060809">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="VISION">
+    <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
+    <title>VISION — Operations</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232563eb'/%3E%3Cpath d='M16 7l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10v-4z' fill='none' stroke='%23ffffff' stroke-width='2'/%3E%3C/svg%3E">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/app.css">
+    <link rel="stylesheet" href="/static/showcase.css">
 </head>
 <body>
 <div class="shell">
 
   <header class="topbar">
     <div class="mark" aria-hidden="true">
-      <svg viewBox="0 0 32 32" fill="none"><path d="M16 5l9 4.5v6.8c0 5.7-3.9 9.6-9 11.2-5.1-1.6-9-5.5-9-11.2V9.5z" stroke="#04140a" stroke-width="2.2" stroke-linejoin="round"/><path d="M11.5 16.2l3.2 3.2 6-6.4" stroke="#04140a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <svg viewBox="0 0 32 32" fill="none"><path d="M16 5l9 4.5v6.8c0 5.7-3.9 9.6-9 11.2-5.1-1.6-9-5.5-9-11.2V9.5z" stroke="#ffffff" stroke-width="2.2" stroke-linejoin="round"/><path d="M11.5 16.2l3.2 3.2 6-6.4" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </div>
     <div>
       <div class="title">VISION</div>
-      <div class="subtitle">Operations &mdash; where the system stays quiet, and why</div>
+      <div class="subtitle">Operations — where the system stays quiet, and why</div>
     </div>
     <div style="margin-left:auto;display:flex;gap:8px">
       <a class="btn secondary" href="/">Showcase</a>
@@ -47,7 +51,7 @@
       <p class="hint">
         The interval a human was responsible for an incident, per incident. This is the
         North Star numerator, and it comes from an audited <code>incident.opened</code>
-        ledger row written on the first authenticated read &mdash; not from a timer in a
+        ledger row written on the first authenticated read — not from a timer in a
         browser tab.
       </p>
       <div class="row" style="margin-bottom:20px">
@@ -67,7 +71,7 @@
         <div class="empty">
           <strong>Nothing read yet</strong>
           Pick a window and read the report. The numbers come from Postgres, so an
-          empty window and a window with no data say different things &mdash; and this
+          empty window and a window with no data say different things — and this
           page says which.
         </div>
       </div>
@@ -85,10 +89,10 @@
         "The system stayed quiet on 40% of decisions" is a number. "It said nothing at all
         about camera-offline at site-north, and nothing elsewhere" is a finding. This is
         the slice that turns the first into the second: each cell is a rule class at one
-        site, and the share is that site&rsquo;s own.
+        site, and the share is that site's own.
       </p>
       <div class="legend" id="silence-legend">
-        <span class="key"><span class="chip silent">silent</span> duplicate or suppressed &mdash; the system decided not to speak</span>
+        <span class="key"><span class="chip silent">silent</span> duplicate or suppressed — the system decided not to speak</span>
       </div>
       <div id="silence-body">
         <div class="empty"><strong>Not read yet</strong>The window chose above governs this section too.</div>
@@ -114,7 +118,7 @@
       <div class="panel-head"><h2>Why nothing was raised</h2></div>
       <p class="hint">
         An incident that was not raised is a decision, and a decision has a reason.
-        Paste an incident id and this page asks the system &mdash; which is the question
+        Paste an incident id and this page asks the system — which is the question
         the product claims it can answer.
       </p>
       <div class="row">

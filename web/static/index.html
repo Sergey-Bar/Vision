@@ -4,56 +4,25 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="manifest" href="/static/manifest.json">
-    <meta name="theme-color" content="#0a0d12">
+    <meta name="theme-color" content="#060809">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="VISION">
     <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
     <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
-    <title>VISION - Security Control UI</title>
-    <!-- One stylesheet, shared with the operations page. Until this line the
-         console carried GitHub's #0d1117 and the fleet page carried Tailwind
-         slate's #0f172a, so the two were both dark and neither looked like the
-         same product. -->
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232f9e5c'/%3E%3Cpath d='M16 7l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10v-4z' fill='none' stroke='%2304140a' stroke-width='2'/%3E%3C/svg%3E">
+    <title>VISION — Security Control</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232563eb'/%3E%3Cpath d='M16 7l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10v-4z' fill='none' stroke='%23ffffff' stroke-width='2'/%3E%3C/svg%3E">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/app.css">
-    <style>
-        /* The console's own additions, on top of the shared system. */
-        .mark svg { width: 20px; height: 20px; display: block; }
-        .tab-panel { display: none; }
-        .tab-panel.active { display: block; }
-        .status-badge {
-            display: inline-block;
-            padding: 3px 10px;
-            border-radius: 999px;
-            font-size: 12px;
-            font-weight: 600;
-            margin-left: 10px;
-            vertical-align: middle;
-        }
-        .status-ok { background: color-mix(in srgb, var(--ok) 22%, transparent); color: var(--ink-1); border: 1px solid color-mix(in srgb, var(--ok) 45%, transparent); }
-        .status-warn { background: color-mix(in srgb, var(--warn) 22%, transparent); color: var(--ink-1); border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent); }
-        .status-error { background: color-mix(in srgb, var(--bad) 22%, transparent); color: var(--ink-1); border: 1px solid color-mix(in srgb, var(--bad) 45%, transparent); }
-        .radio-group { display: flex; gap: 16px; margin-bottom: 16px; }
-        .radio-option { display: flex; align-items: center; gap: 8px; cursor: pointer; color: var(--ink-2); font-size: 13px; }
-        .radio-option input { width: auto; accent-color: var(--accent); }
-        .loading { display: none; align-items: center; gap: 10px; margin-top: 14px; color: var(--ink-2); font-size: 13px; }
-        .spinner {
-            width: 13px; height: 13px;
-            border: 2px solid var(--line-strong);
-            border-top-color: var(--accent);
-            border-radius: 50%;
-            animation: spin 700ms linear infinite;
-        }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        @media (prefers-reduced-motion: reduce) { * { animation-duration: 0ms !important; } }
-    </style>
+    <link rel="stylesheet" href="/static/showcase.css">
 </head>
 <body>
     <div class="shell">
         <header class="topbar">
             <div class="mark" aria-hidden="true">
-                <svg viewBox="0 0 32 32" fill="none"><path d="M16 5l9 4.5v6.8c0 5.7-3.9 9.6-9 11.2-5.1-1.6-9-5.5-9-11.2V9.5z" stroke="#04140a" stroke-width="2.2" stroke-linejoin="round"/><path d="M11.5 16.2l3.2 3.2 6-6.4" stroke="#04140a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <svg viewBox="0 0 32 32" fill="none"><path d="M16 5l9 4.5v6.8c0 5.7-3.9 9.6-9 11.2-5.1-1.6-9-5.5-9-11.2V9.5z" stroke="#ffffff" stroke-width="2.2" stroke-linejoin="round"/><path d="M11.5 16.2l3.2 3.2 6-6.4" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </div>
             <div>
                 <div class="title">VISION <span class="status-badge status-ok" id="statusBadge">Ready</span></div>
@@ -76,7 +45,7 @@
         <div class="tab-panel active" id="tab-poc">
             <div class="panel">
                 <h2>Capture path</h2>
-                <p style="color: #8b949e; font-size: 13px; margin-bottom: 16px;">
+                <p style="color: var(--ink-2); font-size: 13px; margin-bottom: 16px;">
                     Run the full capture path: stream → detect → clip → store → incident
                 </p>
 
@@ -106,7 +75,7 @@
         <div class="tab-panel" id="tab-acceptance">
             <div class="panel">
                 <h2>Acceptance — 13 criteria</h2>
-                <p style="color: #8b949e; font-size: 13px; margin-bottom: 16px;">
+                <p style="color: var(--ink-2); font-size: 13px; margin-bottom: 16px;">
                     Runs all 13 criteria from the plan. Criteria 6-8 need real camera/operator/VMS.
                 </p>
                 <button class="btn primary" onclick="runAcceptance()"><span class="label">Run acceptance test</span></button>
@@ -169,7 +138,7 @@
                     .replace(/: (\d+\.?\d*)/g, ': <span class="json-number">$1</span>')
                     .replace(/: (true|false)/g, ': <span class="json-bool">$1</span>');
             } catch {
-                return text.replace(/</g, '<').replace(/>/g, '>');
+                return text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
             }
         }
 
@@ -243,7 +212,7 @@
     </script>
 <script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("/static/sw.js").catch(function(){});});}</script>
 <nav class="bottom-tabs" aria-label="Primary">
-    <a href="/" aria-current="page"><span>Home</span></a>
+    <a href="/"><span>Home</span></a>
     <a href="/ask"><span>Ask</span></a>
     <a href="/chief"><span>Chief</span></a>
     <a href="/trust"><span>Trust</span></a>

@@ -35,6 +35,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -323,4 +324,111 @@ func chdir(t *testing.T, dir string) func() {
 		t.Fatalf("chdir %s: %v", dir, err)
 	}
 	return func() { _ = os.Chdir(prev) }
+}
+
+// TestTheSearchFreeRouteIsPostOnly guards the method on /api/search/free.
+func TestTheSearchFreeRouteIsPostOnly(t *testing.T) {
+	h := handleSearchFree(nil)
+	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete, http.MethodPatch} {
+		req := httptest.NewRequest(method, "/api/search/free", nil)
+		rec := httptest.NewRecorder()
+		h(rec, req)
+		if rec.Code != http.StatusMethodNotAllowed {
+			t.Errorf("%s /api/search/free -> %d, want 405", method, rec.Code)
+		}
+	}
+}
+
+// TestTheSearchFreeRouteRequiresATenant rejects a request with no tenant.
+func TestTheSearchFreeRouteRequiresATenant(t *testing.T) {
+	h := handleSearchFree(nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/search/free", strings.NewReader(`{"q":"test"}`))
+	rec := httptest.NewRecorder()
+	h(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("/api/search/free with no tenant -> %d, want 400", rec.Code)
+	}
+}
+
+// TestTheChatRouteIsPostOnly guards the method on /api/chat.
+func TestTheChatRouteIsPostOnly(t *testing.T) {
+	h := handleChat(nil)
+	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete, http.MethodPatch} {
+		req := httptest.NewRequest(method, "/api/chat", nil)
+		rec := httptest.NewRecorder()
+		h(rec, req)
+		if rec.Code != http.StatusMethodNotAllowed {
+			t.Errorf("%s /api/chat -> %d, want 405", method, rec.Code)
+		}
+	}
+}
+
+// TestTheChatRouteRequiresAQuestion rejects an empty question.
+func TestTheChatRouteRequiresAQuestion(t *testing.T) {
+	h := handleChat(nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/chat", strings.NewReader(`{"question":""}`))
+	rec := httptest.NewRecorder()
+	h(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("/api/chat with empty question -> %d, want 400", rec.Code)
+	}
+}
+
+// TestTheChatRouteRequiresATenant rejects a request with no tenant.
+func TestTheChatRouteRequiresATenant(t *testing.T) {
+	h := handleChat(nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/chat", strings.NewReader(`{"question":"test"}`))
+	rec := httptest.NewRecorder()
+	h(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("/api/chat with no tenant -> %d, want 400", rec.Code)
+	}
+}
+
+// TestTheClipsRouteIsGetOnly guards the method on /api/clips.
+func TestTheClipsRouteIsGetOnly(t *testing.T) {
+	h := handleClips(nil)
+	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch} {
+		req := httptest.NewRequest(method, "/api/clips", nil)
+		rec := httptest.NewRecorder()
+		h(rec, req)
+		if rec.Code != http.StatusMethodNotAllowed {
+			t.Errorf("%s /api/clips -> %d, want 405", method, rec.Code)
+		}
+	}
+}
+
+// TestTheClipsRouteRequiresATenant rejects a request with no tenant.
+func TestTheClipsRouteRequiresATenant(t *testing.T) {
+	h := handleClips(nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/clips", nil)
+	rec := httptest.NewRecorder()
+	h(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("/api/clips with no tenant -> %d, want 400", rec.Code)
+	}
+}
+
+// TestTheCriticalRouteIsGetOnly guards the method on /api/critical.
+func TestTheCriticalRouteIsGetOnly(t *testing.T) {
+	h := handleCritical(nil)
+	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch} {
+		req := httptest.NewRequest(method, "/api/critical", nil)
+		rec := httptest.NewRecorder()
+		h(rec, req)
+		if rec.Code != http.StatusMethodNotAllowed {
+			t.Errorf("%s /api/critical -> %d, want 405", method, rec.Code)
+		}
+	}
+}
+
+// TestTheCriticalRouteRequiresATenant rejects a request with no tenant.
+func TestTheCriticalRouteRequiresATenant(t *testing.T) {
+	h := handleCritical(nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/critical", nil)
+	rec := httptest.NewRecorder()
+	h(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("/api/critical with no tenant -> %d, want 400", rec.Code)
+	}
 }

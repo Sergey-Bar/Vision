@@ -92,13 +92,51 @@ def dominant_color(cv2, crop) -> str:
     return best[0]
 
 
-def stream_url(raw_url: str) -> str:
+def stream_url(raw_url: str, cookies: str = "") -> str:
     import yt_dlp
+    from yt_dlp.utils import DownloadError
 
-    opts = {"quiet": True, "no_warnings": True, "skip_download": True, "format": "270/232/231/best"}
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(raw_url, download=False)
-    return info["url"]
+    # Try several YouTube format ladders. Some streams only expose HLS/DASH
+    # manifests, some are region- or age-restricted, and the default client
+    # is often throttled. Cycling player_clients and formats covers most of it.
+    base_opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["web", "android", "tv_embedded"],
+                "player_skip": ["configs", "webpage"],
+            }
+        },
+    }
+    if cookies:
+        base_opts["cookiefile"] = cookies
+
+    formats = [
+        "270/232/231/best",
+        "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best",
+        "best",
+    ]
+    last_err: Exception | None = None
+    for fmt in formats:
+        opts = dict(base_opts)
+        opts["format"] = fmt
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(raw_url, download=False)
+        except DownloadError as exc:
+            last_err = exc
+            continue
+        except Exception as exc:  # noqa: BLE001 - report and try the next ladder
+            last_err = exc
+            continue
+        url = info.get("url") or info.get("playback_url") or info.get("manifest_url")
+        if url:
+            return url
+    raise RuntimeError(
+        f"could not extract a playable stream URL from YouTube: {last_err}"
+    )
 
 
 def emit(obj) -> None:
@@ -117,6 +155,7 @@ def main() -> int:
     parser.add_argument("--video-id", default="stream")
     parser.add_argument("--clip-dir", default="dist/live-clips")
     parser.add_argument("--clip-seconds", type=float, default=8.0)
+    parser.add_argument("--cookies", default="", help="Netscape cookies.txt path for age/region-restricted YouTube streams")
     args = parser.parse_args()
     query = args.query.lower().strip()
 
@@ -138,7 +177,7 @@ def main() -> int:
     # Pay model compilation and CUDA allocation before reading the live stream.
     warmup_frame = np.zeros((args.imgsz, args.imgsz, 3), dtype=np.uint8)
     model.predict(warmup_frame, imgsz=args.imgsz, device=device, half=True, verbose=False)
-    cap = cv2.VideoCapture(stream_url(args.url))
+    cap = cv2.VideoCapture(stream_url(args.url, args.cookies))
     if not cap.isOpened():
         emit({"backend": "gpu-yolo", "detectorNote": "could not open YouTube stream", "at": datetime.now(timezone.utc).isoformat(), "zones": zones(), "detections": [], "alerts": []})
         return 3
