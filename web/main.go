@@ -46,10 +46,16 @@ func main() {
 	// free-text search and chat surfaces read the canonical record directly
 	// instead of shelling out; everything else still runs the CLI binary.
 	pool := openDatabasePool()
-	defer pool.Close()
+	if pool != nil {
+		defer pool.Close()
+	}
 
 	// Static files
 	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir(filepath.Join(repoRoot, "web", "static")))))
+
+	// The SPA builds its assets into web/static/spa/assets and index.html refers to
+	// them at /assets/..., so serve that directory directly.
+	http.Handle("/assets/", http.StripPrefix("/assets/", http.FileServer(http.Dir(filepath.Join(repoRoot, "web", "static", "spa", "assets")))))
 
 	// API routes
 	http.HandleFunc("/api/poc", handlePOC(securityctlPath, repoRoot))
@@ -86,13 +92,6 @@ func main() {
 			spaHandler(w, r)
 		})
 	}
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" {
-			http.NotFound(w, r)
-			return
-		}
-		spaHandler(w, r)
-	})
 
 	registerLiveRoutes(repoRoot)
 	registerShowcaseRoutes(repoRoot)

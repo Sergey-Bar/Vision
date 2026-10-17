@@ -1,0 +1,33 @@
+module.exports = {
+  root: true,
+  env: { browser: true, es2022: true },
+  extends: [
+    'eslint:recommended',
+    'plugin:@typescript-eslint/recommended-type-checked',
+    'plugin:@typescript-eslint/stylistic-type-checked',
+    'plugin:react-hooks/recommended',
+    'plugin:react/recommended',
+    'plugin:jsx-a11y/recommended',
+  ],
+  parser: '@typescript-eslint/parser',
+  parserOptions: {
+    ecmaVersion: 'latest',
+    sourceType: 'module',
+    project: ['./tsconfig.json'],
+    tsconfigRootDir: __dirname,
+  },
+  plugins: ['react', '@typescript-eslint', 'react-hooks', 'jsx-a11y'],
+  settings: { react: { version: '19' } },
+  ignorePatterns: ['dist', 'node_modules', 'playwright-report', 'test-results', 'vitest-reports', 'vite.config.ts', 'tailwind.config.js', 'postcss.config.js', 'playwright.config.ts'],
+  rules: {
+    '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+    '@typescript-eslint/consistent-type-definitions': ['error', 'interface'],
+    '@typescript-eslint/no-floating-promises': 'warn',
+    'react/prop-types': 'off',
+    'react/display-name': 'off',
+    'react/react-in-jsx-scope': 'off',
+    'react/no-unescaped-entities': 'off',
+    'jsx-a11y/anchor-is-valid': 'off',
+    'no-console': 'off',
+  },
+}

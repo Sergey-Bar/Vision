@@ -96,9 +96,6 @@ var liveSession = struct {
 }{}
 
 func registerLiveRoutes(repoRoot string) {
-	http.HandleFunc("/live", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, filepath.Join(repoRoot, "web", "static", "live.html"))
-	})
 	http.HandleFunc("/ws/live", handleLiveWS(repoRoot))
 }
 

@@ -153,9 +153,6 @@ type chiefAnalysis struct {
 }
 
 func registerChiefRoutes(repoRoot string) {
-	http.HandleFunc("/chief", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, filepath.Join(repoRoot, "web", "static", "chief.html"))
-	})
 	http.HandleFunc("/api/chief", handleChief(repoRoot))
 }
 

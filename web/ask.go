@@ -72,9 +72,6 @@ type askResponse struct {
 }
 
 func registerAskRoutes(repoRoot string) {
-	http.HandleFunc("/ask", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, filepath.Join(repoRoot, "web", "static", "ask.html"))
-	})
 	http.HandleFunc("/api/ask", handleAsk(repoRoot))
 }
 
