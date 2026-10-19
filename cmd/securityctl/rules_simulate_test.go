@@ -3,12 +3,15 @@ package main
 import (
 	"bytes"
 	"context"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Sergey-Bar/vision/internal/command"
+	"github.com/Sergey-Bar/vision/internal/simulate"
 )
 
 // The plan's P4.2: "The rules simulate path runs with the AI plane killed and
@@ -160,5 +163,73 @@ func TestTheSimulateFlagsActuallyApply(t *testing.T) {
 	if !strings.Contains(flatten(buf.String()), "no-such-fixture-set") {
 		t.Errorf("the failure does not name the directory it was given, so an operator cannot tell "+
 			"a bad path from a missing one:\n%s", buf.String())
+	}
+}
+
+// The typed rules fire on the class the VMS asserted.
+//
+// The TYPED rules are the ones that match a CLASS rather than a generic
+// analytics event, and they are the whole point of the analyticData
+// refinement: the vendor's own analytics engine said what it saw, and the
+// platform decides what to DO about it without looking again.
+//
+// This test runs the committed fixtures through the committed bundle and asks
+// the question the bundle cannot be asked by a rule-lint: does the rule FIRE.
+//
+// It is a test of the wiring rather than of the rule's text, and the wiring is
+// where the failure was: the simulation built its signals without a ZONE, so
+// every rule that filters on one -- which is every production rule in the
+// bundle -- never matched, and the gate that is supposed to catch a bundle
+// change reported "no change" for a change that would have mattered.
+func TestTheTypedRuleFiresOnTheClassTheVMSAsserted(t *testing.T) {
+	ctx := context.Background()
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatalf("resolve the repository root: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(root, "rules", "builtin", "bundle.yaml"))
+	if err != nil {
+		t.Fatalf("read the bundle: %v", err)
+	}
+	compiler := newSiteCompiler()
+	bundle, problems := compiler.Compile(raw)
+	for _, p := range problems {
+		if p.Severity == "error" {
+			t.Fatalf("the bundle does not compile: %s", p)
+		}
+	}
+	scenarios, err := scenariosFromFixtures(ctx, filepath.Join(root, "testdata", "fixtures"))
+	if err != nil {
+		t.Fatalf("load the fixtures: %v", err)
+	}
+	runner := &simulate.Runner{
+		ClockNow:      func() time.Time { return time.Date(2026, 3, 1, 22, 30, 0, 0, time.UTC) },
+		SkewTolerance: time.Duration(bundle.Settings.Clock.SkewToleranceMS) * time.Millisecond,
+		InSchedule:    businessHoursSchedule,
+	}
+	outcomes, err := runner.Run(bundle, scenarios, 0)
+	if err != nil {
+		t.Fatalf("run the simulation: %v", err)
+	}
+
+	const scenario = "typed-person-with-bag-restricted-zone"
+	const rule = "core.typed.person-with-bag-in-restricted-zone"
+	found := false
+	for _, o := range outcomes {
+		if o.ScenarioID != scenario {
+			continue
+		}
+		found = true
+		if !o.IncidentRaised {
+			t.Errorf("the %s scenario raised no incident. The typed rule matches the CLASS "+
+				"the VMS asserted, and a rule that never fires is a rule that is not there", scenario)
+		}
+		if o.RuleID != rule {
+			t.Errorf("the %s scenario was decided by %q, want %q", scenario, o.RuleID, rule)
+		}
+	}
+	if !found {
+		t.Fatalf("the %s scenario produced no outcome at all. The fixture is not being replayed, "+
+			"and a rule that is not exercised is a rule that is not tested", scenario)
 	}
 }

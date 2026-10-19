@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Sergey-Bar/vision/internal/dbx"
+	"github.com/Sergey-Bar/vision/internal/fixture"
 )
 
 // The topology: tenant, site, integration, zones, devices, clocks.
@@ -22,51 +23,17 @@ import (
 // run left something behind, and it refuses to run against a tenant it did not
 // create.
 
-// The devices the committed fixtures name.
+// The devices and the zones live in the package that owns the scenarios.
 //
-// They come out of the fixtures' `Source` fields — "Entrance Camera 01 [CAM-001]",
-// "Loading Bay Door [DOR-004]", "Perimeter North [CAM-014]" — and a device whose
-// `source_device_id` is not registered produces an event with no device. That is
-// correct behaviour ("unattributable" rather than attributed to something
-// guessed) and it would make the whole seeded site assert nothing, because a rule
-// that filters on a zone never gets there.
+// They were here, and the SIMULATION could not see them: the simulation is the
+// gate every bundle change is measured against, and it built its signals
+// without a zone, so every rule that filters on one looked dead. The seed
+// wrote a topology and the gate read none, and a change that only differed by
+// zone looked like no change at all.
 //
-// So this list is derived from the fixtures rather than invented, and the seed
-// prints it. If a fixture gains a device reference, the seed says so rather than
-// quietly attributing the event to the nearest camera it knows.
-var fixtureDevices = []struct {
-	sourceDeviceID string
-	deviceID       string
-	zoneID         string
-	kind           string
-	name           string
-}{
-	{"CAM-001", "dev-entrance-01", "zone-restricted-bay", "camera", "Entrance Camera 01"},
-	{"CAM-014", "dev-perimeter-north", "zone-perimeter", "camera", "Perimeter North"},
-	{"DOR-004", "dev-loading-bay-door", "zone-restricted-bay", "door", "Loading Bay Door"},
-}
-
-// The zones the shipped bundle's one production rule needs.
-//
-// `core.person-in-restricted-zone-after-hours` filters on
-// `zone.pathPrefix: /restricted`, and `pathHasPrefix` matches a contiguous run of
-// WHOLE SEGMENTS anywhere in the path rather than a literal string prefix — so
-// `/north-gate/restricted/loading-bay` carries the run `/restricted` and matches,
-// and `/north-gate/restricted-bay` would not. A seed with the wrong path here
-// makes the bundle's one production rule dead rather than failing, which is the
-// specific outcome `internal/rules/semantic.go` exists to prevent.
-//
-// Depth is written because the column is `CHECK (depth >= 0)` and because a zone
-// tree with a wrong depth is a zone tree the recursive traversal gets wrong.
-var fixtureZones = []struct {
-	zoneID, name, path, parent string
-	depth                      int
-}{
-	{"zone-site", "North Gate", "/north-gate", "", 0},
-	{"zone-restricted", "Restricted", "/north-gate/restricted", "zone-site", 1},
-	{"zone-restricted-bay", "Loading Bay", "/north-gate/restricted/loading-bay", "zone-restricted", 2},
-	{"zone-perimeter", "Perimeter", "/north-gate/perimeter", "zone-site", 1},
-}
+// One table, two readers: the seed writes it into a real database, and the
+// simulation reads it to answer the same question the database answers in
+// production.
 
 // writeTopology creates the tenant, the site, the integration and the physical
 // topology the fixtures refer to.
@@ -107,38 +74,38 @@ func (s *seeder) writeTopology(ctx context.Context) error {
 		return fmt.Errorf("insert the integration: %w", err)
 	}
 
-	for _, z := range fixtureZones {
+	for _, z := range fixture.FixtureZones {
 		var parent any
-		if z.parent != "" {
-			parent = z.parent
+		if z.Parent != "" {
+			parent = z.Parent
 		}
 		if _, err := s.scoped(ctx).Exec(ctx, `
 			INSERT INTO zones (tenant_id, zone_id, site_id, parent_id, name, path, depth)
 			VALUES ($1, $2, $3, $4, $5, $6, $7)
 			ON CONFLICT (tenant_id, zone_id) DO NOTHING`,
-			s.opts.tenant, z.zoneID, s.opts.site, parent, z.name, z.path, z.depth); err != nil {
-			return fmt.Errorf("insert the zone %s: %w", z.zoneID, err)
+			s.opts.tenant, z.ZoneID, s.opts.site, parent, z.Name, z.Path, z.Depth); err != nil {
+			return fmt.Errorf("insert the zone %s: %w", z.ZoneID, err)
 		}
 	}
 
-	for _, d := range fixtureDevices {
+	for _, d := range fixture.FixtureDevices {
 		if _, err := s.scoped(ctx).Exec(ctx, `
 			INSERT INTO devices (tenant_id, device_id, site_id, zone_id, kind, display_name,
 			                     attributes, source_device_id)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 			ON CONFLICT (tenant_id, device_id) DO NOTHING`,
-			s.opts.tenant, d.deviceID, s.opts.site, d.zoneID, d.kind, d.name,
-			`{"tags":["perimeter"]}`, d.sourceDeviceID); err != nil {
-			return fmt.Errorf("insert the device %s: %w", d.deviceID, err)
+			s.opts.tenant, d.DeviceID, s.opts.site, d.ZoneID, d.Kind, d.Name,
+			`{"tags":["perimeter"]}`, d.SourceDeviceID); err != nil {
+			return fmt.Errorf("insert the device %s: %w", d.DeviceID, err)
 		}
 		if _, err := s.scoped(ctx).Exec(ctx, `
 			INSERT INTO cameras (tenant_id, camera_id, device_id, site_id, source_camera_id,
 			                     display_name, state, recording_state)
 			VALUES ($1, $2, $3, $4, $5, $6, 'online', 'recording')
 			ON CONFLICT (tenant_id, camera_id) DO NOTHING`,
-			s.opts.tenant, "cam-"+d.sourceDeviceID, d.deviceID, s.opts.site,
-			d.sourceDeviceID, d.name); err != nil {
-			return fmt.Errorf("insert the camera %s: %w", d.sourceDeviceID, err)
+			s.opts.tenant, "cam-"+d.SourceDeviceID, d.DeviceID, s.opts.site,
+			d.SourceDeviceID, d.Name); err != nil {
+			return fmt.Errorf("insert the camera %s: %w", d.SourceDeviceID, err)
 		}
 		// A clock row per device. `device_clocks.drift_ms` is read by the gauge
 		// sampler and by the correlator's exclusion list; a device with no row has
@@ -148,8 +115,8 @@ func (s *seeder) writeTopology(ctx context.Context) error {
 			INSERT INTO device_clocks (tenant_id, device_id, site_id, clock_source, drift_ms, band)
 			VALUES ($1, $2, $3, 'ntp', 0, 'ok')
 			ON CONFLICT (tenant_id, device_id) DO NOTHING`,
-			s.opts.tenant, d.deviceID, s.opts.site); err != nil {
-			return fmt.Errorf("insert the clock for %s: %w", d.deviceID, err)
+			s.opts.tenant, d.DeviceID, s.opts.site); err != nil {
+			return fmt.Errorf("insert the clock for %s: %w", d.DeviceID, err)
 		}
 	}
 	return nil

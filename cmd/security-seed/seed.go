@@ -25,6 +25,7 @@ import (
 	"github.com/Sergey-Bar/vision/internal/correlator"
 	"github.com/Sergey-Bar/vision/internal/dbx"
 	"github.com/Sergey-Bar/vision/internal/evidence"
+	"github.com/Sergey-Bar/vision/internal/fixture"
 	"github.com/Sergey-Bar/vision/internal/graph"
 	"github.com/Sergey-Bar/vision/internal/identity"
 	"github.com/Sergey-Bar/vision/internal/inbox"
@@ -164,8 +165,8 @@ func (s *seeder) run(ctx context.Context) error {
 	}
 	s.report.Tenant = s.opts.tenant
 	s.report.Site = s.opts.site
-	s.report.Zones = len(fixtureZones)
-	s.report.Devices = len(fixtureDevices)
+	s.report.Zones = len(fixture.FixtureZones)
+	s.report.Devices = len(fixture.FixtureDevices)
 
 	s.step("secret material: the MFA wrapping key and the console certificate")
 	secretKey, err := s.writeSecretMaterial(ctx)

@@ -130,6 +130,7 @@ func ts(offsetMS int64) string {
 func specs() []spec {
 	return []spec{
 		{scenario: motionInRestrictedZone(), covers: []string{"motion", "analytics", "corroboration", "after-hours"}},
+		{scenario: typedPersonWithBagInRestrictedZone(), covers: []string{"typed", "person-with-bag", "restricted-zone"}},
 		{scenario: analyticsObjectCrossed(), covers: []string{"analytics"}},
 		{scenario: alarmLifecycle(), covers: []string{"alarm.created", "alarm.acknowledged", "alarm.closed"}},
 		{scenario: cameraOfflineOnline(), covers: []string{"device.camera_offline", "device.camera_online"}},
@@ -166,6 +167,47 @@ func motionInRestrictedZone() fixture.Scenario {
 			"Id": "sv-0003", "Type": "Servlets.State", "Timestamp": ts(2100),
 			"Source": "Loading Bay Door [DOR-004]", "Message": "Door opened",
 			"State": "Open",
+		}),
+	}
+	return sc
+}
+
+// typedPersonWithBagInRestrictedZone is the scenario for the TYPED rules.
+//
+// It is shaped like what the VMS emulator publishes: an `AnalyticData` subtree
+// naming the class the device's own analytics engine asserted, with the object
+// inside it. The adapter refines that class into a canonical event type, and
+// the rule for that type fires on the class ALONE -- no model, no observation,
+// no corroboration.
+//
+// That is the difference the typed rules exist to make, and a fixture is where
+// it is proved: the scenario carries no `Analytics` block and no second event,
+// so the incident it raises can only have come from the class.
+//
+// The camera is the loading bay's, because the rule's zone condition is the
+// restricted zone, and the restricted zone is where a person with a bag is
+// worth an operator's attention.
+func typedPersonWithBagInRestrictedZone() fixture.Scenario {
+	sc := base("typed-person-with-bag-restricted-zone",
+		"A person with a bag in the restricted zone, asserted by the VMS's own analytics engine.")
+	sc.Events = []fixture.Event{
+		env(eventsRoute, 0, map[string]any{
+			"Id": "mp-000100", "Type": "ObjectDetected", "Timestamp": ts(0),
+			"Source": "Loading Bay Door [DOR-004]", "Priority": "Normal",
+			"Message": "Object detected: person with bag",
+			"AnalyticData": map[string]any{
+				"Vendor":   "vision-detector/yolo11",
+				"RuleName": "object-detected",
+				"Object": map[string]any{
+					"Type": "ObjectDetected",
+					"Value": map[string]any{
+						"DeviceObject": map[string]any{"Id": "DOR-004"},
+						"Confidence":   0.87,
+						"ClassId":      "person_with_bag",
+						"ClassName":    "person-with-bag",
+					},
+				},
+			},
 		}),
 	}
 	return sc

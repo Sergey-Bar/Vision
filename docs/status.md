@@ -179,6 +179,17 @@ POC module's client wrote `/API/rest/v1` and the platform's adapter read
 lower-case spelling is the platform's own contract, so the POC moved, and a
 test pins the two together.
 
+**The bundle gate could not see a zone.** The simulation builds its signals from
+the adapter's records and left the ZONE empty, and every production rule in the
+shipped bundle filters on `zone.pathPrefix` — so the gate that exists to catch a
+bundle change reported "no change" for a change that would have differed only by
+zone, and the activation digest certified a behaviour that had never been
+evaluated. The simulation raised 2 incidents out of 29 outcomes; with the zone
+resolved it raises 11. The topology now lives in `internal/fixture`, which owns
+the scenarios, and the seeder and the simulation read the same table: the seed
+writes it into a real database and the simulation answers the same question the
+database answers in production.
+
 **What is NOT done.** The autonomy layer is still POC-only: `internal/threat`,
 `internal/anomaly` and `internal/correlation` are not in the product's
 pipeline, so the THREAT SCORE is not in the attention queue's ranking and the

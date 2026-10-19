@@ -136,6 +136,22 @@ func scenariosFromFixtures(ctx context.Context, dir string) ([]simulate.Scenario
 }
 
 // signalFromRecord maps a replayed source record into a rule-engine signal.
+//
+// The ZONE comes from the fixture site's topology, and that is the whole point
+// of this function having changed.
+//
+// The signal used to carry no zone at all, and a rule that filters on one
+// therefore never matched: every production rule in the shipped bundle filters
+// on `zone.pathPrefix`, so the simulation -- the gate every bundle change is
+// measured against -- reported all of them as dead. A bundle change that
+// differed only by zone came out as "no change", and the activation digest
+// certified a behaviour that had never been evaluated.
+//
+// The zone is resolved the way production resolves it: the source's device
+// reference names a device, the device is in a zone, and the zone has a path.
+// A device the fixture site does not know has no zone, which is the correct
+// answer -- "we do not know where this happened" and "it happened in the
+// restricted zone" are different facts.
 func signalFromRecord(r milestone.RawRecord) rules.Signal {
 	observed := r.ObservedAt
 	if observed.IsZero() {
@@ -144,12 +160,15 @@ func signalFromRecord(r milestone.RawRecord) rules.Signal {
 	var payload map[string]any
 	_ = json.Unmarshal(r.Envelope, &payload)
 
+	zoneID, zonePath, _ := fixture.ZonePathFor(r.SourceDeviceRef)
 	return rules.Signal{
 		EventID:       r.SourceEventID,
 		SourceEventID: r.SourceEventID,
 		EventType:     r.EventType,
 		NormalizedAt:  observed,
 		DeviceID:      r.SourceDeviceRef,
+		ZoneID:        zoneID,
+		ZonePath:      zonePath,
 		Tier:          rules.TierA,
 		Payload:       payload,
 	}

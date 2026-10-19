@@ -16,6 +16,17 @@
       ]
     },
     {
+      "name": "typed-person-with-bag-restricted-zone",
+      "file": "typed-person-with-bag-restricted-zone.json",
+      "hash": "5fb16fa1c2d7991d084dfb81300b9f781992df07dcf1fe82012452febccdd4ac",
+      "events": 1,
+      "covers": [
+        "typed",
+        "person-with-bag",
+        "restricted-zone"
+      ]
+    },
+    {
       "name": "analytics-object-crossed",
       "file": "analytics-object-crossed.json",
       "hash": "ef559948d5ef73c1c0a1790f9395f2a37e132023ed4919c29d91a302686b10c1",
