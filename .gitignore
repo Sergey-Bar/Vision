@@ -110,6 +110,12 @@ __pycache__/
 # it. The demo script references it by path and says so when it is absent.
 /Videos/
 
+# The detector's weights and the ONNX Runtime that runs them. Both are fetched
+# by ms-emulator fetch-model and ms-emulator fetch-runtime, both are
+# digest-pinned, and neither belongs in a commit: the runtime alone is
+# 2.4 GB of CUDA libraries.
+/models/
+
 # Another project entirely, which was sitting in this working tree. It is not
 # part of this product, and it must never enter this history.
 /product-scraper/

@@ -47,7 +47,7 @@ deliberate holiday buffer and carries no work.
 installation, with one AI-assisted operator workflow that a real operator
 actually prefers to the VMS workflow.
 
-State today: the deterministic spine is built and green — 100 Go packages,
+State today: the deterministic spine is built and green — 102 Go packages,
 27 forward-only migrations, 14 contracts, a hash-chained audit
 ledger, a fixture-driven replay path, a content-addressed evidence store, a
 rule engine with no shell, SQL, network, dynamic code or regex in the language,

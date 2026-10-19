@@ -303,6 +303,12 @@ func (b *Bundle) MarshalCanonical() ([]byte, error) {
 var KnownEventTypes = map[string]bool{
 	"motion": true, "analytics": true,
 	"analytics.restricted_person": true,
+	"analytics.person_with_bag":   true,
+	"analytics.vehicle":           true,
+	"analytics.animal":            true,
+	"analytics.bird":              true,
+	"analytics.drone":             true,
+	"analytics.balloon":           true,
 	"alarm.created":               true, "alarm.acknowledged": true, "alarm.closed": true,
 	"device.camera_offline": true, "device.camera_online": true, "device_state": true,
 	"recording.started": true, "recording.stopped": true,

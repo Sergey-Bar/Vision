@@ -117,6 +117,12 @@
             "enum": [
               "motion", "analytics",
               "analytics.restricted_person",
+              "analytics.person_with_bag",
+              "analytics.vehicle",
+              "analytics.animal",
+              "analytics.bird",
+              "analytics.drone",
+              "analytics.balloon",
               "alarm.created", "alarm.acknowledged", "alarm.closed",
               "device.camera_offline", "device.camera_online", "device_state",
               "recording.started", "recording.stopped",

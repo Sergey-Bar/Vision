@@ -258,6 +258,79 @@ var vendorSpellings = []struct {
 	{rawType: "GateEvent", want: "gate"},
 	{rawType: "GateOpen", want: "gate"},
 	{rawType: "GateClose", want: "gate"},
+
+	// The classes the analyticData refinement produces beyond the M1 one. Each
+	// is reachable because a VMS's analytics engine asserts it, and the
+	// assertion reaches the platform as an `AnalyticData` subtree naming the
+	// class. They are in this fixture because a class nobody's feed produces is
+	// a class the platform would refine into a typed event no incident ever
+	// turns on.
+	{rawType: "ObjectDetected", want: "analytics.person_with_bag",
+		item: map[string]any{
+			"AnalyticData": map[string]any{
+				"Object": map[string]any{
+					"Type": "ObjectDetected",
+					"Value": map[string]any{
+						"ClassId": "PersonWithBag", "ClassName": "person-with-bag",
+					},
+				},
+			},
+		}},
+	{rawType: "ObjectDetected", want: "analytics.vehicle",
+		item: map[string]any{
+			"AnalyticData": map[string]any{
+				"Object": map[string]any{
+					"Type": "ObjectDetected",
+					"Value": map[string]any{
+						"ClassId": "Vehicle", "ClassName": "vehicle",
+					},
+				},
+			},
+		}},
+	{rawType: "ObjectDetected", want: "analytics.animal",
+		item: map[string]any{
+			"AnalyticData": map[string]any{
+				"Object": map[string]any{
+					"Type": "ObjectDetected",
+					"Value": map[string]any{
+						"ClassId": "Animal", "ClassName": "animal",
+					},
+				},
+			},
+		}},
+	{rawType: "ObjectDetected", want: "analytics.bird",
+		item: map[string]any{
+			"AnalyticData": map[string]any{
+				"Object": map[string]any{
+					"Type": "ObjectDetected",
+					"Value": map[string]any{
+						"ClassId": "Bird", "ClassName": "bird",
+					},
+				},
+			},
+		}},
+	{rawType: "ObjectDetected", want: "analytics.drone",
+		item: map[string]any{
+			"AnalyticData": map[string]any{
+				"Object": map[string]any{
+					"Type": "ObjectDetected",
+					"Value": map[string]any{
+						"ClassId": "Drone", "ClassName": "drone",
+					},
+				},
+			},
+		}},
+	{rawType: "ObjectDetected", want: "analytics.balloon",
+		item: map[string]any{
+			"AnalyticData": map[string]any{
+				"Object": map[string]any{
+					"Type": "ObjectDetected",
+					"Value": map[string]any{
+						"ClassId": "Balloon", "ClassName": "balloon",
+					},
+				},
+			},
+		}},
 }
 
 // TestEveryTypeTheAdapterProducesIsKnown is the C3 test.

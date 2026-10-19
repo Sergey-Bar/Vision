@@ -89,12 +89,20 @@ func InputSize(shape []int64, layout string) (w, h int, err error) {
 				"run must say which, and it does not",
 		}
 	}
-	if w < 1 || h < 1 {
+	if w == 0 || h == 0 {
 		return 0, 0, &Refusal{
-			What:   "the model declares a non-positive spatial size",
+			What:   "the model declares a zero spatial size",
 			Detail: sprintf("%dx%d from %v in %s", w, h, shape, layout),
 		}
 	}
+	// A NEGATIVE spatial size is a dynamic axis, and a dynamic axis is not a
+	// refusal: it is the export saying "this input takes whatever size the run
+	// asks for". That is the normal shape of a modern YOLO export, and refusing
+	// it is the same inability the dynamic OUTPUT axes used to be.
+	//
+	// The negative is returned as it is, so the caller can tell a dynamic axis
+	// from a declared one, and the run's chosen size becomes a fact about the
+	// run rather than a fact about the model.
 	return w, h, nil
 }
 

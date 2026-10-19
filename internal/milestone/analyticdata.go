@@ -142,14 +142,32 @@ func parseAnalyticObject(item map[string]any) (analyticObject, bool) {
 // analyticCanonicalClasses is the closed table from a vendor class name to a
 // canonical event type.
 //
-// One entry, on purpose. `restricted-person` is the M1 incident class, and it
-// is the one the roadmap names: *"two of its three classes are now cheap
+// One entry, on purpose. `restricted-person` is the M1 incident class, and it is
+// the one the roadmap names: *"two of its three classes are now cheap
 // because `analyticData` made them deterministic rather than modelled."* A
 // second class is a decision with a rule behind it, not a default — and a
 // defaulted class is a fabricated fact wearing the vendor's authority, which is
 // the exact failure mode `eventtypes.go` refuses for GUIDs.
+//
+// Every entry below has a rule behind it in `rules/builtin/bundle.yaml`. That is
+// the condition, and it is checked by the rules gate: a class nobody has a rule
+// for is a class the platform will refine into a typed event that no incident
+// ever turns on, which is a fact the operator can see and act on and nothing
+// else does.
+//
+// The classes are the VMS's own analytics vocabulary, not a taxonomy the
+// platform invented. `person-with-bag` is the VMS's assertion that a bag was
+// inside a person's box in one frame; the platform refines that assertion into
+// a typed event and applies a rule to it. The platform never infers the
+// association itself, because the picture is not the platform's.
 var analyticCanonicalClasses = map[string]string{
 	"restricted-person": "analytics.restricted_person",
+	"person-with-bag":   "analytics.person_with_bag",
+	"vehicle":           "analytics.vehicle",
+	"animal":            "analytics.animal",
+	"bird":              "analytics.bird",
+	"drone":             "analytics.drone",
+	"balloon":           "analytics.balloon",
 }
 
 // analyticCanonicalClass maps a parsed object's class onto a canonical event

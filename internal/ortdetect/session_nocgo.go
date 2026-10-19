@@ -38,6 +38,9 @@ type InputSpec struct {
 	W, H   int
 	Layout string
 	Rank   int
+	// Dynamic mirrors the cgo build's: it says the export declares a variable
+	// spatial size, so the input size is the run's choice.
+	Dynamic bool
 }
 
 // OutputSpec mirrors the cgo build's.

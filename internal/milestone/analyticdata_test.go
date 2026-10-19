@@ -65,16 +65,22 @@ func TestARestrictedPersonAnalyticEventBecomesATypedEvent(t *testing.T) {
 
 // TestAnUnnamedAnalyticClassKeepsTheGenericAnalyticsType.
 //
-// The table has one entry because a second entry is a decision with a rule
-// behind it. A class the taxonomy does not name keeps the generic analytics
-// event it always had: the event is not lost, and nothing is guessed.
+// The table names the classes a rule exists for. A class the taxonomy does not
+// name keeps the generic analytics event it always had: the event is not lost,
+// and nothing is guessed.
+//
+// The class is unnamed in BOTH spellings, because the lookup falls back from
+// the class name to the class id. A "delivery van" whose id is "Vehicle" IS
+// named — the id is the stable identifier and the name is the site's — and
+// refusing to refine it would make the table's reachability depend on which
+// spelling a given vendor build happens to publish.
 func TestAnUnnamedAnalyticClassKeepsTheGenericAnalyticsType(t *testing.T) {
 	item := map[string]any{
 		"Id": "7f1c2a90-1111-4222-8333-abcdefabcdef", "Type": "ObjectDetected",
 		"AnalyticData": map[string]any{
 			"Object": map[string]any{
 				"Type":  "ObjectDetected",
-				"Value": map[string]any{"ClassId": "Vehicle", "ClassName": "delivery van"},
+				"Value": map[string]any{"ClassId": "DeliveryVan", "ClassName": "delivery van"},
 			},
 		},
 	}

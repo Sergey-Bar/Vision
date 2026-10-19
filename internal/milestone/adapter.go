@@ -257,9 +257,15 @@ func buildKnownEventTypes() map[string]bool {
 var normalizedEventTypes = []string{
 	"motion",
 	"analytics",
-	// The one class the analyticData refinement produces. The M1 incident
-	// class, deterministic rather than modelled: see analyticdata.go.
+	// The classes the analyticData refinement produces. The M1 incident class,
+	// deterministic rather than modelled: see analyticdata.go.
 	"analytics.restricted_person",
+	"analytics.person_with_bag",
+	"analytics.vehicle",
+	"analytics.animal",
+	"analytics.bird",
+	"analytics.drone",
+	"analytics.balloon",
 	"alarm.created",
 	"alarm.acknowledged",
 	"alarm.closed",

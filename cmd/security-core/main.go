@@ -627,11 +627,22 @@ func flatten(m map[string]any) []any {
 // milestoneBaseURL is the adapter's endpoint. It has no field on Config because
 // M1 supports one vendor and one integration, and inventing a setting for it now
 // is a setting somebody has to document and migrate later.
+//
+// The default is the SITE ROOT, not a path that ends in the API prefix.
+//
+// The adapter appends the prefix itself: `urlFor` joins the base with
+// `route.Path`, and every route path already begins with `/api/rest/v1`. So a
+// base of `http://127.0.0.1:8000/api` asks for
+// `http://127.0.0.1:8000/api/api/rest/v1/events`, and every poll 404s while the
+// adapter reports a quiet site rather than a wrong URL.
+//
+// The route audit records the same thing from the other side: the vendor's
+// documents put their paths after the host, so the host is the root.
 func milestoneBaseURL() string {
 	if v := strings.TrimSpace(os.Getenv("SP_MILESTONE_BASE_URL")); v != "" {
 		return strings.TrimRight(v, "/")
 	}
-	return "http://127.0.0.1:8000/api"
+	return "http://127.0.0.1:8000"
 }
 
 // milestoneToken is the adapter's bearer credential.

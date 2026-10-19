@@ -82,7 +82,15 @@ type InputSpec struct {
 	// cross-checked against SP_POC_DET_INPUT, because a wrong value letterboxes a
 	// frame into a square the model was not exported for and that is the most
 	// productive way to produce confident nonsense.
+	//
+	// A DYNAMIC export declares -1, and then W and H are the size the RUN chose
+	// rather than the size the export baked in. [Dynamic] says which it is, so
+	// a reader never has to guess whether 640 is the model's number or the
+	// operator's.
 	W, H int
+	// Dynamic says the export declares a variable spatial size, so the input
+	// size is the run's choice and is checked against nothing.
+	Dynamic bool
 	// Layout is `nchw` or `nhwc`, decided from the DECLARED shape by
 	// [DetectLayout] and never by convention.
 	//
@@ -281,13 +289,26 @@ func Open(cfg SessionConfig) (*Session, error) {
 	}
 	id.SHA256, id.Bytes = sum, size
 	if md, err := sess.GetModelMetadata(); err == nil {
-		id.RuntimeVersion = sprintf("%v", md)
+		// The runtime's VERSION, not the metadata's address.
+		//
+		// `sprintf("%v", md)` printed the pointer, and a pointer address is not a
+		// version: it changes every run, which makes two runs' identities
+		// incomparable and a recorded measurement unreproducible. The metadata
+		// carries the producer that wrote the graph and the version the graph
+		// declares, and both are facts about the model rather than about this
+		// process.
+		producer, _ := md.GetProducerName()
+		version, _ := md.GetVersion()
+		id.RuntimeVersion = sprintf("%s %d", producer, version)
 		_ = md.Destroy()
 	}
 
 	return &Session{
 		sess: sess, opts: opts,
-		input:    InputSpec{Name: inInfo[0].Name, W: int(w), H: int(h), Layout: layout, Rank: len(inInfo[0].Dimensions)},
+		input: InputSpec{
+			Name: inInfo[0].Name, W: int(w), H: int(h), Layout: layout,
+			Rank: len(inInfo[0].Dimensions), Dynamic: w < 0 || h < 0,
+		},
 		outputs:  outputs,
 		identity: id,
 	}, nil
@@ -317,6 +338,11 @@ func (s *Session) Identity() Identity { return s.identity }
 // is whatever the export baked in; letterboxing into a different square is the most
 // productive way to produce confident nonsense, and adjusting silently would mean
 // the operator's declared SP_POC_DET_INPUT was not what ran.
+//
+// A DYNAMIC export declares no size, and then the rule inverts: the run's size IS
+// the model's size, because the model takes whatever it is given. The size is
+// recorded on the session, so the run's own report names the number that was
+// used rather than the number the export would have preferred.
 func (s *Session) CheckInputSize(configured int) error {
 	if configured <= 0 {
 		return &Refusal{
@@ -324,6 +350,11 @@ func (s *Session) CheckInputSize(configured int) error {
 			Detail: sprintf("the model declares %dx%d; set the variable to that number so the run "+
 				"says out loud what it letterboxed into", s.input.W, s.input.H),
 		}
+	}
+	if s.input.Dynamic {
+		s.input.W = configured
+		s.input.H = configured
+		return nil
 	}
 	if configured != s.input.W || configured != s.input.H {
 		return &Refusal{

@@ -261,6 +261,138 @@ rules:
         - type: notify_operator
           target: on-call
 
+  # --- typed analytics rules --------------------------------------------------
+  #
+  # These match the CLASS the VMS's own analytics engine asserted, and they do
+  # not need an AI observation to do it.
+  #
+  # That is the point of the analyticData refinement: the vendor's analytics
+  # engine has already looked at the picture and said what it saw, so the
+  # platform's job is to decide what to DO about it, not to look again. The rules
+  # above, which match the generic analytics type and then ask a model what the
+  # detection was, are the shape the product had before the vendor said anything
+  # precise.
+  #
+  # The trade is explicit and it is the right one for a demo. A class-based rule
+  # fires on the vendor's assertion, so it is deterministic and instant; it is
+  # also exactly as good as the vendor's analytics engine. A model-based rule
+  # is independent of the vendor and it costs eight seconds and a GPU. Both are
+  # real, and the bundle carries both.
+  - id: core.typed.person-with-bag-in-restricted-zone
+    description: A person carrying a bag in a restricted zone, as the VMS's analytics engine asserted it.
+    enabled: true
+    priority: 470
+    tags: [production, object-detection, typed, person]
+    when:
+      all:
+        - eventType: [analytics.person_with_bag]
+        - zone:
+            pathPrefix: /restricted
+    then:
+      createIncident: true
+      severity: high
+      title: "Person with bag in a restricted zone"
+      dispatch:
+        - type: fetch_evidence
+          target: pre-event
+        - type: notify_operator
+          target: on-call
+
+  - id: core.typed.vehicle-outside-hours
+    description: A vehicle seen outside business hours, as the VMS's analytics engine asserted it.
+    enabled: true
+    priority: 445
+    tags: [production, object-detection, typed, vehicle]
+    when:
+      all:
+        - eventType: [analytics.vehicle]
+        - schedule:
+            id: business-hours
+            invert: true
+    then:
+      createIncident: true
+      severity: medium
+      title: "Vehicle outside business hours"
+      dispatch:
+        - type: fetch_evidence
+          target: pre-event
+        - type: notify_operator
+          target: on-call
+
+  - id: core.typed.drone-detected
+    description: A drone anywhere, as the VMS's analytics engine asserted it.
+    enabled: true
+    priority: 430
+    tags: [production, object-detection, typed, drone]
+    when:
+      eventType: [analytics.drone]
+    then:
+      createIncident: true
+      severity: high
+      title: "Drone detected"
+      dispatch:
+        - type: fetch_evidence
+          target: pre-event
+        - type: notify_operator
+          target: on-call
+
+  - id: core.typed.animal-detected
+    description: An animal in a monitored zone, as the VMS's analytics engine asserted it.
+    enabled: true
+    priority: 420
+    tags: [production, object-detection, typed, animal]
+    when:
+      all:
+        - eventType: [analytics.animal]
+        - zone:
+            pathPrefix: /perimeter
+    then:
+      createIncident: true
+      severity: low
+      title: "Animal detected"
+      dispatch:
+        - type: fetch_evidence
+          target: pre-event
+        - type: notify_operator
+          target: on-call
+
+  - id: core.typed.bird-detected
+    description: A bird in a monitored zone, as the VMS's analytics engine asserted it.
+    enabled: true
+    priority: 410
+    tags: [production, object-detection, typed, bird]
+    when:
+      all:
+        - eventType: [analytics.bird]
+        - zone:
+            pathPrefix: /perimeter
+    then:
+      createIncident: true
+      severity: low
+      title: "Bird detected"
+      dispatch:
+        - type: fetch_evidence
+          target: pre-event
+        - type: notify_operator
+          target: on-call
+
+  - id: core.typed.balloon-detected
+    description: A balloon anywhere, as the VMS's analytics engine asserted it.
+    enabled: true
+    priority: 405
+    tags: [production, object-detection, typed, balloon]
+    when:
+      eventType: [analytics.balloon]
+    then:
+      createIncident: true
+      severity: medium
+      title: "Balloon detected"
+      dispatch:
+        - type: fetch_evidence
+          target: pre-event
+        - type: notify_operator
+          target: on-call
+
   - id: core.animal-detected
     description: An animal detected in a monitored zone.
     enabled: true

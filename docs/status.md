@@ -1,6 +1,12 @@
 # Status
 
-Last revised 2026-10-14 (Wave 0: `internal/identity/keystore.go`'s permission
+Last revised 2026-10-19 (the VMS emulator, and the detector's move into the
+product module. The Milestone adapter had never spoken to anything: every claim
+the product made about a vendor had been a claim about code that had never been
+on both ends of a socket. `internal/emulator` is now the other end. See "The
+2026-10-19 pass: a VMS to talk to" below.)
+
+Previously 2026-10-14 (Wave 0: `internal/identity/keystore.go`'s permission
 check refused on every platform, and on Windows the condition was permanently
 unsatisfiable — so `security-seed` could not enrol an administrator's TOTP factor
 and no tenant could be seeded. Fixed, split by `runtime.GOOS`, red-checked as
@@ -83,6 +89,79 @@ flake, statuscheck and roadmap-check were added, so an older record's gate list
 is a statement about its own run rather than about today's script.
 `red-check` is 21 of 21 controls proved in 142 seconds; `statuscheck` is 1 second,
 because it checks freshness rather than rescanning 67 skills.
+
+### The 2026-10-19 pass: a VMS to talk to
+
+**What is built now, that was not built before.**
+
+`internal/emulator` and `cmd/vms-emulator`: a video management system. It plays
+local files, an RTSP camera or a YouTube URL as virtual cameras, runs the
+in-process ONNX detector over the frames on the GPU, publishes what it finds in
+the vendor's wire shape on the vendor's routes, and serves the media surface
+the platform cuts clips from.
+
+**Why it exists.** The Milestone adapter is written, tested and unexercised,
+because a Milestone is a year of procurement. Every claim the product made
+about a vendor — that an event arrives, that a class refines into a typed
+event, that a clip can be fetched for the moment an incident was raised — was a
+claim about code that had never spoken to anything. This is the other end of
+that socket.
+
+**The detector moved into the product module.** `internal/ortdetect`,
+`internal/classify`, `internal/sidecar`, `internal/aistate` and
+`internal/proposal` came out of `poc/active-monitoring`, which is a separate Go
+module and therefore could not see `internal/`. The module graph inverted: the
+root module no longer depends on the POC module, and the POC module depends on
+the root through `shared/` — a public face over each of those packages, because
+a module boundary is also a visibility boundary and the two halves of a wire
+contract cannot drift apart in two modules.
+
+**The model is a fused-head export, fetched by a digest-pinned command.**
+`vms-emulator fetch-model` downloads Ultralytics' YOLO11 nano and checks its
+SHA-256 against the one in the source. The export declares a DYNAMIC input
+size, which the detector now accepts: a dynamic export takes whatever size the
+run asks for, and the run's number is the fact that gets recorded. The refusal
+that used to be there was an inability wearing a refusal's clothes, which is
+what the POC's own RC-29 says about dynamic output axes.
+
+**The class table grew, and each entry has a rule behind it.**
+`analytics.person_with_bag`, `analytics.vehicle`, `analytics.animal`,
+`analytics.bird`, `analytics.drone` and `analytics.balloon` are now canonical
+event types, each with a rule in `rules/builtin/bundle.yaml` that turns it into
+an incident. The rules match the CLASS the VMS asserted and need no model, which
+is the point of the `analyticData` refinement: the vendor's analytics engine
+has already looked at the picture, and the platform's job is to decide what to
+DO about it, not to look again.
+
+**The person count is a fact and not an incident.** It travels as its own
+vendor-side class, `person-count`, with the count in the event's class id —
+which is the one field in that subtree the adapter's redaction allow-list
+permits, so a count anywhere else would be redacted on ingest and the platform
+would silently lose it. It is deliberately NOT in the platform's class table:
+a count of twelve is not an event, and a rule that turned one into an incident
+would be a rule that fires twelve times a minute.
+
+**A default URL that doubled the prefix is fixed.** The product's default
+`SP_MILESTONE_BASE_URL` was `http://127.0.0.1:8000/api`, and the adapter
+appends `/api/rest/v1` to whatever base it is given, so every poll asked for
+`/api/api/rest/v1/events`. The symptom was a working system that saw nothing.
+The base is now the site root.
+
+**The probe is clean against the emulator.** `securityctl adapter-probe
+--base-url http://127.0.0.1:8010` reports **17 route(s): 14 confirmed, 0
+contradicted, 0 unreachable, 3 skipped** — the three skipped being the
+write-side routes, which a read probe deliberately does not reach. All 17
+routes are still marked `Unverified`, because the probe never clears a flag; that
+stays a human editing `routes.go`.
+
+**What is NOT done.** The console has not been rebuilt: the SPA still proxies to
+a server that registers no `/v1` routes, and the live view still draws boxes
+the browser made up. The AI Operator's parts are still unwired. The smart
+search's embedding writer does not exist. The open-vocabulary model is not
+here: the class list is a parameter and the vocabulary is honest about being
+COCO-80, but the export that would name a drone or a balloon by prompt is not
+fetched, so those two classes have a rule behind them and nothing that produces
+them.
 
 ### `no-silent-skips`: the run that tested nothing is now a red gate
 
