@@ -474,9 +474,17 @@ if (-not $node) {
     try {
         if (-not (Test-Path -LiteralPath 'node_modules')) {
             Write-Host "    installing the SPA's dependencies (once)" -ForegroundColor DarkGray
-            & npm ci --no-audit --no-fund
+            $npmOutput = & npm ci --no-audit --no-fund 2>&1
             if ($LASTEXITCODE -ne 0) {
-                Invoke-Skip 'spa' 'the SPA dependencies could not be installed, so the type check, unit tests and build did not run'
+                # The reason is in the output, and it is printed: a skip that says
+                # only "it did not install" is a skip the next person has to
+                # reproduce to understand, and reproducing it is the whole cost of
+                # the gate.
+                $npmOutput | Select-Object -Last 10 | ForEach-Object {
+                    Write-Host "        $_" -ForegroundColor DarkGray
+                }
+                Invoke-Skip 'spa' ("the SPA dependencies could not be installed (npm ci exited $LASTEXITCODE), " +
+                                   'so the type check, unit tests and build did not run')
             }
         }
         if (Test-Path -LiteralPath 'node_modules') {
@@ -565,6 +573,22 @@ Invoke-Gate 'test' {
 # declaration that no longer fires, because an exemption for a test that was
 # deleted is an exemption for whatever gets named next.
 Invoke-Gate 'skip-audit' {
+    # A run with no database skipped the database-backed suites, and this gate
+    # exists to say so -- which is the CORRECT answer for a run that tested
+    # nothing. The gate is SKIPPED here rather than run, because the
+    # "no-silent-skips" gate below already records the same fact and records it
+    # in the run record, and a skip that is also a failure is a gate that fires
+    # on every contributor without a database and teaches them to pass
+    # -SkipNoDatabase everywhere.
+    #
+    # The difference matters: with a database the gate RUNS, and an undeclared
+    # skip in a run that could have tested something is a failure. Without one it
+    # is skipped VISIBLY, and the run's `verified` is false.
+    if (-not $env:SP_TEST_DATABASE_URL) {
+        Invoke-Skip 'skip-audit' ('no database: the database-backed suites declined to start, and every one of ' +
+                                  'them is an undeclared skip, which is what the no-silent-skips gate records')
+        return
+    }
     & $go run ./tools/skipaudit -input $testStream
     $global:LASTEXITCODE = $LASTEXITCODE
 }
@@ -945,7 +969,7 @@ Invoke-Gate 'red-check' {
             # inbox row written and the accepted counter moved from 0 to 1.
             name = 'an ingest pass with no site id writes nothing'
             file = 'internal/pipeline/pipeline.go'
-            from = '	if _, err := l.Deps.IngestScoped(); err != nil {'
+            from = '	if _, err := l.Deps.ingestScoped(); err != nil {'
             to   = '	if _, err := (*dbx.Tenant)(nil), error(nil); err != nil { // REDCHECK RC-12'
             test = 'TestAnIngestPassWithNoSiteIngestsNothing'
             pkg  = './internal/pipeline'

@@ -133,11 +133,32 @@ if ($LASTEXITCODE -ne 0) { Die "the migrations did not apply." }
 Say "the schema is up to date"
 
 # ------------------------------------------------------------------ the VMS
+Write-Host "Building the three programs" -ForegroundColor White
+#
+# Built, not `go run`. A `go run` compiles on the way in, and the operator is
+# watching a blank screen while it does; the first build of the day is a
+# minute, and the demo's first minute is the one the operator is judging.
+$bin = Join-Path $repoRoot "dist/demo"
+New-Item -ItemType Directory -Path $bin -Force | Out-Null
+& go build -o (Join-Path $bin "vms-emulator") ./cmd/vms-emulator
+if ($LASTEXITCODE -ne 0) { Die "the VMS emulator did not build." }
+& go build -o (Join-Path $bin "security-core") ./cmd/security-core
+if ($LASTEXITCODE -ne 0) { Die "the product did not build." }
+& go build -o (Join-Path $bin "console") ./web
+if ($LASTEXITCODE -ne 0) { Die "the console did not build." }
+Push-Location "web/spa"
+if (Test-Path -LiteralPath "node_modules") {
+    & npm run build | Out-Null
+} else {
+    Say "the SPA is not built (no node_modules in web/spa). The console will serve the last build."
+}
+Pop-Location
+Say "the three programs are built"
+
 Write-Host "Starting the VMS emulator" -ForegroundColor White
 $env:SP_VMS_LISTEN = "127.0.0.1:$VmsPort"
 $env:SP_VMS_TOKEN = ""
 $emulatorArgs = @(
-    "run", "./cmd/vms-emulator",
     "--listen", "127.0.0.1:$VmsPort",
     "--source", "entrance=file:$EntranceVideo",
     "--source", "street=file:$StreetVideo",
@@ -149,7 +170,7 @@ if (Test-Path -LiteralPath "models/yolo11n.onnx") {
 if ($ortLib) {
     $emulatorArgs += @("--ort-lib", $ortLib)
 }
-$emulator = Start-Process -FilePath "go" -ArgumentList $emulatorArgs -PassThru -NoNewWindow
+$emulator = Start-Process -FilePath (Join-Path $bin "vms-emulator") -ArgumentList $emulatorArgs -PassThru -NoNewWindow
 Say "the emulator is starting on port $VmsPort (pid $($emulator.Id))"
 
 # Wait for the vendor surface, because the daemon polls it and the first poll
@@ -182,22 +203,14 @@ if (Test-Path -LiteralPath "poc/sitemap.yaml") {
 }
 $env:SP_MILESTONE_TOKEN = ""
 New-Item -ItemType Directory -Path $env:SP_EVIDENCE_ROOT -Force | Out-Null
-$daemon = Start-Process -FilePath "go" -ArgumentList @("run", "./cmd/security-core") -PassThru -NoNewWindow
+$daemon = Start-Process -FilePath (Join-Path $bin "security-core") -PassThru -NoNewWindow
 Say "the product is starting on port $ApiPort (pid $($daemon.Id))"
 
 # ---------------------------------------------------------------- the console
 Write-Host "Starting the console" -ForegroundColor White
 $env:SP_API_URL = "http://127.0.0.1:$ApiPort"
 $env:SP_VMS_URL = "http://127.0.0.1:$VmsPort"
-Push-Location "web/spa"
-if (Test-Path -LiteralPath "node_modules") {
-    & npm run build | Out-Null
-    Pop-Location
-} else {
-    Pop-Location
-    Say "the SPA is not built (no node_modules in web/spa). The console will serve the last build."
-}
-$console = Start-Process -FilePath "go" -ArgumentList @("run", "./web") -PassThru -NoNewWindow -WorkingDirectory $repoRoot
+$console = Start-Process -FilePath (Join-Path $bin "console") -PassThru -NoNewWindow -WorkingDirectory $repoRoot
 Say "the console is starting on port $ConsolePort (pid $($console.Id))"
 
 # ------------------------------------------------------------------ the walk
