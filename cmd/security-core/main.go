@@ -58,6 +58,7 @@ import (
 	"github.com/Sergey-Bar/vision/internal/evidence"
 	"github.com/Sergey-Bar/vision/internal/evidencefetch"
 	"github.com/Sergey-Bar/vision/internal/graph"
+	"github.com/Sergey-Bar/vision/internal/identity"
 	"github.com/Sergey-Bar/vision/internal/inbox"
 	"github.com/Sergey-Bar/vision/internal/incidents"
 	"github.com/Sergey-Bar/vision/internal/jobs"
@@ -259,6 +260,11 @@ func run() error {
 	server := &api.Server{
 		Audit: writer, Log: log,
 		Tenant: cfg.Tenant,
+		// The configured principal. The console has no login, so the API runs as
+		// an identity that comes from configuration: a role and a site scope.
+		// The capability checks are real against it.
+		PrincipalRole:  identity.Role(cfg.PrincipalRole),
+		PrincipalSites: cfg.PrincipalSites,
 		// Secure is configuration, not a constant. It was hardcoded true, which
 		// marked the cookie Secure over a plaintext listener instead of letting
 		// config refuse the pairing. config refuses Secure=false on anything but a

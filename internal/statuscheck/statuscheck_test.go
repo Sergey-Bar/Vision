@@ -94,8 +94,8 @@ func TestDeriveCountsTheTreeDirectly(t *testing.T) {
 	// derives, and it is deliberate: a derivation that stops finding gates would
 	// make the document agree with a smaller tree, and only a number written out
 	// here notices that. Updating it is the cost of adding a gate.
-	if d.Gates != 33 {
-		t.Errorf("gates: got %d, want 33", d.Gates)
+	if d.Gates != 35 {
+		t.Errorf("gates: got %d, want 35", d.Gates)
 	}
 }
 

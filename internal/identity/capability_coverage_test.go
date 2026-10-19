@@ -32,15 +32,19 @@ var capUse = regexp.MustCompile(`\bCap[A-Z][A-Za-z0-9_]*`)
 //
 // Each entry is a capability the shipped role table grants and that nothing in
 // the tree checks. It is a list rather than a fix because two of them are
-// features being built by another participant: deleting CapIdentityManage or
-// CapIncidentEscalate here would remove the name a route under construction is
+// features being built by another participant: deleting CapIncidentEscalate or
+// CapSiteConfigure here would remove the name a route under construction is
 // going to use, and an agent may not deactivate a capability on the strength of
 // a search it ran rather than on a decision somebody signed. The list is a
 // record of that, not a permission: adding to it is a human decision, and the
 // test below is what makes adding to it visible rather than silent.
+//
+// CapIdentityManage is NOT on this list any more, and that is a fact rather
+// than an opinion: the console's identity surface -- `GET /v1/principal`, which
+// names the configured principal the API runs as -- gates on it. A capability
+// that is enforced is not debt.
 var capabilitiesDeclaredButNotYetEnforced = map[string]string{
 	"CapIncidentEscalate": "no route gates an escalation; it was never wired up",
-	"CapIdentityManage":   "the identity management surface gates on identity.* and is owned by another participant",
 	"CapSiteConfigure":    "no route gates site configuration",
 }
 

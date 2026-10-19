@@ -7,7 +7,9 @@
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+/* No web font. The font stack below names Inter first and the system's own
+   sans-serif after it, and a demo that cannot reach the network must not leave
+   a hole where the type was. */
 
 :root {
   /* Netflix cinematic black palette */
@@ -353,29 +355,14 @@ input, select, textarea {
   letter-spacing: 0.06em;
 }
 
-.bg-accent\/10 {
-  background-color: rgba(255, 59, 48, 0.1);
-}
-.border-accent\/30 {
-  border-color: rgba(255, 59, 48, 0.3);
-}
-
-/* Apple color utilities */
-.bg-apple-red {
-  background-color: var(--color-apple-red) !important;
-}
-.bg-apple-green {
-  background-color: var(--color-apple-green) !important;
-}
-.bg-apple-yellow {
-  background-color: var(--color-apple-yellow) !important;
-}
-.text-apple-red {
-  color: var(--color-apple-red) !important;
-}
-.text-apple-green {
-  color: var(--color-apple-green) !important;
-}
+/* The Apple colour utilities are gone from here.
+   They were hand-written copies of what Tailwind generates, with the rgba
+   values typed out a second time -- so a colour changed in :root left these
+   behind, and the pages that used them kept the old colour while the ones that
+   used the Tailwind class moved. The Tailwind config now reads the same
+   variables, so there is one definition of each colour and it is the variable.
+   The only hand-written colour left here is the button, which is a component
+   and not a utility. */
 .btn-apple-red {
   background: var(--color-apple-red);
   border-color: var(--color-apple-red);
@@ -386,36 +373,6 @@ input, select, textarea {
   border-color: var(--color-apple-red-hover);
   box-shadow: var(--shadow-glow);
   transform: translateY(-1px);
-}
-.shadow-apple-red\/50 {
-  box-shadow: 0 0 50px rgba(255, 59, 48, 0.5);
-}
-.shadow-apple-red\/40 {
-  box-shadow: 0 0 40px rgba(255, 59, 48, 0.4);
-}
-.shadow-apple-red\/30 {
-  box-shadow: 0 0 30px rgba(255, 59, 48, 0.3);
-}
-.shadow-apple-green\/20 {
-  box-shadow: 0 0 20px rgba(52, 199, 89, 0.2);
-}
-.shadow-apple-green\/30 {
-  box-shadow: 0 0 30px rgba(52, 199, 89, 0.3);
-}
-.border-apple-red {
-  border-color: var(--color-apple-red) !important;
-}
-.border-apple-red\/30 {
-  border-color: rgba(255, 59, 48, 0.3) !important;
-}
-.border-apple-green\/30 {
-  border-color: rgba(52, 199, 89, 0.3) !important;
-}
-.bg-apple-red\/10 {
-  background-color: rgba(255, 59, 48, 0.1);
-}
-.bg-apple-red\/5 {
-  background-color: rgba(255, 59, 48, 0.05);
 }
 .bg-apple-green\/10 {
   background-color: rgba(52, 199, 89, 0.1);

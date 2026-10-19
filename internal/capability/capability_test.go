@@ -122,9 +122,6 @@ var refusals = []refusal{
 	{table: "CapabilityEnforcement", item: "CapIncidentEscalate",
 		why: "no route gates an escalation, so the capability is declared and granted and " +
 			"nothing reads it"},
-	{table: "CapabilityEnforcement", item: "CapIdentityManage",
-		why: "the identity management surface is not built; the capability is granted by " +
-			"tenant_admin and enforced by no route"},
 	{table: "CapabilityEnforcement", item: "CapSiteConfigure",
 		why: "site configuration has no surface yet and no route names this capability"},
 

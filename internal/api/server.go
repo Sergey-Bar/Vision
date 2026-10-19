@@ -39,6 +39,24 @@ type Server struct {
 	// Tenant is the site this server serves. Single-site per install, so it is
 	// configuration rather than a routing decision.
 	Tenant string
+	// PrincipalRole is the role the configured principal holds.
+	//
+	// The console has no login, so the API runs as a principal that comes from
+	// CONFIGURATION rather than from a session. The role is what that principal
+	// is ALLOWED to do, and the capability checks below are real: a role without
+	// `evidence.fetch` does not fetch evidence, whatever the request says.
+	//
+	// It defaults to the tenant administrator, because an install with no
+	// identity configured has one identity and it is the one that administers.
+	// Narrowing it is a configuration change, not a code change.
+	PrincipalRole identity.Role
+	// PrincipalSites are the sites the configured principal may see.
+	//
+	// Empty means every site, which is the single-site install's case. A
+	// principal scoped to a site it is not assigned to is refused, and the
+	// refusal is the same answer as "no such incident" so the refusal does not
+	// disclose what exists.
+	PrincipalSites []string
 	// Handlers registers the API and console routes. Kept as a hook so this
 	// package owns the security properties and the application owns the routes.
 	Routes func(*http.ServeMux)
@@ -329,12 +347,26 @@ func (s *statusRecorder) WriteHeader(code int) {
 }
 
 // openPrincipal is the principal every request runs as when login is removed.
-// Open access: the configured tenant, no site restriction, no MFA gate, no
-// session. Every route is reachable by anyone who can reach the listener.
+//
+// The console has no login, so there is no session and no user. What there IS
+// is a CONFIGURED principal: a role and a site scope, both from configuration,
+// and the ledger attributes every action to it. That is a different thing from
+// an open door, and the difference is the capability checks below: the role
+// decides what the API may do, and a request cannot widen it.
+//
+// The default role is the tenant administrator, because an install that has not
+// configured an identity has one identity and it is the one that administers.
 func (s *Server) openPrincipal(_ *http.Request) identity.Principal {
+	role := s.PrincipalRole
+	if role == "" {
+		role = identity.RoleTenantAdmin
+	}
 	return identity.Principal{
-		TenantID:    s.Tenant,
-		MFAVerified: true,
+		TenantID:       s.Tenant,
+		Roles:          []identity.Role{role},
+		SiteScope:      s.PrincipalSites,
+		MFAVerified:    true,
+		ServiceAccount: true,
 	}
 }
 
@@ -346,23 +378,49 @@ func (s *Server) requirePrincipal(h func(http.ResponseWriter, *http.Request, ide
 	}
 }
 
-// requireCapability is the wrapper for a capability-gated handler. With login
-// removed it never denies.
-func (s *Server) requireCapability(_ identity.Capability, h func(http.ResponseWriter, *http.Request, identity.Principal)) http.HandlerFunc {
+// requireCapability is the wrapper for a capability-gated handler.
+//
+// The check is REAL. The console has no login, but the configured principal
+// still holds a role, and a role that does not hold the capability does not get
+// the route. An open door would be a different thing: it would mean the role
+// meant nothing, and a capability table that grants nothing is a role table
+// that lies.
+func (s *Server) requireCapability(c identity.Capability, h func(http.ResponseWriter, *http.Request, identity.Principal)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		h(w, r, s.openPrincipal(r))
+		p := s.openPrincipal(r)
+		if !p.Can(c) {
+			WriteError(w, http.StatusForbidden, "capability_denied",
+				"The configured principal does not hold "+string(c)+".", requestID(r))
+			return
+		}
+		h(w, r, p)
 	}
 }
 
-// requireCapabilityAtSite is requireCapability plus the site check. With login
-// removed it never denies.
+// requireCapabilityAtSite is requireCapability plus the site check.
+//
+// The site is resolved from the request -- the incident's own site, or the
+// camera's -- and the principal must be assigned to it. The refusal is 404
+// rather than 403, because "no such incident" and "not yours" are the same
+// answer and a different one is a disclosure.
 func (s *Server) requireCapabilityAtSite(
-	_ identity.Capability,
-	_ func(*http.Request, identity.Principal) string,
+	c identity.Capability,
+	siteOf func(*http.Request, identity.Principal) string,
 	h func(http.ResponseWriter, *http.Request, identity.Principal),
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		h(w, r, s.openPrincipal(r))
+		p := s.openPrincipal(r)
+		if !p.Can(c) {
+			WriteError(w, http.StatusForbidden, "capability_denied",
+				"The configured principal does not hold "+string(c)+".", requestID(r))
+			return
+		}
+		if site := siteOf(r, p); site != "" && !p.CanSeeSite(site) {
+			WriteError(w, http.StatusNotFound, "not_found",
+				"No such record, or you are not assigned to its site.", requestID(r))
+			return
+		}
+		h(w, r, p)
 	}
 }
 

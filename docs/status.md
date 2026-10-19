@@ -62,15 +62,15 @@ rather than the per-package **schema** the plan asked for, because migration 000
 hardcodes `public` and a per-schema harness would apply **no row-level security at
 all**; the reason is in R13.
 
-**Verification:** `scripts/verify.ps1` green - thirty-three gates: contract-check
+**Verification:** `scripts/verify.ps1` green - thirty-five gates: contract-check
 across all three published contract surfaces, vet, gofmt,
 `golangci-lint` (including gosec), the generated-code check,
 `go test -race -count=1 -json -coverprofile ./...`, skip-audit, no-silent-skips,
 cover-floor, dead-export, predicate-cov,
 red-check, migration-phases, sql-guard, rules-lint, the RLS canary,
-the Python runtime suite, and seven more named `tree-state`, `fuzz`, `flake`,
+the Python runtime suite, and nine more named `tree-state`, `fuzz`, `flake`,
 `roadmap-check`, `nl-hits-resolve` and `nl-replays-without-model`, `video-embed-audit`
-and `boot` -
+and `boot`, `spa` and `emulator-determinism` -
 against a real Postgres 16, with `SP_TEST_DATABASE_URL` set so the database-backed
 suites ran rather than skipped.
 `contractcheck` reports 25 messages and 22 enums compatible with the baseline, plus
@@ -80,7 +80,7 @@ races. The most recent dated run record is
 list of twenty-six, zero failed, zero skipped, against a real database -
 including `recovery-drill`, which is the gate that skips whenever the database
 variable is absent, and which is why a run without that variable is not evidence
-even when it is green. The thirty-three gates above are the names the script
+even when it is green. The thirty-five gates above are the names the script
 declares; the record's twenty-six are the ones that ran, the difference being
 `lint`, `generated-code` and `ai-runtime`, registered inside tool-present
 branches. The record before it carried 17 gates, before skip-audit,

@@ -316,3 +316,59 @@ func TestTheCountTravelsInTheClassID(t *testing.T) {
 		t.Errorf("the person count travelled as %q, want \"2\"", count.ClassID)
 	}
 }
+
+// TestTheSameFramesProduceTheSameEvents is the determinism the whole fixture
+// design exists to protect, applied to the device that now publishes them.
+//
+// Two runs over the same frames must produce the same events, byte for byte.
+// If they do not, then the demo is a performance rather than a system: the
+// numbers on the screen would describe the run rather than the site, and the
+// recorded session could not be replayed to check them.
+//
+// The clock is the emulator's, and it is FIXED here, so the only thing that
+// could make the two runs differ is the publishing itself.
+func TestTheSameFramesProduceTheSameEvents(t *testing.T) {
+	frames := [][]Detection{
+		{{Class: classPerson, Confidence: 0.91, X1: 0.10, Y1: 0.10, X2: 0.40, Y2: 0.80}},
+		{
+			{Class: classPerson, Confidence: 0.88, X1: 0.12, Y1: 0.12, X2: 0.42, Y2: 0.82},
+			{Class: "backpack", Confidence: 0.77, X1: 0.20, Y1: 0.40, X2: 0.32, Y2: 0.58},
+			{Class: classVehicle, Confidence: 0.66, X1: 0.60, Y1: 0.55, X2: 0.95, Y2: 0.75},
+		},
+		{{Class: classVehicle, Confidence: 0.71, X1: 0.55, Y1: 0.52, X2: 0.92, Y2: 0.74}},
+	}
+
+	publish := func() []string {
+		engine := startEmulator(t, fakeDetector{})
+		cam, ok := engine.camera("entrance")
+		if !ok {
+			t.Fatal("the camera was not created")
+		}
+		for _, dets := range frames {
+			engine.publish(cam, dets)
+		}
+		var out []string
+		for _, ev := range engine.eventsSince(time.Time{}) {
+			raw, err := json.Marshal(ev.envelope())
+			if err != nil {
+				t.Fatalf("encode an event: %v", err)
+			}
+			out = append(out, string(raw))
+		}
+		return out
+	}
+
+	first := publish()
+	second := publish()
+	if len(first) != len(second) {
+		t.Fatalf("the two runs published %d and %d events", len(first), len(second))
+	}
+	for i := range first {
+		if first[i] != second[i] {
+			t.Fatalf("event %d differs between two runs over the same frames:\n  %s\n  %s", i, first[i], second[i])
+		}
+	}
+	if len(first) == 0 {
+		t.Fatal("the runs published nothing, so the comparison proved nothing")
+	}
+}

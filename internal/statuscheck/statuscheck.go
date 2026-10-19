@@ -306,6 +306,7 @@ var gateWords = map[string]int{
 	"twenty-three": 23, "twenty-four": 24, "twenty-five": 25, "twenty-six": 26,
 	"twenty-seven": 27, "twenty-eight": 28, "twenty-nine": 29, "thirty": 30,
 	"thirty-one": 31, "thirty-two": 32, "thirty-three": 33,
+	"thirty-four": 34, "thirty-five": 35,
 }
 
 var gateCountRe = regexp.MustCompile(`(?i)\b((?:[a-z]+-)?[a-z]+)\s+gates\b`)

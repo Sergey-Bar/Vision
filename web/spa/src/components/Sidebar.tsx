@@ -1,10 +1,17 @@
 import { Link, useNavigate } from 'react-router-dom'
 import { useState } from 'react'
-import { Menu, LayoutGrid, Activity, ClipboardList, Video, ShieldAlert, Users, Settings, ChevronRight } from 'lucide-react'
+import { Menu, LayoutGrid, Activity, ClipboardList, Video, ShieldAlert, Users, Settings, ChevronRight, Gauge } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
+// The navigation.
+//
+// The first entry is the cockpit, because it is the home page and the
+// operator's first question. The live grid is a second entry rather than the
+// first, because the grid is one panel of the cockpit and a page of its own
+// only when the operator wants the grid full-size.
 const NAV = [
-  { href: '/', label: 'Live', icon: LayoutGrid },
+  { href: '/', label: 'Cockpit', icon: Gauge },
+  { href: '/live', label: 'Live', icon: LayoutGrid },
   { href: '/events', label: 'Events', icon: Activity },
   { href: '/incidents', label: 'Incidents', icon: ClipboardList },
   { href: '/clips', label: 'Clips', icon: Video },

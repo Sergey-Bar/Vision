@@ -1,6 +1,7 @@
 import { Outlet, useLocation, Routes, Route } from 'react-router-dom'
 import { TopBar } from './TopBar'
 import { Sidebar } from './Sidebar'
+import { CockpitPage } from '../pages/Cockpit'
 import { LivePage } from '../pages/Live'
 import { EventsPage } from '../pages/Events'
 import { IncidentsPage } from '../pages/Incidents'
@@ -20,7 +21,10 @@ export function Shell() {
       <TopBar />
       <Routes>
         <Route element={<Layout currentPath={location.pathname} />}>
-          <Route index element={<LivePage />} />
+          {/* The home page is the cockpit: the operator's first question is what
+              needs them now, and the answer is a page rather than a click. */}
+          <Route index element={<CockpitPage />} />
+          <Route path="live" element={<LivePage />} />
           <Route path="events" element={<EventsPage />} />
           <Route path="incidents" element={<IncidentsPage />} />
           <Route path="clips" element={<ClipsPage />} />

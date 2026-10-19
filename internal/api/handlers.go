@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -160,6 +161,18 @@ func (s *Server) RegisterRoutes(d Deps) func(*http.ServeMux) {
 		// policy: the policy is what the database enforces if the edge is missed, and
 		// this is what stops a caller who is not assigned from reaching the row at
 		// all.
+		// The principal route is gated on the identity capability.
+		//
+		// It is the console's own identity, and any caller may know who it is --
+		// but every route on this surface declares a capability, and a route that
+		// declares none is a route nobody reasoned about. The identity capability
+		// is granted to the tenant administrator alone, which is the right answer
+		// for a surface that says what the install may do.
+		mux.Handle("GET /v1/principal",
+			s.requireCapability(identity.CapIdentityManage, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handlePrincipal(w, r, p)
+			}))
+
 		mux.Handle("GET /v1/incidents",
 			s.requireCapability(identity.CapIncidentRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
 				s.handleIncidentList(w, r, p, d)
@@ -490,6 +503,43 @@ func splitScope(scope string) []string {
 	return out
 }
 
+// handlePrincipal says who the console is acting as.
+//
+// The console has no login, so there is no user to show. What there is a
+// CONFIGURED principal -- a role and a site scope, both from configuration --
+// and this route names it, so the console can say what it is acting as instead
+// of implying a person is sitting there.
+//
+// The capabilities are the role's, listed by name. A console that shows them is
+// a console that says what the install is allowed to do, which is the honest
+// thing for an operator to see and the reason the API's checks are real.
+//
+// It is not gated on a capability: every caller may read its own identity, and
+// a route that refuses to tell you who you are is not a capability check.
+func (s *Server) handlePrincipal(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+	roles := make([]string, 0, len(p.Roles))
+	for _, role := range p.Roles {
+		roles = append(roles, string(role))
+	}
+	caps := make([]string, 0)
+	for _, role := range p.Roles {
+		for _, c := range identity.CapabilitiesFor(role) {
+			caps = append(caps, string(c))
+		}
+	}
+	sort.Strings(caps)
+	WriteJSON(w, http.StatusOK, map[string]any{
+		"tenantId":     p.TenantID,
+		"roles":        roles,
+		"siteScope":    p.SiteScope,
+		"capabilities": caps,
+		// The console must never imply a person did something, so it says
+		// plainly that this is not a person.
+		"serviceAccount": p.ServiceAccount,
+	})
+}
+
+// handleIncidentList answers the incident feed.
 func (s *Server) handleIncidentList(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
 	site := r.URL.Query().Get("siteId")
 	if site != "" && !p.CanSeeSite(site) {

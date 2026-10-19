@@ -92,6 +92,24 @@ paths:
         "204": { description: Ended }
         "401": { $ref: "#/components/responses/Error" }
 
+  /v1/principal:
+    get:
+      tags: [identity]
+      summary: The principal the API is configured to act as
+      description: >
+        The console has no login, so there is no session and no user. This
+        route names the CONFIGURED principal the API runs as -- its tenant, its
+        role, the sites it is assigned to and the capabilities that role holds --
+        so the console can say what it is acting as instead of implying that a
+        person is sitting there. Every action in the audit ledger is attributed
+        to this principal.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Principal" }
+
   /v1/incidents:
     get:
       tags: [incidents]
@@ -711,6 +729,29 @@ components:
 
     IncidentState:
       enum: [OPEN, IN_REVIEW, DISPOSITIONED, CLOSED]
+
+    Principal:
+      type: object
+      additionalProperties: false
+      required: [tenantId, roles, capabilities, serviceAccount]
+      properties:
+        tenantId: { type: string }
+        roles:
+          type: array
+          items: { type: string }
+        siteScope:
+          type: array
+          items: { type: string }
+          description: The sites the principal is assigned to. Empty means every site.
+        capabilities:
+          type: array
+          items: { type: string }
+        serviceAccount:
+          type: boolean
+          description: >
+            Always true for the configured principal. The console has no login, so
+            there is no person to be; the ledger attributes every action to this
+            principal and the console says so rather than implying otherwise.
 
     IncidentSummary:
       type: object

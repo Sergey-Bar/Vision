@@ -453,6 +453,57 @@ if (-not $NoRace) {
     }
 }
 
+# The SPA's own gate.
+#
+# The console is a React application with its own type checker, its own test
+# runner and its own build, and until now none of them was in this script. A
+# gate list that leaves the console untested is a gate list that says the
+# console is fine when nobody has looked at it -- and the console is where the
+# demo is won or lost.
+#
+# The gate is skipped, VISIBLY, when node is absent: a skip is in the record
+# and `verified` is false whenever there is one, so a run without node cannot be
+# read as a clean bill of health. That is the same rule the rest of this script
+# follows, and the same reason.
+$node = Get-Command node -ErrorAction SilentlyContinue
+if (-not $node) {
+    Invoke-Skip 'spa' 'node is not on PATH; the SPA type check, unit tests and build did not run'
+    Write-Host "    SKIPPED: node is not on PATH. The SPA gate did not run; this is not a pass." -ForegroundColor Yellow
+} else {
+    Push-Location (Join-Path $repoRoot 'web/spa')
+    try {
+        if (-not (Test-Path -LiteralPath 'node_modules')) {
+            Write-Host "    installing the SPA's dependencies (once)" -ForegroundColor DarkGray
+            & npm ci --no-audit --no-fund
+            if ($LASTEXITCODE -ne 0) {
+                Invoke-Skip 'spa' 'the SPA dependencies could not be installed, so the type check, unit tests and build did not run'
+            }
+        }
+        if (Test-Path -LiteralPath 'node_modules') {
+            Invoke-Gate 'spa' {
+                & npx tsc --noEmit -p tsconfig.json
+                if ($LASTEXITCODE -ne 0) { return }
+                & npx vitest run
+                if ($LASTEXITCODE -ne 0) { return }
+                & npm run build
+            }
+        }
+    } finally {
+        Pop-Location
+    }
+}
+
+# The VMS emulator's own gate: a recorded session produces the same events on a
+# replay.
+#
+# The determinism the fixture design exists to protect, applied to the device
+# that now publishes the events: the same video, the same detector and the same
+# frame produce the same analytics, or the demo is a performance and not a
+# system. It runs without a GPU and without a model, because the thing being
+# proved is that the PUBLISHING is deterministic -- the frames are the
+# emulator's, and the detector's contribution is asserted elsewhere.
+Invoke-Gate 'emulator-determinism' { & $go test -p 1 -count=1 ./internal/emulator/... }
+
 # The suite runs with -json so that `skip-audit` below has something to read.
 #
 # `go test` reports a package whose every test skipped as `ok`, and on a machine

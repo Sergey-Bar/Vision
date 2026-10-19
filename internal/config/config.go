@@ -86,6 +86,21 @@ type Config struct {
 	SiteID        string
 	IntegrationID string
 
+	// PrincipalRole is the role the API's CONFIGURED principal holds.
+	//
+	// The console has no login: there is no session, no user and no second
+	// factor. What there is a configured identity, and this is its role. The
+	// API's capability checks are real against it, so the role decides what the
+	// console may do.
+	//
+	// The default is the tenant administrator. An install that has not
+	// configured an identity has one identity, and it is the one that
+	// administers.
+	PrincipalRole string
+	// PrincipalSites are the sites the configured principal may see. Empty means
+	// every site, which is the single-site install's case.
+	PrincipalSites []string
+
 	// Database is the connection policy. The password is not here.
 	Database dbx.Config
 
@@ -209,6 +224,17 @@ func LoadFrom(get Lookup) (Config, error) {
 	c.Tenant = strings.TrimSpace(get("SP_TENANT_ID"))
 	c.SiteID = strings.TrimSpace(get("SP_SITE_ID"))
 	c.IntegrationID = strings.TrimSpace(get("SP_INTEGRATION_ID"))
+	c.PrincipalRole = strings.TrimSpace(get("SP_PRINCIPAL_ROLE"))
+	if c.PrincipalRole == "" {
+		c.PrincipalRole = "tenant_admin"
+	}
+	// The sites the configured principal may see. Empty means every site, and
+	// the single-site install is the case where that is right.
+	for _, site := range strings.Split(get("SP_PRINCIPAL_SITES"), ",") {
+		if site = strings.TrimSpace(site); site != "" {
+			c.PrincipalSites = append(c.PrincipalSites, site)
+		}
+	}
 
 	c.Database = dbx.DefaultConfig()
 	if dsn := strings.TrimSpace(get("SP_DATABASE_URL")); dsn != "" {
