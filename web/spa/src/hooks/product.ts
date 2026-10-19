@@ -74,6 +74,44 @@ export interface Handover {
 // The ORDER is the product's. The console does not re-rank them: a queue the
 // console re-ranks is a queue whose order nobody can explain, and "why this,
 // why now" is a question about the product's decision, not about the panel.
+// The attention queue: the PRODUCT's ranked list, with the reason chain.
+//
+// It is one call, and the order is the product's. The console does not rank it
+// itself: two operators must see the same order for the same site, and a
+// console that ranked in the browser would give them two.
+export interface AttentionItem {
+  incidentId: string
+  siteId: string
+  state: string
+  severity: string
+  title: string
+  ruleId: string
+  createdAt: string
+  degraded: boolean
+  degradedReasons?: string[]
+  rank: number
+  why?: {
+    ruleId?: string
+    reasonCode?: string
+    replayedFromStoredFacts?: boolean
+    steps?: { key?: string; rule?: string; factor?: number; evidence?: string }[]
+  } | null
+  whyUnavailable?: string
+}
+
+export function useAttention(limit = 20) {
+  return useQuery({
+    queryKey: ['attention', limit],
+    queryFn: async () => {
+      const res = await get(`/v1/attention?limit=${limit}`)
+      const data = (await res.json()) as { items: AttentionItem[] }
+      return data.items ?? []
+    },
+    refetchInterval: 5_000,
+    retry: 1,
+  })
+}
+
 export function useIncidents(limit = 20) {
   return useQuery({
     queryKey: ['incidents', limit],

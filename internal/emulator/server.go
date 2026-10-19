@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Sergey-Bar/vision/internal/classify"
@@ -42,7 +43,12 @@ const controlPrefix = "/__control"
 type server struct {
 	engine *Engine
 	srv    *http.Server
-	ln     net.Listener
+
+	// mu guards ln. The listener is bound in `start` and read by `URL` from
+	// another goroutine, and a getter that every caller uses is a race
+	// everybody hits.
+	mu sync.RWMutex
+	ln net.Listener
 }
 
 // newServer builds the surface.
@@ -61,7 +67,9 @@ func (s *server) start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("emulator: listen on %s: %w", listen, err)
 	}
+	s.mu.Lock()
 	s.ln = ln
+	s.mu.Unlock()
 	mux := http.NewServeMux()
 	s.routes(mux)
 	s.srv = &http.Server{
@@ -85,7 +93,23 @@ func (s *server) start(ctx context.Context) error {
 // appends the prefix to the base it is given, and a base that already carries
 // it asks for `/api/api/rest/v1`. The route audit records this, and the
 // product's default was wrong because of it.
-func (s *server) URL() string { return "http://" + s.ln.Addr().String() }
+//
+// It is empty until the listener is bound. A caller that asks before that gets
+// an empty string rather than a panic: the listener is bound inside `start`,
+// and reading the address of a listener that does not exist yet is a nil
+// dereference dressed up as a getter.
+func (s *server) URL() string {
+	if s == nil {
+		return ""
+	}
+	s.mu.RLock()
+	ln := s.ln
+	s.mu.RUnlock()
+	if ln == nil {
+		return ""
+	}
+	return "http://" + ln.Addr().String()
+}
 
 // close stops the surface.
 func (s *server) close() {

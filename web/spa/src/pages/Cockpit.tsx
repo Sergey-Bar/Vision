@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Page, PageHeader } from '@/components/Shell'
 import { Search, Layout, Activity, ShieldAlert, Cpu } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { useIncidents, useIncidentExplanation, useHealth, useCoverage, useHandover, useEvidenceSearch } from '@/hooks/product'
+import { useAttention, useIncidents, useHealth, useCoverage, useHandover, useEvidenceSearch } from '@/hooks/product'
 import { useVMSCameras, useVMSState, vmsFrameUrl, type VMSCamera } from '@/hooks/vms'
 
 // The cockpit.
@@ -102,13 +102,15 @@ function StatusStrip() {
 }
 
 // The attention queue: what needs the operator, and why.
+//
+// It is ONE call, and the order is the product's. The reason chain is in the
+// same body, so the panel cannot show a queue whose order and whose reasons
+// came from two different places.
 function AttentionQueue() {
-  const { data: incidents, isError } = useIncidents(20)
-  const [openId, setOpenId] = useState<string | null>(null)
-  const { data: explanation } = useIncidentExplanation(openId)
+  const { data: items, isError } = useAttention(20)
 
-  if (isError) return <Unreachable what="The incident list" />
-  if (!incidents || incidents.length === 0) {
+  if (isError) return <Unreachable what="The attention queue" />
+  if (!items || items.length === 0) {
     return (
       <div className="rounded-2xl border border-white/10 bg-black/30 px-5 py-6 text-sm text-text-dim">
         Nothing needs the operator. The product raised no incident.
@@ -118,56 +120,56 @@ function AttentionQueue() {
 
   return (
     <div className="rounded-2xl border border-white/10 bg-black/30 divide-y divide-white/5 overflow-hidden">
-      {incidents.map((i) => {
-        const open = openId === i.incidentId
-        return (
-          <div key={i.incidentId} className="px-5 py-4">
-            <button
-              className="w-full text-left flex items-start gap-4"
-              onClick={() => setOpenId(open ? null : i.incidentId)}
-              aria-expanded={open}
-            >
-              <span
-                className={cn(
-                  'mt-1 w-2 h-2 rounded-full shrink-0',
-                  i.severity === 'high' ? 'bg-danger' : i.severity === 'medium' ? 'bg-warning' : 'bg-apple-blue',
-                )}
-              />
-              <span className="flex-1 min-w-0">
-                <span className="block text-sm font-black text-text truncate">{i.title}</span>
-                <span className="block text-[11px] text-text-dim mt-1">
-                  {i.siteId} · {i.ruleId} · {new Date(i.createdAt).toLocaleString()}
-                </span>
-              </span>
-              <span
-                className={cn(
-                  'shrink-0 text-[10px] font-black uppercase tracking-[0.12em] px-2 py-1 rounded-full border',
-                  i.state === 'open' ? 'border-danger/40 text-danger' : 'border-white/10 text-text-dim',
-                )}
-              >
-                {i.state}
-              </span>
-            </button>
-            {open && (
-              <div className="mt-3 ml-6 pl-4 border-l border-white/10 text-xs text-text-muted space-y-1">
-                {explanation?.reasons?.map((r, n) => (
-                  <p key={n}>{r}</p>
-                ))}
-                {explanation?.chain?.map((r, n) => (
-                  <p key={`c-${n}`} className="text-text-dim">{r}</p>
-                ))}
-                {explanation?.summary && <p className="text-text">{explanation.summary}</p>}
-                {i.degraded && (
-                  <p className="text-warning">
-                    Raised without the AI plane{i.degradedReasons?.length ? `: ${i.degradedReasons.join(', ')}` : ''}.
-                  </p>
-                )}
-                {!explanation && <p className="text-text-dim">The product is explaining it.</p>}
-              </div>
+      {items.map((i) => (
+        <div key={i.incidentId} className="px-5 py-4 flex items-start gap-4">
+          <span className="mt-0.5 w-6 shrink-0 text-[11px] font-black text-text-dim">{i.rank}</span>
+          <span
+            className={cn(
+              'mt-1.5 w-2 h-2 rounded-full shrink-0',
+              i.severity === 'critical' || i.severity === 'high'
+                ? 'bg-danger'
+                : i.severity === 'medium'
+                  ? 'bg-warning'
+                  : 'bg-apple-blue',
             )}
-          </div>
-        )
-      })}
+          />
+          <span className="flex-1 min-w-0">
+            <span className="block text-sm font-black text-text truncate">{i.title}</span>
+            <span className="block text-[11px] text-text-dim mt-1">
+              {i.siteId} · {i.ruleId} · {new Date(i.createdAt).toLocaleString()}
+            </span>
+            {i.why?.steps && i.why.steps.length > 0 && (
+              <span className="block mt-2 space-y-1">
+                {i.why.steps.map((s, n) => (
+                  <span key={n} className="block text-[11px] text-text-muted">
+                    {s.evidence ? `${s.evidence} — ` : ''}
+                    {s.rule ?? s.key}
+                  </span>
+                ))}
+              </span>
+            )}
+            {i.whyUnavailable && (
+              <span className="block mt-1 text-[11px] text-warning">
+                The product could not explain this one: {i.whyUnavailable}
+              </span>
+            )}
+            {i.degraded && (
+              <span className="block mt-1 text-[11px] text-warning">
+                Raised without the AI plane
+                {i.degradedReasons?.length ? `: ${i.degradedReasons.join(', ')}` : ''}.
+              </span>
+            )}
+          </span>
+          <span
+            className={cn(
+              'shrink-0 text-[10px] font-black uppercase tracking-[0.12em] px-2 py-1 rounded-full border',
+              i.state === 'open' ? 'border-danger/40 text-danger' : 'border-white/10 text-text-dim',
+            )}
+          >
+            {i.severity}
+          </span>
+        </div>
+      ))}
     </div>
   )
 }

@@ -221,7 +221,12 @@ func (e *Engine) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// The server is published BEFORE the listener is bound, so a caller that
+	// asks for the URL gets an empty string until the surface is up rather than
+	// a race on the pointer.
+	e.mu.Lock()
 	e.server = srv
+	e.mu.Unlock()
 	if err := srv.start(ctx); err != nil {
 		return err
 	}
@@ -242,7 +247,15 @@ func (e *Engine) Run(ctx context.Context) error {
 }
 
 // URL is the address of the vendor surface.
+//
+// It is empty until the surface is listening. The server is published under
+// the lock, because a caller that asks for the URL while the engine is
+// starting would otherwise read a half-published pointer -- which is a data
+// race, and a race in a getter that every caller uses is a race everybody
+// hits.
 func (e *Engine) URL() string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
 	if e.server == nil {
 		return ""
 	}

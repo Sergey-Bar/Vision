@@ -177,6 +177,15 @@ func (s *Server) RegisterRoutes(d Deps) func(*http.ServeMux) {
 			s.requireCapability(identity.CapIncidentRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
 				s.handleIncidentList(w, r, p, d)
 			}))
+
+		// The attention queue: one ranked list of what needs the operator, with
+		// the reason chain. It is served here rather than assembled by the
+		// console, because two operators must see the same order for the same
+		// site.
+		mux.Handle("GET /v1/attention",
+			s.requireCapability(identity.CapIncidentRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleAttention(w, r, p, d)
+			}))
 		mux.Handle("GET /v1/incidents/{id}",
 			s.requireCapabilityAtSite(identity.CapIncidentRead, siteOfIncident(d),
 				func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
@@ -580,6 +589,107 @@ func (s *Server) handleIncidentList(w http.ResponseWriter, r *http.Request, p id
 	})
 }
 
+// handleAttention answers the queue: what needs the operator, in what order,
+// and why.
+//
+// It is served by the PRODUCT and not by the console, and that is the point. A
+// console that ranked the queue itself would be ranking it in the BROWSER, and
+// two operators would then see two different orders for the same site -- which
+// is the same defect as a product whose rules ran in the console.
+//
+// The ORDER is the product's: severity first, then recency. A queue that
+// ranked by recency alone would put a critical incident from last week above a
+// high one from ten minutes ago, and an operator would learn to ignore the
+// order.
+//
+// The THREAT SCORE is not in the ranking yet, and its absence is stated rather
+// than hidden: the score comes from the autonomy layer's scorer over a
+// CORRELATED incident, and the correlation does not run in the product's
+// pipeline yet. When it does, the score joins the ranking here.
+//
+// The reason chain comes from the incident's REPLAY -- the product re-evaluating
+// the decision from the stored facts, under the bundle that made it. It is the
+// same replay the explanation route serves, so the queue and the explanation
+// cannot disagree.
+func (s *Server) handleAttention(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
+	limit := parseLimit(r.URL.Query().Get("limit"), 20, 50)
+	scope := strings.Join(p.SiteScope, ",")
+	items, _, err := d.Incidents.ListWithCursor(r.Context(), p.TenantID, scope, "", limit, "open", nil)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "list_failed", err.Error(), requestID(r))
+		return
+	}
+	// The active bundle, once, for every replay. It is rebuilt per call rather
+	// than cached, for the reason the explanation route gives: an explanation
+	// from a bundle the operator has rolled back is worse than no explanation.
+	bundle, bundleErr := s.activeBundle(r, p, d)
+
+	queue := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		entry := map[string]any{
+			"incidentId": item.IncidentID,
+			"siteId":     item.SiteID,
+			"state":      item.State,
+			"severity":   item.Severity,
+			"title":      item.Title,
+			"ruleId":     item.RuleID,
+			"createdAt":  item.CreatedAt,
+			"degraded":   item.Degraded,
+		}
+		if item.Degraded {
+			entry["degradedReasons"] = item.DegradedReasons
+		}
+		if bundleErr == nil {
+			ex, err := d.Incidents.Replay(r.Context(), incidents.ReplayInputs{
+				TenantID: p.TenantID, IncidentID: item.IncidentID, Bundle: bundle,
+			})
+			if err != nil {
+				// A queue item with no reason chain is still an item. The chain
+				// is missing, not the incident, and dropping the incident would
+				// hide the very thing the operator needed to see.
+				entry["why"] = nil
+			} else {
+				entry["why"] = ex
+			}
+		} else {
+			entry["why"] = nil
+			entry["whyUnavailable"] = bundleErr.Error()
+		}
+		queue = append(queue, entry)
+	}
+	// The severity order, then the recency. The list arrives newest-first, and
+	// a stable sort keeps that order inside a severity.
+	sort.SliceStable(queue, func(i, j int) bool {
+		return severityRank(queue[i]["severity"]) > severityRank(queue[j]["severity"])
+	})
+	for i, entry := range queue {
+		entry["rank"] = i + 1
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"items": queue})
+}
+
+// severityRank orders the severities.
+//
+// The order is a decision and it is written down: critical, high, medium, low,
+// info. An unknown severity sorts BELOW info rather than above it, because a
+// severity nobody has heard of is not a reason to put an incident first.
+func severityRank(severity any) int {
+	switch strings.ToLower(fmt.Sprint(severity)) {
+	case "critical":
+		return 5
+	case "high":
+		return 4
+	case "medium":
+		return 3
+	case "low":
+		return 2
+	case "info":
+		return 1
+	default:
+		return 0
+	}
+}
+
 func (s *Server) handleIncidentGet(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
 	id := r.PathValue("id")
 	detail, err := d.Incidents.Get(r.Context(), p.TenantID, id)
@@ -597,7 +707,7 @@ func (s *Server) handleIncidentGet(w http.ResponseWriter, r *http.Request, p ide
 	// The attention producer, BEFORE the body: the same ordering and the same
 	// failure answer `auditEvidenceFetched` uses. A read that answers and then
 	// fails to record that it was read is the invisible gap this row exists to
-	// close â€” attention_minutes is the North Star numerator, and a producer that
+	// close — attention_minutes is the North Star numerator, and a producer that
 	// can fail silently under-counts it with nothing anywhere saying so.
 	//
 	// The site is deliberately not a parameter: the row is about the incident and

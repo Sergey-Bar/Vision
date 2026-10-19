@@ -110,6 +110,42 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Principal" }
 
+  /v1/attention:
+    get:
+      tags: [incidents]
+      summary: The attention queue
+      description: >
+        One ranked list of what needs the operator now, with the reason chain for
+        each. The order is the product's -- severity first, then recency -- and
+        the reason chain is the incident's own replay: the product re-evaluating
+        the decision from the stored facts under the bundle that made it. Two
+        operators therefore see the same order for the same site, which is the
+        reason this is served by the product rather than assembled by a console.
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 20 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: "#/components/schemas/IncidentSummary"
+                        - type: object
+                          properties:
+                            rank: { type: integer }
+                            why:
+                              type: [object, "null"]
+                              description: The incident's replay, or null when it could not be produced.
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
   /v1/incidents:
     get:
       tags: [incidents]
