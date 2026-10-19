@@ -54,6 +54,7 @@ import (
 	"github.com/Sergey-Bar/vision/internal/correlator"
 	"github.com/Sergey-Bar/vision/internal/dbx"
 	"github.com/Sergey-Bar/vision/internal/dispatch"
+	"github.com/Sergey-Bar/vision/internal/embeddings"
 	"github.com/Sergey-Bar/vision/internal/eventsearch"
 	"github.com/Sergey-Bar/vision/internal/evidence"
 	"github.com/Sergey-Bar/vision/internal/evidencefetch"
@@ -133,6 +134,20 @@ func run() error {
 	defer func() { _ = transport.Close() }()
 
 	adapter := milestone.New(transport, cfg.SiteID, cfg.IntegrationID)
+
+	// Does this database have pgvector?
+	//
+	// The free-text search needs it for the vector path, and the search's
+	// WRITE needs it for the column's type. A database without it gets a
+	// degraded search -- the keyword path over the same document -- and an
+	// ingest that is not degraded, because a missing vector is a missing
+	// RANKING and not a missing record.
+	hasVector := false
+	if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector')`).Scan(&hasVector); err != nil {
+		log.Warn("could not tell whether this database has pgvector; the free-text search will use the keyword path only", "error", err.Error())
+	} else if !hasVector {
+		log.Warn("this database has no pgvector, so the free-text search ranks by keyword and the vector path is unavailable")
+	}
 
 	correlatorSvc := &correlator.Correlator{Pool: pool}
 	incidentsSvc := &incidents.Service{Pool: pool, Audit: writer}
@@ -289,7 +304,12 @@ func run() error {
 		// the same capability the incident pages carry. Wired here because the
 		// pool the API already holds is the pool it queries, and a service that
 		// needed its own would be a second connection count for one SELECT.
-		EventSearch: &eventsearch.Service{Pool: pool},
+		//
+		// The embedder is the same one the writer uses, so the vector a search
+		// compares against is computed by the same code that computed the one
+		// it is compared to. Two embedders that disagreed would produce a
+		// ranking that is confidently wrong.
+		EventSearch: &eventsearch.Service{Pool: pool, Embed: embeddings.Embedder{}},
 		DeadLetters: api.DeadLetters{Inbox: inboxSvc, Jobs: jobWorker},
 		// The coverage panel's counts. Supplied here rather than inside `internal/api`
 		// because these tables belong to the packages that own them, and a COUNT over
@@ -347,8 +367,14 @@ func run() error {
 
 	loops := pipeline.Start(ctx, pipeline.Deps{
 		Pool: pool, Log: log, Metrics: registry,
-		Adapter: adapter, Inbox: inboxSvc, Normal: normalize.New(pool),
-		Graph: &graph.Service{Pool: pool}, Correlat: correlatorSvc,
+		Adapter: adapter, Inbox: inboxSvc,
+		// The normalizer carries the search writer, and the writer carries the
+		// answer to "does this database have pgvector". Without the extension
+		// there is no `vector` type, so the write would fail; with it, every
+		// canonical event gets a row the free-text search can find, written in
+		// the same transaction as the event itself.
+		Normal: normalize.New(pool).WithEmbeddings(&embeddings.Writer{Enabled: hasVector}),
+		Graph:  &graph.Service{Pool: pool}, Correlat: correlatorSvc,
 		Incidents: incidentsSvc, Bundles: bundlesSvc, Enqueuer: jobs.New(pool),
 		Tenant: cfg.Tenant, SiteID: cfg.SiteID, IntegrationID: cfg.IntegrationID,
 		// The evidence volume, so `evidence_disk_free_percent` measures the

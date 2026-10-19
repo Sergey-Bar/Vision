@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -34,6 +35,7 @@ import (
 	"github.com/Sergey-Bar/vision/internal/clocksub"
 	securityv1 "github.com/Sergey-Bar/vision/internal/contracts/securityv1"
 	"github.com/Sergey-Bar/vision/internal/dbx"
+	"github.com/Sergey-Bar/vision/internal/embeddings"
 	"github.com/Sergey-Bar/vision/internal/inbox"
 )
 
@@ -118,11 +120,30 @@ type Normalizer struct {
 	// can pin ids, and so a future scheme change is one field rather than a
 	// rewrite of every call site.
 	IDGenerator func(key inbox.Key) string
+	// embeddings writes the search row for each canonical event, inside the
+	// same transaction as the event itself.
+	//
+	// A nil writer means the search rows are not written, and the free-text
+	// search then answers "unavailable" -- which is what it did for as long as
+	// the table existed and nothing wrote it. A writer with Enabled=false means
+	// the database has no pgvector, and the ingest continues: the search is
+	// degraded, the record is not.
+	embeddings *embeddings.Writer
 }
 
 // New builds a normalizer.
 func New(pool *dbx.Pool) *Normalizer {
 	return &Normalizer{Pool: pool}
+}
+
+// WithEmbeddings attaches the search writer.
+//
+// It is an option rather than a constructor argument because the writer needs
+// to know whether the database has pgvector, and that is a question about the
+// database rather than about the normalizer.
+func (n *Normalizer) WithEmbeddings(w *embeddings.Writer) *Normalizer {
+	n.embeddings = w
+	return n
 }
 
 // Normalize converts one inbox event and completes its lease in the same
@@ -236,9 +257,57 @@ func (n *Normalizer) Normalize(ctx context.Context, in Input) (Result, error) {
 		}
 		result.EventID = storedEventID
 		result.IntegrityHash = integrity
+		// The search row, in the SAME transaction as the event.
+		//
+		// Inside the transaction is the point: there is no window in which the
+		// event exists and its search row does not, and none in which a search
+		// row exists without its event. A write after the commit would have
+		// both: a crash between the two would leave an event the search could
+		// never find, and the search would report a quiet record.
+		if err := n.embeddings.Write(ctx, tx, in.Key.TenantID, storedEventID, embeddings.Document(
+			in.EventType, in.DeviceID, in.ZoneID, labelOf(in))); err != nil {
+			return err
+		}
 		return n.completeInbox(ctx, tx, in, storedEventID)
 	})
 	return result, err
+}
+
+// labelOf reads a human-readable label out of an event's payload.
+//
+// It is a best effort on purpose, and it never fails the event: the label is
+// what makes an event findable by a word, and an event whose payload has no
+// label is still an event. The fields it looks for are the ones a source
+// actually uses for a name, and the first one that is a non-empty string wins.
+func labelOf(in Input) string {
+	if len(in.Payload) == 0 {
+		return ""
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(in.Payload, &payload); err != nil {
+		return ""
+	}
+	for _, key := range []string{"label", "className", "class_name", "class", "title", "name", "objectType"} {
+		if v, ok := payload[key].(string); ok {
+			if v = strings.TrimSpace(v); v != "" {
+				return v
+			}
+		}
+	}
+	// A nested analyticData object carries the class name, which is the label
+	// that matters for a VMS's own analytics.
+	if analytic, ok := payload["analyticData"].(map[string]any); ok {
+		if object, ok := analytic["object"].(map[string]any); ok {
+			if value, ok := object["value"].(map[string]any); ok {
+				if v, ok := value["className"].(string); ok {
+					if v = strings.TrimSpace(v); v != "" {
+						return v
+					}
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // completeInbox is the only place an inbox event reaches its terminal state on

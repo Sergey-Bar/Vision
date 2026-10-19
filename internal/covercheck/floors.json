@@ -14,6 +14,38 @@
   "mode": "atomic",
   "margin": 2,
   "floors": {
+    "internal/aistate": {
+      "percent": 88.9,
+      "measured": "2026-10-19"
+    },
+    "internal/classify": {
+      "percent": 93.8,
+      "measured": "2026-10-19"
+    },
+    "internal/embeddings": {
+      "percent": 78.8,
+      "measured": "2026-10-19"
+    },
+    "internal/emulator": {
+      "percent": 48.3,
+      "measured": "2026-10-19"
+    },
+    "internal/nlp": {
+      "percent": 97.3,
+      "measured": "2026-10-19"
+    },
+    "internal/ortdetect": {
+      "percent": 55.2,
+      "measured": "2026-10-19"
+    },
+    "internal/proposal": {
+      "percent": 71.4,
+      "measured": "2026-10-19"
+    },
+    "internal/sidecar": {
+      "percent": 89.1,
+      "measured": "2026-10-19"
+    },
     "internal/airuntime": {
       "percent": 34.2,
       "measured": "2026-10-13"
@@ -305,6 +337,7 @@
     }
   },
   "excluded": [
+    "web/spa/node_modules/",
     "cmd/",
     "tools/",
     "migrations/",

@@ -7,7 +7,7 @@ incidents, and records everything in a hash-chained audit ledger.
 
 This file is for two readers: a new engineer on day one, and an AI agent with no
 prior context. It answers *where things are* and *what each package is for* so
-neither of you has to open 102 packages to find out.
+neither of you has to open 103 packages to find out.
 
 It is a map, not an architecture document. It does not restate build state —
 `docs/status.md` is the only source of truth for that — and it does not restate
@@ -88,6 +88,7 @@ Only five do. Everything else reaches the ledger through its caller.
 | `dutylog` | The hand-over artifact: one append-only, hash-chained JSONL file per shift, fsynced before the decision it records is broadcast. Pure: a path and a clock in, a tamper-evident log out | present | no | `dutylog.Open`, `Writer.Append`, `Writer.Verify`, `dutylog.ReadAll`, `Extract`, `Event` |
 | `evaluation` | Scores a VLM profile against labelled cases and decides promotion, with the gates as code | observe | no | `evaluation.Evaluate`, `evaluation.Gates`, `Runner`, `Case` |
 | `embedaudit` | The C7 gate: a schema-level assertion that no person/plate/face-crop/credential vector can exist in the contract surfaces. The embeddings ADR remains E1's; this makes the closed part structurally true | observe | no | `embedaudit.Scan`, `embedaudit.SensitiveSubjects`, `embedaudit.Finding` |
+| `embeddings` | The search writer: the searchable document for a canonical event and the vector over it, written in the same transaction as the event. The vector is a hashed bag of words — deterministic, model-free, and lexical — and it says so in the `model` column | observe | no | `embeddings.Document`, `embeddings.Embed`, `embeddings.Writer`, `embeddings.Embedder` |
 | `emulator` | A VMS. It plays video through ffmpeg, runs the in-process detector over the frames on the GPU, publishes what it finds in the vendor's wire shape on the vendor's routes, and serves the media surface the platform cuts clips from. It is the other end of the adapter's socket, and it deliberately does not import the adapter: a device that shared a constant with the platform would agree with it by construction, which is the agreement the probe exists to check | observe (vendor side) | no | `emulator.Engine`, `emulator.New`, `emulator.Options`, `emulator.Source` |
 | `evidence` | Content-addressed filesystem store. The only code that touches the evidence root | store | no (the API audits `evidence.fetched`) | `evidence.Store`, `New`, `ValidateRef`, `Store.Put`, `Store.Open` |
 | `evidencefetch` | The `QueueEvidenceFetch` worker: places Milestone bookmarks, fetches clips, stores receipts | observe | no (the worker audits `evidence.bookmark.*`) | `evidencefetch.Worker`, `Worker.Handle`, `evidencefetch.Receipt` |

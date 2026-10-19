@@ -27,7 +27,7 @@ Write-Host "Checking Postgres container sp-pg..." -ForegroundColor Cyan
 $existing = docker ps --format '{{.Names}}' | Where-Object { $_ -eq 'sp-pg' }
 if (-not $existing) {
     Write-Host "Starting Postgres container on port 55432..." -ForegroundColor Cyan
-    docker run -d --name sp-pg -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=security_test -p 55432:5432 postgres:16 -c max_connections=300 | Out-Null
+    docker run -d --name sp-pg -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=security_test -p 55432:5432 pgvector/pgvector:pg16 -c max_connections=300 | Out-Null
     Write-Host "Waiting for Postgres to be ready..." -ForegroundColor Cyan
     for ($i = 0; $i -lt 30; $i++) {
         $ready = docker exec sp-pg pg_isready -U postgres 2>$null

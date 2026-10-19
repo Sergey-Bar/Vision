@@ -108,7 +108,7 @@ if ($running -eq $container) {
     docker rm -f $container 2>$null | Out-Null
     docker run -d --name $container `
         -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=vision_demo `
-        -p "${DatabasePort}:5432" postgres:16 -c max_connections=300 | Out-Null
+        -p "${DatabasePort}:5432" pgvector/pgvector:pg16 -c max_connections=300 | Out-Null
     Say "the container is up on port $DatabasePort"
 }
 
