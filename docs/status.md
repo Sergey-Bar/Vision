@@ -183,7 +183,20 @@ test pins the two together.
 `internal/anomaly` and `internal/correlation` are not in the product's
 pipeline, so the THREAT SCORE is not in the attention queue's ranking and the
 anomaly rules do not run. The queue ranks by severity and then recency, and
-the handler says so rather than hiding it. The open-vocabulary model is not
+the handler says so rather than hiding it.
+
+The reason it is not a wiring job is worth recording, because it looks like
+one. The anomaly rules run over TRACKED entities -- something that stayed in a
+zone for fifteen seconds -- and tracking needs the box geometry. The
+adapter's redaction allow-list deliberately does not carry one: a person's
+position in a frame is a privacy-bearing field, and the product's record does
+not keep it. So the autonomy layer cannot run over the product's record without
+a decision about whether the product keeps positions, and that decision has not
+been made. Wiring it anyway would mean either keeping positions the record
+deliberately does not keep, or scoring an anomaly over a camera-level
+"something happened here" and calling it an entity.
+
+The open-vocabulary model is not
 here: the class list is a parameter and the vocabulary is honest about being
 COCO-80, but the export that would name a drone or a balloon by prompt is not
 fetched, so those two classes have a rule behind them and nothing that

@@ -80,6 +80,14 @@ func (s *Session) CheckInputSize(int) error        { return errors.New(NoCgoRefu
 func (s *Session) CheckDecoderFamily(string) error { return errors.New(NoCgoRefusal) }
 func (s *Session) Close() error                    { return nil }
 
+// Vocabulary is the built-in one, because a build with no cgo has no model and
+// therefore no class list of its own.
+//
+// It is the same answer the cgo build gives when the session declares no
+// vocabulary, and a caller must not have to know which build it is talking to
+// to ask the question.
+func (s *Session) Vocabulary() *Vocabulary { return COCOVocabulary() }
+
 // Infer refuses, always.
 func (s *Session) Infer([]float32, string) ([]Tensor, error) {
 	return nil, errors.New(NoCgoRefusal)
