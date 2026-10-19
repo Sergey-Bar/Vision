@@ -52,7 +52,7 @@ import (
 
 	"github.com/Sergey-Bar/vision-poc/internal/bench"
 	"github.com/Sergey-Bar/vision-poc/internal/novelty"
-	"github.com/Sergey-Bar/vision-poc/internal/ortdetect"
+	"github.com/Sergey-Bar/vision/shared/ortdetect"
 )
 
 // regime is one setting's measurement over the window.

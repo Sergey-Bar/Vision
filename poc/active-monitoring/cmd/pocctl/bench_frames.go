@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/Sergey-Bar/vision-poc/internal/ortdetect"
+	"github.com/Sergey-Bar/vision/shared/ortdetect"
 )
 
 // A frame's outcome in the benchmark, and the line that prints it.

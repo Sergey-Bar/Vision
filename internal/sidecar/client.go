@@ -1,12 +1,20 @@
-// Package ai is the Go side of the sidecar. It sends raw RGB frames to a Python
-// process over loopback HTTP and parses the JSON that comes back.
+// Package sidecar is the Go side of the detector sidecar. It sends raw RGB
+// frames to a Python process over loopback HTTP and parses the JSON that comes
+// back.
 //
 // The package has one job beyond moving bytes: it never lets an absence become
 // an answer. A frame that was never sent is not_asked. A frame that was sent
 // and came back malformed, late, or from a failing read is degraded. A frame
 // whose response parsed but cannot be interpreted is cannot_tell. Only a
 // response the model actually produced, with an empty array, is no_objects.
-package ai
+//
+// # Why the name
+//
+// It is not called `ai`, because this repository already has an AI plane and
+// this is not it: `internal/airuntime` speaks to the product's signed model
+// bundle, and this speaks to the POC's Python detector. Two clients, two
+// vocabularies, two names.
+package sidecar
 
 import (
 	"bytes"
@@ -22,8 +30,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Sergey-Bar/vision-poc/internal/aistate"
-	"github.com/Sergey-Bar/vision-poc/internal/proposal"
+	"github.com/Sergey-Bar/vision/internal/aistate"
+	"github.com/Sergey-Bar/vision/internal/proposal"
 )
 
 // State is the AI absence vocabulary from CONTRACT.md §2.2. These are the only
@@ -33,7 +41,7 @@ import (
 // `internal/detect` counts them when it folds a frame into its counters and must
 // not depend on this package to say what they are — see the aistate doc for why
 // two declarations of one vocabulary is a defect rather than a small duplication.
-// Every `ai.State*` reference in this module keeps working and keeps its
+// Every `sidecar.State*` reference in this module keeps working and keeps its
 // meaning.
 const (
 	StateAnswered   = aistate.Asked

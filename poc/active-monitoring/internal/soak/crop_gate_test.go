@@ -22,8 +22,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/vision-poc/internal/aistate"
 	"github.com/Sergey-Bar/vision-poc/internal/soak"
+	"github.com/Sergey-Bar/vision/shared/aistate"
 )
 
 // renderCropGate reaches the unexported section the way the report does — through

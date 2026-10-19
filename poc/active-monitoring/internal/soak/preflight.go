@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/vision-poc/internal/ai"
 	"github.com/Sergey-Bar/vision-poc/internal/config"
 	"github.com/Sergey-Bar/vision-poc/internal/recorder"
 	"github.com/Sergey-Bar/vision-poc/internal/source"
+	"github.com/Sergey-Bar/vision/shared/sidecar"
 )
 
 // Check is one preflight condition.
@@ -49,7 +49,7 @@ type PreflightInput struct {
 	Headroom     float64
 	BudgetDays   int
 	DataRoot     string
-	Client       *ai.Client
+	Client       *sidecar.Client
 	SimURL       string
 	// TriggerMode is where the boxes come from: `novelty` (the shipped path) or
 	// `sidecar`. An empty value means the caller has not been updated, and the

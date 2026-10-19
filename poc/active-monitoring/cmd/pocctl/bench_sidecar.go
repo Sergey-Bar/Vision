@@ -32,8 +32,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/vision-poc/internal/ai"
 	"github.com/Sergey-Bar/vision-poc/internal/soak"
+	"github.com/Sergey-Bar/vision/shared/sidecar"
 )
 
 // sidecarBenchDeadline is the per-request deadline the timing pass sends.
@@ -89,7 +89,7 @@ func benchSidecar(flags map[string]string) error {
 		return fmt.Errorf("bench: the model %s could not be hashed: %w", model, err)
 	}
 
-	client, err := ai.New(addr, sidecarBenchDeadline)
+	client, err := sidecar.New(addr, sidecarBenchDeadline)
 	if err != nil {
 		return fmt.Errorf("bench --trigger sidecar: %w", err)
 	}
@@ -171,7 +171,7 @@ func benchSidecar(flags map[string]string) error {
 // bench prints. The decode is the only thing it does that needs ffmpeg, and it
 // is kept out of [sidecarTimings] so the timing discipline — the warm-up and
 // the refusal wall — is testable with an image made of bytes.
-func sidecarCalibration(client *ai.Client, img stillImage, count int,
+func sidecarCalibration(client *sidecar.Client, img stillImage, count int,
 	model, addr, library string, input int, sha string) (soak.DetectorCalibration, string, error) {
 	rgb, w, h, err := readImageRGB(img.Path)
 	if err != nil {
@@ -217,9 +217,9 @@ func sidecarCalibration(client *ai.Client, img stillImage, count int,
 // latencies would measure the cost of failing and call it the cost of
 // answering: a p99 over degradations is a number about nothing, and it is
 // exactly the number the AI row would then multiply by the frame rate.
-func sidecarTimings(client *ai.Client, rgb []byte, w, h, count int) (p50, p99 time.Duration, n int, err error) {
+func sidecarTimings(client *sidecar.Client, rgb []byte, w, h, count int) (p50, p99 time.Duration, n int, err error) {
 	total := count + 1
-	lat := ai.NewLatencies(total)
+	lat := sidecar.NewLatencies(total)
 	refused := 0
 	var refusal string
 	for i := 0; i < total; i++ {
@@ -230,7 +230,7 @@ func sidecarTimings(client *ai.Client, rgb []byte, w, h, count int) (p50, p99 ti
 			// out of the window and out of the record, and said below.
 			continue
 		}
-		if ai.AbsenceOf(r.State) || r.Unparsed {
+		if sidecar.AbsenceOf(r.State) || r.Unparsed {
 			refused++
 			if refusal == "" {
 				refusal = r.Reason

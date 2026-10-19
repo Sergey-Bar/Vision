@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/vision-poc/internal/ai"
 	"github.com/Sergey-Bar/vision-poc/internal/recorder"
+	"github.com/Sergey-Bar/vision/shared/sidecar"
 )
 
 // fakeRecorder is a pipe with no ffmpeg behind it, so the run LOOP can be tested
@@ -76,7 +76,7 @@ func newLoopRunner(rec FrameSource, target, beatEvery time.Duration) (*Runner, *
 			RunID: "r1", Recorder: rec, Target: target, Heartbeat: beatEvery,
 			Logf: func(string, ...any) {},
 		},
-		lat:      ai.NewLatencies(16),
+		lat:      sidecar.NewLatencies(16),
 		stopPush: make(chan struct{}),
 	}
 	r.opt.heartbeat = func(context.Context) error { beats.n.Add(1); return nil }
@@ -158,7 +158,7 @@ func TestTheHeartbeatIsNotSilencedByASlowFrame(t *testing.T) {
 	// A "frame" that takes 300ms to deal with, which is a fast inference on a
 	// slow machine and a slow one for anything bigger.
 	var inFlight atomic.Int64
-	r.opt.onFrame = func(recorder.Frame, []ai.Box, []byte, ai.Telemetry, string) {
+	r.opt.onFrame = func(recorder.Frame, []sidecar.Box, []byte, sidecar.Telemetry, string) {
 		inFlight.Add(1)
 		time.Sleep(300 * time.Millisecond)
 	}

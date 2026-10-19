@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Sergey-Bar/vision-poc/internal/aistate"
+	"github.com/Sergey-Bar/vision/shared/aistate"
 )
 
 // TestAMalformedAnswerIsCannotTellAndNeverAPartialParse is the parser's whole

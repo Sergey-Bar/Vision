@@ -22,12 +22,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Sergey-Bar/vision-poc/internal/ai"
 	"github.com/Sergey-Bar/vision-poc/internal/config"
 	"github.com/Sergey-Bar/vision-poc/internal/detect"
 	"github.com/Sergey-Bar/vision-poc/internal/evidence"
 	"github.com/Sergey-Bar/vision-poc/internal/novelty"
-	"github.com/Sergey-Bar/vision-poc/internal/ortdetect"
 	"github.com/Sergey-Bar/vision-poc/internal/recorder"
 	"github.com/Sergey-Bar/vision-poc/internal/soak"
 	"github.com/Sergey-Bar/vision-poc/internal/source"
@@ -37,6 +35,8 @@ import (
 	"github.com/Sergey-Bar/vision-poc/internal/vlm"
 	"github.com/Sergey-Bar/vision-poc/internal/xprotect"
 	"github.com/Sergey-Bar/vision-poc/internal/xpsim"
+	"github.com/Sergey-Bar/vision/shared/ortdetect"
+	"github.com/Sergey-Bar/vision/shared/sidecar"
 )
 
 func main() {
@@ -281,10 +281,10 @@ func run() error {
 	// dependency an operator debugs for an hour before discovering the answer is
 	// "you don't need this".
 	usesSidecar := soak.UsesSidecar(cfg.TriggerMode)
-	var aic *ai.Client
+	var aic *sidecar.Client
 	var side *supervisor.Sidecar
 	if usesSidecar {
-		aic, err = ai.New(cfg.AIAddr, cfg.AIDeadline)
+		aic, err = sidecar.New(cfg.AIAddr, cfg.AIDeadline)
 		if err != nil {
 			return err
 		}
@@ -473,11 +473,11 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		runner.SetFrameHook(func(f recorder.Frame, boxes []ai.Box, jpg []byte, tel ai.Telemetry, aiState string) {
+		runner.SetFrameHook(func(f recorder.Frame, boxes []sidecar.Box, jpg []byte, tel sidecar.Telemetry, aiState string) {
 			// W3-6: the run's own record of itself, read ONCE per frame so the truth
 			// bar and the picture cannot show two different moments of the same run.
 			proofLedger, proofSeal := proofFor(st, context.Background(), runID, verifierLabelFromEnv(cfg))
-			// aiState is whatever `ai.Interpret` returned, from the runner, for
+			// aiState is whatever `sidecar.Interpret` returned, from the runner, for
 			// THIS frame. It used to be the literal "answered", which is not one
 			// of the four words in CONTRACT.md §2.2 and which was printed for
 			// frames that were never sent — a screen that says `answered` over a
@@ -1322,7 +1322,7 @@ func childPIDs(rec *recorder.Recorder, side *supervisor.Sidecar) []int {
 	return pids
 }
 
-func toOverlay(boxes []ai.Box) []ui.OverlayBox {
+func toOverlay(boxes []sidecar.Box) []ui.OverlayBox {
 	out := make([]ui.OverlayBox, 0, len(boxes))
 	for _, b := range boxes {
 		out = append(out, ui.OverlayBox{Class: b.Class, Score: b.Score, X1: b.X1, Y1: b.Y1, X2: b.X2, Y2: b.Y2})

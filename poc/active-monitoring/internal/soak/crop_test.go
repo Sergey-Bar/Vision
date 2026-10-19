@@ -11,9 +11,9 @@ package soak
 import (
 	"testing"
 
-	"github.com/Sergey-Bar/vision-poc/internal/ai"
 	"github.com/Sergey-Bar/vision-poc/internal/novelty"
-	"github.com/Sergey-Bar/vision-poc/internal/ortdetect"
+	"github.com/Sergey-Bar/vision/shared/ortdetect"
+	"github.com/Sergey-Bar/vision/shared/sidecar"
 )
 
 // stubProposer offers whatever regions the test hands it, and reports the score it was
@@ -58,13 +58,13 @@ func passWith(p RegionProposer) CropPass {
 // nobody can measure.
 func TestACropOverlappingAWholeFrameDetectionIsNotInferredTwice(t *testing.T) {
 	// A car the whole-frame pass found, on the left of the frame.
-	car := ai.Box{Class: "car", Score: 0.9, X1: 0.10, Y1: 0.40, X2: 0.25, Y2: 0.60}
+	car := sidecar.Box{Class: "car", Score: 0.9, X1: 0.10, Y1: 0.40, X2: 0.25, Y2: 0.60}
 	// The proposer offers the region the car occupies, and one far away from it.
 	p := &stubProposer{regions: []novelty.Candidate{
 		region("motion", 0.11, 0.42, 0.24, 0.58), // overlaps the car
 		region("motion", 0.70, 0.70, 0.76, 0.76), // a bird-sized speck, far away
 	}}
-	got, ct := proposeCrops(aFrame(), []ai.Box{car}, passWith(p))
+	got, ct := proposeCrops(aFrame(), []sidecar.Box{car}, passWith(p))
 
 	if len(got) != 1 {
 		t.Fatalf("proposed %d crop(s), want 1. The region over the car must be refused: the whole-frame "+
@@ -98,10 +98,10 @@ func TestACropOverlappingAWholeFrameDetectionIsNotInferredTwice(t *testing.T) {
 // overlap would drop it, and every crop along the edge of every large detection would go
 // unmeasured.
 func TestACropBesideADetectionIsStillInferred(t *testing.T) {
-	car := ai.Box{Class: "car", Score: 0.9, X1: 0.10, Y1: 0.40, X2: 0.30, Y2: 0.60}
+	car := sidecar.Box{Class: "car", Score: 0.9, X1: 0.10, Y1: 0.40, X2: 0.30, Y2: 0.60}
 	// Abutting the car's right edge exactly: shares no pixels, touches at x=0.30.
 	p := &stubProposer{regions: []novelty.Candidate{region("motion", 0.30, 0.40, 0.36, 0.60)}}
-	got, ct := proposeCrops(aFrame(), []ai.Box{car}, passWith(p))
+	got, ct := proposeCrops(aFrame(), []sidecar.Box{car}, passWith(p))
 	if len(got) != 1 || ct.SkippedOverlap != 0 {
 		t.Fatalf("a region abutting the car's edge proposed %d crop(s) with %d skipped as overlapping. "+
 			"Those regions share no pixels, so the crop still has something the whole-frame pass has not "+
@@ -118,14 +118,14 @@ func TestACropBesideADetectionIsStillInferred(t *testing.T) {
 // the crop's tighter box would quietly change the box on every detection both passes
 // saw, and the tracker's history would hold two slightly different boxes for one object.
 func TestTheSameObjectIsReportedOnceWhenBothPassesFindIt(t *testing.T) {
-	whole := ai.Box{Class: "car", Score: 0.90, X1: 0.10, Y1: 0.40, X2: 0.30, Y2: 0.60}
+	whole := sidecar.Box{Class: "car", Score: 0.90, X1: 0.10, Y1: 0.40, X2: 0.30, Y2: 0.60}
 	// The same car through a crop: tighter and slightly offset, because the crop pass
 	// sees more of it and less of everything else.
-	cut := ai.Box{Class: "car", Score: 0.88, X1: 0.11, Y1: 0.41, X2: 0.31, Y2: 0.61}
+	cut := sidecar.Box{Class: "car", Score: 0.88, X1: 0.11, Y1: 0.41, X2: 0.31, Y2: 0.61}
 	// And a bird the whole-frame pass could not see at all.
-	bird := ai.Box{Class: "bird", Score: 0.71, X1: 0.72, Y1: 0.72, X2: 0.76, Y2: 0.76}
+	bird := sidecar.Box{Class: "bird", Score: 0.71, X1: 0.72, Y1: 0.72, X2: 0.76, Y2: 0.76}
 
-	out, kept, deduped := unionBoxes([]ai.Box{whole}, []ai.Box{cut, bird})
+	out, kept, deduped := unionBoxes([]sidecar.Box{whole}, []sidecar.Box{cut, bird})
 	if len(out) != 2 {
 		t.Fatalf("the union has %d box(es), want 2: the car once and the bird once", len(out))
 	}
@@ -406,8 +406,8 @@ func TestACropCoveringTheWholeFrameIsNotWorthAnInference(t *testing.T) {
 // had to be guessed, and a guessed source is a re-inference on the one field the replay
 // reads.
 func TestCutSetMembershipIsExact(t *testing.T) {
-	cut := ai.Box{Class: "bird", Score: 0.8, X1: 0.5, Y1: 0.5, X2: 0.6, Y2: 0.6}
-	set := cutSetOf([]ai.Box{cut})
+	cut := sidecar.Box{Class: "bird", Score: 0.8, X1: 0.5, Y1: 0.5, X2: 0.6, Y2: 0.6}
+	set := cutSetOf([]sidecar.Box{cut})
 	if set == nil {
 		t.Fatal("cutSetOf returned nil for a non-empty list")
 	}
@@ -415,7 +415,7 @@ func TestCutSetMembershipIsExact(t *testing.T) {
 		t.Fatalf("the set has %d entries, want 1", len(set))
 	}
 	// Same class and same score, one pixel different: NOT the same measurement.
-	near := ai.Box{Class: "bird", Score: 0.8, X1: 0.5001, Y1: 0.5, X2: 0.6, Y2: 0.6}
+	near := sidecar.Box{Class: "bird", Score: 0.8, X1: 0.5001, Y1: 0.5, X2: 0.6, Y2: 0.6}
 	if _, ok := set[near]; ok {
 		t.Fatal("a box one pixel from a crop-sourced one was marked as crop-sourced too. Membership must " +
 			"be by exact value or the source-aware minimum is applied to a sighting that was not magnified")

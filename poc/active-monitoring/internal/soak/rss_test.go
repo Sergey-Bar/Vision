@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/vision-poc/internal/ai"
 	"github.com/Sergey-Bar/vision-poc/internal/recorder"
+	"github.com/Sergey-Bar/vision/shared/sidecar"
 )
 
 // TestRSSIsMeasuredNotGuessedOnThisPlatform: AC5's memory clause compares a
@@ -52,7 +52,7 @@ func TestRSSIsMeasuredNotGuessedOnThisPlatform(t *testing.T) {
 func TestTheHeartbeatDoesNotPanicWithoutAStore(t *testing.T) {
 	r := &Runner{
 		opt: RunnerOptions{RunID: "r1", Recorder: &silentPipe{}, Store: nil},
-		lat: ai.NewLatencies(16),
+		lat: sidecar.NewLatencies(16),
 	}
 	done := make(chan struct{})
 	go func() {

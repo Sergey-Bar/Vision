@@ -61,8 +61,8 @@ import (
 
 	"github.com/Sergey-Bar/vision-poc/internal/bench"
 	"github.com/Sergey-Bar/vision-poc/internal/novelty"
-	"github.com/Sergey-Bar/vision-poc/internal/ortdetect"
-	"github.com/Sergey-Bar/vision-poc/internal/proposal"
+	"github.com/Sergey-Bar/vision/shared/ortdetect"
+	"github.com/Sergey-Bar/vision/shared/proposal"
 )
 
 // proposalBox is the module's box vocabulary, named once here so the policy's

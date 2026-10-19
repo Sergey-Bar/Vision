@@ -15,8 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/vision-poc/internal/ai"
-	"github.com/Sergey-Bar/vision-poc/internal/classify"
 	"github.com/Sergey-Bar/vision-poc/internal/detect"
 	"github.com/Sergey-Bar/vision-poc/internal/evidence"
 	"github.com/Sergey-Bar/vision-poc/internal/recorder"
@@ -24,6 +22,8 @@ import (
 	"github.com/Sergey-Bar/vision-poc/internal/store"
 	"github.com/Sergey-Bar/vision-poc/internal/xprotect"
 	"github.com/Sergey-Bar/vision-poc/internal/xpsim"
+	"github.com/Sergey-Bar/vision/shared/classify"
+	"github.com/Sergey-Bar/vision/shared/sidecar"
 )
 
 // stubSidecar answers every frame with one car box that walks from one side of
@@ -158,7 +158,7 @@ func TestTheWholePipelineFromAFrameToAnEventIsProven(t *testing.T) {
 	stub.x0.Store(100)
 	srv := httptest.NewServer(http.HandlerFunc(stub.handler))
 	defer srv.Close()
-	client, err := ai.New(srv.URL, 5*time.Second)
+	client, err := sidecar.New(srv.URL, 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -250,6 +250,44 @@ var (
 
 		"internal/checkpoint.SealOnce": {Symbol: "internal/checkpoint.SealOnce", Why: "UNWIRED. The single-interval seal entry point nothing calls. Its range sibling SealRange was one of the nine dead exports that started this gate; this is the same cluster. Close it by having the scheduler call it, or delete it"},
 
+		// The detector, the class taxonomy, the sidecar wire and the box geometry
+		// moved into this module from the POC module. The POC module is a SEPARATE
+		// Go module: it cannot import `internal/`, so it reaches these through the
+		// `shared/` faces, and the gate's reader walk cannot see a method call made
+		// across a module boundary -- it matches a method by a bare selector name,
+		// and the POC's `box.Area()` is not this module's `Area`.
+		//
+		// Every entry below is a symbol the POC module calls, or a symbol the VMS
+		// emulator reads once it lands. Each one is here because the gate cannot
+		// see the reader, not because the reader does not exist. The gate will
+		// report each of them as stale the moment this module grows a reader of
+		// its own, and that is the intended way out.
+		"internal/ortdetect.Area":               {Symbol: "internal/ortdetect.Area", Why: "READ-ACROSS-THE-MODULE-BOUNDARY. The crop rectangle's area. The POC module calls it and the VMS emulator reads it to drop a box too small to be a detection; the gate cannot see either caller"},
+		"internal/ortdetect.AchievableFPS":      {Symbol: "internal/ortdetect.AchievableFPS", Why: "READ-ACROSS-THE-MODULE-BOUNDARY. The frame rate the measured latency allows. The POC module reports it and the VMS emulator publishes it; the gate cannot see either caller"},
+		"internal/ortdetect.CheckDecoderFamily": {Symbol: "internal/ortdetect.CheckDecoderFamily", Why: "READ-ACROSS-THE-MODULE-BOUNDARY. The decoder-family check the session exposes. The POC module calls it and the VMS emulator checks the family before it trusts a model's output; the gate cannot see either caller"},
+		"internal/ortdetect.ClassCount":         {Symbol: "internal/ortdetect.ClassCount", Why: "READ-ACROSS-THE-MODULE-BOUNDARY. The number of classes the model declares. The POC module reads it and the VMS emulator reports it as part of the model's identity; the gate cannot see either caller"},
+		"internal/ortdetect.DeclareClassCount":  {Symbol: "internal/ortdetect.DeclareClassCount", Why: "READ-ACROSS-THE-MODULE-BOUNDARY. The declaration of a class count for a model whose output does not name its classes, which is what an open-vocabulary export looks like. The POC module calls it and the VMS emulator uses it for the same reason; the gate cannot see either caller"},
+		"internal/ortdetect.EPProviderCPU":      {Symbol: "internal/ortdetect.EPProviderCPU", Why: "READ-ACROSS-THE-MODULE-BOUNDARY. The CPU provider's name. The POC module names it and the VMS emulator falls back to it when no GPU is present; the gate cannot see either caller"},
+		"internal/ortdetect.EPProviderCUDA":     {Symbol: "internal/ortdetect.EPProviderCUDA", Why: "READ-ACROSS-THE-MODULE-BOUNDARY. The CUDA provider's name. The POC module names it and the VMS emulator asks for it when the GPU is present; the gate cannot see either caller"},
+		"internal/ortdetect.HoldsFrameRate":     {Symbol: "internal/ortdetect.HoldsFrameRate", Why: "READ-ACROSS-THE-MODULE-BOUNDARY. Whether the measured latency keeps up with a frame rate. The POC module prints it and the VMS emulator decides whether to lower the sampling rate on its answer; the gate cannot see either caller"},
+		"internal/ortdetect.Is":                 {Symbol: "internal/ortdetect.Is", Why: "READ-ACROSS-THE-MODULE-BOUNDARY. The refusal's own comparison. The POC module compares refusals by it and the VMS emulator decides whether a refusal is the one it can recover from; the gate cannot see either caller"},
+		"internal/ortdetect.Max":                {Symbol: "internal/ortdetect.Max", Why: "READ-ACROSS-THE-MODULE-BOUNDARY. The slowest measured frame. The POC module reports it and the VMS emulator publishes it; the gate cannot see either caller"},
+		"internal/ortdetect.Min":                {Symbol: "internal/ortdetect.Min", Why: "READ-ACROSS-THE-MODULE-BOUNDARY. The fastest measured frame. The POC module reports it and the VMS emulator publishes it; the gate cannot see either caller"},
+		"internal/ortdetect.P50":                {Symbol: "internal/ortdetect.P50", Why: "READ-ACROSS-THE-MODULE-BOUNDARY. The median measured frame. The POC module reports it and the VMS emulator publishes it; the gate cannot see either caller"},
+		"internal/ortdetect.P95":                {Symbol: "internal/ortdetect.P95", Why: "READ-ACROSS-THE-MODULE-BOUNDARY. The 95th percentile measured frame. The POC module reports it and the VMS emulator publishes it; the gate cannot see either caller"},
+		"internal/ortdetect.Outputs":            {Symbol: "internal/ortdetect.Outputs", Why: "READ-ACROSS-THE-MODULE-BOUNDARY. The session's declared outputs. The POC module reads them and the VMS emulator checks that a model has the output shape it expects before it trusts it; the gate cannot see either caller"},
+		"internal/ortdetect.ObjectnessNone":     {Symbol: "internal/ortdetect.ObjectnessNone", Why: "READ-ACROSS-THE-MODULE-BOUNDARY. The objectness decision's 'no channel' state. The POC module compares against it and the VMS emulator reports it as the model's own answer; the gate cannot see either caller"},
+		"internal/ortdetect.ObjectnessUnknown":  {Symbol: "internal/ortdetect.ObjectnessUnknown", Why: "READ-ACROSS-THE-MODULE-BOUNDARY. The objectness decision's 'cannot tell' state. The POC module compares against it and the VMS emulator reports it rather than turning it into a negative answer; the gate cannot see either caller"},
+		"internal/ortdetect.ObjectnessYes":      {Symbol: "internal/ortdetect.ObjectnessYes", Why: "READ-ACROSS-THE-MODULE-BOUNDARY. The objectness decision's 'objectness present' state. The POC module compares against it and the VMS emulator reports it; the gate cannot see either caller"},
+		"internal/ortdetect.ToAITelemetry":      {Symbol: "internal/ortdetect.ToAITelemetry", Why: "READ-ACROSS-THE-MODULE-BOUNDARY. The conversion into the sidecar's telemetry shape, so a frame measured in-process and a frame measured by the sidecar are reported the same way. The POC module calls it and the VMS emulator publishes the result; the gate cannot see either caller"},
+		"internal/ortdetect.Unpad":              {Symbol: "internal/ortdetect.Unpad", Why: "READ-ACROSS-THE-MODULE-BOUNDARY. The letterbox padding's removal. The POC module calls it and the VMS emulator maps a box back onto the frame; the gate cannot see either caller"},
+
+		"internal/proposal.Area":   {Symbol: "internal/proposal.Area", Why: "READ-ACROSS-THE-MODULE-BOUNDARY. The box's area. The POC module calls it and the VMS emulator uses it to weight a box by how much of the frame it covers; the gate cannot see either caller"},
+		"internal/proposal.Centre": {Symbol: "internal/proposal.Centre", Why: "READ-ACROSS-THE-MODULE-BOUNDARY. The box's centre. The POC module calls it and the VMS emulator uses it to associate a bag with the person carrying it; the gate cannot see either caller"},
+		"internal/proposal.Union":  {Symbol: "internal/proposal.Union", Why: "READ-ACROSS-THE-MODULE-BOUNDARY. The union of two boxes. The POC module calls it and the VMS emulator merges two boxes of one object; the gate cannot see either caller"},
+
+		"internal/sidecar.NoObjects": {Symbol: "internal/sidecar.NoObjects", Why: "READ-ACROSS-THE-MODULE-BOUNDARY. The answer's 'the model found nothing' state. The POC module calls it and the VMS emulator distinguishes it from an absence; the gate cannot see either caller"},
+
 		"internal/clock.Partial": {Symbol: "internal/clock.Partial", Why: "TEST-ONLY. The partial-window predicate used in tests. Not called from production code"},
 
 		"internal/bundles.ErrNotStored": {Symbol: "internal/bundles.ErrNotStored", Why: "sentinel: the bundle store returns it for a version it does not hold, and the console's rules screen renders the reason so an operator at a site with no network can tell a missing version from a refused activation"},

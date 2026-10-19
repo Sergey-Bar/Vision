@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/vision-poc/internal/ai"
-	"github.com/Sergey-Bar/vision-poc/internal/classify"
 	"github.com/Sergey-Bar/vision-poc/internal/evidence"
 	"github.com/Sergey-Bar/vision-poc/internal/recorder"
 	"github.com/Sergey-Bar/vision-poc/internal/store"
+	"github.com/Sergey-Bar/vision/shared/classify"
+	"github.com/Sergey-Bar/vision/shared/sidecar"
 )
 
 // TestEveryCrossingFrameSurvivesTheCap is the rule that makes the bound usable.
@@ -145,7 +145,7 @@ func TestTheMeasuredFlagIsTheDifferenceTheTableExistsFor(t *testing.T) {
 	src := SourceFor(TriggerDetector)
 
 	// Asked, and the model published candidates but none cleared the floor.
-	asked := boxObservationsFor("r1", 11, zeroTime(), nil, ai.Telemetry{Candidates: 8400}, nil, src)
+	asked := boxObservationsFor("r1", 11, zeroTime(), nil, sidecar.Telemetry{Candidates: 8400}, nil, src)
 	if len(asked) != 1 {
 		t.Fatalf("a measured frame with no boxes produced %d rows, want 1", len(asked))
 	}
@@ -154,7 +154,7 @@ func TestTheMeasuredFlagIsTheDifferenceTheTableExistsFor(t *testing.T) {
 	}
 
 	// Never asked: no candidates, no boxes, no pre-NMS count.
-	notAsked := boxObservationsFor("r1", 11, zeroTime(), nil, ai.Telemetry{}, nil, src)
+	notAsked := boxObservationsFor("r1", 11, zeroTime(), nil, sidecar.Telemetry{}, nil, src)
 	if len(notAsked) != 1 {
 		t.Fatalf("an unasked frame produced %d rows, want 1", len(notAsked))
 	}
@@ -176,10 +176,10 @@ func TestTheMeasuredFlagIsTheDifferenceTheTableExistsFor(t *testing.T) {
 // the disagreement would be invisible in the data and visible only as a box in the
 // wrong place.
 func TestTheBoxScaleIsTheOneTheRestOfTheStoreUses(t *testing.T) {
-	obs := boxObservationsFor("r1", 1, zeroTime(), []ai.Box{
+	obs := boxObservationsFor("r1", 1, zeroTime(), []sidecar.Box{
 		{Class: "car", Score: 0.91, X1: 0.1, Y1: 0.2, X2: 0.3, Y2: 0.4},
 		{Class: "person", Score: 0.5, X1: 0, Y1: 0, X2: 1, Y2: 1},
-	}, ai.Telemetry{Candidates: 100}, nil, SourceFor(TriggerDetector))
+	}, sidecar.Telemetry{Candidates: 100}, nil, SourceFor(TriggerDetector))
 	if len(obs) != 2 {
 		t.Fatalf("rows = %d, want 2", len(obs))
 	}
@@ -195,10 +195,10 @@ func TestTheBoxScaleIsTheOneTheRestOfTheStoreUses(t *testing.T) {
 // TestFamilyIsAlwaysRecordedAndNeverInvented - nil is "not recorded", an
 // empty string would read as a recorded absence.
 func TestFamilyIsAlwaysRecordedAndNeverInvented(t *testing.T) {
-	obs := boxObservationsFor("r1", 1, zeroTime(), []ai.Box{
+	obs := boxObservationsFor("r1", 1, zeroTime(), []sidecar.Box{
 		{Class: "car", Score: 0.9, X1: 0.1, Y1: 0.1, X2: 0.3, Y2: 0.3},
 		{Class: "zzzz-not-a-coco-class", Score: 0.9, X1: 0.1, Y1: 0.1, X2: 0.3, Y2: 0.3},
-	}, ai.Telemetry{Candidates: 2}, nil, SourceFor(TriggerDetector))
+	}, sidecar.Telemetry{Candidates: 2}, nil, SourceFor(TriggerDetector))
 	if len(obs) != 2 {
 		t.Fatalf("rows = %d, want 2 - an unplaceable class is still a measured box", len(obs))
 	}
@@ -226,8 +226,8 @@ func TestFamilyIsAlwaysRecordedAndNeverInvented(t *testing.T) {
 // groups by track_id: a zero silently becomes a track with a thousand boxes on it.
 func TestTrackIDIsMinusOneAndNotZero(t *testing.T) {
 	obs := boxObservationsFor("r1", 1, zeroTime(),
-		[]ai.Box{{Class: "car", Score: 0.9, X1: 0.1, Y1: 0.1, X2: 0.3, Y2: 0.3}},
-		ai.Telemetry{Candidates: 1}, nil, SourceFor(TriggerDetector))
+		[]sidecar.Box{{Class: "car", Score: 0.9, X1: 0.1, Y1: 0.1, X2: 0.3, Y2: 0.3}},
+		sidecar.Telemetry{Candidates: 1}, nil, SourceFor(TriggerDetector))
 	if obs[0].TrackID != -1 {
 		t.Fatalf("track_id = %d, want -1: 0 would be a track number nobody has, and a reader "+
 			"grouping by it would find a thousand-box track that does not exist", obs[0].TrackID)

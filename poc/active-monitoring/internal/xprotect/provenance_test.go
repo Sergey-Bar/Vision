@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/vision-poc/internal/aistate"
+	"github.com/Sergey-Bar/vision/shared/aistate"
 )
 
 // answeredProvenance is the ordinary, fully attributed answer. Every test below

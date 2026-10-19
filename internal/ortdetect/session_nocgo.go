@@ -62,15 +62,6 @@ type Identity struct {
 // zero value is not a session and must not be mistaken for one.
 type Session struct{}
 
-// NoCgoRefusal is the exact text, so the gate and a demo cannot word it
-// differently.
-const NoCgoRefusal = "ortdetect: this build has no cgo, so the in-process ONNX detector cannot be " +
-	"compiled. The detector needs a C toolchain because ONNX Runtime is loaded through cgo. " +
-	"On Windows: install MSYS2 and put C:\\msys64\\mingw64\\bin on PATH, then set CGO_ENABLED=1. " +
-	"In Docker: build FROM a golang image that has gcc, or install build-essential. " +
-	"SP_POC_TRIGGER_MODE=novelty needs no toolchain and still works — the whole-frame change " +
-	"trigger is pure Go. What is lost is the DETECTOR, not the pipeline."
-
 // Open refuses, always, and says what is missing.
 func Open(cfg SessionConfig) (*Session, error) { return nil, errors.New(NoCgoRefusal) }
 

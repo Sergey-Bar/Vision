@@ -3,10 +3,10 @@ module github.com/Sergey-Bar/vision
 go 1.26.0
 
 require (
-	github.com/Sergey-Bar/vision-poc v0.0.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
+	github.com/yalue/onnxruntime_go v1.35.0
 	golang.org/x/crypto v0.57.0
 	google.golang.org/protobuf v1.36.12
 	gopkg.in/yaml.v3 v3.0.1
@@ -22,5 +22,3 @@ require (
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 )
-
-replace github.com/Sergey-Bar/vision-poc => ./poc/active-monitoring

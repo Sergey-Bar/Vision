@@ -27,8 +27,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Sergey-Bar/vision-poc/internal/aistate"
 	"github.com/Sergey-Bar/vision-poc/internal/store"
+	"github.com/Sergey-Bar/vision/shared/aistate"
 )
 
 // VerificationCell is one row of the per-site, per-class table. It is the

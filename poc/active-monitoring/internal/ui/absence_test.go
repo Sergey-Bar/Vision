@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/vision-poc/internal/aistate"
 	"github.com/Sergey-Bar/vision-poc/internal/store"
 	"github.com/Sergey-Bar/vision-poc/internal/vlm"
+	"github.com/Sergey-Bar/vision/shared/aistate"
 )
 
 // The absence panel's controls, one test each.

@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/vision-poc/internal/ai"
-	"github.com/Sergey-Bar/vision-poc/internal/classify"
 	"github.com/Sergey-Bar/vision-poc/internal/soak"
 	"github.com/Sergey-Bar/vision-poc/internal/store"
+	"github.com/Sergey-Bar/vision/shared/classify"
+	"github.com/Sergey-Bar/vision/shared/sidecar"
 )
 
 // The renderers. They read the same Data the JSON feed does, so the page and the
@@ -168,7 +168,7 @@ func familyText(f map[string]int) string {
 	return strings.Join(parts, " · ")
 }
 
-// aiStateCell is the REAL state from `ai.Interpret`, and never the literal
+// aiStateCell is the REAL state from `sidecar.Interpret`, and never the literal
 // `answered`.
 //
 // An empty cell here would read as "fine" beside a live picture, and `fine` is
@@ -209,7 +209,7 @@ func aiStateClass(l Live) string {
 // 41 with a post-NMS of 0 means the decoder did, `identical_geometry` is the
 // signature of the collapsed decode, and `median_object_px` is the one a person
 // can check against the picture without a ruler.
-func decodeCell(t ai.Telemetry) string {
+func decodeCell(t sidecar.Telemetry) string {
 	if !t.Seen() {
 		return "NOT RUN"
 	}

@@ -52,10 +52,10 @@ package soak
 //     on three other caps already.
 
 import (
-	"github.com/Sergey-Bar/vision-poc/internal/ai"
 	"github.com/Sergey-Bar/vision-poc/internal/detect"
 	"github.com/Sergey-Bar/vision-poc/internal/novelty"
-	"github.com/Sergey-Bar/vision-poc/internal/ortdetect"
+	"github.com/Sergey-Bar/vision/shared/ortdetect"
+	"github.com/Sergey-Bar/vision/shared/sidecar"
 )
 
 // CropPass is the configuration of the crop pass and the counters it produces.
@@ -226,7 +226,7 @@ const cropDedupeIOU = 0.5
 //     that is mostly car costs a full inference, and the region being small is the
 //     signal that the crop will be too. The pad is a fraction of a small region, so the
 //     crop stays small.
-func proposeCrops(f frameSource, whole []ai.Box, cp CropPass) ([]cropProposal, CropCounters) {
+func proposeCrops(f frameSource, whole []sidecar.Box, cp CropPass) ([]cropProposal, CropCounters) {
 	var ct CropCounters
 	if !cp.Enabled || cp.Proposer == nil || len(f.RGB) == 0 || f.Width <= 0 || f.Height <= 0 {
 		return nil, ct
@@ -368,7 +368,7 @@ func applyViewVerdict(ct CropCounters, v novelty.ViewVerdict) (CropCounters, boo
 // ends up comparing a 200-pixel rectangle against a 0.2-sized fraction and matching
 // nothing, which is a crop pass that runs, costs the full frame rate, and finds nothing
 // new.
-func coveredByAny(rect ortdetect.Rect, f frameSource, boxes []ai.Box) bool {
+func coveredByAny(rect ortdetect.Rect, f frameSource, boxes []sidecar.Box) bool {
 	cand := ortdetect.Box{
 		X1: float64(rect.X) / float64(f.Width), Y1: float64(rect.Y) / float64(f.Height),
 		X2: float64(rect.X+rect.W) / float64(f.Width), Y2: float64(rect.Y+rect.H) / float64(f.Height),
@@ -390,7 +390,7 @@ func coveredByAny(rect ortdetect.Rect, f frameSource, boxes []ai.Box) bool {
 // that preferred the tighter crop box would quietly change the box on every detection
 // the crop pass also saw, and the tracker's association history would hold two slightly
 // different boxes for one object.
-func unionBoxes(whole, cuts []ai.Box) (out []ai.Box, kept, deduped int) {
+func unionBoxes(whole, cuts []sidecar.Box) (out []sidecar.Box, kept, deduped int) {
 	out = append(out, whole...)
 	kept = len(whole)
 	for _, c := range cuts {
@@ -404,9 +404,9 @@ func unionBoxes(whole, cuts []ai.Box) (out []ai.Box, kept, deduped int) {
 	return out, kept, deduped
 }
 
-func overlapsAnyAbove(c ai.Box, against []ai.Box, min float64) bool {
+func overlapsAnyAbove(c sidecar.Box, against []sidecar.Box, min float64) bool {
 	for _, b := range against {
-		if boxIoU(ai.Box{X1: b.X1, Y1: b.Y1, X2: b.X2, Y2: b.Y2},
+		if boxIoU(sidecar.Box{X1: b.X1, Y1: b.Y1, X2: b.X2, Y2: b.Y2},
 			ortdetect.Box{X1: c.X1, Y1: c.Y1, X2: c.X2, Y2: c.Y2}) >= min {
 			return true
 		}
@@ -454,11 +454,11 @@ func maxf(a, b float64) float64 {
 
 // cutSetOf is the membership set the detect engine reads Answer.Cut through.
 //
-// `ai.Box` and `detect.Box` are the SAME type, both aliases of `proposal.Box`, which is
+// `sidecar.Box` and `detect.Box` are the SAME type, both aliases of `proposal.Box`, which is
 // what makes this a one-conversion loop instead of a field-by-field copy. A
 // reconstruction would be a second place for a coordinate to be rescaled, and a
 // rescaled coordinate is a box in the wrong place on the picture.
-func cutSetOf(cuts []ai.Box) map[detect.Box]bool {
+func cutSetOf(cuts []sidecar.Box) map[detect.Box]bool {
 	if len(cuts) == 0 {
 		return nil
 	}

@@ -52,8 +52,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/Sergey-Bar/vision-poc/internal/ai"
-	"github.com/Sergey-Bar/vision-poc/internal/proposal"
+	"github.com/Sergey-Bar/vision/internal/proposal"
+	"github.com/Sergey-Bar/vision/internal/sidecar"
 )
 
 // Box is one detection, normalised 0..1 against the FRAME.
@@ -72,10 +72,10 @@ type Box = proposal.Box
 // than as a state. The refusal is strictly better information, and the
 // translation into `degraded` happens at the one place that owns it.
 const (
-	StateAsked     = ai.StateAnswered
-	StateNoObjects = ai.StateNoObjects
-	StateDegraded  = ai.StateDegraded
-	StateNotAsked  = ai.StateNotAsked
+	StateAsked     = sidecar.StateAnswered
+	StateNoObjects = sidecar.StateNoObjects
+	StateDegraded  = sidecar.StateDegraded
+	StateNotAsked  = sidecar.StateNotAsked
 )
 
 // StateFor maps a decode outcome to one of the four states.
@@ -104,7 +104,7 @@ func StateFor(refusal *Refusal, emitted int) string {
 // (PreNMS large, PostNMS zero). Those are opposite diagnoses and they need
 // opposite fixes.
 //
-// It is a distinct type from [ai.Telemetry] rather than an alias because this one
+// It is a distinct type from [sidecar.Telemetry] rather than an alias because this one
 // carries fields the sidecar's does not — the DECLARED shape, the record layout
 // and the input geometry — and it is converted at one place rather than by
 // structural coincidence.
@@ -174,9 +174,9 @@ type Telemetry struct {
 // the only thing that knows how many frames the source produced. What this
 // conversion does carry is everything about HOW a frame was measured, so a
 // detection rate printed beside it can be argued with.
-func (t Telemetry) ToAITelemetry() ai.Telemetry {
+func (t Telemetry) ToAITelemetry() sidecar.Telemetry {
 	hasObj := t.HasObjectness == ObjectnessYes
-	out := ai.Telemetry{
+	out := sidecar.Telemetry{
 		Layout: t.Layout,
 		// This decoder reads fused outputs and publishes no family name of its
 		// own; "fused" is the fact, and claiming anything else would be a claim

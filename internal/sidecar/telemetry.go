@@ -16,7 +16,7 @@
 // it, and the only thing that could have caught them was a healthy run being
 // required to describe its own arithmetic.
 
-package ai
+package sidecar
 
 import "fmt"
 

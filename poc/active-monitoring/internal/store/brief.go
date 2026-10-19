@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/vision-poc/internal/aistate"
+	"github.com/Sergey-Bar/vision/shared/aistate"
 )
 
 // HourBeat is one hour of a run: was the stream alive, did the detector propose

@@ -9,8 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Sergey-Bar/vision-poc/detectclient"
 	"github.com/Sergey-Bar/vision/internal/camerahealth"
+	"github.com/Sergey-Bar/vision/shared/sidecar"
 )
 
 // The camera fleet.
@@ -315,7 +315,7 @@ func (s *StreamIngest) startCameras(ctx context.Context) error {
 }
 
 // startCamera runs one camera's ingest under its own cancellable context.
-func (s *StreamIngest) startCamera(ctx context.Context, c *cameraRuntime, client *detectclient.Client) {
+func (s *StreamIngest) startCamera(ctx context.Context, c *cameraRuntime, client *sidecar.Client) {
 	ctx, cancel := context.WithCancel(ctx)
 	c.cancel = cancel
 	c.done = make(chan struct{})
@@ -344,7 +344,7 @@ func (s *StreamIngest) stopCamera(c *cameraRuntime) {
 
 // cameraLoop resolves and captures one camera's stream, then runs the
 // shared frame loop. Every step is allowed to fail by name.
-func (s *StreamIngest) cameraLoop(ctx context.Context, c *cameraRuntime, client *detectclient.Client) {
+func (s *StreamIngest) cameraLoop(ctx context.Context, c *cameraRuntime, client *sidecar.Client) {
 	hlsURL, err := s.resolveHLSURL(ctx, c.url)
 	if err != nil {
 		c.fail(fmt.Sprintf("stream resolve: %v", err))
@@ -362,7 +362,7 @@ func (s *StreamIngest) cameraLoop(ctx context.Context, c *cameraRuntime, client 
 // round trip, local identity, health digest, publish. The autonomy pass runs
 // inside publishFrame, so every camera's frames take the same path through
 // the shared correlation tracker.
-func (s *StreamIngest) cameraFrameLoop(ctx context.Context, c *cameraRuntime, capture *frameCapture, client *detectclient.Client) {
+func (s *StreamIngest) cameraFrameLoop(ctx context.Context, c *cameraRuntime, capture *frameCapture, client *sidecar.Client) {
 	minScore := s.config.Live.MinScore
 	// The index interval is a positive count or the default. It is
 	// converted once, here, where the guard is — rather than inside the
@@ -404,7 +404,7 @@ func (s *StreamIngest) cameraFrameLoop(ctx context.Context, c *cameraRuntime, ca
 			s.recordAIState(res)
 
 			var dets []frameObject
-			if !detectclient.AbsenceOf(res.State) {
+			if !sidecar.AbsenceOf(res.State) {
 				dets = s.mapDetections(res, frame, minScore)
 			}
 			dets = c.trk.update(dets, now)

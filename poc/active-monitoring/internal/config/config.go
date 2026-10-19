@@ -18,9 +18,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Sergey-Bar/vision-poc/internal/classify"
 	"github.com/Sergey-Bar/vision-poc/internal/novelty"
-	"github.com/Sergey-Bar/vision-poc/internal/ortdetect"
+	"github.com/Sergey-Bar/vision/shared/classify"
+	"github.com/Sergey-Bar/vision/shared/ortdetect"
 )
 
 // NoAnchorsSentinel is the value SP_POC_AI_ANCHORS takes when the model is a

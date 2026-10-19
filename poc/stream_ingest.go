@@ -45,7 +45,7 @@ import (
 
 	"github.com/Sergey-Bar/vision/poc/ws"
 
-	"github.com/Sergey-Bar/vision-poc/detectclient"
+	"github.com/Sergey-Bar/vision/shared/sidecar"
 
 	"gopkg.in/yaml.v3"
 )
@@ -513,7 +513,7 @@ type StreamIngest struct {
 	aiCannotTell atomic.Int64
 	aiNotAsked   atomic.Int64
 	lastAIState  atomic.Value
-	inferLat     *detectclient.Latencies
+	inferLat     *sidecar.Latencies
 }
 
 // resolveHLSURL resolves a watch URL to a playable HLS manifest through
@@ -654,17 +654,17 @@ func (s *StreamIngest) runMetricsLoop(ctx context.Context) {
 // claim. An absent or degraded answer is recorded as one: the count of
 // answered frames goes up, and so does the count of the ones that could not
 // tell, which is the figure that has to be honest for the next incident.
-func (s *StreamIngest) recordAIState(res detectclient.Result) {
+func (s *StreamIngest) recordAIState(res sidecar.Result) {
 	switch res.State {
-	case detectclient.StateAnswered:
+	case sidecar.StateAnswered:
 		s.aiAnswered.Add(1)
-	case detectclient.StateNoObjects:
+	case sidecar.StateNoObjects:
 		s.aiNoObjects.Add(1)
-	case detectclient.StateDegraded:
+	case sidecar.StateDegraded:
 		s.aiDegraded.Add(1)
-	case detectclient.StateCannotTell:
+	case sidecar.StateCannotTell:
 		s.aiCannotTell.Add(1)
-	case detectclient.StateNotAsked:
+	case sidecar.StateNotAsked:
 		s.aiNotAsked.Add(1)
 	default:
 		return

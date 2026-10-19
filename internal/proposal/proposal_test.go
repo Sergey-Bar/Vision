@@ -5,7 +5,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/Sergey-Bar/vision-poc/internal/proposal"
+	"github.com/Sergey-Bar/vision/internal/proposal"
 )
 
 func mustJSON(t *testing.T, v any) string {

@@ -32,9 +32,9 @@ import (
 
 	"github.com/Sergey-Bar/vision-poc/internal/detect"
 
-	"github.com/Sergey-Bar/vision-poc/internal/ai"
-	"github.com/Sergey-Bar/vision-poc/internal/classify"
 	"github.com/Sergey-Bar/vision-poc/internal/store"
+	"github.com/Sergey-Bar/vision/shared/classify"
+	"github.com/Sergey-Bar/vision/shared/sidecar"
 )
 
 // BoxLog is the run's bounded per-frame box log.
@@ -186,8 +186,8 @@ func SourceFor(mode string) string {
 //     denominator — so a log that wrote -1 on every row would leave the reviewer
 //     with nothing to judge and the false-positive rate NOT RUN forever, with no
 //     error anywhere. That is the shape of this bug the first time it existed.
-func boxObservationsFor(runID string, seq int64, at time.Time, boxes []ai.Box,
-	tel ai.Telemetry, tracks []detect.Track, source string) []store.BoxObservation {
+func boxObservationsFor(runID string, seq int64, at time.Time, boxes []sidecar.Box,
+	tel sidecar.Telemetry, tracks []detect.Track, source string) []store.BoxObservation {
 
 	measured := tel.Candidates > 0 || tel.PreNms > 0 || len(boxes) > 0
 	if !measured || len(boxes) == 0 {
@@ -207,7 +207,7 @@ func boxObservationsFor(runID string, seq int64, at time.Time, boxes []ai.Box,
 	for _, t := range tracks {
 		byClass[strings.ToLower(t.Class)] = append(byClass[strings.ToLower(t.Class)], t)
 	}
-	attr := func(b ai.Box) int {
+	attr := func(b sidecar.Box) int {
 		best, bestIou := -1, 0.0
 		for _, t := range byClass[strings.ToLower(b.Class)] {
 			if v := detect.Overlap(t.Box, b); v > bestIou {

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	tax "github.com/Sergey-Bar/vision-poc/internal/classify"
+	tax "github.com/Sergey-Bar/vision/shared/classify"
 )
 
 // The two refusals that are about WHAT MUST NOT HAPPEN, rather than about a

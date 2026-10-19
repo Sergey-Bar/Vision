@@ -11,13 +11,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/vision-poc/internal/ai"
 	"github.com/Sergey-Bar/vision-poc/internal/detect"
 	"github.com/Sergey-Bar/vision-poc/internal/evidence"
 	"github.com/Sergey-Bar/vision-poc/internal/novelty"
-	"github.com/Sergey-Bar/vision-poc/internal/ortdetect"
 	"github.com/Sergey-Bar/vision-poc/internal/store"
 	"github.com/Sergey-Bar/vision-poc/internal/vlm"
+	"github.com/Sergey-Bar/vision/shared/ortdetect"
+	"github.com/Sergey-Bar/vision/shared/sidecar"
 )
 
 // Trigger is the local novelty engine in the trigger path: cheap perception that
@@ -114,7 +114,7 @@ type RegionProposer interface {
 type DetectAnswer struct {
 	// Boxes is normalised against the FRAME, never against the model's input, so a
 	// model running at 640x640 and a camera at 1920x1080 produce the same numbers.
-	Boxes []ai.Box
+	Boxes []sidecar.Box
 	// State is one of the four words the contract fixes: asked_answered,
 	// no_objects, degraded, not_asked. It is DERIVED by the detector rather than
 	// set by the caller, because a caller that sets it can set it wrong and these

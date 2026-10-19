@@ -39,7 +39,7 @@ import (
 	"math"
 	"sort"
 
-	"github.com/Sergey-Bar/vision-poc/internal/proposal"
+	"github.com/Sergey-Bar/vision/shared/proposal"
 )
 
 // Mode is which comparison the engine makes.
@@ -59,7 +59,7 @@ func ValidMode(m Mode) bool { return m == ModeTemporal || m == ModeReference }
 
 // Box is a measured region, normalised 0..1 against the FRAME.
 //
-// An ALIAS of [proposal.Box], the same type `detect.Box` and `ai.Box` name. It
+// An ALIAS of [proposal.Box], the same type `detect.Box` and `sidecar.Box` name. It
 // carries a class and a score that this package never fills in, because a
 // connected component has not been told what it is yet; it reads one engine's
 // vocabulary and another's when a detector fills them.

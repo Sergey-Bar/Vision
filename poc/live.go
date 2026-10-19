@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/vision-poc/detectclient"
+	"github.com/Sergey-Bar/vision/shared/sidecar"
 )
 
 // The real path: resolved stream → ffmpeg frames → Python sidecar (the
@@ -65,7 +65,7 @@ func (s *StreamIngest) stopDemoSource() {
 
 // mapDetections turns sidecar boxes (frame fractions) into categorised frame
 // objects, naming vehicle colours from the captured pixels themselves.
-func (s *StreamIngest) mapDetections(res detectclient.Result, frame []byte, minScore float64) []frameObject {
+func (s *StreamIngest) mapDetections(res sidecar.Result, frame []byte, minScore float64) []frameObject {
 	out := make([]frameObject, 0, len(res.Boxes))
 	for _, b := range res.Boxes {
 		if b.Score < minScore {
@@ -108,7 +108,7 @@ func (s *StreamIngest) mapDetections(res detectclient.Result, frame []byte, minS
 // It is the ONE sidecar for the whole fleet: every camera's Detect call goes
 // to the same process, which is why the client is shared and the round trip
 // serialized (see cameraFrameLoop).
-func (s *StreamIngest) ensureSidecar(ctx context.Context) (*detectclient.Client, error) {
+func (s *StreamIngest) ensureSidecar(ctx context.Context) (*sidecar.Client, error) {
 	addr := s.config.Live.SidecarAddr
 	if addr == "" {
 		addr = "127.0.0.1:8099"
@@ -119,7 +119,7 @@ func (s *StreamIngest) ensureSidecar(ctx context.Context) (*detectclient.Client,
 		deadline = 5 * time.Second
 	}
 
-	if client, err := detectclient.New(base, deadline); err == nil {
+	if client, err := sidecar.New(base, deadline); err == nil {
 		pctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		_, perr := client.Probe(pctx)
 		cancel()
@@ -166,7 +166,7 @@ func (s *StreamIngest) ensureSidecar(ctx context.Context) (*detectclient.Client,
 	}
 	log.Printf("sidecar: started pid=%d: %s %s", cmd.Process.Pid, python, strings.Join(args, " "))
 
-	client, err := detectclient.New(base, deadline)
+	client, err := sidecar.New(base, deadline)
 	if err != nil {
 		return nil, err
 	}

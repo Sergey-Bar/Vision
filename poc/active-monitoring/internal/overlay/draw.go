@@ -6,7 +6,7 @@ import (
 	"image/color"
 	"strings"
 
-	"github.com/Sergey-Bar/vision-poc/internal/classify"
+	"github.com/Sergey-Bar/vision/shared/classify"
 )
 
 // The low-level primitives. They are here rather than in overlay.go because they

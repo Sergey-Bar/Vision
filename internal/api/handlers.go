@@ -1587,17 +1587,17 @@ func (s *Server) handleCritical(w http.ResponseWriter, r *http.Request, p identi
 		return
 	}
 	type critStream struct {
-		IncidentID string `json:"incidentId"`
-		VideoID    string `json:"videoId"`
-		SiteID     string `json:"siteId"`
-		Score      float64 `json:"score"`
+		IncidentID string   `json:"incidentId"`
+		VideoID    string   `json:"videoId"`
+		SiteID     string   `json:"siteId"`
+		Score      float64  `json:"score"`
 		Reasons    []string `json:"reasons"`
-		State      string `json:"state"`
-		Severity   string `json:"severity"`
-		Title      string `json:"title"`
-		FirstAt    string `json:"firstAt"`
-		LastAt     string `json:"lastAt"`
-		RuleID     string `json:"ruleId"`
+		State      string   `json:"state"`
+		Severity   string   `json:"severity"`
+		Title      string   `json:"title"`
+		FirstAt    string   `json:"firstAt"`
+		LastAt     string   `json:"lastAt"`
+		RuleID     string   `json:"ruleId"`
 	}
 	out := make([]critStream, 0, len(streams))
 	for _, inc := range streams {
@@ -1626,7 +1626,7 @@ func (s *Server) handleClips(w http.ResponseWriter, r *http.Request, p identity.
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool { return true },
+	CheckOrigin:     func(r *http.Request) bool { return true },
 }
 
 func (s *Server) handleWebSocketLive(w http.ResponseWriter, r *http.Request) {

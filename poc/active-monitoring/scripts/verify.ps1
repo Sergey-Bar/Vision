@@ -182,12 +182,36 @@ if ($LASTEXITCODE -ne 0) { Fail "go vet ./... exited $LASTEXITCODE" } else { Pas
 # --- 5. module boundary -----------------------------------------------------
 Step "module boundary"
 
-# D1: no import of the parent module, anywhere.
-$platformImport = Get-ChildItem -Recurse -Filter *.go -Path . | Select-String -Pattern 'github\.com/Sergey-Bar/vision/'
-if ($platformImport) {
-  $platformImport | ForEach-Object { Write-Host "        $($_.Path):$($_.LineNumber)" -ForegroundColor Yellow }
-  Fail "this module imports the platform. D1 forbids it: the POC mirrors the platform's ideas and shares none of its code."
-} else { Pass "no import of the platform" }
+# D1, restated: this module may not import the platform's OWN packages.
+#
+# It used to import nothing from the parent module at all. The detector, the class
+# taxonomy, the sidecar wire and the box geometry have since moved INTO the parent
+# module, and this module still needs them -- so it reaches them through the
+# parent's `shared/` faces, which are thin aliases over the parent's `internal/`
+# packages. A Go module boundary is also a visibility boundary, so `shared/` is the
+# only way across, and the aliases are type aliases: a value crosses without a
+# conversion and without a second copy to drift.
+#
+# The rule is therefore narrower, not looser: the faces are allowed, everything
+# else in the parent module is forbidden. `internal/` was never reachable from
+# here and still is not.
+#
+# The check is on the IMPORT GRAPH, not on the text: a comment that mentions the
+# platform's package path is not a dependency, and a text search would report one
+# and hide a real one.
+$platformImports = & $go list -f '{{range .Imports}}{{.}}
+{{end}}{{range .TestImports}}{{.}}
+{{end}}' ./... 2>$null
+$platformViolations = @()
+foreach ($i in $platformImports) {
+  if ($i -like 'github.com/Sergey-Bar/vision/*' -and $i -notlike 'github.com/Sergey-Bar/vision/shared/*') {
+    $platformViolations += $i
+  }
+}
+if ($platformViolations) {
+  $platformViolations | Sort-Object -Unique | ForEach-Object { Write-Host "        $_" -ForegroundColor Yellow }
+  Fail "this module imports the platform outside its shared/ faces. D1 forbids it: the POC may use the detector and the taxonomy the product now owns, and nothing else."
+} else { Pass "no import of the platform outside the shared/ faces" }
 
 # D1: the root does not build this module. This is the reason this script exists.
 $root = Resolve-Path (Join-Path $PWD '..\..')
@@ -207,20 +231,27 @@ try {
 # and a text search would report one and hide a real one.
 $boundaries = @(
   @{
+    # The shared box type, the detector's decoder, the class taxonomy and the
+    # sidecar wire have MOVED to the product module: the box geometry, the
+    # decoder and the wire are three halves of one contract, and a contract with
+    # halves in two modules is a contract that drifts. Their boundaries are now
+    # checked where they live, in the product module's own gate.
+    #
+    # What stays here is the consequence: `internal/detect` and `internal/novelty`
+    # still alias `proposal.Box`, and they alias it through the product module's
+    # `shared/` face. The alias is a type alias, not a wrapper, so the three
+    # spellings of "the box" are still one type -- which is the whole reason
+    # `internal/proposal` exists.
+    #
+    # `internal/detect` must reach the box geometry, the taxonomy and the absence
+    # vocabulary -- and nothing else.
     pkg = './internal/detect'
     forbid = @('modernc.org/sqlite', 'github.com/Sergey-Bar/vision-poc/internal/store',
                'github.com/Sergey-Bar/vision-poc/internal/evidence',
                'github.com/Sergey-Bar/vision-poc/internal/xprotect',
-               'github.com/Sergey-Bar/vision-poc/internal/ai')
-    why = 'internal/detect must know nothing about storage, the wire or the sidecar'
-  },
-  @{
-    pkg = './internal/ai'
-    forbid = @('modernc.org/sqlite', 'github.com/Sergey-Bar/vision-poc/internal/store',
-               'github.com/Sergey-Bar/vision-poc/internal/detect',
-               'github.com/Sergey-Bar/vision-poc/internal/evidence',
-               'github.com/Sergey-Bar/vision-poc/internal/xprotect')
-    why = 'internal/ai must know nothing about line-crossing, storage or the wire'
+               'github.com/Sergey-Bar/vision/shared/sidecar',
+               'github.com/Sergey-Bar/vision/shared/ortdetect')
+    why = 'internal/detect must know nothing about storage, the wire or the detector, and it reaches the box geometry, the taxonomy and the absence vocabulary through the product module''s shared faces: a shared vocabulary that depends on one of its consumers is not a shared vocabulary.'
   },
   @{
     pkg = './internal/xprotect'
@@ -247,63 +278,11 @@ $boundaries = @(
     pkg = './internal/overlay'
     forbid = @('github.com/Sergey-Bar/vision-poc/internal/soak',
                'github.com/Sergey-Bar/vision-poc/internal/store',
-               'github.com/Sergey-Bar/vision-poc/internal/ai',
+               'github.com/Sergey-Bar/vision/shared/sidecar',
                'github.com/Sergey-Bar/vision-poc/internal/detect',
                'github.com/Sergey-Bar/vision-poc/internal/ui',
                'modernc.org/sqlite')
-    why = 'internal/overlay is the leaf the screen and the runner BOTH draw with, so it may import only the standard library and internal/classify. Anything else is the import cycle this package exists to avoid, and a package that has begun to be a dumping ground is a package whose boundary has stopped being enforced.'
-  },
-  @{
-    # The shared box type, and the strictest leaf in the module: `ai.Box`,
-    # `detect.Box` and `novelty.Box` are ALIASES of `proposal.Box`, so all three
-    # of those packages import it and it may import none of them back.
-    #
-    # That is the whole reason this package exists. Three packages each declared
-    # their own Box, and a fourth — the detector — could not be written without
-    # importing one of them. A type that three packages alias can only stay one
-    # type while it stays below all three; the moment it imports one of them, the
-    # aliases stop being assignable and every existing call site becomes a
-    # conversion, which is a place a coordinate gets rescaled by accident.
-    #
-    # It must also stay free of `math` at the edges: the predicates here decide
-    # whether a box is real, and a predicate that needed the store to answer
-    # would be a predicate about the database rather than about the picture.
-    pkg = './internal/proposal'
-    forbid = @('modernc.org/sqlite',
-               'github.com/Sergey-Bar/vision-poc/internal/ai',
-               'github.com/Sergey-Bar/vision-poc/internal/detect',
-               'github.com/Sergey-Bar/vision-poc/internal/novelty',
-               'github.com/Sergey-Bar/vision-poc/internal/soak',
-               'github.com/Sergey-Bar/vision-poc/internal/store',
-               'github.com/Sergey-Bar/vision-poc/internal/overlay',
-               'github.com/Sergey-Bar/vision-poc/internal/classify',
-               'github.com/Sergey-Bar/vision-poc/internal/evidence',
-               'github.com/Sergey-Bar/vision-poc/internal/config',
-               'onnxruntime_go')
-    why = 'internal/proposal is aliased BY internal/ai, internal/detect and internal/novelty, so it must import none of them and nothing at all. A shared vocabulary that depends on one of its consumers is not a shared vocabulary.'
-  },
-  @{
-    # The detector's decoder, and a leaf for the same reason internal/vlm is one.
-    #
-    # It must not reach the database, and the reason is the parity claim: the
-    # cross-decoder test asserts that this decoder and pyworker's decoder agree on
-    # the same tensor. A decoder that could read a recorded answer would make that
-    # comparison unfalsifiable, exactly as a verifier that can read the store would
-    # make RC-4 unfalsifiable.
-    #
-    # `internal/novelty` is permitted and `internal/ai` is required: the absence
-    # states are the four the contract fixes and they must not drift between the
-    # sidecar path and the detector path, so both name them from one place.
-    pkg = './internal/ortdetect'
-    forbid = @('modernc.org/sqlite',
-               'github.com/Sergey-Bar/vision-poc/internal/store',
-               'github.com/Sergey-Bar/vision-poc/internal/soak',
-               'github.com/Sergey-Bar/vision-poc/internal/detect',
-               'github.com/Sergey-Bar/vision-poc/internal/evidence',
-               'github.com/Sergey-Bar/vision-poc/internal/xprotect',
-               'github.com/Sergey-Bar/vision-poc/internal/ui',
-               'github.com/Sergey-Bar/vision-poc/internal/classify')
-    why = 'internal/ortdetect decodes a tensor and nothing else. It may import internal/proposal for the box type, internal/novelty for the candidate shape the Trigger interface hands back, and internal/ai for the absence states; anything that reaches storage or the pipeline would let a measurement be taken from a record instead of from a tensor.'
+    why = 'internal/overlay is the leaf the screen and the runner BOTH draw with, so it may import only the standard library and the shared class taxonomy. Anything else is the import cycle this package exists to avoid, and a package that has begun to be a dumping ground is a package whose boundary has stopped being enforced.'
   },
   @{
     # The benchmark's arithmetic, and it is a leaf for the reason it matters.
@@ -323,7 +302,7 @@ $boundaries = @(
                'github.com/Sergey-Bar/vision-poc/internal/store',
                'github.com/Sergey-Bar/vision-poc/internal/soak',
                'github.com/Sergey-Bar/vision-poc/internal/detect',
-               'github.com/Sergey-Bar/vision-poc/internal/ortdetect',
+               'github.com/Sergey-Bar/vision/shared/ortdetect',
                'github.com/Sergey-Bar/vision-poc/internal/evidence',
                'github.com/yalue/onnxruntime_go')
     why = 'internal/bench/metrics.go is the pure half of the benchmark and must stay pure, or its golden test is checking the implementation against itself. The half that holds a session is cmd/pocctl/bench.go, which is a command and not a package.'
@@ -336,19 +315,11 @@ $boundaries = @(
     # rather than the judgement, and the false-positive rate it produced would be
     # the model's opinion of itself.
     pkg = './internal/labelui'
-    forbid = @('github.com/Sergey-Bar/vision-poc/internal/ortdetect',
+    forbid = @('github.com/Sergey-Bar/vision/shared/ortdetect',
                'github.com/Sergey-Bar/vision-poc/internal/detect',
                'github.com/Sergey-Bar/vision-poc/internal/soak',
                'github.com/yalue/onnxruntime_go')
     why = 'internal/labelui marks what a run RECORDED. It may hold the store and serve a page; it must not hold a model, because a marking tool that re-runs the detector is asking the model to grade its own work.'
-  },
-  @{
-    # The taxonomy is a leaf too, and for the opposite reason: it is the vocabulary
-    # every other package agrees on, so a classify that reached for the store or
-    # the wire would make the vocabulary depend on the thing it describes.
-    pkg = './internal/classify'
-    forbid = @('modernc.org/sqlite')
-    why = 'internal/classify is the family vocabulary and must stay a leaf; a taxonomy that imports the store is a taxonomy that can be wrong in a way no table can show'
   },
   @{
     # The verifier is a leaf. It is the package that decides what a camera operator
@@ -373,12 +344,19 @@ $boundaries = @(
     # region and it owns nothing else. A detector that could reach the store could
     # report a decision it did not measure, and a detector that could reach soak
     # would be inside the pipeline it is supposed to be a measurement of.
+    #
+    # The taxonomy it used to import has moved to the product module, with the
+    # detector and the wire it belongs with; it reaches the box geometry through
+    # the shared face and must reach no detector and no sidecar.
     pkg = './internal/novelty'
     forbid = @('github.com/Sergey-Bar/vision-poc/internal/store',
                'github.com/Sergey-Bar/vision-poc/internal/soak',
                'github.com/Sergey-Bar/vision-poc/internal/vlm',
                'github.com/Sergey-Bar/vision-poc/internal/detect',
                'github.com/Sergey-Bar/vision-poc/internal/ui',
+               'github.com/Sergey-Bar/vision/shared/ortdetect',
+               'github.com/Sergey-Bar/vision/shared/sidecar',
+               'github.com/Sergey-Bar/vision/shared/classify',
                'modernc.org/sqlite')
     why = 'internal/novelty measures a region from pixels and nothing else. A score that could read the database could report a decision nobody measured, and the box on a pushed event is supposed to be ours and measured.'
   }
@@ -447,9 +425,18 @@ if ($py) {
 # model, neither of which a gate may assume. It is SKIPPED with the command that
 # runs it — never a quiet pass.
 Step "cross-decoder parity"
-& $go test -count=1 -run 'Parity|BothAxisLayouts|ExerciseBothNMS|ScoreParity' ./internal/ortdetect/
-if ($LASTEXITCODE -ne 0) { Fail "the decoder's own parity harness failed: the two axis layouts disagree, or the fixture no longer exercises both suppression passes" }
-else { Pass "the decoder's axis-layout and NMS-fixture parity harness" }
+# The decoder has MOVED to the product module, and the parity test moved with it:
+# the Go half of the wire and the Python half are two halves of one contract, and
+# the test that compares them belongs with the Go half. The step still runs from
+# here, because it is this module's Python sidecar that is the reference, but the
+# package under test is now the product module's.
+$productRoot = Resolve-Path (Join-Path $PWD '..\..')
+Push-Location $productRoot
+try {
+  & $go test -count=1 -run 'Parity|BothAxisLayouts|ExerciseBothNMS|ScoreParity' ./internal/ortdetect/
+  if ($LASTEXITCODE -ne 0) { Fail "the decoder's own parity harness failed: the two axis layouts disagree, or the fixture no longer exercises both suppression passes" }
+  else { Pass "the decoder's axis-layout and NMS-fixture parity harness" }
+} finally { Pop-Location }
 
 $pyRunner = Get-Command py -ErrorAction SilentlyContinue
 if ($pyRunner) { $pyCmd = if ($pyRunner.Name -eq 'py.exe') { @('py','-3') } else { @('python') } }
@@ -480,15 +467,21 @@ if ($pyCmd -and (Test-Path -LiteralPath $ortLib) -and (Test-Path -LiteralPath $o
   # `-list` prints the matching test names and exits 0 either way, so the exit
   # code is not the evidence. The OUTPUT is: the command must name the test it is
   # about to run, or the step refuses rather than passes.
-  $listed = & $go test -count=1 -list 'TestCrossDecoderParity' -tags parity ./internal/ortdetect/ 2>&1
-  if (($listed | Where-Object { $_ -match '^(Test|Example)' }).Count -eq 0) {
-    Fail "the cross-decoder parity test named above does not exist in ./internal/ortdetect with the 'parity' tag, and a `go test -run` over a name nothing matches is an exit 0. The step below would report agreement without comparing anything."
-  } else {
-    & $go test -count=1 -run 'TestCrossDecoderParity' -tags parity ./internal/ortdetect/
-    if ($LASTEXITCODE -ne 0) {
-      Fail "the Go decoder and pyworker's disagree on the same tensor. Every measurement taken with either is a measurement of their disagreement."
-    } else { Pass "the Go decoder and pyworker agree on the same tensor" }
-  }
+  #
+  # The test now lives in the PRODUCT module, next to the decoder it checks, so
+  # the command runs from the repository root.
+  Push-Location $productRoot
+  try {
+    $listed = & $go test -count=1 -list 'TestCrossDecoderParity' -tags parity ./internal/ortdetect/ 2>&1
+    if (($listed | Where-Object { $_ -match '^(Test|Example)' }).Count -eq 0) {
+      Fail "the cross-decoder parity test named above does not exist in ./internal/ortdetect with the 'parity' tag, and a `go test -run` over a name nothing matches is an exit 0. The step below would report agreement without comparing anything."
+    } else {
+      & $go test -count=1 -run 'TestCrossDecoderParity' -tags parity ./internal/ortdetect/
+      if ($LASTEXITCODE -ne 0) {
+        Fail "the Go decoder and pyworker's disagree on the same tensor. Every measurement taken with either is a measurement of their disagreement."
+      } else { Pass "the Go decoder and pyworker agree on the same tensor" }
+    }
+  } finally { Pop-Location }
 } else {
   $missing = @()
   if (-not $pyCmd) { $missing += 'no Python interpreter' }
@@ -651,6 +644,7 @@ if ($SkipRedCheck) {
       file = 'internal\ortdetect\letterbox.go'
       from = 'return (v - float64(pad)) / float64(content)'
       to   = 'return (v - float64(pad)) / float64(gInputSizeOf) // REDCHECK RC-13: the content divisor was replaced'
+      root = '..\..'
       pkg  = './internal/ortdetect'
       why  = 'every box is drawn 0.6x its true height on a 16:9 frame, every crossing happens early, and nothing anywhere reports an error — the boxes are in the right x and confidently the wrong size'
     },
@@ -659,6 +653,7 @@ if ($SkipRedCheck) {
       file = 'internal\ortdetect\decode.go'
       from = 'afterBoth := nmsGlobal(afterClass, cfg.NMSGlobal)'
       to   = 'afterBoth := afterClass // REDCHECK RC-14: the class-agnostic pass was removed'
+      root = '..\..'
       pkg  = './internal/ortdetect'
       why  = 'a car box and a truck box on ONE object survive as two boxes, two tracks and two crossings, because a class-aware pass structurally cannot compare across classes. The picture shows one car and the report counts two.'
     },
@@ -675,6 +670,7 @@ if ($SkipRedCheck) {
       file = 'internal\ortdetect\decode.go'
       from = 'if cx2-cx1 <= 1e-6 || cy2-cy1 <= 1e-6 {'
       to   = 'if false { // REDCHECK RC-16: the degenerate-box gate was removed'
+      root = '..\..'
       pkg  = './internal/ortdetect'
       why  = 'one box off the top of the frame clamps to a zero-area box, the consumer reads it as an uninterpretable answer, and a frame with nineteen good detections becomes a frame nobody can read'
     },
@@ -819,6 +815,7 @@ file = 'internal\detect\engine.go'
       file = 'internal\ortdetect\execution_provider.go'
       from = 'func gpuMeansCUDA() string { return EPProviderCUDA }'
       to   = 'func gpuMeansCUDA() string { return EPProviderCPU } // REDCHECK RC-28: `gpu` became the CPU'
+      root = '..\..'
       pkg  = './internal/ortdetect'
       why  = 'a latency measured on the CPU is recorded as one measured on a GPU, and the number is real and the label is not'
     },
@@ -834,6 +831,7 @@ file = 'internal\detect\engine.go'
       file = 'internal\ortdetect\session_cgo.go'
       from = '		return make([]ort.Value, len(outputs)), true'
       to   = '		return preallocateConcrete(outputs), false // REDCHECK RC-29: the runtime never allocates'
+      root = '..\..'
       pkg  = './internal/ortdetect'
       why  = 'a detector exported with dynamic axes cannot be run at all, and the refusal says it is being protected from something'
     },
@@ -848,6 +846,7 @@ file = 'internal\detect\engine.go'
       file = 'internal\ortdetect\session_cgo.go'
       from = '		shape = ort.NewShape(1, h, w, c)'
       to   = '		shape = ort.NewShape(1, c, h, w) // REDCHECK RC-30: NHWC is fed as NCHW'
+      root = '..\..'
       pkg  = './internal/ortdetect'
       why  = 'a tensor of exactly the right size fed in the wrong order decodes to boxes that are plausible and wrong, while every artefact describing the model says the layout was honoured'
     },
@@ -924,6 +923,7 @@ file = 'internal\detect\engine.go'
       file = 'internal\ortdetect\crop.go'
       from = 'return a.X1 < b.X2 && b.X1 < a.X2 && a.Y1 < b.Y2 && b.Y1 < a.Y2'
       to   = 'return a.X1 <= b.X2 && b.X1 <= a.X2 && a.Y1 <= b.Y2 && b.Y1 <= a.Y2 // REDCHECK: touching counted as overlapping'
+      root = '..\..'
       pkg  = './internal/ortdetect'
       why  = 'regions sharing no pixels are treated as overlapping, so every crop beside a large detection goes unmeasured. A flock against a wall is a row of small regions along one big box and all of them vanish.'
     },
@@ -948,6 +948,7 @@ file = 'internal\detect\engine.go'
       file = 'internal\ortdetect\crop.go'
       from = 'X1: (rx + b.X1*rw) / fx,'
       to   = 'X1: (b.X1*rw) / fx, // REDCHECK: the crop offset was dropped'
+      root = '..\..'
       pkg  = './internal/ortdetect'
       why  = 'every crop-sourced box lands at the origin of the crop with plausible coordinates and no error anywhere. This is the letterbox-divisor defect in a new place: the arithmetic is a couple of additions and forgetting one of them is invisible until somebody reports a bird in the wrong tree.'
     },
@@ -956,6 +957,7 @@ file = 'internal\detect\engine.go'
       file = 'internal\ortdetect\crop.go'
       from = 'src := ((c.Y+row)*frameW + c.X) * 3'
       to   = 'src := ((c.Y)*frameW + c.X) * 3 // REDCHECK: the row offset was dropped'
+      root = '..\..'
       pkg  = './internal/ortdetect'
       why  = 'every row of the crop is the first row, so the crop is a horizontally striped image of the object. A detector answers confidently about a sheared picture, and the box it returns is the box for the wrong pixels.'
     },
@@ -1694,7 +1696,15 @@ file = 'internal\detect\engine.go'
   Push-Location $PWD
   try {
     foreach ($c in $controls) {
-      $full = (Resolve-Path -LiteralPath $c.file).Path
+      # A control whose subject MOVED to the product module is proved against the
+      # product module: the file is resolved there and the suite that watches it
+      # runs there. The detector, the taxonomy and the sidecar wire moved as one
+      # piece -- the decoder and the wire are two halves of one contract -- and
+      # the controls that watch them moved with them. Proving a control against a
+      # copy of the file would prove the copy.
+      $entryRoot = $PWD.Path
+      if ($c.root) { $entryRoot = (Resolve-Path -LiteralPath $c.root).Path }
+      $full = (Resolve-Path -LiteralPath (Join-Path $entryRoot $c.file)).Path
       $original = [System.IO.File]::ReadAllText($full)
       if (-not $original.Contains($c.from)) {
         Skip "$($c.name): the control line is not present in $($c.file) in the form this script expects, so the control could not be removed. NOT passing; not run. Look for: $($c.from)"
@@ -1714,8 +1724,13 @@ file = 'internal\detect\engine.go'
         # result here — the control really is gone — so it must be read as one
         # rather than as a crash.
         $ErrorActionPreference = 'Continue'
-        & $go test -count=1 $c.pkg *> $null
-        $exit = $LASTEXITCODE
+        Push-Location $entryRoot
+        try {
+          & $go test -count=1 $c.pkg *> $null
+          $exit = $LASTEXITCODE
+        } finally {
+          Pop-Location
+        }
         $ErrorActionPreference = 'Stop'
         if ($exit -eq 0) {
           Fail "$($c.name): the suite stayed green with the control removed. $($c.why). A test that cannot fail when its subject is gone is not a test."

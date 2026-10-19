@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/vision-poc/internal/ai"
 	"github.com/Sergey-Bar/vision-poc/internal/config"
 	"github.com/Sergey-Bar/vision-poc/internal/recorder"
 	"github.com/Sergey-Bar/vision-poc/internal/soak"
@@ -20,6 +19,7 @@ import (
 	"github.com/Sergey-Bar/vision-poc/internal/vlm"
 	"github.com/Sergey-Bar/vision-poc/internal/xprotect"
 	"github.com/Sergey-Bar/vision-poc/internal/xpsim"
+	"github.com/Sergey-Bar/vision/shared/sidecar"
 )
 
 // httpServer is the simulator's listener. It is here so `pocctl sim` and the demo
@@ -92,7 +92,7 @@ func cmdPreflight(args []string) error {
 		return cfgErr
 	}
 	free, _ := recorder.Free(cfg.DataRoot)
-	aic, aierr := ai.New(cfg.AIAddr, cfg.AIDeadline)
+	aic, aierr := sidecar.New(cfg.AIAddr, cfg.AIDeadline)
 	if aierr != nil {
 		aic = nil
 	}
@@ -363,7 +363,7 @@ func cmdRehearse(args []string) error {
 			// fixture carries the attribution every pushed event now needs. Without
 			// it the rehearsal would fail on a refusal that has nothing to do with the
 			// fault being injected.
-			Provenance: xprotect.Provenance{AIState: ai.StateNotAsked},
+			Provenance: xprotect.Provenance{AIState: sidecar.StateNotAsked},
 		})
 		observed := classify(err, out)
 		mark := "PASS"

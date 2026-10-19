@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/vision-poc/internal/ai"
 	"github.com/Sergey-Bar/vision-poc/internal/config"
 	"github.com/Sergey-Bar/vision-poc/internal/soak"
+	"github.com/Sergey-Bar/vision/shared/sidecar"
 )
 
 // TestCalibrationForResolvesTheDetectorRowsP99 covers the wiring that used to
@@ -117,9 +117,9 @@ func TestCalibrationForRefusesADetectorRecordOnASidecarRun(t *testing.T) {
 
 	// With a probed sidecar, the DETECTOR record is refused BY NAME and the
 	// sidecar record is what the AI row multiplies.
-	client, err := ai.New(addr, time.Second)
+	client, err := sidecar.New(addr, time.Second)
 	if err != nil {
-		t.Fatalf("ai.New: %v", err)
+		t.Fatalf("sidecar.New: %v", err)
 	}
 	got = calibrationFor(cfg, client)
 	if got.p99MS != 0 {
@@ -162,9 +162,9 @@ func TestCalibrationForRefusesADetectorRecordOnASidecarRun(t *testing.T) {
 func TestCalibrationForRefusesASidecarRecordThatNamesAnotherModel(t *testing.T) {
 	env := calibrationWorld(t, nil)
 	cfg := env.sidecarCfg(fakeSidecarURL(t, "other-export.onnx", 416, []string{"CPUExecutionProvider"}))
-	client, err := ai.New(cfg.AIAddr, time.Second)
+	client, err := sidecar.New(cfg.AIAddr, time.Second)
 	if err != nil {
-		t.Fatalf("ai.New: %v", err)
+		t.Fatalf("sidecar.New: %v", err)
 	}
 	got := calibrationFor(cfg, client)
 	if got.p99MS != 0 {

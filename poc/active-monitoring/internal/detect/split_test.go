@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Sergey-Bar/vision-poc/internal/aistate"
-	"github.com/Sergey-Bar/vision-poc/internal/classify"
+	"github.com/Sergey-Bar/vision/shared/aistate"
+	"github.com/Sergey-Bar/vision/shared/classify"
 )
 
 func th(approved ...string) Thresholds {

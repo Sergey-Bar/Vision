@@ -43,26 +43,35 @@ FROM ${GO_IMAGE} AS build
 # to satisfy and no `.so` to ship. The one file that is Windows-only is
 # `internal/pipeline/disk_windows.go`, which has a linux sibling and is selected
 # by build tag rather than by runtime detection.
+#
+# The claim used to be that no build path contains cgo AT ALL. It no longer is,
+# and the difference is the detector: `internal/ortdetect` loads ONNX Runtime
+# through cgo, so the module has one package that needs a C compiler and one that
+# refuses by name without one. `CGO_ENABLED=0` selects the refusing build --
+# `internal/ortdetect/session_nocgo.go` -- so this image ships a product whose
+# detector says `ortdetect.NoCgoRefusal` rather than one that silently has no
+# detector. The product image is the SERVER; the detector runs in the VMS
+# emulator, which is a separate process with its own image.
 ENV CGO_ENABLED=0 \
     GOFLAGS=-mod=readonly
 
 WORKDIR /src
 
-# The whole tree goes in before the module cache is warmed, because this module
-# has a `replace` pointing at a second module in the tree
-# (`./poc/active-monitoring`). A local replace is resolved during the module
-# graph read, so a dependency-first layer that copies only `go.mod`/`go.sum`
-# and runs `go mod download` fails outright — reproduced:
+# The whole tree goes in before the module cache is warmed. The dependency
+# graph changed shape when the detector moved out of the POC module: this module
+# no longer has a `replace` pointing at `./poc/active-monitoring`, and the POC
+# module now has one pointing at THIS module -- the direction is the other way
+# round, because the detector, the taxonomy and the sidecar wire moved into the
+# product and the POC reached them through `shared/`.
 #
-#     go: github.com/Sergey-Bar/vision-poc@v0.0.0 (replaced by ./poc/active-monitoring):
-#         reading poc\active-monitoring\go.mod: no such file or directory
-#
-# The split is still worth most of what it was worth: `COPY . .` is the layer a
-# source edit invalidates, so the module cache still survives one, because
-# `go mod download` now sits *after* the copy it needed. `-mod=readonly` still
-# means a go.mod that disagrees with go.sum fails the build rather than
-# silently rewriting either — `AGENTS.md` calls a hand-edited dependency list a
-# human-review item.
+# A local replace is resolved during the module graph read, so a
+# dependency-first layer that copies only `go.mod`/`go.sum` and runs
+# `go mod download` fails outright when one is present. The split is still worth
+# most of what it was worth: `COPY . .` is the layer a source edit invalidates,
+# so the module cache still survives one, because `go mod download` now sits
+# *after* the copy it needed. `-mod=readonly` still means a go.mod that
+# disagrees with go.sum fails the build rather than silently rewriting either —
+# `AGENTS.md` calls a hand-edited dependency list a human-review item.
 COPY . .
 RUN go mod download
 

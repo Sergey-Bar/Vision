@@ -265,13 +265,32 @@ type declSite struct {
 // loadDirs are the trees the gate covers. `poc` is included because only part
 // of it is a second Go module: `poc/active-monitoring/` has its own `go.mod`
 // and is pruned below, while `poc/` itself is a normal package of this module
-// and is the main() that consumes the autonomy layer.
-var loadDirs = []string{"internal", "cmd", "tools", "web", "poc"}
+// and is the main() that consumes the autonomy layer. `shared` is included
+// because it is a normal package of this module too: it is the public face the
+// POC module imports, so the names it writes are readers of this module's
+// symbols, and a gate that did not parse it would report the detector's own API
+// as dead.
+var loadDirs = []string{"internal", "cmd", "tools", "web", "poc", "shared"}
 
-// nestedModules are the second Go modules inside this repository. They cannot
-// import this module's packages, so they are neither a source of declarations
-// to check nor a reader that can satisfy one, and walking them would report
-// their exports against the wrong module entirely.
+// readerOnlyDirs are trees that are READ but never declared against.
+//
+// `poc/active-monitoring` is one, and it stopped being an exception when the
+// detector moved into this module. It is a separate Go module and cannot import
+// `internal/`, so its own exports are not this module's business; but it now
+// imports this module's `shared/` packages, and every `ortdetect.X` it writes
+// is a reader of `internal/ortdetect`'s X. Pruning the tree entirely reported
+// the detector's whole API as dead -- the symbols the POC calls on every frame
+// of every run -- because the only caller was behind a module boundary the
+// walk refused to cross.
+//
+// The asymmetry is deliberate: a second module's declarations are checked by
+// that module's own gate, and this gate cannot judge them; but a reader is a
+// reader wherever it lives.
+var readerOnlyDirs = []string{"poc/active-monitoring"}
+
+// nestedModules are the second Go modules inside this repository. Their
+// declarations belong to their own gate; their reads are collected by
+// readerOnlyDirs above.
 var nestedModules = map[string]bool{
 	"poc/active-monitoring": true,
 }
@@ -285,7 +304,8 @@ var defaultSkip = map[string]bool{
 }
 
 // Load parses every Go file under root for each directory in LoadDirs.
-func Load(root string) *Repo { return LoadDir(root, loadDirs) }
+// Load is Load over the repository's own trees, including the reader-only ones.
+func Load(root string) *Repo { return loadDir(root, loadDirs, readerOnlyDirs) }
 
 // LoadDir is Load over an explicit list of trees, which is what the gate's own
 // tests use to point it at a fixture rather than at the live repository.
@@ -293,7 +313,14 @@ func Load(root string) *Repo { return LoadDir(root, loadDirs) }
 // A tree that does not exist is an error rather than a silent zero. A gate that
 // quietly covers less than it claims is the defect this whole repository keeps
 // finding, and it is the defect this gate exists to catch.
-func LoadDir(root string, dirs []string) *Repo {
+//
+// The reader-only trees are NOT added here: a fixture is a fixture, and
+// pointing the reader walk at `poc/active-monitoring` under a temporary
+// directory would fail every one of these tests for a reason that has nothing
+// to do with what they test.
+func LoadDir(root string, dirs []string) *Repo { return loadDir(root, dirs, nil) }
+
+func loadDir(root string, dirs, readerDirs []string) *Repo {
 	r := &Repo{
 		decls:             map[string]declSite{},
 		reads:             map[string]map[string]bool{},
@@ -316,6 +343,7 @@ func LoadDir(root string, dirs []string) *Repo {
 	// clause and nothing else; it is cheap and it makes the second pass's qualifier
 	// test sound.
 	var files []string
+	var readerFiles []string
 	for _, d := range dirs {
 		base := filepath.Join(root, d)
 		if _, err := os.Stat(base); err != nil {
@@ -346,11 +374,51 @@ func LoadDir(root string, dirs []string) *Repo {
 		}
 	}
 
+	// The reader-only trees. Their files are parsed for what they NAME, never for
+	// what they DECLARE: a second module's exports are checked by that module's
+	// own gate, and this gate cannot judge them.
+	for _, d := range readerDirs {
+		base := filepath.Join(root, d)
+		if _, err := os.Stat(base); err != nil {
+			r.errs = append(r.errs, fmt.Errorf("reader tree %s does not exist under %s", d, root))
+			continue
+		}
+		walkErr := filepath.Walk(base, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if info.IsDir() {
+				if defaultSkip[info.Name()] {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if !strings.HasSuffix(path, ".go") {
+				return nil
+			}
+			readerFiles = append(readerFiles, path)
+			return nil
+		})
+		if walkErr != nil {
+			r.errs = append(r.errs, walkErr)
+		}
+	}
+
 	for _, path := range files {
 		r.notePackageName(path)
 	}
+	// The reader-only tree's package names are NOT noted. A package name in this
+	// tree is what tells the qualifier test "this identifier names a package, so
+	// this selector is a qualified name and not a method call" -- and the reader
+	// tree's names belong to another module, whose `store` is not this module's
+	// `store`. Noting them made `store.WriteScenario(...)` in
+	// `tools/fixturegen` look like a package-qualified name, which stopped the
+	// gate from seeing the call at all and reported four live methods as dead.
+	for _, path := range readerFiles {
+		r.loadFile(root, path, dirOf(path), false)
+	}
 	for _, path := range files {
-		r.loadFile(root, path, dirOf(path))
+		r.loadFile(root, path, dirOf(path), true)
 	}
 	return r
 }
@@ -375,7 +443,11 @@ func (r *Repo) notePackageName(path string) {
 	r.packageNames[f.Name.Name] = true
 }
 
-func (r *Repo) loadFile(root, path, dir string) {
+// loadFile parses one file. `declare` says whether the symbols it declares
+// belong to this module's gate: a reader-only tree's declarations belong to
+// another module's gate, and registering them here would judge another
+// module's exports by this module's rules.
+func (r *Repo) loadFile(root, path, dir string, declare bool) {
 	head, err := os.ReadFile(path)
 	if err != nil {
 		r.errs = append(r.errs, fmt.Errorf("read %s: %w", path, err))
@@ -430,7 +502,11 @@ func (r *Repo) loadFile(root, path, dir string) {
 	// before recording them, so the gate reported 40-odd live functions as dead
 	// purely because their only caller was in a `main` package.
 	if f.Name.Name == "main" {
-		r.addSelectors(f, r.methods)
+		// A reader-only tree's `main` is not this module's `main`, so its bare
+		// selectors are not this module's method calls.
+		if declare {
+			r.addSelectors(f, r.methods)
+		}
 		addIdents(r, f, set, qual)
 		r.mains++
 		return
@@ -442,14 +518,31 @@ func (r *Repo) loadFile(root, path, dir string) {
 	// computed the right answer and no route or gauge loop ever invoked it, so the
 	// SLOs were a document. A method whose only caller is a test is dead product
 	// code wearing a test as a hat.
+	// A reader-only tree contributes its QUALIFIED names -- `pkg.Symbol` -- and
+	// not its bare selectors.
+	//
+	// The distinction is the difference between a read and a coincidence. A
+	// qualified name names a package, so `ortdetect.Open` is a read of
+	// `ortdetect.Open`. A bare selector is just a name: the POC's `st.Stats` is
+	// its own store's method, and letting it satisfy `observations.Stats` in
+	// another package would turn a coincidence into a verdict. The bare
+	// selector is already the gate's one documented looseness inside this
+	// module; extending it across a module boundary would extend the looseness
+	// to a tree the gate does not even judge.
 	isTest := strings.HasSuffix(path, "_test.go")
-	if !isTest {
+	if !isTest && declare {
 		r.addSelectors(f, r.methods)
 	}
 	addIdents(r, f, set, qual)
 
 	// A test declares nothing, so only the reads above matter for it.
 	if isTest {
+		return
+	}
+
+	// A reader-only tree declares nothing either: its exports belong to another
+	// module's gate.
+	if !declare {
 		return
 	}
 
@@ -852,6 +945,15 @@ func (r *Repo) HasReader(key string) bool {
 	// A method is reached through a receiver, so a bare-name collision is
 	// indistinguishable from a call. This is the one looseness in the gate and it is
 	// documented in the package comment.
+	//
+	// It applies to METHODS ONLY, and the restriction is the point. A top-level
+	// function, var or const is reached by a QUALIFIED name -- `pkg.Name` -- and a
+	// qualified name is exactly what the gate records, so the bare-name
+	// shortcut has nothing to add for one. It only adds falsehoods: `novelty`'s
+	// `cfg.MaxCandidates` is a field, `c.MaxCandidates` is a field read, and
+	// either one would satisfy `correlator.MaxCandidates`, a CONST in another
+	// package, if the shortcut were allowed to reach across kinds. The shortcut
+	// existed for methods; it now does exactly that and nothing more.
 	if r.methods[name] {
 		return true
 	}

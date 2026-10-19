@@ -1,6 +1,6 @@
 package main
 
-import ort "github.com/Sergey-Bar/vision-poc/internal/ortdetect"
+import ort "github.com/Sergey-Bar/vision/shared/ortdetect"
 
 // The answers under test, built by helpers so the body of a test reads as the
 // claim it is making. The package is imported under a short alias for one

@@ -7,7 +7,7 @@ incidents, and records everything in a hash-chained audit ledger.
 
 This file is for two readers: a new engineer on day one, and an AI agent with no
 prior context. It answers *where things are* and *what each package is for* so
-neither of you has to open 89 packages to find out.
+neither of you has to open 100 packages to find out.
 
 It is a map, not an architecture document. It does not restate build state —
 `docs/status.md` is the only source of truth for that — and it does not restate
@@ -61,6 +61,7 @@ Only five do. Everything else reaches the ledger through its caller.
 |---|---|---|---|---|
 | 
 | `airuntime` | The Go client for `runtime.py` and the `QueueVLM` worker. Imports nothing from the deterministic core | observe | no (the caller audits `ai.observation.*`) | `airuntime.Client`, `Client.Do`, `airuntime.Result`, `VLMWorker` |
+| `aistate` | The answer vocabulary: five states, of which three are absences. A leaf that imports nothing, so three packages can agree on the words without depending on each other | support | no | `aistate.Asked`, `aistate.Degraded`, `aistate.BlindnessStates`, `aistate.IsAnswered` |
 | `anomaly` | The autonomy layer's behaviour rules: dwell, loiter, flow, tailgate. Pure functions over a linked incident and a site | evaluate | no | `anomaly.RuleSet`, `RuleSet.Evaluate`, `anomaly.DefaultRuleSet` |
 | `api` | Strict-JSON API and the server-rendered console, with CSRF, CSP and per-route capabilities | present | yes (denials and refusals) | `api.Server`, `Server.RegisterRoutes(Deps)`, `api.Deps` |
 | `audit` | Append-only, hash-chained ledger; owns the `Entry` shape, validation, verification and sealing | store | yes — it *is* the writer | `audit.Writer`, `Writer.Append`, `Writer.Verify`, `audit.Entry` |
@@ -68,6 +69,7 @@ Only five do. Everything else reaches the ledger through its caller.
 | `camerahealth` | The camera state vocabulary and state machine (`fresh`/`stale`/`silent`/`blind`) plus the one `Degraded` predicate, read by the brief, the coverage rule, telemetry and the POC so they cannot disagree about whether a camera is watching. `frozen` is deliberately not a state | support | no | `camerahealth.State`, `camerahealth.Degraded`, `WindowsFor` |
 | `capability` | The capability-coverage gate: seven derived tables with refusal ledgers. Every declared effect has an executor, every metric a producer, every contract route an implementation | support | test only | `capability.Check`, `capability.Derive`, `capability.Refusal` |
 | `checkpoint` | Signs the ledger to a sink outside the database, so tamper is provable after the fact | store | no (the caller audits `audit.checkpoint.sealed`) | `checkpoint.Seal`, `checkpoint.Sealer`, `Sink`, `Signer`, `VerifySeal` |
+| `classify` | The class taxonomy: which COCO class belongs to which of the four families, and the one-way ownership that keeps the Python sidecar from growing a second copy of it. A leaf that imports nothing | support | no | `classify.Family`, `classify.Resolve`, `classify.FamilyOf`, `classify.Value` |
 | `clock` | The time subsystem: sources, drift bands, per-site policy, normalized time, skew, lag. Pure, no DB | support | no | `clock.Policy`, `clock.Band`, `clock.Normalized`, `clock.Lag` |
 | `clocksub` | Measures and stores per-device clock drift against the site reference | store | no | `clocksub.Service`, `Service.Measure`, `Service.State` |
 | `command` | A ~270-line subcommand tree for the CLIs. Deliberately not a dependency | present | no | `command.Command`, `Execute`, `command.ExitCode` |
@@ -105,6 +107,9 @@ Only five do. Everything else reaches the ledger through its caller.
 | `normalize` | Inbox row → canonical event, committing with the inbox transition in one transaction | normalize | no | `normalize.Normalizer`, `Input`, `Result`, `DeriveEventID`, `ToProto` |
 | `observability` | The metric registry (closed name set) and SLO evaluation | support | no | `observability.Registry`, `observability.Breaches`, `observability.SLO` |
 | `operatormetrics` | The DURABLE half of the metric surface: attention minutes, MTTI/MTTV, the two silent verification states, and the evidence-failure proxy, all as Postgres computations. The registry answers "what is happening now"; this answers "what happened in the window", which is the only shape a gate artefact may quote. Read-only | support | no | `operatormetrics.Queries`, `Queries.Attention`, `Queries.MTTI`, `Queries.MTTV`, `Queries.VerificationStates`, `Queries.EvidenceFetchFailures` |
+| `ortdetect` | The in-process ONNX detector: a cgo session over ONNX Runtime, the fused-head decoder, the letterbox, the non-maximum suppression, the CUDA preflight, and the absence vocabulary a refusal produces. A build without cgo refuses by name rather than pretending to be a detector | observe | no | `ortdetect.Open`, `ortdetect.NewDetector`, `ortdetect.Detect`, `ortdetect.Identity`, `ortdetect.Preflight` |
+| `proposal` | The box geometry: a rectangle in pixel coordinates, with the validity rules and the union that merges two boxes of one object. A leaf that imports nothing, so the detector, the tracker and the sidecar wire can all speak it | support | no | `proposal.Box`, `proposal.Candidate`, `Box.Valid`, `Box.Union` |
+| `sidecar` | The Go side of the Python detector sidecar: raw RGB frames over loopback HTTP, a strict decoder, and the tripwire that never lets an absence become an answer | observe | no | `sidecar.New`, `sidecar.Interpret`, `sidecar.Result`, `sidecar.Telemetry` |
 | `observations` | Persists and validates AI observations: mandatory attribution, append-only, supersession, profiles | observe | no (the caller audits `ai.observation.*`) | `observations.Writer`, `Observation`, `M1Profiles`, `Degradation` |
 | `outbox` | Transactional publish without a broker: the state change and its outbound effect commit together | store | no | `outbox.Enqueue`, `outbox.Message`, `outbox.Relay` |
 | `pipeline` | The loops: ingest, consume, outbox and gauge sampling, plus the shutdown order. Nothing else owns a lifecycle | present | no | `pipeline.Start`, `pipeline.New`, `Loops.Stop`, `pipeline.Deps` |
@@ -129,6 +134,26 @@ Only five do. Everything else reaches the ledger through its caller.
 | `threat` | The autonomy layer's explainable scoring and autonomous playbook: a reason chain, a severity × likelihood matrix, and cooldown-bounded decisions | evaluate | no | `threat.Scorer`, `Scorer.Score`, `threat.Matrix`, `threat.Playbook`, `Playbook.Decide` |
 | `treestate` | The repository-state gate: no frozen merge, no applied red-check mutation, no declined branch without reason | support | test only | `treestate.Check`, `TestTheRealTreeHasNoRedCheckMutationApplied` |
 | `youtube` | Small YouTube URL helpers for the live POC. Extracts a video ID from common URL forms and a raw 11-char id | ingest (demo) | no | `youtube.ExtractVideoID` |
+
+### The module seam
+
+`poc/active-monitoring/` is a second Go module in this repository. A Go module
+boundary is also a visibility boundary: it cannot import `internal/`, so when
+the detector, the class taxonomy, the sidecar wire and the box geometry moved
+into the product module, the POC module was left unable to reach them.
+
+`shared/` is the answer: a thin public face over each of those `internal/`
+packages. The implementation stays behind `internal/`, where the product keeps
+it, and the alias publishes the same types under the same names — a type alias,
+not a wrapper, so a value crosses the boundary without a conversion.
+
+| Path | What it is |
+|---|---|
+| `shared/ortdetect` | The public face of `internal/ortdetect`: the in-process ONNX detector. |
+| `shared/classify` | The public face of `internal/classify`: the class taxonomy. |
+| `shared/sidecar` | The public face of `internal/sidecar`: the Python detector sidecar client. |
+| `shared/aistate` | The public face of `internal/aistate`: the answer vocabulary. |
+| `shared/proposal` | The public face of `internal/proposal`: the box geometry. |
 
 ### Binaries and tools
 

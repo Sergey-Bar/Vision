@@ -36,9 +36,9 @@ import (
 
 	"github.com/Sergey-Bar/vision-poc/internal/bench"
 	"github.com/Sergey-Bar/vision-poc/internal/config"
-	"github.com/Sergey-Bar/vision-poc/internal/ortdetect"
 	"github.com/Sergey-Bar/vision-poc/internal/soak"
 	"github.com/Sergey-Bar/vision-poc/internal/store"
+	"github.com/Sergey-Bar/vision/shared/ortdetect"
 )
 
 func cmdBench(args []string) error {

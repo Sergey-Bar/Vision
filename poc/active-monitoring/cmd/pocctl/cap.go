@@ -11,13 +11,13 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/Sergey-Bar/vision-poc/internal/ai"
 	"github.com/Sergey-Bar/vision-poc/internal/config"
 	"github.com/Sergey-Bar/vision-poc/internal/recorder"
 	"github.com/Sergey-Bar/vision-poc/internal/soak"
 	"github.com/Sergey-Bar/vision-poc/internal/source"
 	"github.com/Sergey-Bar/vision-poc/internal/xprotect"
 	"github.com/Sergey-Bar/vision-poc/internal/xpsim"
+	"github.com/Sergey-Bar/vision/shared/sidecar"
 )
 
 // cmdCap is the §5 capability table. It measures, it does not quote.
@@ -157,7 +157,7 @@ func sidecarOK() bool {
 	if addr == "" {
 		return false
 	}
-	c, err := ai.New(addr, 2*time.Second)
+	c, err := sidecar.New(addr, 2*time.Second)
 	if err != nil {
 		return false
 	}
@@ -170,11 +170,11 @@ func measureAI() ([3]time.Duration, int, error) {
 	if addr == "" {
 		return [3]time.Duration{}, 0, errNotConfigured
 	}
-	c, err := ai.New(addr, 2*time.Second)
+	c, err := sidecar.New(addr, 2*time.Second)
 	if err != nil {
 		return [3]time.Duration{}, 0, err
 	}
-	lat := ai.NewLatencies(1000)
+	lat := sidecar.NewLatencies(1000)
 	// A real frame, 640x360 of mid grey, is enough to measure the round trip
 	// without a camera. The measurement is of the pipeline, not of the content.
 	w, h := 640, 360

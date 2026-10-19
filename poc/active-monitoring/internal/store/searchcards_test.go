@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/vision-poc/internal/aistate"
+	"github.com/Sergey-Bar/vision/shared/aistate"
 )
 
 const (

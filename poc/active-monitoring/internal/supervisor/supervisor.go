@@ -26,7 +26,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Sergey-Bar/vision-poc/internal/ai"
+	"github.com/Sergey-Bar/vision/shared/sidecar"
 )
 
 // FaultReason is the closed set of reasons this package produces. The store
@@ -157,7 +157,7 @@ func fileSize(path string) int64 {
 }
 
 // Start launches the worker and waits for it to report ready.
-func StartSidecar(ctx context.Context, cfg SidecarConfig, client *ai.Client, logf func(string, ...any)) (*Sidecar, error) {
+func StartSidecar(ctx context.Context, cfg SidecarConfig, client *sidecar.Client, logf func(string, ...any)) (*Sidecar, error) {
 	if err := cfg.Probe(); err != nil {
 		return nil, err
 	}

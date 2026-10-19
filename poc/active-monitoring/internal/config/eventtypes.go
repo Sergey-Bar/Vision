@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Sergey-Bar/vision-poc/internal/aistate"
+	"github.com/Sergey-Bar/vision/shared/aistate"
 )
 
 // The Analytics Event Type map.

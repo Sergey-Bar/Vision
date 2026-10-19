@@ -81,12 +81,14 @@ func pythonForParity() (string, bool) {
 func pyworkerDir(t *testing.T) string {
 	t.Helper()
 	// Go runs a test with its working directory at the package, so the module
-	// root is three levels up from internal/ortdetect.
+	// root is two levels up from internal/ortdetect. The Python sidecar lives
+	// in the POC module, which is a separate module in this repository: the Go
+	// half of the wire moved into the product and the Python half stayed.
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatalf("cannot find the module root: %v", err)
 	}
-	dir := filepath.Join(root, "pyworker")
+	dir := filepath.Join(root, "poc", "active-monitoring", "pyworker")
 	if _, err := os.Stat(filepath.Join(dir, "server.py")); err != nil {
 		t.Skipf("the sidecar is not at %s, so there is nothing to compare against: %v", dir, err)
 	}

@@ -143,7 +143,7 @@ func New(opt Options) (*Recorder, error) {
 }
 
 // Start launches ffmpeg with two outputs from one input: a `-c copy` rolling
-// recording, and a paced MJPEG pipe for the AI. The copy output is first in the
+// recording, and a paced MJPEG pipe for the sidecar. The copy output is first in the
 // argument list so a failure in the MJPEG branch cannot leave the recording
 // silently unstarted.
 func (r *Recorder) Start(ctx context.Context) error {

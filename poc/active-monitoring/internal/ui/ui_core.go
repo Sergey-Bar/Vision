@@ -18,8 +18,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Sergey-Bar/vision-poc/internal/ai"
 	"github.com/Sergey-Bar/vision-poc/internal/store"
+	"github.com/Sergey-Bar/vision/shared/sidecar"
 )
 
 // Live is the per-frame state the pipeline hands the screen. It is drawn by the
@@ -89,7 +89,7 @@ type Live struct {
 	// nothing" from "the decoder threw everything away", and `identical_geometry`
 	// is the signature of the collapsed decode that this module's four-bug
 	// history was all about. It is one frame's numbers, not a run's.
-	Telemetry ai.Telemetry
+	Telemetry sidecar.Telemetry
 	// Families is the run's approved-box tally by family, which is what a viewer
 	// counts by: "vehicles" and "people" are the product's grouping and are what
 	// the picture's colours already use.

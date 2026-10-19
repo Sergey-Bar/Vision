@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/vision-poc/internal/ai"
+	"github.com/Sergey-Bar/vision/shared/sidecar"
 )
 
 // TestPreflightAndTheCapabilityTableAgreeOnTheDecoder is the bug this test
@@ -241,9 +241,9 @@ func TestTheAIRowIsAboutTheRunThatHasAnAI(t *testing.T) {
 // run with no record at all passes with "measured during the run" rather than
 // being scored against an absence.
 func TestTheAIRowMeasuresTheSidecarThatIsThere(t *testing.T) {
-	client, err := ai.New("http://127.0.0.1:8099", time.Second)
+	client, err := sidecar.New("http://127.0.0.1:8099", time.Second)
 	if err != nil {
-		t.Fatalf("ai.New: %v", err)
+		t.Fatalf("sidecar.New: %v", err)
 	}
 	base := PreflightInput{
 		TriggerMode: "sidecar", Client: client, AIFPS: 5,

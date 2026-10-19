@@ -1123,7 +1123,7 @@ func demoEnv(root, dataRoot, clip, zones, model, anchors, simAddr, uiAddr string
 		"SP_POC_MODE=demo-replay",
 		"SP_POC_SOURCE_KIND=loop",
 		"SP_POC_SOURCE_ARG=" + clip,
-		// WITH a scheme. It did not have one, and `ai.New` refuses an address
+		// WITH a scheme. It did not have one, and `sidecar.New` refuses an address
 		// that is not http or https — correctly, because a sidecar is a loopback
 		// service and there is no third form. So the demo built an environment
 		// its own child refused, and the headline command of the whole project

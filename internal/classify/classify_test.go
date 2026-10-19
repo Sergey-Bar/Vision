@@ -206,7 +206,12 @@ func TestFamiliesAreTheFourAndOnlyFour(t *testing.T) {
 // explains itself around it.
 func TestOneWayOwnership(t *testing.T) {
 	root := moduleRoot(t)
-	py := filepath.Join(root, "pyworker", "server.py")
+	// The Python sidecar lives in the POC module, which is a separate Go module
+	// in this repository: the Go half of the wire moved into the product, and
+	// the Python half stayed where it was. The path says so rather than
+	// guessing, because a path that silently stopped resolving would turn this
+	// test into a no-op that reports green.
+	py := filepath.Join(root, "poc", "active-monitoring", "pyworker", "server.py")
 	raw, err := os.ReadFile(py)
 	if err != nil {
 		t.Fatalf("cannot read %s: %v", py, err)

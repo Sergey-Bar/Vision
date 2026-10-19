@@ -57,7 +57,7 @@ import (
 	"strings"
 
 	"github.com/Sergey-Bar/vision-poc/internal/bench"
-	"github.com/Sergey-Bar/vision-poc/internal/ortdetect"
+	"github.com/Sergey-Bar/vision/shared/ortdetect"
 )
 
 func footageUsage() {

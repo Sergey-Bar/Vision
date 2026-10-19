@@ -13,20 +13,20 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Sergey-Bar/vision-poc/internal/ai"
-	"github.com/Sergey-Bar/vision-poc/internal/aistate"
-	"github.com/Sergey-Bar/vision-poc/internal/classify"
 	"github.com/Sergey-Bar/vision-poc/internal/config"
 	"github.com/Sergey-Bar/vision-poc/internal/detect"
 	"github.com/Sergey-Bar/vision-poc/internal/evidence"
 	"github.com/Sergey-Bar/vision-poc/internal/novelty"
-	"github.com/Sergey-Bar/vision-poc/internal/ortdetect"
 	"github.com/Sergey-Bar/vision-poc/internal/recorder"
 	"github.com/Sergey-Bar/vision-poc/internal/source"
 	"github.com/Sergey-Bar/vision-poc/internal/store"
 	"github.com/Sergey-Bar/vision-poc/internal/supervisor"
 	"github.com/Sergey-Bar/vision-poc/internal/vlm"
 	"github.com/Sergey-Bar/vision-poc/internal/xprotect"
+	"github.com/Sergey-Bar/vision/shared/aistate"
+	"github.com/Sergey-Bar/vision/shared/classify"
+	"github.com/Sergey-Bar/vision/shared/ortdetect"
+	"github.com/Sergey-Bar/vision/shared/sidecar"
 )
 
 // FrameSource is what the run loop needs from the recorder: the next frame, the
@@ -59,7 +59,7 @@ type RunnerOptions struct {
 	Spec             source.Spec
 	Store            *store.Store
 	Evidence         *evidence.Store
-	Client           *ai.Client
+	Client           *sidecar.Client
 	XProtect         *xprotect.Client
 	Engine           *detect.Engine
 	Recorder         FrameSource
@@ -102,7 +102,7 @@ type RunnerOptions struct {
 	Logf             func(string, ...any)
 	// OnFrame is called with each frame for the live screen's overlay. It runs
 	// on the pipeline goroutine and must not block.
-	OnFrame func(recorder.Frame, []ai.Box)
+	OnFrame func(recorder.Frame, []sidecar.Box)
 	// LastJPEG is consulted by the frame hook when it needs the picture rather
 	// than the pixels. It is nil until a frame has been read.
 	LastJPEG func() []byte
@@ -143,7 +143,7 @@ type RunnerOptions struct {
 	// the change — the alternative was a new hook signature and a new hook type,
 	// and a second way to be handed a frame is a second way to be handed an
 	// incomplete one.
-	onFrame   func(recorder.Frame, []ai.Box, []byte, ai.Telemetry, string)
+	onFrame   func(recorder.Frame, []sidecar.Box, []byte, sidecar.Telemetry, string)
 	heartbeat func(context.Context) error
 
 	// Rehearsals are the fault rehearsals already performed on this build, read
@@ -225,7 +225,7 @@ type RunnerOptions struct {
 type Runner struct {
 	opt RunnerOptions
 	log func(string, ...any)
-	lat *ai.Latencies
+	lat *sidecar.Latencies
 	// cpu samples the children AC5's CPU clause is about.
 	cpu *CPUSampler
 	mu  sync.Mutex
@@ -509,7 +509,7 @@ func NewRunner(opt RunnerOptions) (*Runner, error) {
 			"the runner, so every frame would be answered `not_asked` and a run of it would look "+
 			"like a camera fault", TriggerSidecar)
 	}
-	return &Runner{opt: opt, log: opt.Logf, lat: ai.NewLatencies(200000), stopPush: make(chan struct{}),
+	return &Runner{opt: opt, log: opt.Logf, lat: sidecar.NewLatencies(200000), stopPush: make(chan struct{}),
 		boxLog: NewBoxLog(opt.BoxLogFrames), absence: newAbsenceLedger(), cpu: NewCPUSampler(func() []int {
 			if opt.ChildPIDs == nil {
 				return nil
@@ -773,17 +773,17 @@ func (r *Runner) process(ctx context.Context, f recorder.Frame) {
 	hook := r.opt.onFrame
 	r.mu.Unlock()
 
-	var boxes []ai.Box
+	var boxes []sidecar.Box
 	// cutBoxes is the crop pass's own contribution to this frame. It travels beside the
 	// union rather than inside it because three consumers need to know which box came
 	// from where: the source-aware track minimum, the stored `region_source`, and the
 	// report's crop-pass block.
-	var cutBoxes []ai.Box
-	telemetry := ai.Telemetry{}
+	var cutBoxes []sidecar.Box
+	telemetry := sidecar.Telemetry{}
 	// aiState is the four-word vocabulary state, and it defaults to `not_asked`
 	// — the honest reading when no model is configured at all, rather than an
 	// empty string that the screen would render as "fine".
-	aiState := ai.StateNotAsked
+	aiState := sidecar.StateNotAsked
 	// detRefusal is this frame's named failure, if the detector had one. It is kept
 	// apart from telemetry because a refusal is not telemetry: it is the reason the
 	// answer is missing, and it has to reach the log and the screen as its own
@@ -833,7 +833,7 @@ func (r *Runner) process(ctx context.Context, f recorder.Frame) {
 	r.detectors.Observe(r.opt.Engine.LastSplit())
 	r.detectorsMu.Unlock()
 	if hook != nil {
-		// The REAL state, from `ai.Interpret` — never a hardcoded `answered`.
+		// The REAL state, from `sidecar.Interpret` — never a hardcoded `answered`.
 		// The screen used to print `answered` for every frame including the ones
 		// that were never sent, and `answered` is not in CONTRACT.md §2.2's
 		// four-word vocabulary at all: it is a fifth word that reads as
@@ -911,7 +911,7 @@ func (r *Runner) process(ctx context.Context, f recorder.Frame) {
 // people, it costs one inference, and nothing about the crop pass changes it, which is
 // what makes the crop pass additive and the rollback one environment variable rather
 // than a code change.
-func (r *Runner) runDetector(f recorder.Frame) (boxes []ai.Box, cuts []ai.Box, state string, tel ai.Telemetry,
+func (r *Runner) runDetector(f recorder.Frame) (boxes []sidecar.Box, cuts []sidecar.Box, state string, tel sidecar.Telemetry,
 	refusal *ortdetect.Refusal, latencyMS float64, p50, p95, p99 *float64) {
 
 	ans := r.opt.Detector.Detect(f.Seq, f.RGB, f.Width, f.Height, ortdetect.Rect{})
@@ -927,7 +927,7 @@ func (r *Runner) runDetector(f recorder.Frame) (boxes []ai.Box, cuts []ai.Box, s
 	// all.
 	p50, p95, p99 = percentilesFor(r.opt.Detector)
 
-	out := make([]ai.Box, 0, len(ans.Boxes))
+	out := make([]sidecar.Box, 0, len(ans.Boxes))
 	for _, b := range ans.Boxes {
 		if !b.Valid() {
 			// The decoder already refuses an invalid box, so reaching here means
@@ -941,7 +941,7 @@ func (r *Runner) runDetector(f recorder.Frame) (boxes []ai.Box, cuts []ai.Box, s
 		// in the model's own coordinates, and the tracker reads them without rescaling,
 		// which is why this is a copy of the struct rather than a reconstruction field
 		// by field. A reconstruction is a second place for a coordinate to be rescaled.
-		out = append(out, ai.Box(b))
+		out = append(out, sidecar.Box(b))
 	}
 
 	// The crop pass. By construction the union is a SUPERSET of the whole-frame boxes:
@@ -972,7 +972,7 @@ func (r *Runner) runDetector(f recorder.Frame) (boxes []ai.Box, cuts []ai.Box, s
 // refusals go through the same rate-limited logger the whole-frame pass uses: a
 // misconfigured crop is the same kind of fault as a misconfigured detector, and logging
 // it by a second path would produce 9,000 lines a second at 25 fps.
-func (r *Runner) cropPass(f recorder.Frame, whole []ai.Box) ([]ai.Box, CropCounters) {
+func (r *Runner) cropPass(f recorder.Frame, whole []sidecar.Box) ([]sidecar.Box, CropCounters) {
 	cp := r.opt.Crop
 	if !cp.Enabled || cp.Proposer == nil {
 		return nil, CropCounters{}
@@ -1021,7 +1021,7 @@ func (r *Runner) cropPass(f recorder.Frame, whole []ai.Box) ([]ai.Box, CropCount
 	if len(regions) == 0 {
 		return nil, ct
 	}
-	out := make([]ai.Box, 0, len(regions))
+	out := make([]sidecar.Box, 0, len(regions))
 	for _, reg := range regions {
 		ans := r.opt.Detector.Detect(f.Seq, f.RGB, f.Width, f.Height, reg.rect)
 		r.lat.Add(time.Duration(ans.LatencyMS * float64(time.Millisecond)))
@@ -1040,7 +1040,7 @@ func (r *Runner) cropPass(f recorder.Frame, whole []ai.Box) ([]ai.Box, CropCount
 					f.Seq, reg.rect.X, reg.rect.Y, reg.rect.W, reg.rect.H, b)
 				continue
 			}
-			out = append(out, ai.Box(b))
+			out = append(out, sidecar.Box(b))
 		}
 	}
 	ct.BoxesFound = len(out)
@@ -1167,35 +1167,35 @@ type Attribution struct {
 // `no_objects` when it did not, and it never returns a box it did not measure. A
 // novelty engine has no opinion about whether a change is an incident, so the most
 // it can honestly report is that it measured something.
-func (r *Runner) measureTrigger(f recorder.Frame) ([]ai.Box, string) {
+func (r *Runner) measureTrigger(f recorder.Frame) ([]sidecar.Box, string) {
 	if len(f.RGB) == 0 || f.Width <= 0 || f.Height <= 0 {
 		r.logf("frame %d: no pixels; the trigger measured nothing and this is not a zero", f.Seq)
-		return nil, ai.StateNotAsked
+		return nil, sidecar.StateNotAsked
 	}
 	cands, _ := r.opt.Trigger.Candidates(f.RGB, f.Width, f.Height)
-	out := make([]ai.Box, 0, len(cands))
+	out := make([]sidecar.Box, 0, len(cands))
 	for _, c := range cands {
 		if !c.Box.NonEmpty() {
 			// An empty region is not a proposal. Passing it on would put an
 			// all-zero box on a pushed event, which is the defect RC-6 exists for.
 			continue
 		}
-		out = append(out, ai.Box{
+		out = append(out, sidecar.Box{
 			Class: r.triggerClass(), Score: c.Score,
 			X1: c.Box.X1, Y1: c.Box.Y1, X2: c.Box.X2, Y2: c.Box.Y2,
 		})
 	}
 	if len(out) == 0 {
-		return nil, ai.StateNoObjects
+		return nil, sidecar.StateNoObjects
 	}
-	return out, ai.StateAnswered
+	return out, sidecar.StateAnswered
 }
 
 // askSidecar is the older per-frame path, kept as a measurement tool.
-func (r *Runner) askSidecar(ctx context.Context, f recorder.Frame) ([]ai.Box, ai.Telemetry, string) {
+func (r *Runner) askSidecar(ctx context.Context, f recorder.Frame) ([]sidecar.Box, sidecar.Telemetry, string) {
 	if r.opt.Client == nil {
 		r.logf("frame %d: not_asked — no sidecar client is configured", f.Seq)
-		return nil, ai.Telemetry{}, ai.StateNotAsked
+		return nil, sidecar.Telemetry{}, sidecar.StateNotAsked
 	}
 	res := r.opt.Client.Detect(ctx, f.Seq, f.RGB, f.Width, f.Height)
 	r.lat.Add(res.Latency)
@@ -1203,7 +1203,7 @@ func (r *Runner) askSidecar(ctx context.Context, f recorder.Frame) ([]ai.Box, ai
 	r.lastAIState = res.State
 	r.mu.Unlock()
 	switch res.State {
-	case ai.StateDegraded, ai.StateCannotTell:
+	case sidecar.StateDegraded, sidecar.StateCannotTell:
 		// Only a reply that ARRIVED and could not be read counts as unparsed.
 		// A `degraded` frame is a deadline, and a tripwire refusal is the
 		// tripwire working; folding either into AC6's "unparsed" clause would
@@ -1217,11 +1217,11 @@ func (r *Runner) askSidecar(ctx context.Context, f recorder.Frame) ([]ai.Box, ai
 			At: f.At, Reason: store.FaultAIUnreadable,
 			Detail: fmt.Sprintf("frame %d at %s: %s", f.Seq, f.At.Format(time.RFC3339), res.Reason),
 		})
-	case ai.StateNotAsked:
+	case sidecar.StateNotAsked:
 		// A frame that was never sent is not a failure of the model, and it is
 		// not an empty scene. It is counted as not_asked and nothing else.
 	}
-	boxes := make([]ai.Box, 0, len(res.Boxes))
+	boxes := make([]sidecar.Box, 0, len(res.Boxes))
 	boxes = append(boxes, res.Boxes...)
 	return boxes, res.Telemetry, res.State
 }
@@ -1251,10 +1251,10 @@ func (r *Runner) handleSentinels(ctx context.Context, f recorder.Frame) {
 		Score: finding.Score, Novelty: t.Last(), Streak: finding.Streak,
 		RegionSource: finding.RegionSource,
 	}
-	r.handleIncident(ctx, ev, ai.StateAnswered, f.Seq)
+	r.handleIncident(ctx, ev, sidecar.StateAnswered, f.Seq)
 }
 
-func toDetect(boxes []ai.Box) []detect.Box {
+func toDetect(boxes []sidecar.Box) []detect.Box {
 	out := make([]detect.Box, 0, len(boxes))
 	for _, b := range boxes {
 		out = append(out, detect.Box{Class: b.Class, Score: b.Score, X1: b.X1, Y1: b.Y1, X2: b.X2, Y2: b.Y2})
@@ -1429,8 +1429,8 @@ func (r *Runner) askObserver(ctx context.Context, id string, ev TriggerEvent, re
 	if r.opt.Observer == nil {
 		// Nobody to ask. `not_asked`, and it is recorded as that rather than as
 		// left blank.
-		obs := vlm.Observation{DetectionID: id, State: ai.StateNotAsked}
-		obs.SetState(ai.StateNotAsked)
+		obs := vlm.Observation{DetectionID: id, State: sidecar.StateNotAsked}
+		obs.SetState(sidecar.StateNotAsked)
 		obs.Finalise()
 		r.recordObservation(ctx, id, ev, obs, "")
 		return obs
@@ -1438,16 +1438,16 @@ func (r *Runner) askObserver(ctx context.Context, id string, ev TriggerEvent, re
 	if clipErr != nil {
 		// There is no clip to send. We did not ask, and the reason is a recorded
 		// clip failure rather than a silent skip.
-		obs := vlm.Observation{DetectionID: id, State: ai.StateNotAsked, Message: clipErr.Error()}
-		obs.SetState(ai.StateNotAsked)
+		obs := vlm.Observation{DetectionID: id, State: sidecar.StateNotAsked, Message: clipErr.Error()}
+		obs.SetState(sidecar.StateNotAsked)
 		obs.Finalise()
 		r.recordObservation(ctx, id, ev, obs, "")
 		return obs
 	}
 	clip, err := readEvidenceClip(r.opt.Evidence, ref.SHA256)
 	if err != nil {
-		obs := vlm.Observation{DetectionID: id, State: ai.StateNotAsked, Message: err.Error()}
-		obs.SetState(ai.StateNotAsked)
+		obs := vlm.Observation{DetectionID: id, State: sidecar.StateNotAsked, Message: err.Error()}
+		obs.SetState(sidecar.StateNotAsked)
 		obs.Finalise()
 		_ = r.opt.Store.RecordFault(ctx, r.opt.RunID, store.Fault{
 			At: ev.At, Reason: store.FaultClipRefused,
@@ -1804,7 +1804,7 @@ func boxString(b xprotect.Box) string {
 // distinguished by whether the ask was answered, which is the same predicate
 // everything else in this module uses.
 func eventConfidence(ev TriggerEvent, obs vlm.Observation) float64 {
-	if obs.State == ai.StateAnswered {
+	if obs.State == sidecar.StateAnswered {
 		return obs.Confidence
 	}
 	return ev.Score
@@ -1865,7 +1865,7 @@ func bookmarkDescription(ev TriggerEvent, obs vlm.Observation) string {
 // does not.
 func verdictPhrase(obs vlm.Observation) string {
 	switch {
-	case obs.State != ai.StateAnswered:
+	case obs.State != sidecar.StateAnswered:
 		return "the model was not asked (" + obs.Reason + ")"
 	case obs.Verdict == vlm.VerdictNone:
 		return "the model returned no verdict"
@@ -2167,10 +2167,10 @@ func (r *Runner) countDetections(ctx context.Context) int {
 // hook that can be called with the wrong frame's telemetry attached to it, and a
 // picture labelled with the decoder's numbers from a different moment is a lie
 // that looks like data.
-func (r *Runner) SetFrameHook(fn func(recorder.Frame, []ai.Box, []byte, ai.Telemetry, string)) {
+func (r *Runner) SetFrameHook(fn func(recorder.Frame, []sidecar.Box, []byte, sidecar.Telemetry, string)) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.opt.onFrame = func(f recorder.Frame, b []ai.Box, jpg []byte, tel ai.Telemetry, state string) {
+	r.opt.onFrame = func(f recorder.Frame, b []sidecar.Box, jpg []byte, tel sidecar.Telemetry, state string) {
 		if jpg == nil && r.opt.LastJPEG != nil {
 			jpg = r.opt.LastJPEG()
 		}
@@ -2210,7 +2210,7 @@ func (r *Runner) AICounters() (unparsed, healthyFromFailed int) {
 }
 
 // Latencies exposes the AI round-trip reservoir.
-func (r *Runner) Latencies() *ai.Latencies { return r.lat }
+func (r *Runner) Latencies() *sidecar.Latencies { return r.lat }
 
 // Pushes is how many pushes were confirmed sent.
 func (r *Runner) Pushes() int {

@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Sergey-Bar/vision-poc/internal/ai"
 	"github.com/Sergey-Bar/vision-poc/internal/config"
 	"github.com/Sergey-Bar/vision-poc/internal/soak"
+	"github.com/Sergey-Bar/vision/shared/sidecar"
 )
 
 // calibrationFor resolves the detector row's p99 from a MEASURED record.
@@ -50,7 +50,7 @@ type calibrationResult struct {
 	sidecar bool
 }
 
-func calibrationFor(cfg config.Config, client *ai.Client) calibrationResult {
+func calibrationFor(cfg config.Config, client *sidecar.Client) calibrationResult {
 	switch cfg.TriggerMode {
 	case config.TriggerModeDetector:
 		return calibrationForBuild(cfg, soak.CalibrationBuild{
@@ -75,7 +75,7 @@ func calibrationFor(cfg config.Config, client *ai.Client) calibrationResult {
 // build and not decoration: the same sidecar on CPU and on CUDA is two latencies
 // an order of magnitude apart, and a record from one applied to the other is a
 // number with the wrong label.
-func calibrationForSidecar(cfg config.Config, client *ai.Client) calibrationResult {
+func calibrationForSidecar(cfg config.Config, client *sidecar.Client) calibrationResult {
 	if client == nil {
 		return calibrationResult{note: "SP_POC_TRIGGER_MODE=sidecar and no sidecar client could be " +
 			"built, so the sidecar's own model, providers and input could not be read and no calibration " +

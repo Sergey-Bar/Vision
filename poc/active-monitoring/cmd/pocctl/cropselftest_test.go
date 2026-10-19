@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Sergey-Bar/vision-poc/internal/ortdetect"
+	"github.com/Sergey-Bar/vision/shared/ortdetect"
 )
 
 // TestTheCropVerdictNeedsBothHalves: a PASS needs the problem AND the cure.

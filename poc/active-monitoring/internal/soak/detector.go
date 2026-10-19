@@ -1,8 +1,8 @@
 package soak
 
 import (
-	"github.com/Sergey-Bar/vision-poc/internal/ai"
-	"github.com/Sergey-Bar/vision-poc/internal/ortdetect"
+	"github.com/Sergey-Bar/vision/shared/ortdetect"
+	"github.com/Sergey-Bar/vision/shared/sidecar"
 )
 
 // ORTDetector adapts *ortdetect.Detector to the [Detector] interface.
@@ -67,7 +67,7 @@ func (a *ORTDetector) Detect(seq uint64, rgb []byte, w, h int, crop ortdetect.Re
 	// measured frame, which at 100 boxes is a few kilobytes against a detector
 	// costing milliseconds.
 	if len(ans.Boxes) > 0 {
-		out.Boxes = make([]ai.Box, len(ans.Boxes))
+		out.Boxes = make([]sidecar.Box, len(ans.Boxes))
 		copy(out.Boxes, ans.Boxes)
 	}
 	return out

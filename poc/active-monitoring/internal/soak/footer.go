@@ -27,8 +27,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sergey-Bar/vision-poc/internal/classify"
 	"github.com/Sergey-Bar/vision-poc/internal/overlay"
+	"github.com/Sergey-Bar/vision/shared/classify"
 )
 
 // footer builds the strip for this run.

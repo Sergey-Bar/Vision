@@ -3,8 +3,8 @@ package store
 import (
 	"testing"
 
-	"github.com/Sergey-Bar/vision-poc/internal/aistate"
 	"github.com/Sergey-Bar/vision-poc/internal/vlm"
+	"github.com/Sergey-Bar/vision/shared/aistate"
 )
 
 // TestTheStoredSpellingsMatchTheVerifierClosedSets is what makes the duplicated

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/vision-poc/internal/aistate"
+	"github.com/Sergey-Bar/vision/shared/aistate"
 )
 
 // TestAnAllZeroBoxIsRefused is RC-6, at the place where the box becomes a wire

@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/vision-poc/internal/aistate"
 	"github.com/Sergey-Bar/vision-poc/internal/recorder"
 	"github.com/Sergey-Bar/vision-poc/internal/store"
 	"github.com/Sergey-Bar/vision-poc/internal/xprotect"
 	"github.com/Sergey-Bar/vision-poc/internal/xpsim"
+	"github.com/Sergey-Bar/vision/shared/aistate"
 )
 
 // TestTheLocalFaultTableIsClosed: the plan names six. A seventh appears only by

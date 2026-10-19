@@ -1,4 +1,4 @@
-package ai
+package sidecar
 
 import (
 	"bytes"
@@ -26,15 +26,16 @@ import (
 // recordedTelemetryKeys is the fixture the sidecar is pinned against.
 func recordedTelemetryKeys(t *testing.T) []string {
 	t.Helper()
-	// The fixture lives next to the sidecar, which is above this package. The path
-	// is walked up out of `internal/ai` rather than hardcoded, because a
-	// hardcoded path is a test that fails for the wrong reason on another
-	// machine and looks like a missing fixture.
+	// The fixture lives next to the sidecar, which is in the POC module: the Go
+	// half of the wire moved into the product module and the Python half stayed
+	// where it was. The path is walked up out of `internal/sidecar` rather than
+	// hardcoded, because a hardcoded path is a test that fails for the wrong
+	// reason on another machine and looks like a missing fixture.
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := os.ReadFile(filepath.Join(root, "pyworker", "fixtures", "telemetry_keys.json"))
+	raw, err := os.ReadFile(filepath.Join(root, "poc", "active-monitoring", "pyworker", "fixtures", "telemetry_keys.json"))
 	if err != nil {
 		t.Fatalf("the telemetry key fixture cannot be read, so the wire is unpinned: %v", err)
 	}
@@ -92,7 +93,7 @@ func TestTheSidecarTelemetryShapeIsAccepted(t *testing.T) {
 		t.Fatalf("the sidecar's recorded telemetry shape does not decode on the Go side: %v.\n"+
 			"  A key the sidecar sends and this build does not have makes EVERY reply "+
 			"unreadable, and the run reports `cannot_tell` on every frame with nothing red. "+
-			"  Add the field to internal/ai.Telemetry and re-record "+
+			"  Add the field to internal/sidecar.Telemetry and re-record "+
 			"pyworker/fixtures/telemetry_keys.json in the SAME commit.", err)
 	}
 	if out.Telemetry.InputW != 1 {

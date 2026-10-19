@@ -18,8 +18,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Sergey-Bar/vision-poc/internal/aistate"
 	"github.com/Sergey-Bar/vision-poc/internal/soak"
+	"github.com/Sergey-Bar/vision/shared/aistate"
 )
 
 // sliceFixture is a small run with a shape that exercises every branch: one site,

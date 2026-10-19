@@ -29,14 +29,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sergey-Bar/vision-poc/internal/ai"
+	"github.com/Sergey-Bar/vision/shared/sidecar"
 )
 
 // sidecarFake answers /healthz and /infer like the real worker. `first` is how
 // long the FIRST inference takes and `rest` is every one after it â€” which is
 // what makes the warm-up observable. When `degraded` is set, every inference
 // answers 500, which the client turns into a degraded Result WITH a latency.
-func sidecarFake(t *testing.T, model string, input int, providers []string, first, rest time.Duration, degraded bool) (*ai.Client, string) {
+func sidecarFake(t *testing.T, model string, input int, providers []string, first, rest time.Duration, degraded bool) (*sidecar.Client, string) {
 	t.Helper()
 	var seen int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -87,9 +87,9 @@ func sidecarFake(t *testing.T, model string, input int, providers []string, firs
 		}
 	}))
 	t.Cleanup(srv.Close)
-	client, err := ai.New(srv.URL, sidecarBenchDeadline)
+	client, err := sidecar.New(srv.URL, sidecarBenchDeadline)
 	if err != nil {
-		t.Fatalf("ai.New: %v", err)
+		t.Fatalf("sidecar.New: %v", err)
 	}
 	return client, srv.URL
 }

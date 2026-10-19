@@ -4,8 +4,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Sergey-Bar/vision-poc/internal/aistate"
-	"github.com/Sergey-Bar/vision-poc/internal/classify"
+	"github.com/Sergey-Bar/vision/shared/aistate"
+	"github.com/Sergey-Bar/vision/shared/classify"
 )
 
 // The approved / rejected split, the per-family roll-up, and the four counters
@@ -76,7 +76,7 @@ type Split struct {
 	// Candidates is how many raw candidates the sidecar read out of the model
 	// BEFORE any filter ran.
 	//
-	// It is an `int` and not `ai.Telemetry` on purpose. The counters below use one
+	// It is an `int` and not `sidecar.Telemetry` on purpose. The counters below use one
 	// number, and a typed dependency on the sidecar's package to carry one number
 	// is what put `internal/ai` on this package's import list — a boundary
 	// `scripts/verify.ps1` fails on, and fails correctly: the line-cross machine

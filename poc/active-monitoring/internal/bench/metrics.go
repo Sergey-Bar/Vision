@@ -41,7 +41,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Sergey-Bar/vision-poc/internal/proposal"
+	"github.com/Sergey-Bar/vision/shared/proposal"
 )
 
 // Box is one detection or one ground-truth object, in normalised 0..1 coordinates
