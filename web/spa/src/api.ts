@@ -73,3 +73,46 @@ export interface Camera {
   rtsp?: string
   zones?: unknown[]
 }
+
+export interface VideoUploadResponse {
+  videoId: string
+  evidenceId: string
+  eventId: string
+  duplicate: boolean
+  sizeBytes: number
+  sha256: string
+}
+
+export interface VideoYouTubeRequest {
+  url: string
+  siteId?: string
+}
+
+export interface VideoYouTubeResponse {
+  videoId: string
+  evidenceId: string
+  eventId: string
+  duplicate: boolean
+  source: string
+}
+
+export interface RulesFromTextRequest {
+  text: string
+  siteId?: string
+}
+
+export interface RulesFromTextResponse {
+  rule: string
+}
+
+export interface Detection {
+  label: string
+  confidence: number
+  bbox: number[]
+}
+
+export interface AIRuntimeStatus {
+  available: boolean
+  reason: string | null
+  model: string | null
+}

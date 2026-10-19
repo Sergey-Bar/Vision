@@ -462,7 +462,7 @@ func (q *Worker) DeadLetters(ctx context.Context, tenantID, siteID string, limit
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	rows, err := q.Pool.WithSites(tenantID, "jobs", []string{siteID}).Query(ctx, `
+	rows, err := q.Pool.WithSites(tenantID, "", []string{siteID}).Query(ctx, `
 		SELECT job_id::text, tenant_id, site_id, queue, idempotency_key,
 		       attempt_count, max_attempts, COALESCE(dead_letter_reason, last_error, ''),
 		       -- completed_at, not created_at: the operator's question is "what

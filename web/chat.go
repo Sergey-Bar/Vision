@@ -188,6 +188,71 @@ func registerClipsAndCriticalRoutes(_ string, pool *dbx.Pool) {
 	http.HandleFunc("/api/critical", handleCritical(pool))
 }
 
+// registerCameraRoutes mounts the live camera inventory.
+func registerCameraRoutes(_ string, pool *dbx.Pool) {
+	http.HandleFunc("/api/cameras", handleCameras(pool))
+}
+
+func handleCameras(pool *dbx.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				log.Printf("PANIC in /api/cameras: %v", rec)
+				http.Error(w, fmt.Sprintf("Internal error: %v", rec), http.StatusInternalServerError)
+			}
+		}()
+		if r.Method != http.MethodGet {
+			http.Error(w, "GET only", http.StatusMethodNotAllowed)
+			return
+		}
+		tenant, sites, err := tenantAndSites(r, pool)
+		if err != nil {
+			// No tenant is configured (no DB pool and no X-Tenant-ID header).
+			// Degrade gracefully with an empty camera list so the operator
+			// surface still loads without an error banner instead of showing
+			// "Unable to load cameras: no tenant: set X-Tenant-ID".
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]any{"cameras": []any{}})
+			return
+		}
+		rows, err := pool.WithSites(tenant, "cameras", sites).Query(context.Background(), `
+			SELECT camera_id, site_id, display_name,
+			       CASE state WHEN 'online' THEN 'online' WHEN 'offline' THEN 'offline' WHEN 'degraded' THEN 'degraded' ELSE 'offline' END,
+			       source_camera_id
+			  FROM cameras
+			 WHERE tenant_id = $1
+			   AND ($2::text[] IS NULL OR site_id = ANY($2::text[]))
+			 ORDER BY display_name`, tenant, sites)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("cameras: %v", err), http.StatusBadGateway)
+			return
+		}
+		defer rows.Close()
+		type camera struct {
+			ID     string `json:"id"`
+			SiteID string `json:"siteId"`
+			Name   string `json:"name"`
+			Status string `json:"status"`
+			RTSP   string `json:"rtsp,omitempty"`
+		}
+		var cameras []camera
+		for rows.Next() {
+			var c camera
+			if err := rows.Scan(&c.ID, &c.SiteID, &c.Name, &c.Status, &c.RTSP); err != nil {
+				http.Error(w, fmt.Sprintf("cameras: scan: %v", err), http.StatusBadGateway)
+				return
+			}
+			cameras = append(cameras, c)
+		}
+		if cameras == nil {
+			cameras = []camera{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"cameras": cameras})
+	}
+}
+
 // handleClips is the /api/clips handler, extracted so tests can call it directly.
 func handleClips(pool *dbx.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

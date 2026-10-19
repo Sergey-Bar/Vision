@@ -16,7 +16,6 @@ import (
 	"github.com/Sergey-Bar/vision/internal/bundles"
 	"github.com/Sergey-Bar/vision/internal/checkpoint"
 	"github.com/Sergey-Bar/vision/internal/command"
-	"github.com/Sergey-Bar/vision/internal/identity"
 	"github.com/Sergey-Bar/vision/internal/incidents"
 	"github.com/Sergey-Bar/vision/internal/rules"
 )
@@ -627,7 +626,6 @@ argument: a passphrase on a command line is in the shell history.`,
 	}
 	id.Register(
 		simpleFlag("bootstrap-admin", "Create the first administrator", runBootstrapAdmin),
-		simpleFlag("enroll-mfa", "Enrol a WebAuthn or TOTP factor for a user", runEnrollMFA),
 		simpleFlag("list", "List users, roles and site assignments", runIdentityList),
 		simpleFlag("revoke-sessions", "Revoke every session for a user", runRevokeSessions),
 	)
@@ -683,123 +681,6 @@ func runBootstrapAdmin(ctx context.Context, env *command.Env, args []string) err
 	return nil
 }
 
-func runEnrollMFA(ctx context.Context, env *command.Env, args []string) error {
-	fs := flag.NewFlagSet("identity enroll-mfa", flag.ContinueOnError)
-	fs.SetOutput(env.Stderr)
-	user := fs.String("user", "", "User id.")
-	method := fs.String("method", "totp", "totp or webauthn.")
-	label := fs.String("label", "", "Credential label.")
-	origin := fs.String("origin", os.Getenv("SP_CONSOLE_ORIGIN"),
-		"Console origin, e.g. https://console.example:8443. Required for webauthn.")
-	rpID := fs.String("rp-id", os.Getenv("SP_CONSOLE_RP_ID"),
-		"WebAuthn relying-party id: a registrable suffix of the origin host.")
-	challenge := fs.String("challenge", "", "A challenge issued earlier by enroll-mfa --method webauthn --begin.")
-	credentialID := fs.String("credential-id", "", "Credential id returned by the browser.")
-	publicKey := fs.String("public-key", "", "Attested credential data, base64url, as the browser returned it.")
-	signCount := fs.Int64("sign-count", 0, "The authenticator's sign count.")
-	confirm := fs.String("confirm", "", "A code from the authenticator, to confirm a TOTP enrolment.")
-	begin := fs.Bool("begin", false, "Print a registration challenge and the browser options for it.")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if *user == "" {
-		return &command.UsageError{Err: errors.New("--user is required")}
-	}
-
-	ident, err := newIdentityService()
-	if err != nil {
-		return err
-	}
-	defer ident.Pool.Close()
-	tenant := configuredTenant()
-
-	switch *method {
-	case "totp":
-		if *label == "" {
-			*label = *user
-		}
-		if *confirm != "" {
-			// Confirming an existing enrolment is the step that makes the
-			// credential usable. Without it the row is stored with a null
-			// verified_at and the first sign-in at 3am fails.
-			if err := ident.VerifyTOTPEnrollment(ctx, tenant, *user, *confirm); err != nil {
-				return command.Refuse("%v", err)
-			}
-			fmt.Fprintf(env.Stdout, "confirmed the TOTP credential for %s\n", *user)
-			return nil
-		}
-		secret, uri, err := ident.EnrollTOTP(ctx, tenant, *user, *label)
-		if err != nil {
-			return err
-		}
-		fmt.Fprintf(env.Stdout, "secret (shown once): %s\n", secret)
-		fmt.Fprintf(env.Stdout, "add to an authenticator: %s\n", uri)
-		fmt.Fprintf(env.Stdout, "\nthen confirm it, or the credential is stored but unusable:\n"+
-			"  securityctl identity enroll-mfa --user %s --method totp --confirm <code>\n", *user)
-		return nil
-
-	case "webauthn":
-		return runEnrollWebAuthn(ctx, env, ident, tenant, *user, *origin, *rpID,
-			*challenge, *credentialID, *publicKey, *signCount, *begin)
-
-	default:
-		return command.Refuse("method %q is not one of totp or webauthn", *method)
-	}
-}
-
-func runEnrollWebAuthn(ctx context.Context, env *command.Env, ident *identity.Service,
-	tenant, user, origin, rpID, challenge, credentialID, publicKey string, signCount int64, begin bool) error {
-
-	rp := identity.WebAuthnRelyingParty{
-		ID: rpID, Origin: origin, UserName: user, DisplayName: user,
-	}
-
-	if begin || challenge == "" {
-		if origin == "" || rpID == "" {
-			return command.Refuse(
-				"--origin and --rp-id are required. The relying-party id must be a registrable " +
-					"suffix of the origin's host, or the browser refuses the credential and it " +
-					"would never be presented here. Set SP_CONSOLE_ORIGIN and SP_CONSOLE_RP_ID " +
-					"to avoid passing them each time")
-		}
-		issued, err := identity.IssueRegistrationChallenge(rp, user)
-		if err != nil {
-			return err
-		}
-		payload, err := identity.RegistrationPayload(rp, issued)
-		if err != nil {
-			return err
-		}
-		body, _ := json.MarshalIndent(payload, "", "  ")
-		fmt.Fprintf(env.Stdout, "hand this to navigator.credentials.create:\n%s\n", body)
-		fmt.Fprintln(env.Stdout,
-			"\nThen complete the ceremony with the values the browser returns:\n"+
-				"  securityctl identity enroll-mfa --user "+user+" --method webauthn \\\n"+
-				"      --challenge <challenge> --credential-id <id> --public-key <cose> --sign-count <n>")
-		return nil
-	}
-
-	if credentialID == "" || publicKey == "" {
-		return &command.UsageError{Err: errors.New(
-			"--credential-id and --public-key are required to complete a registration")}
-	}
-	issued := identity.RegistrationChallenge{Challenge: challenge, UserID: user}
-
-	err := ident.CompleteRegistration(ctx, tenant, user, rp, issued, identity.RegistrationResponse{
-		CredentialID: credentialID, PublicKey: publicKey, SignCount: signCount,
-	})
-	if err != nil {
-		return command.Refuse("%v", err)
-	}
-	fmt.Fprintf(env.Stdout, "enrolled a WebAuthn credential for %s\n", user)
-	fmt.Fprintln(env.Stdout,
-		"\nThis build checks the credential's structure and its sign counter, and stores the "+
-			"attestation for the record. It does not verify an attestation trust chain: the "+
-			"replay defence here is the counter, not the certificate. A deployment that needs "+
-			"attestation provenance should say so rather than assume it is in place")
-	return nil
-}
-
 func runIdentityList(ctx context.Context, env *command.Env, args []string) error {
 	fs := flag.NewFlagSet("identity list", flag.ContinueOnError)
 	fs.SetOutput(env.Stderr)
@@ -828,8 +709,6 @@ func runIdentityList(ctx context.Context, env *command.Env, args []string) error
 		       COALESCE((SELECT array_agg(a.site_id ORDER BY a.site_id)
 		                   FROM user_site_assignments a
 		                  WHERE a.tenant_id = u.tenant_id AND a.user_id = u.user_id), '{}'),
-		       (SELECT count(*) FROM mfa_credentials m
-		         WHERE m.tenant_id = u.tenant_id AND m.user_id = u.user_id AND m.revoked_at IS NULL)
 		  FROM users u
 		 WHERE u.tenant_id = $1
 		 ORDER BY u.username`, configuredTenant())
@@ -848,13 +727,12 @@ func runIdentityList(ctx context.Context, env *command.Env, args []string) error
 		FailedAttempts   int      `json:"failedAttempts"`
 		Roles            []string `json:"roles"`
 		Sites            []string `json:"sites"`
-		Factors          int64    `json:"enrolledFactors"`
 	}
 	var items []entry
 	for rows.Next() {
 		var e entry
 		if err := rows.Scan(&e.UserID, &e.Username, &e.DisplayName, &e.Enabled, &e.BreakGlass,
-			&e.RecoveryRequired, &e.FailedAttempts, &e.Roles, &e.Sites, &e.Factors); err != nil {
+			&e.RecoveryRequired, &e.FailedAttempts, &e.Roles, &e.Sites); err != nil {
 			return err
 		}
 		items = append(items, e)
@@ -868,13 +746,9 @@ func runIdentityList(ctx context.Context, env *command.Env, args []string) error
 		fmt.Fprintf(env.Stdout, "no users for tenant %s\n", configuredTenant())
 		return nil
 	}
-	fmt.Fprintf(env.Stdout, "%-20s %-22s %-9s %-6s %-19s %-22s %s\n",
-		"USERNAME", "ROLES", "ENABLED", "MFA", "STATE", "SITES", "FAILED")
+	fmt.Fprintf(env.Stdout, "%-20s %-22s %-9s %-19s %-22s %s\n",
+		"USERNAME", "ROLES", "ENABLED", "STATE", "SITES", "FAILED")
 	for _, e := range items {
-		mfa := "none"
-		if e.Factors > 0 {
-			mfa = fmt.Sprintf("%d", e.Factors)
-		}
 		// Two flags that look alarming and mean different things. Recovery-required
 		// is the state after a bootstrap or a password reset: the placeholder has
 		// not been replaced yet. Break-glass is an account that should not exist
@@ -885,9 +759,9 @@ func runIdentityList(ctx context.Context, env *command.Env, args []string) error
 		} else if e.RecoveryRequired {
 			state = "password-chosen"
 		}
-		fmt.Fprintf(env.Stdout, "%-20s %-22s %-9v %-6s %-19s %-22s %d\n",
+		fmt.Fprintf(env.Stdout, "%-20s %-22s %-9v %-19s %-22s %d\n",
 			shorten(e.Username, 20), shorten(strings.Join(e.Roles, ","), 22), e.Enabled,
-			mfa, state, shorten(strings.Join(e.Sites, ","), 22), e.FailedAttempts)
+			state, shorten(strings.Join(e.Sites, ","), 22), e.FailedAttempts)
 	}
 	return nil
 }

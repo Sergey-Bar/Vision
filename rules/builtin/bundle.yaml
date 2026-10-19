@@ -193,3 +193,102 @@ rules:
       dispatch:
         - type: request_vlm
           target: door-forced
+
+  # --- object detection rules (NLP-derived, AI-observation backed) ------------
+  - id: core.person-with-bag
+    description: A person carrying a bag in a zone, corroborated by AI observation.
+    enabled: true
+    priority: 480
+    tags: [production, object-detection, person, bag]
+    when:
+      all:
+        - eventType: [analytics]
+        - zone:
+            pathPrefix: /entrance
+        - corroborate:
+            eventTypes: [analytics]
+            minSignals: 1
+            minEvidenceTier: C
+            requiresAIObservation: true
+            ifAIAvailable:
+              degradeTo: UNVERIFIED
+        - aiObservation:
+            profileId: object-detection/v1
+            field: detections
+            equals: person
+    then:
+      createIncident: true
+      severity: medium
+      title: "Person with bag detected"
+      requireAIObservation: true
+      dispatch:
+        - type: request_vlm
+          target: restricted-person
+        - type: fetch_evidence
+          target: pre-event
+        - type: notify_operator
+          target: on-call
+
+  - id: core.vehicle-detected
+    description: A vehicle detected in a monitored zone.
+    enabled: true
+    priority: 460
+    tags: [production, object-detection, vehicle]
+    when:
+      all:
+        - eventType: [analytics]
+        - zone:
+            pathPrefix: /gate
+        - corroborate:
+            eventTypes: [analytics]
+            minSignals: 1
+            minEvidenceTier: C
+            requiresAIObservation: true
+            ifAIAvailable:
+              degradeTo: UNVERIFIED
+        - aiObservation:
+            profileId: object-detection/v1
+            field: detections
+            equals: vehicle
+    then:
+      createIncident: true
+      severity: low
+      title: "Vehicle detected"
+      requireAIObservation: true
+      dispatch:
+        - type: fetch_evidence
+          target: pre-event
+        - type: notify_operator
+          target: on-call
+
+  - id: core.animal-detected
+    description: An animal detected in a monitored zone.
+    enabled: true
+    priority: 440
+    tags: [production, object-detection, animal]
+    when:
+      all:
+        - eventType: [analytics]
+        - zone:
+            pathPrefix: /perimeter
+        - corroborate:
+            eventTypes: [analytics]
+            minSignals: 1
+            minEvidenceTier: C
+            requiresAIObservation: true
+            ifAIAvailable:
+              degradeTo: UNVERIFIED
+        - aiObservation:
+            profileId: object-detection/v1
+            field: detections
+            equals: animal
+    then:
+      createIncident: true
+      severity: low
+      title: "Animal detected"
+      requireAIObservation: true
+      dispatch:
+        - type: fetch_evidence
+          target: pre-event
+        - type: notify_operator
+          target: on-call

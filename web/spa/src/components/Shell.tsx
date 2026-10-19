@@ -5,6 +5,7 @@ import { LivePage } from '../pages/Live'
 import { EventsPage } from '../pages/Events'
 import { IncidentsPage } from '../pages/Incidents'
 import { ClipsPage } from '../pages/Clips'
+import { UploadPage } from '../pages/Upload'
 import { CamerasPage } from '../pages/Cameras'
 import { SitesPage } from '../pages/Sites'
 import { UsersPage } from '../pages/Users'
@@ -15,7 +16,7 @@ import { NotFound } from '../pages/NotFound'
 export function Shell() {
   const location = useLocation()
   return (
-    <div className="bg-bg text-text min-h-screen font-sans selection:bg-accent selection:text-[rgb(0,26,38)]">
+    <div className="bg-bg text-text min-h-screen font-sans selection:bg-accent selection:text-white overflow-x-hidden">
       <TopBar />
       <Routes>
         <Route element={<Layout currentPath={location.pathname} />}>
@@ -23,6 +24,7 @@ export function Shell() {
           <Route path="events" element={<EventsPage />} />
           <Route path="incidents" element={<IncidentsPage />} />
           <Route path="clips" element={<ClipsPage />} />
+          <Route path="upload" element={<UploadPage />} />
           <Route path="cameras" element={<CamerasPage />} />
           <Route path="sites" element={<SitesPage />} />
           <Route path="users" element={<UsersPage />} />
@@ -48,16 +50,16 @@ function Layout({ currentPath }: { currentPath: string }) {
 
 export function PageHeader({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
-    <div className="flex items-center gap-3 px-4 py-4 border-b border-border bg-surface/50">
-      <div className="w-2 h-2 rounded-full bg-accent" />
-      <div>
-        <h1 className="text-sm font-semibold text-text tracking-tight">{title}</h1>
-        {subtitle && <p className="text-xs text-text-muted">{subtitle}</p>}
+    <div className="px-10 pb-8 pt-14 page-transition animate-fade-in">
+      <div className="flex items-center gap-4 mb-6">
+        <span className="w-2.5 h-2.5 rounded-full bg-accent animate-pulse-red shadow-lg shadow-accent/50" />
+        <h1 className="text-3xl font-black text-text tracking-tight">{title}</h1>
       </div>
+      {subtitle && <p className="text-sm text-text-muted font-medium max-w-2xl">{subtitle}</p>}
     </div>
   )
 }
 
 export function Page({ children }: { children: React.ReactNode }) {
-  return <div className="px-4 pb-8">{children}</div>
+  return <div className="px-10 pb-20 max-w-[1400px] mx-auto">{children}</div>
 }

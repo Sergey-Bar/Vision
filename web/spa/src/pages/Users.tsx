@@ -1,5 +1,6 @@
 import { PageHeader, Page } from '@/components/Shell'
 import { Shield } from 'lucide-react'
+import { cn } from '@/lib/utils'
 
 const USERS = [
   { id: 'u-1', name: 'A. Rivera', role: 'Operator', mfa: true, status: 'active' },
@@ -12,32 +13,37 @@ export function UsersPage() {
   return (
     <Page>
       <PageHeader title="Users & Roles" subtitle="Users, roles, permissions and MFA status" />
-      <div className="space-y-4">
-        <div className="border border-border rounded-xl bg-surface overflow-hidden">
+      <div className="space-y-10">
+        <div className="border border-white/10 rounded-3xl bg-black/30 backdrop-blur-sm overflow-hidden shadow-2xl">
           <table className="w-full text-left text-sm">
-            <thead className="bg-surface-lift text-text-muted text-xs uppercase tracking-wider">
+            <thead className="bg-black/40 text-text-dim text-[10px] font-black uppercase tracking-[0.12em] sticky top-0 z-20">
               <tr>
-                <th className="px-4 py-3">User</th>
-                <th className="px-4 py-3">Role</th>
-                <th className="px-4 py-3">Permissions</th>
-                <th className="px-4 py-3">MFA</th>
-                <th className="px-4 py-3 text-right">Status</th>
+                <th className="px-8 py-5 font-black">User</th>
+                <th className="px-8 py-5 font-black">Role</th>
+                <th className="px-8 py-5 font-black">Permissions</th>
+                <th className="px-8 py-5 font-black">MFA</th>
+                <th className="px-8 py-5 font-black text-right">Status</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-border">
+            <tbody className="divide-y divide-white/10">
               {USERS.map((u) => (
-                <tr key={u.id} className="hover:bg-surface-lift transition-colors group">
-                  <td className="px-4 py-3 text-text font-medium">{u.name}</td>
-                  <td className="px-4 py-3 text-text-muted">{u.role}</td>
-                  <td className="px-4 py-3 text-text-muted">
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-border text-[10px] text-text-muted">
-                      <Shield size={12} /> {u.role.toLowerCase()}
+                <tr key={u.id} className="hover:bg-white/5 transition-all duration-300 group border-b border-white/5 last:border-0">
+                  <td className="px-8 py-5 text-text font-black">{u.name}</td>
+                  <td className="px-8 py-5 text-text-dim">{u.role}</td>
+                  <td className="px-8 py-5 text-text-dim">
+                    <span className="inline-flex items-center gap-3 px-4 py-2 rounded-full border border-white/10 text-[10px] font-black text-text-dim">
+                      <Shield size={15} /> {u.role.toLowerCase()}
                     </span>
                   </td>
-                  <td className="px-4 py-3">
-                    <span className={cnStatus(u.mfa)}>{u.mfa ? 'Enabled' : 'Disabled'}</span>
+                  <td className="px-8 py-5">
+                    <span className={cn(
+                      'inline-flex items-center gap-3 px-4 py-2 rounded-full border text-[10px] font-black',
+                      u.mfa ? 'border-success text-success bg-success/10 shadow-lg shadow-success/20' : 'border-[#f59e0b] text-[#fbbf24] bg-[#fbbf24]/10 shadow-lg shadow-[#fbbf24]/20',
+                    )}>
+                      {u.mfa ? 'Enabled' : 'Disabled'}
+                    </span>
                   </td>
-                  <td className="px-4 py-3 text-text-muted text-right">{u.status}</td>
+                  <td className="px-8 py-5 text-text-dim text-right">{u.status}</td>
                 </tr>
               ))}
             </tbody>
@@ -46,10 +52,4 @@ export function UsersPage() {
       </div>
     </Page>
   )
-}
-
-function cnStatus(mfa: boolean) {
-  return `inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${
-    mfa ? 'border-success text-success bg-success/10' : 'border-[#f59e0b] text-[#f59e0b] bg-[#4a2a1a]/40'
-  }`
 }

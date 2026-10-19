@@ -226,6 +226,26 @@ func (s *Service) Search(ctx context.Context, tenant string, q Query) (Result, e
 		cursorAt, cursorID = at, id
 	}
 
+	// If we have free text and no other structured parameters specified,
+	// try to parse it as natural language to govern the search
+	if q.FreeText != "" && len(q.SiteIDs) == 0 && q.EventType == "" && q.DeviceID == "" &&
+		q.ZoneID == "" && q.CorrelationID == "" && q.IncidentID == "" &&
+		q.From.IsZero() && q.To.IsZero() {
+		// Parse natural language to add governance
+		nlQuery := parseNaturalLanguage(q.FreeText)
+		// Only override if we found something specific
+		if nlQuery.EventType != "" {
+			q.EventType = nlQuery.EventType
+		}
+		if !nlQuery.From.IsZero() {
+			q.From = nlQuery.From
+		}
+		if !nlQuery.To.IsZero() {
+			q.To = nlQuery.To
+		}
+		// Keep the original free text for ranking
+	}
+
 	// `WithSites` rather than `For`, so the site-scoped policy the database
 	// enforces sees the same scope the handler checked. `For` alone would bind
 	// the tenant and nothing else, and a search that asked for site-a while
@@ -395,6 +415,57 @@ func cleanSites(in []string) []string {
 		}
 	}
 	return out
+}
+
+// parseNaturalLanguage converts a free-text query into a structured query by
+// mapping simple keywords to governed parameters. This is a simplified
+// implementation for demo purposes.
+// Examples:
+//
+//	"person running" → EventType=motion (assuming motion detection identifies persons)
+//	"at door 18" → would need camera/zone mapping, but we'll leave as free text for now
+//	"last hour" → sets time window
+func parseNaturalLanguage(text string) Query {
+	// Convert to lowercase for case-insensitive matching
+	text = strings.ToLower(text)
+	query := Query{}
+
+	// Simple keyword mapping for demo
+	// In a real implementation, this would use NLP techniques
+	if strings.Contains(text, "person") || strings.Contains(text, "people") {
+		// Assume person detection falls under motion events for simplicity
+		query.EventType = "motion"
+	}
+	if strings.Contains(text, "running") || strings.Contains(text, "walking") {
+		// Movement activity
+		query.EventType = "motion"
+	}
+	if strings.Contains(text, "door") || strings.Contains(text, "entrance") || strings.Contains(text, "exit") {
+		// Would map to specific zones/cameras in a real implementation
+		// For demo, we'll leave it in free text to be handled by keyword search
+	}
+	if strings.Contains(text, "car") || strings.Contains(text, "vehicle") {
+		// Vehicle detection
+		query.EventType = "motion" // Simplified
+	}
+
+	// Time-based phrases
+	if strings.Contains(text, "last hour") || strings.Contains(text, "past hour") {
+		query.From = time.Now().Add(-time.Hour)
+		query.To = time.Now()
+	} else if strings.Contains(text, "last 24 hours") || strings.Contains(text, "past day") {
+		query.From = time.Now().Add(-24 * time.Hour)
+		query.To = time.Now()
+	} else if strings.Contains(text, "today") {
+		todayStart := time.Now().Truncate(24 * time.Hour)
+		query.From = todayStart
+		query.To = time.Now()
+	}
+
+	// Any remaining text goes to FreeText for keyword/vector search
+	query.FreeText = text
+
+	return query
 }
 
 // encodeCursor makes the keyset position opaque.

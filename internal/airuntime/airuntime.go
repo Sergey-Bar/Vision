@@ -159,6 +159,103 @@ var InvestigatorProfileSchema = map[string]any{
 	"required": []any{"answer", "citations"},
 }
 
+// ObjectDetectionProfileSchema declares the output field set for object
+// detection: a list of detections, each with a label, bounding box, and
+// confidence.
+var ObjectDetectionProfileSchema = map[string]any{
+	"properties": map[string]any{
+		"detections": map[string]any{
+			"type": "array",
+			"items": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"label":      map[string]any{"type": "string"},
+					"confidence": map[string]any{"type": "number"},
+					"bbox": map[string]any{
+						"type":  "array",
+						"items": map[string]any{"type": "number"},
+					},
+				},
+				"required": []any{"label", "confidence", "bbox"},
+			},
+		},
+	},
+	"required": []any{"detections"},
+}
+
+// ObjectDetectionProfile is the profile ID used for object detection.
+const ObjectDetectionProfile = "object-detection/v1"
+
+// Detection is one object detected in a frame.
+type Detection struct {
+	Label      string    `json:"label"`
+	Confidence float64   `json:"confidence"`
+	BBox       []float64 `json:"bbox"`
+}
+
+// DetectObjects sends an image frame to the runtime for object detection.
+//
+// Evidence must contain exactly one item: the image bytes with a SHA-256
+// hash. On a degraded response (model unavailable, no runtime, etc.), the
+// returned slice is nil and the Degraded field carries the reason.
+func (c *Client) DetectObjects(ctx context.Context, observationID string, evidence []Evidence) ([]Detection, *Result, error) {
+	if len(evidence) != 1 {
+		return nil, nil, errors.New("airuntime: DetectObjects requires exactly one evidence item")
+	}
+	if evidence[0].SHA256 == "" {
+		return nil, nil, errors.New("airuntime: evidence item must carry a SHA-256 hash")
+	}
+
+	result, err := c.Do(ctx, Request{
+		ObservationID: observationID,
+		ProfileID:     ObjectDetectionProfile,
+		Evidence:      evidence,
+		ProfileSchema: ObjectDetectionProfileSchema,
+	})
+	if err != nil {
+		// Do returns a degraded result on transport failure, with err set.
+		if result.Degraded {
+			return nil, &result, nil
+		}
+		return nil, &result, err
+	}
+	if result.Degraded {
+		return nil, &result, nil
+	}
+
+	raw, ok := result.Structured["detections"]
+	if !ok {
+		return nil, &result, nil
+	}
+	arr, ok := raw.([]any)
+	if !ok {
+		return nil, &result, nil
+	}
+	out := make([]Detection, 0, len(arr))
+	for _, item := range arr {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		d := Detection{}
+		if label, ok := m["label"].(string); ok {
+			d.Label = label
+		}
+		if conf, ok := m["confidence"].(float64); ok {
+			d.Confidence = conf
+		}
+		if bbox, ok := m["bbox"].([]any); ok {
+			for _, v := range bbox {
+				if f, ok := v.(float64); ok {
+					d.BBox = append(d.BBox, f)
+				}
+			}
+		}
+		out = append(out, d)
+	}
+	return out, &result, nil
+}
+
 // Request is one inference.
 type Request struct {
 	ObservationID string

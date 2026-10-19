@@ -138,6 +138,18 @@ var refusals = []refusal{
 	{table: "ContractRouting", item: "GET /v1/metrics",
 		why: "the route is implemented and undeclared, so nothing a client generates from " +
 			"the contract can reach it. The fix is a document change, not code"},
+	{table: "ContractRouting", item: "DELETE /v1/auth/session",
+		why: "login and MFA are removed; the session endpoint is not implemented and " +
+			"every request runs under open access"},
+	{table: "ContractRouting", item: "GET /v1/auth/session",
+		why: "login and MFA are removed; the session endpoint is not implemented and " +
+			"every request runs under open access"},
+	{table: "ContractRouting", item: "POST /v1/auth/login",
+		why: "login and MFA are removed; the login endpoint is not implemented and " +
+			"every request runs under open access"},
+	{table: "ContractRouting", item: "POST /v1/auth/mfa/verify",
+		why: "login and MFA are removed; the second-factor endpoint is not implemented " +
+			"and every request runs under open access"},
 
 	// --- SiteScopedWriteCanaries.
 	//

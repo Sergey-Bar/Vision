@@ -2,11 +2,11 @@ package api
 
 import (
 	"bytes"
-	"crypto/subtle"
 	"embed"
 	"html/template"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -156,126 +156,12 @@ func firstSite(p identity.Principal) string {
 	return p.SiteScope[0]
 }
 
-// handleConsoleRoot sends a signed-in operator to the incident feed and everyone
-// else to the sign-in page.
+// handleConsoleRoot sends every request to the incident feed. Login is removed,
+// so there is no sign-in page to land on.
 func (s *Server) handleConsoleRoot(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie(s.cookieName())
-	if err != nil || cookie.Value == "" {
-		http.Redirect(w, r, "/login", http.StatusFound)
-		return
-	}
-	p, rotated, err := s.Identity.Resolve(r.Context(), s.Tenant, cookie.Value, s.clientIP(r))
-	if err != nil {
-		s.clearSessionCookie(w)
-		http.Redirect(w, r, "/login", http.StatusFound)
-		return
-	}
-	// The rotated token has to go back to the browser.
-	//
-	// `Resolve` rotates the session token on every call, and this handler threw
-	// the new one away. The browser kept the old value, which no longer matches
-	// the row, so the very next request failed to resolve and bounced to /login:
-	// visiting the console root logged the operator out. Every other handler that
-	// resolves a session ’ `s.principal` and therefore the whole API ’ does this,
-	// and this one was the exception.
-	s.setSessionCookie(w, rotated, p.CSRFToken)
 	http.Redirect(w, r, "/incidents", http.StatusFound)
 }
 
-func (s *Server) handleConsoleLogin(w http.ResponseWriter, r *http.Request) {
-	csrfRaw, _, err := identity.NewToken()
-	if err != nil {
-		s.render(w, http.StatusInternalServerError, "login.html", consoleData{Title: "Sign in", RequestID: requestID(r), Now: time.Now().UTC(), Error: "CSRF token generation failed"})
-		return
-	}
-	http.SetCookie(w, &http.Cookie{
-		Name:     s.cookieName() + "_csrf",
-		Value:    csrfRaw,
-		Path:     "/",
-		Secure:   s.Secure,
-		SameSite: http.SameSiteStrictMode,
-		MaxAge:   int((15 * time.Minute).Seconds()),
-	})
-	data := consoleData{Title: "Sign in", RequestID: requestID(r), Now: time.Now().UTC(), CSRF: csrfRaw}
-	if msg := r.URL.Query().Get("error"); msg != "" {
-		data.Error = msg
-	}
-	s.render(w, http.StatusOK, "login.html", data)
-}
-
-// handleConsoleLoginSubmit is the form-encoded password step.
-//
-// It exists because `login.html` has always pointed at a route that could not accept
-// it. The form said `method="post" action="/login"` and the only `/login` route was
-// `GET`, so submitting the sign-in form produced a 405 from the mux and the console
-// was a page an operator could look at and not use. An HTML form can only send GET
-// and POST, so no amount of editing that one line reaches `DELETE`; the console
-// needs a POST of its own, and the API keeps its JSON route unchanged.
-//
-// A failure re-renders the page with the reason rather than redirecting to it with a
-// query string, because a reason in a URL lands in the browser history, in a
-// bookmark, and in the `Referer` of whatever the operator clicks next. The lockout
-// 423 in particular is the one answer an operator needs to read twice.
-func (s *Server) handleConsoleLoginSubmit(w http.ResponseWriter, r *http.Request) {
-	// Verify pre-session CSRF token (double-submit cookie).
-	csrfCookie, err := r.Cookie(s.cookieName() + "_csrf")
-	if err != nil {
-		s.renderConsoleLoginError(w, r, http.StatusForbidden, "Missing CSRF token. Reload the page and try again.")
-		return
-	}
-	presented := r.PostFormValue("csrf_token")
-	if subtle.ConstantTimeCompare([]byte(presented), []byte(csrfCookie.Value)) != 1 {
-		s.renderConsoleLoginError(w, r, http.StatusForbidden, "Invalid CSRF token. Reload the page and try again.")
-		return
-	}
-
-	if err := r.ParseForm(); err != nil {
-		s.renderConsoleLoginError(w, r, http.StatusBadRequest, "The form could not be read.")
-		return
-	}
-	res, status, reason := s.passwordStep(r,
-		r.PostFormValue("username"), r.PostFormValue("password"))
-	if status != http.StatusOK {
-		s.renderConsoleLoginError(w, r, status, reason)
-		return
-	}
-
-	if res.Session != nil {
-		s.setSessionCookie(w, res.Session.Token, res.Session.CSRFToken)
-		http.Redirect(w, r, "/incidents", http.StatusFound)
-		return
-	}
-	// MFA is required. There is no console page that collects a second factor, and
-	// inventing one here would be the wrong fix: the honest answer is the page that
-	// says so and names the route that does collect it, rather than a form that
-	// accepts a code and silently does nothing with it.
-	s.renderConsoleLoginError(w, r, http.StatusOK,
-		"This account needs a second factor, which the console does not collect yet. "+
-			"Sign in through the API at POST /v1/auth/login, then open the console.")
-}
-
-// renderConsoleLoginError re-renders the sign-in page with a reason.
-//
-// `status` is the status the PAGE is served with, not the status the password step
-// produced: a wrong password re-renders at 401, which is right, but a locked account
-// re-rendering at 423 would make the browser's own error page replace the page that
-// explains the lockout.
-func (s *Server) renderConsoleLoginError(w http.ResponseWriter, r *http.Request, pageStatus int, reason string) {
-	data := consoleData{Title: "Sign in", RequestID: requestID(r), Now: time.Now().UTC(), Error: reason}
-	s.render(w, pageStatus, "login.html", data)
-}
-
-// handleConsoleLogout is the form-encoded sign-out.
-//
-// `layout.html` posted to `/v1/auth/session`, which is registered `DELETE` only, so
-// the Sign out button was a 405. Same shape as the sign-in form: HTML cannot send
-// DELETE, and the API's DELETE is correct for a JSON client that has no form to fill
-// in.
-//
-// Unlike the sign-in form this one is NOT exempt from the CSRF check. A session
-// exists, the layout renders the token into the form, and a sign-out a third-party
-// page can trigger is a nuisance at best -- an operator's console is cleared
-// mid-incident.
 // handleConsoleDisposition records an operator disposition from the console.
 //
 // # Why this route exists at all
@@ -345,110 +231,53 @@ func (s *Server) handleConsoleDisposition(w http.ResponseWriter, r *http.Request
 		agreement = "unsure"
 	}
 
-	stepUpVerified := false
-	if incidents.OutcomeNeedsStepUp(outcome) {
-		code := strings.TrimSpace(r.PostFormValue("factor"))
-		if code == "" {
-			data.Error = "Escalating or dismissing needs a second factor. " +
-				"This account has none enrolled, so an operator cannot do either from here."
-			s.render(w, http.StatusForbidden, "incident.html", data)
-			return
-		}
-		proof, err := d.Identity.StepUp(r.Context(), p.TenantID, p.UserID, "", code,
-			"disposition:"+outcome, id)
-		if err != nil {
-			data.Error = "The second factor was not accepted: " + err.Error()
-			s.render(w, http.StatusForbidden, "incident.html", data)
-			return
-		}
-		// Spent before the disposition is recorded, not after. A proof that is spent
-		// last and a record that fails leaves a live proof behind, and a live proof is
-		// exactly the thing `ConsumeStepUp` exists to prevent: it is spent FIRST, and
-		// a failure to record then costs the operator a re-authentication rather than
-		// leaving a usable escalation token on the table.
-		if err := d.Incidents.ConsumeStepUp(r.Context(), d.Identity, p.TenantID, p.UserID, proof); err != nil {
-			data.Error = err.Error()
-			s.render(w, http.StatusForbidden, "incident.html", data)
-			return
-		}
-		stepUpVerified = true
-	}
-
 	if _, err := d.Incidents.Record(r.Context(), incidents.Disposition{
 		TenantID: p.TenantID, IncidentID: id, Outcome: outcome,
 		ReasonCode: reasonCode, Notes: notes, Agreement: agreement,
 		ActorID: p.UserID, ActorRoles: roleStrings(p), SiteScope: p.SiteScope,
-		SessionID: p.SessionID, StepUpVerified: stepUpVerified,
+		SessionID: p.SessionID,
 	}); err != nil {
 		data.Error = "The disposition was not recorded: " + err.Error()
 		s.render(w, http.StatusBadRequest, "incident.html", data)
 		return
 	}
 
-	if stepUpVerified {
-		// The escalation boundary. The cookie carries the session, which survives; the
-		// CSRF token does not, and a page rendered before this point still holds the
-		// old one in every form. A failure to rotate is logged and NOT swallowed: the
-		// disposition already committed, so the only honest thing left is to say that
-		// the rotation did not happen and let the operator know their console is now
-		// carrying a token that may or may not be current.
-		if fresh, err := s.rotateConsoleCSRF(r, p, d); err != nil {
-			if s.Log != nil {
-				s.Log.Error("the CSRF token was not rotated after a sensitive disposition",
-					"tenant_id", p.TenantID, "incident_id", id, "error", err.Error())
-			}
-		} else if fresh != "" {
-			http.SetCookie(w, &http.Cookie{
-				Name:     s.CookieName + "_csrf",
-				Value:    fresh,
-				Path:     "/",
-				HttpOnly: true,
-				Secure:   s.Secure,
-				SameSite: http.SameSiteStrictMode,
-			})
-		}
-	}
-
 	http.Redirect(w, r, "/incidents/"+url.PathEscape(id), http.StatusFound)
 }
 
-// rotateConsoleCSRF issues a fresh token for the live session.
-//
-// Separate from the caller because rotating is the part that can fail and the
-// disposition is not: the record is already committed by the time this is called, so
-// "fail the whole thing" is no longer available and the choice is between reporting
-// and pretending.
-func (s *Server) rotateConsoleCSRF(r *http.Request, p identity.Principal, d Deps) (string, error) {
-	if d.Identity == nil || strings.TrimSpace(p.SessionID) == "" {
-		return "", nil
-	}
-	return d.Identity.RotateCSRF(r.Context(), p.TenantID, p.SessionID)
-}
-
-func (s *Server) handleConsoleLogout(w http.ResponseWriter, r *http.Request, p identity.Principal) {
-	if err := s.Identity.Logout(r.Context(), s.Tenant, p.SessionID, p.Username, "console logout"); err != nil {
-		data := s.consoleData(r, p, "Sign in")
-		data.Error = "Sign out failed: " + err.Error()
-		s.render(w, http.StatusInternalServerError, "incidents.html", data)
-		return
-	}
-	s.clearSessionCookie(w)
-	http.Redirect(w, r, "/login", http.StatusFound)
-}
+// severityClass maps a severity to a CSS class.
 
 func (s *Server) handleConsoleIncidents(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
+	s.Log.Info("HANDLE_START")
 	data := s.consoleData(r, p, "Incidents")
 
 	limit := parseLimit(r.URL.Query().Get("limit"), 50, 200)
 	state := r.URL.Query().Get("state")
 	degraded := r.URL.Query().Get("degraded")
 
-	items, err := d.Incidents.List(r.Context(), p.TenantID, "", limit)
+	// Ensure principal has site scope from environment if empty (console open access)
+	if len(p.SiteScope) == 0 {
+		if site := os.Getenv("SP_SITE_ID"); site != "" {
+			s.Log.Info("SETTING SITE SCOPE", "site", site)
+			p.SiteScope = []string{site}
+		}
+	}
+	siteID := ""
+	if len(p.SiteScope) > 0 {
+		siteID = p.SiteScope[0]
+	}
+
+	// Incidents list
+	startIncidents := time.Now()
+	items, err := d.Incidents.List(r.Context(), p.TenantID, siteID, limit)
+	durationIncidents := time.Since(startIncidents)
 	if err != nil {
 		data.Error = "The incident list could not be read: " + err.Error()
 		s.render(w, http.StatusInternalServerError, "incidents.html", data)
 		return
 	}
+	s.Log.Info("Incidents list duration", "duration", durationIncidents)
+
 	// The site filter is applied here rather than in the query, so a principal
 	// with several assignments and a principal with one behave identically.
 	filtered := make([]incidents.Summary, 0, len(items))
@@ -467,14 +296,20 @@ func (s *Server) handleConsoleIncidents(w http.ResponseWriter, r *http.Request, 
 	data.Incidents = filtered
 
 	if d.ClockDrift != nil {
+		startClockDrift := time.Now()
 		if drift, err := d.ClockDrift.List(r.Context(), p.TenantID, 20); err == nil {
 			data.Drift = drift
 		}
+		durationClockDrift := time.Since(startClockDrift)
+		s.Log.Info("ClockDrift list duration", "duration", durationClockDrift)
 	}
 	if d.DeadLetters != nil {
-		if letters, err := d.DeadLetters.Read(r.Context(), p.TenantID, primarySiteOf(p), "", 20); err == nil {
+		startDeadLetters := time.Now()
+		if letters, err := d.DeadLetters.Read(r.Context(), p.TenantID, primarySiteOf(p), "", 1); err == nil {
 			data.DeadLetters = letters
 		}
+		durationDeadLetters := time.Since(startDeadLetters)
+		s.Log.Info("DeadLetters read duration", "duration", durationDeadLetters)
 	}
 
 	s.render(w, http.StatusOK, "incidents.html", data)

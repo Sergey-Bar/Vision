@@ -60,8 +60,8 @@ func TestDeriveCountsTheTreeDirectly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Derive: %v", err)
 	}
-	if d.Packages != 88 {
-		t.Errorf("Go packages: got %d, want 88", d.Packages)
+	if d.Packages != 89 {
+		t.Errorf("Go packages: got %d, want 89", d.Packages)
 	}
 	if d.Migrations != 27 {
 		t.Errorf("migrations: got %d, want 27", d.Migrations)
@@ -131,6 +131,11 @@ func TestCountPackagesSkipsWhatTheGoToolSkips(t *testing.T) {
 	// holds a worktree that would otherwise double every count.
 	write(".kilo/worktrees/x/internal/one/one.go", "package one\n")
 	write("_ignored/thing.go", "package thing\n")
+	// A package manager's working directory is not the repository's. The go
+	// tool does pick up Go files inside one -- `web/spa/node_modules/flatted/golang`
+	// ships a Go package -- so on a machine that has run `npm install` this count
+	// came out one higher than on a machine that has not.
+	write("web/spa/node_modules/flatted/golang/pkg/flatted/flatted.go", "package flatted\n")
 
 	got, err := countPackages(root)
 	if err != nil {

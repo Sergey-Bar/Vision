@@ -94,6 +94,10 @@ FROM ${RUNTIME_IMAGE} AS runtime
 # one when a fifth command is added.
 COPY --from=build /out/ /usr/local/bin/
 
+# Dispatch destinations: rules ask for notify_operator / notify_supervisor and
+# the core refuses to start until a destination is configured for each target.
+COPY deploy/dispatch-destinations.yaml /etc/security-platform/dispatch-destinations.yaml
+
 # The rule bundle and the committed fixtures, because the seed reads them and
 # `securityctl rules lint` and `rules simulate` accept a path. They are data the
 # release carries, not build inputs — a site install gets the same bundle the

@@ -58,7 +58,6 @@ import (
 	"github.com/Sergey-Bar/vision/internal/evidence"
 	"github.com/Sergey-Bar/vision/internal/evidencefetch"
 	"github.com/Sergey-Bar/vision/internal/graph"
-	"github.com/Sergey-Bar/vision/internal/identity"
 	"github.com/Sergey-Bar/vision/internal/inbox"
 	"github.com/Sergey-Bar/vision/internal/incidents"
 	"github.com/Sergey-Bar/vision/internal/jobs"
@@ -133,12 +132,6 @@ func run() error {
 	defer func() { _ = transport.Close() }()
 
 	adapter := milestone.New(transport, cfg.SiteID, cfg.IntegrationID)
-
-	secretStore, err := identity.NewFileSecretStore(secretKeyPath())
-	if err != nil {
-		return err
-	}
-	ident := &identity.Service{Pool: pool, Audit: writer, SecretStore: secretStore}
 
 	correlatorSvc := &correlator.Correlator{Pool: pool}
 	incidentsSvc := &incidents.Service{Pool: pool, Audit: writer}
@@ -264,7 +257,7 @@ func run() error {
 	}
 
 	server := &api.Server{
-		Identity: ident, Audit: writer, Log: log,
+		Audit: writer, Log: log,
 		Tenant: cfg.Tenant,
 		// Secure is configuration, not a constant. It was hardcoded true, which
 		// marked the cookie Secure over a plaintext listener instead of letting
@@ -282,10 +275,10 @@ func run() error {
 	server.SetStartTime(start)
 
 	deps := api.Deps{
-		Identity:  ident,
 		Incidents: incidentsSvc,
 		Bundles:   bundlesSvc,
 		Evidence:  store,
+		Inbox:     inboxSvc,
 		// The structured search: SQL over the canonical event windows, behind
 		// the same capability the incident pages carry. Wired here because the
 		// pool the API already holds is the pool it queries, and a service that
@@ -326,6 +319,7 @@ func run() error {
 			}, err
 		},
 	}
+	log.Info("Setting server routes")
 	server.Routes = func(mux *http.ServeMux) { server.RegisterRoutes(deps)(mux) }
 
 	// Checkpoint sealing starts only when a directory and a signing key are both

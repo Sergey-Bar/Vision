@@ -128,6 +128,25 @@ var (
 		"internal/identity.KeySize":     {Symbol: "internal/identity.KeySize", Why: "published constant: the generated key length, stated in the key-rotation runbook and checked by an operator's own tooling"},
 		"internal/identity.TokenLength": {Symbol: "internal/identity.TokenLength", Why: "published constant: the session token length, which the login handler's own documentation and the incident runbook state by name"},
 
+		// Login and MFA are removed: every request runs under open access, so the
+		// whole second-factor surface (enrolment, challenges, sessions, logout,
+		// step-up proofs, CSRF rotation) and the authorization edges that only
+		// the auth routes used have no reader. They are part of the removed auth
+		// surface, restored only if sign-in is reintroduced.
+		"internal/identity.AuthorizeSite":        {Symbol: "internal/identity.AuthorizeSite", Why: "login and MFA are removed; the site-authorized check nothing calls. Restore it only if sign-in is reintroduced"},
+		"internal/identity.CheckCSRFByToken":     {Symbol: "internal/identity.CheckCSRFByToken", Why: "login and MFA are removed; the CSRF-by-token check nothing calls. Restore it only if sign-in is reintroduced"},
+		"internal/identity.CompleteChallenge":    {Symbol: "internal/identity.CompleteChallenge", Why: "login and MFA are removed; the second-factor challenge nothing calls. Restore it only if sign-in is reintroduced"},
+		"internal/identity.CompleteRegistration": {Symbol: "internal/identity.CompleteRegistration", Why: "login and MFA are removed; the WebAuthn registration completion nothing calls. Restore it only if sign-in is reintroduced"},
+		"internal/identity.EnrollTOTP":           {Symbol: "internal/identity.EnrollTOTP", Why: "login and MFA are removed; TOTP enrolment nothing calls. Restore it only if sign-in is reintroduced"},
+		"internal/identity.Logout":               {Symbol: "internal/identity.Logout", Why: "login and MFA are removed; logout nothing calls. Restore it only if sign-in is reintroduced"},
+		"internal/identity.NewToken":             {Symbol: "internal/identity.NewToken", Why: "login and MFA are removed; the session-token mint nothing calls. Restore it only if sign-in is reintroduced"},
+		"internal/identity.PasswordStep":         {Symbol: "internal/identity.PasswordStep", Why: "login and MFA are removed; the password step nothing calls. Restore it only if sign-in is reintroduced"},
+		"internal/identity.RegistrationPayload":  {Symbol: "internal/identity.RegistrationPayload", Why: "login and MFA are removed; the WebAuthn registration payload builder nothing calls. Restore it only if sign-in is reintroduced"},
+		"internal/identity.RotateCSRF":           {Symbol: "internal/identity.RotateCSRF", Why: "login and MFA are removed; the CSRF rotation nothing calls. Restore it only if sign-in is reintroduced"},
+		"internal/identity.StepUp":               {Symbol: "internal/identity.StepUp", Why: "login and MFA are removed; the step-up proof nothing calls. Restore it only if sign-in is reintroduced"},
+		"internal/identity.VerifyTOTPEnrollment": {Symbol: "internal/identity.VerifyTOTPEnrollment", Why: "login and MFA are removed; TOTP enrolment confirmation nothing calls. Restore it only if sign-in is reintroduced"},
+		"internal/incidents.OutcomeNeedsStepUp":  {Symbol: "internal/incidents.OutcomeNeedsStepUp", Why: "login and MFA are removed; the step-up outcome predicate nothing calls. Restore it only if sign-in is reintroduced"},
+
 		"internal/inbox.StatusReceived": {Symbol: "internal/inbox.StatusReceived", Why: "the inbox lifecycle vocabulary. Statuses are stored as text and read by the recovery drill, by `securityctl doctor` and by the ops screen rather than by a Go caller"},
 		"internal/jobs.Status":          {Prefix: "internal/jobs.Status", Why: "the job lifecycle vocabulary. Statuses are stored as text and read by the recovery drill, by the soak criteria and by the ops screen rather than by a Go caller"},
 
@@ -219,6 +238,10 @@ var (
 		"internal/threat.DecideFromScore": {Symbol: "internal/threat.DecideFromScore", Why: "the score-only entry point into the matrix: given nothing but a score, decide an action, with no anomaly set to route through. It is the seam a documented override takes (a site that decides purely on score), and it is tested directly against the matrix's boundary rows in internal/threat. UNWIRED in the product path today: the playbook calls DecideWithSight and routes through the full form. Close it by wiring the score-bar's band derivation or the override path through this function, or delete it"},
 
 		"internal/airuntime.MaxResponseBytes": {Symbol: "internal/airuntime.MaxResponseBytes", Why: "published bound: the largest body the AI runtime will read. The AI runtime is untrusted input, so the bound is part of its contract and is asserted by the Python test that drives it"},
+
+		"internal/airuntime.DetectObjects":                {Symbol: "internal/airuntime.DetectObjects", Why: "published method: object detection against the AI runtime's object-detection profile. It is the consumer-facing entry point the operator console calls. UNWIRED in the product path today, and the previous justification for it -- that the videoingest path called it -- was false: internal/videoingest never called it, and that package is gone. Close it by wiring the console's live view through it, or delete it"},
+		"internal/airuntime.ObjectDetectionProfile":       {Symbol: "internal/airuntime.ObjectDetectionProfile", Why: "published constant: the profile id for object detection. It is written into inbox event payloads and rule conditions, and the runtime validates answers against the schema named by it"},
+		"internal/airuntime.ObjectDetectionProfileSchema": {Symbol: "internal/airuntime.ObjectDetectionProfileSchema", Why: "published schema: the output field set the AI runtime returns for object detection. It is the contract the model answers against, and a rule's aiObservation condition reads its fields"},
 
 		"internal/api.DecodeJSON":           {Symbol: "internal/api.DecodeJSON", Why: "UNWIRED. The request decoder nothing calls. Close it by having the disposition form and the new write routes decode through it, so every body is bounded the same way, or delete it"},
 		"internal/api.WriteError":           {Symbol: "internal/api.WriteError", Why: "UNWIRED. The error-response writer nothing calls. Close it with the two above: every handler's refusal should render through one writer, which is also what makes the console's error pages consistent"},

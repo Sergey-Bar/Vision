@@ -331,9 +331,19 @@ func (a *Adapter) Poll(ctx context.Context, since *time.Time) ([]RawRecord, erro
 			id := a.feedErrorID(route, since)
 			a.recordFeedError(ctx, route, id, err)
 			recs = []RawRecord{{
+				TenantID:        "",
+				IntegrationID:   a.integrationID,
+				SourceSystemID:  a.integrationID,
+				SiteID:          a.siteID,
 				SourceEventID:   id,
 				EventType:       adapterFeedErrorType,
-				SiteID:          a.siteID,
+				ObservedAt:      time.Now().UTC(),
+				SourceTimezone:  "",
+				ClockSource:     "",
+				ReceivedAt:      time.Now().UTC(),
+				Envelope:        []byte("{}"),
+				SourceDeviceRef: "",
+				SourceTypeName:  "",
 				Malformed:       true,
 				MalformedReason: err.Error(),
 			}}

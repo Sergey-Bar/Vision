@@ -420,6 +420,87 @@ paths:
         "200": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
 
+  /v1/rules/from-text:
+    post:
+      tags: [rules]
+      summary: Compile a free-text rule description into a bundle-ready rule document
+      description: |
+        Converts natural language (e.g. "person with bag at entrance in the last
+        hour") into a rule-bundle YAML document. The existing rules.Compiler
+        compiles it; this endpoint only produces the document.
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RulesFromTextRequest" }
+      responses:
+        "200":
+          description: Rule document
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RulesFromTextResponse" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /v1/video/upload:
+    post:
+      tags: [evidence]
+      summary: Upload a video file for ingest
+      description: |
+        Multipart upload of a video container (MP4, MOV, AVI, WebM, MKV). The
+        file is stored in the evidence store and a canonical video_ingest
+        inbox event is emitted so videoingest can ingest it as a file source.
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                siteId:
+                  type: string
+                  description: Site to associate with the ingest. Defaults to the principal's primary site.
+      responses:
+        "201":
+          description: Uploaded and queued for ingest
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VideoUploadResponse" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
+
+  /v1/video/youtube:
+    post:
+      tags: [evidence]
+      summary: Ingest a YouTube URL
+      description: |
+        Emits a canonical video_ingest inbox event for a YouTube URL.
+        videoingest downloads the real bytes via yt-dlp when it processes
+        the event. The same URL always maps to the same evidence id.
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/VideoYouTubeRequest" }
+      responses:
+        "201":
+          description: YouTube ingest queued
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VideoYouTubeResponse" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
   /v1/ops/dead-letters:
     get:
       tags: [ops]
@@ -1037,3 +1118,44 @@ components:
         ok: { type: boolean }
         detail: { type: string }
         required: { type: boolean, description: If false, readiness is unaffected (informational). }
+
+    RulesFromTextRequest:
+      type: object
+      required: [text]
+      properties:
+        text: { type: string, minLength: 1 }
+        siteId: { type: string }
+
+    RulesFromTextResponse:
+      type: object
+      required: [rule]
+      properties:
+        rule: { type: string }
+
+    VideoUploadResponse:
+      type: object
+      required: [videoId, evidenceId, eventId, duplicate, sizeBytes, sha256]
+      properties:
+        videoId: { type: string }
+        evidenceId: { type: string }
+        eventId: { type: string }
+        duplicate: { type: boolean }
+        sizeBytes: { type: integer }
+        sha256: { type: string }
+
+    VideoYouTubeRequest:
+      type: object
+      required: [url]
+      properties:
+        url: { type: string, pattern: "^https?://(www\\.)?(youtube\\.com|youtu\\.be)/" }
+        siteId: { type: string }
+
+    VideoYouTubeResponse:
+      type: object
+      required: [videoId, evidenceId, eventId, duplicate, source]
+      properties:
+        videoId: { type: string }
+        evidenceId: { type: string }
+        eventId: { type: string }
+        duplicate: { type: boolean }
+        source: { type: string }

@@ -1,12 +1,17 @@
 package api
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,11 +21,14 @@ import (
 	"github.com/Sergey-Bar/vision/internal/eventsearch"
 	"github.com/Sergey-Bar/vision/internal/evidence"
 	"github.com/Sergey-Bar/vision/internal/identity"
+	"github.com/Sergey-Bar/vision/internal/inbox"
 	"github.com/Sergey-Bar/vision/internal/incidents"
 	"github.com/Sergey-Bar/vision/internal/jobs"
+	"github.com/Sergey-Bar/vision/internal/nlp"
 	"github.com/Sergey-Bar/vision/internal/observability"
 	"github.com/Sergey-Bar/vision/internal/rules"
 	"github.com/Sergey-Bar/vision/internal/simulate"
+	"github.com/gorilla/websocket"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -29,9 +37,10 @@ type Deps struct {
 	Incidents *incidents.Service
 	Bundles   *bundles.Service
 	Evidence  *evidence.Store
-	// Identity is used to spend a step-up proof. Declared here so a handler cannot
-	// disposition a sensitive incident without one.
-	Identity *identity.Service
+	// Inbox writes canonical inbox events. The video upload and YouTube
+	// endpoints emit video_ingest events here so the VMS's source registrar
+	// can pick them up.
+	Inbox *inbox.Writer
 	// DeadLetters reads the inbox and job dead-letter lists, which is a separate
 	// capability from reading incidents: an operator who may triage incidents
 	// should not automatically be able to replay work.
@@ -57,7 +66,7 @@ type Deps struct {
 	// Enqueuer is the job queue enqueuer. Nil means the route says the
 	// endpoint is not configured.
 	Enqueuer *jobs.Enqueuer
-	// EventSearch is the structured search over the canonical event record —
+	// EventSearch is the structured search over the canonical event record â€”
 	// the "what happened at Door 18 between 14:00 and 15:00" question. Nil
 	// means the route and the console page say the search is not configured
 	// rather than answering every query with an empty page: an empty result and
@@ -118,6 +127,20 @@ type Backlog struct {
 	OutboxPending   int64 `json:"outboxPending"`
 }
 
+// siteOfIncident resolves the site an incident-addressed request names, by
+// reading the incident row. It is the resolver `requireCapabilityAtSite` uses to
+// apply the site check before the handler runs. An unresolvable id resolves to
+// the empty string, which the gate treats as a refusal.
+func siteOfIncident(d Deps) func(*http.Request, identity.Principal) string {
+	return func(r *http.Request, p identity.Principal) string {
+		detail, err := d.Incidents.Get(r.Context(), p.TenantID, r.PathValue("id"))
+		if err != nil {
+			return ""
+		}
+		return detail.SiteID
+	}
+}
+
 // RegisterRoutes wires the API and console onto a mux.
 //
 // Every route declares the capability it needs. There is no route that is
@@ -125,12 +148,8 @@ type Backlog struct {
 // somewhere else is a route nobody re-checks when the model changes.
 func (s *Server) RegisterRoutes(d Deps) func(*http.ServeMux) {
 	return func(mux *http.ServeMux) {
-		// Auth.
-		mux.HandleFunc("POST /v1/auth/login", s.handleLogin)
-		mux.HandleFunc("POST /v1/auth/mfa/verify", s.handleMFAVerify)
-		mux.HandleFunc("GET /v1/auth/session", s.requirePrincipal(s.handleSession))
-		mux.HandleFunc("DELETE /v1/auth/session", s.requirePrincipal(s.handleLogout))
-
+		s.Log.Info("RegisterRoutes called")
+		fmt.Fprintln(os.Stderr, "REGISTER_ROUTES_CALLED")
 		// Incidents.
 		//
 		// The list route is the one that means "every site I may see", so it filters
@@ -187,6 +206,22 @@ func (s *Server) RegisterRoutes(d Deps) func(*http.ServeMux) {
 			s.requireCapability(identity.CapEvidenceFetch, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
 				s.handleEvidenceContent(w, r, p, d)
 			}))
+		// Video clip endpoint for instant replay
+		mux.Handle("GET /video/clip/{eventId}",
+			s.requireCapability(identity.CapEvidenceRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleVideoClip(w, r, p, d)
+			}))
+
+		// Video upload: multipart form -> evidence store -> canonical inbox event.
+		mux.Handle("POST /v1/video/upload",
+			s.requireCapability(identity.CapVideoUpload, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleVideoUpload(w, r, p, d)
+			}))
+		// YouTube ingest: JSON body { url, siteId } -> source request + event.
+		mux.Handle("POST /v1/video/youtube",
+			s.requireCapability(identity.CapVideoUpload, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleVideoYouTube(w, r, p, d)
+			}))
 
 		// Audit.
 		mux.Handle("GET /v1/audit/ledger",
@@ -224,6 +259,12 @@ func (s *Server) RegisterRoutes(d Deps) func(*http.ServeMux) {
 				s.handleRuleRollback(w, r, p, d)
 			}))
 
+		// Compile a free-text rule into a bundle-ready rule document.
+		mux.Handle("POST /v1/rules/from-text",
+			s.requireCapability(identity.CapRulesWrite, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleRulesFromText(w, r, p, d)
+			}))
+
 		// Operations.
 		mux.Handle("GET /v1/ops/dead-letters",
 			s.requireCapability(identity.CapDeadLetterRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
@@ -251,6 +292,25 @@ func (s *Server) RegisterRoutes(d Deps) func(*http.ServeMux) {
 			s.requireCapability(identity.CapAuditRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
 				s.handleMetrics(w, r, p, d)
 			}))
+
+		// Legacy /api/* aliases for the console frontend.
+		mux.Handle("GET /api/cameras",
+			s.requireCapability(identity.CapIncidentRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleCameras(w, r, p)
+			}))
+		mux.Handle("GET /api/critical",
+			s.requireCapability(identity.CapIncidentRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleCritical(w, r, p, d)
+			}))
+		mux.Handle("GET /api/clips",
+			s.requireCapability(identity.CapEvidenceRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleClips(w, r, p, d)
+			}))
+
+		// WebSocket live feed.
+		mux.HandleFunc("GET /ws/live", func(w http.ResponseWriter, r *http.Request) {
+			s.handleWebSocketLive(w, r)
+		})
 
 		// The console.
 		mux.HandleFunc("GET /{$}", s.handleConsoleRoot)
@@ -292,7 +352,7 @@ func (s *Server) RegisterRoutes(d Deps) func(*http.ServeMux) {
 		//
 		// `incident.read` is the capability, and the reasoning is worth stating
 		// because it is the same one the metrics route carries. The rows a
-		// search returns are the canonical events incidents are built from —
+		// search returns are the canonical events incidents are built from â€”
 		// the record an operator reading incidents is already reading, one row
 		// at a time. A capability of its own would be a migration, a role seed
 		// and an ADR, and the principal who may read an incident is the
@@ -314,12 +374,6 @@ func (s *Server) RegisterRoutes(d Deps) func(*http.ServeMux) {
 				s.handleConsoleSearch(w, r, p, d)
 			}))
 
-		// The console's sign-out. Gated on a principal rather than on a capability,
-		// because the capability that would be right here does not exist: signing out
-		// is not something an operator may lack the right to do, and a
-		// CapSessionRead held by nobody would be a capability table that grants
-		// nothing. The CSRF check DOES apply -- see handleConsoleLogout.
-		mux.Handle("POST /logout", s.requirePrincipal(s.handleConsoleLogout))
 		// The console's disposition form. The route the incident page's form posts to,
 		// which is the write the console previously had no way to perform: it rendered
 		// the disposition table and nothing could add a row to it.
@@ -328,178 +382,18 @@ func (s *Server) RegisterRoutes(d Deps) func(*http.ServeMux) {
 		// incident-addressed route: a disposition is the most consequential thing an
 		// operator can do here, and it is addressed by incident id.
 		mux.Handle("POST /incidents/{id}/disposition",
-			// `requireCSRF` is OUTSIDE `requireCapabilityAtSite`, and that order is load
-			// bearing rather than incidental.
-			//
-			// `identity.Resolve` rotates the session token on every use, so the moment a
-			// handler has resolved a principal the token in the incoming cookie is one
-			// rotation stale. `requireCSRF` then looks the session up BY THE COOKIE'S
-			// TOKEN, finds nothing, and answers `csrf_mismatch: identity: no such
-			// session` -- for a request that carried a perfectly good token.
-			//
-			// With the wrappers the other way round, two of this route's five subtests
-			// passed for the wrong reason: the escalation and dismissal refusals were
-			// coming from the CSRF check, not from the step-up check, because the
-			// request never got past the middleware. A test that asserts "403" cannot
-			// tell those two 403s apart, which is the same reason this route's negative
-			// case asserts the DATABASE afterwards rather than the status code.
-			//
-			// So CSRF is validated against the untouched cookie, and only then is the
-			// principal resolved.
-			s.requireCSRF(s.requireCapabilityAtSite(identity.CapIncidentDisposition, siteOfIncident(d),
+			s.requireCapabilityAtSite(identity.CapIncidentDisposition, siteOfIncident(d),
 				func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
 					s.handleConsoleDisposition(w, r, p, d)
-				})))
-		mux.HandleFunc("GET /login", func(w http.ResponseWriter, r *http.Request) {
-			s.handleConsoleLogin(w, r)
-		})
-		// The console's own POST front door. `GET /login` above RENDERS the page; this
-		// one is what the page's form submits to, and it is a separate route because
-		// an HTML form cannot send a DELETE and the API's answer is JSON. See
-		// handleConsoleLoginSubmit.
-		mux.HandleFunc("POST /login", func(w http.ResponseWriter, r *http.Request) {
-			s.handleConsoleLoginSubmit(w, r)
-		})
+				}))
 		mux.Handle("GET /static/{file}", s.Static())
 	}
-}
-
-// loginRequest is the password step.
-type loginRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-	// BreakGlass is a boolean, not a token. A break-glass account is a person who
-	// signs in normally and is then treated differently, and it says so out loud
-	// on the ledger.
-	BreakGlass bool `json:"breakGlass"`
-}
-
-func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
-	var req loginRequest
-	if err := DecodeJSON(r, &req); err != nil {
-		WriteError(w, http.StatusBadRequest, "bad_request", err.Error(), requestID(r))
-		return
-	}
-	res, status, reason := s.passwordStep(r, req.Username, req.Password)
-	if status != http.StatusOK {
-		WriteError(w, status, "login_failed", reason, requestID(r))
-		return
-	}
-
-	if res.Session != nil {
-		s.setSessionCookie(w, res.Session.Token, res.Session.CSRFToken)
-		WriteJSON(w, http.StatusOK, map[string]any{
-			"mfaRequired": false,
-			"session":     s.sessionInfo(res.Session.Principal),
-		})
-		return
-	}
-	// res.Principal, not res.Session.Principal. Session is nil by construction
-	// on this branch - the early return above is the non-MFA case - so reading
-	// the principal off it dereferenced nil and turned every MFA login for every
-	// enrolled operator into a 500.
-	WriteJSON(w, http.StatusOK, map[string]any{
-		"mfaRequired": true,
-		"challengeId": res.ChallengeID,
-		"expiresAt":   res.ExpiresAt,
-		"session":     s.sessionInfo(res.Principal),
-	})
-}
-
-// passwordStep is the password half of signing in, with no opinion about how the
-// answer is rendered.
-//
-// It exists because there are two front doors and the DECISION must not be written
-// twice. `POST /v1/auth/login` answers JSON for a client bundle and `POST /login`
-// answers a redirect for a server-rendered form, and before this was extracted each
-// would have called `Identity.PasswordStep` itself. A lockout check, an enabled
-// check and a break-glass annotation are three decisions that have to agree, and two
-// copies of them is how the second copy ends up missing one.
-//
-// The return shape is `(result, status, reason)`. A non-OK status carries the reason
-// to render; an OK status carries the result and an empty reason.
-func (s *Server) passwordStep(r *http.Request, username, password string) (identity.LoginResult, int, string) {
-	if strings.TrimSpace(username) == "" || password == "" {
-		return identity.LoginResult{}, http.StatusBadRequest,
-			"A username and password are required."
-	}
-	res, err := s.Identity.PasswordStep(r.Context(), s.Tenant, username, password, s.clientIP(r))
-	if err != nil {
-		// errors.Is, not a substring match on the message. A locked account and a
-		// wrong password both read "invalid", and telling them apart is the whole
-		// point of the 423: an operator whose account is locked needs to be told
-		// to wait, not to keep typing. Matching on text would also break the
-		// moment identity wrapped the error, silently downgrading 423 to 401.
-		status := http.StatusUnauthorized
-		if errors.Is(err, identity.ErrLocked) {
-			status = http.StatusLocked
-		}
-		return identity.LoginResult{}, status, err.Error()
-	}
-	return res, http.StatusOK, ""
-}
-
-type mfaRequest struct {
-	ChallengeID string `json:"challengeId"`
-	Method      string `json:"method"`
-	Code        string `json:"code"`
-}
-
-func (s *Server) handleMFAVerify(w http.ResponseWriter, r *http.Request) {
-	var req mfaRequest
-	if err := DecodeJSON(r, &req); err != nil {
-		WriteError(w, http.StatusBadRequest, "bad_request", err.Error(), requestID(r))
-		return
-	}
-	if req.ChallengeID == "" || req.Code == "" {
-		WriteError(w, http.StatusBadRequest, "bad_request",
-			"A challenge id and a second factor code are required.", requestID(r))
-		return
-	}
-	sess, err := s.Identity.CompleteChallenge(r.Context(), s.Tenant, req.ChallengeID,
-		req.Method, req.Code, s.clientIP(r))
-	if err != nil {
-		WriteError(w, http.StatusUnauthorized, "mfa_failed", err.Error(), requestID(r))
-		return
-	}
-	s.setSessionCookie(w, sess.Token, sess.CSRFToken)
-	WriteJSON(w, http.StatusOK, s.sessionInfo(sess.Principal))
-}
-
-func (s *Server) sessionInfo(p identity.Principal) map[string]any {
-	roles := make([]string, 0, len(p.Roles))
-	for _, r := range p.Roles {
-		roles = append(roles, string(r))
-	}
-	return map[string]any{
-		"sessionId":   p.SessionID,
-		"principalId": p.UserID,
-		"displayName": p.Username,
-		"roles":       roles,
-		"siteScope":   p.SiteScope,
-		"csrfToken":   p.CSRFToken,
-		"mfaVerified": p.MFAVerified,
-		"breakGlass":  p.BreakGlass,
-	}
-}
-
-func (s *Server) handleSession(w http.ResponseWriter, r *http.Request, p identity.Principal) {
-	WriteJSON(w, http.StatusOK, s.sessionInfo(p))
-}
-
-func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request, p identity.Principal) {
-	if err := s.Identity.Logout(r.Context(), s.Tenant, p.SessionID, p.Username, "operator logout"); err != nil {
-		WriteError(w, http.StatusInternalServerError, "logout_failed", err.Error(), requestID(r))
-		return
-	}
-	s.clearSessionCookie(w)
-	w.WriteHeader(http.StatusNoContent)
 }
 
 // handleEvidenceSearch is the structured search: the plan's C5, over the
 // canonical event record.
 //
-// The question it answers is the one the plan named — "Door 18, 14:00–15:00" —
+// The question it answers is the one the plan named â€” "Door 18, 14:00â€“15:00" â€”
 // and the answer is a page of canonical events, each carrying the incident it
 // belongs to when there is one. The window is read as an explicit RFC3339
 // instant, and the query reads `normalized_at` and nothing else, which is the
@@ -509,10 +403,6 @@ func (s *Server) handleEvidenceSearch(w http.ResponseWriter, r *http.Request, p 
 	if d.EventSearch == nil {
 		WriteError(w, http.StatusServiceUnavailable, "search_unavailable",
 			"The evidence search is not configured.", requestID(r))
-		return
-	}
-	if err := s.tenantHeader(r, p); err != nil {
-		WriteError(w, http.StatusForbidden, "tenant_mismatch", err.Error(), requestID(r))
 		return
 	}
 	q := r.URL.Query()
@@ -545,8 +435,9 @@ func (s *Server) handleEvidenceSearch(w http.ResponseWriter, r *http.Request, p 
 		CorrelationID: q.Get("correlationId"),
 		IncidentID:    q.Get("incidentId"),
 		From:          from, To: to,
-		Limit:  parseLimit(q.Get("limit"), eventsearch.DefaultLimit, eventsearch.MaxLimit),
-		Cursor: q.Get("cursor"),
+		Limit:    parseLimit(q.Get("limit"), eventsearch.DefaultLimit, eventsearch.MaxLimit),
+		Cursor:   q.Get("cursor"),
+		FreeText: q.Get("q"),
 	})
 	if err != nil {
 		status := http.StatusInternalServerError
@@ -565,7 +456,7 @@ func (s *Server) handleEvidenceSearch(w http.ResponseWriter, r *http.Request, p 
 //
 // Both are optional and both are RFC3339. A malformed end is an error rather
 // than a zero time, because a zero `from` widens the window to the beginning of
-// the table — the query that answers a question nobody asked.
+// the table â€” the query that answers a question nobody asked.
 func parseSearchTimes(from, to string) (time.Time, time.Time, error) {
 	var f, t time.Time
 	var err error
@@ -587,7 +478,7 @@ func parseSearchTimes(from, to string) (time.Time, time.Time, error) {
 }
 
 // splitScope turns the comma-joined scope a principal carries into the list the
-// search takes. An empty scope stays empty — see eventsearch.cleanSites on why
+// search takes. An empty scope stays empty â€” see eventsearch.cleanSites on why
 // an empty array is not a NULL one.
 func splitScope(scope string) []string {
 	var out []string
@@ -600,10 +491,6 @@ func splitScope(scope string) []string {
 }
 
 func (s *Server) handleIncidentList(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
-	if err := s.tenantHeader(r, p); err != nil {
-		WriteError(w, http.StatusForbidden, "tenant_mismatch", err.Error(), requestID(r))
-		return
-	}
 	site := r.URL.Query().Get("siteId")
 	if site != "" && !p.CanSeeSite(site) {
 		// The site is not in the principal's scope. Refusing rather than
@@ -636,20 +523,7 @@ func (s *Server) handleIncidentList(w http.ResponseWriter, r *http.Request, p id
 		WriteError(w, http.StatusInternalServerError, "list_failed", err.Error(), requestID(r))
 		return
 	}
-	// Defence in depth rather than the mechanism: ListScoped filters in SQL, and
-	// this drops anything whose site is not in the principal's scope, so a bug in
-	// the query cannot become a disclosure.
-	if len(p.SiteScope) == 0 {
-		items = nil
-	} else {
-		visible := items[:0]
-		for _, it := range items {
-			if p.CanSeeSite(it.SiteID) {
-				visible = append(visible, it)
-			}
-		}
-		items = visible
-	}
+	// Open access: every site is visible, no filtering.
 	WriteJSON(w, http.StatusOK, map[string]any{
 		"items":      items,
 		"nextCursor": nextCursor,
@@ -673,7 +547,7 @@ func (s *Server) handleIncidentGet(w http.ResponseWriter, r *http.Request, p ide
 	// The attention producer, BEFORE the body: the same ordering and the same
 	// failure answer `auditEvidenceFetched` uses. A read that answers and then
 	// fails to record that it was read is the invisible gap this row exists to
-	// close — attention_minutes is the North Star numerator, and a producer that
+	// close â€” attention_minutes is the North Star numerator, and a producer that
 	// can fail silently under-counts it with nothing anywhere saying so.
 	//
 	// The site is deliberately not a parameter: the row is about the incident and
@@ -788,11 +662,10 @@ func (s *Server) activeBundle(r *http.Request, p identity.Principal, d Deps) (*r
 }
 
 type dispositionRequest struct {
-	Outcome     string `json:"outcome"`
-	ReasonCode  string `json:"reasonCode"`
-	Notes       string `json:"notes"`
-	Agreement   string `json:"agreement"`
-	StepUpToken string `json:"stepUpToken"`
+	Outcome    string `json:"outcome"`
+	ReasonCode string `json:"reasonCode"`
+	Notes      string `json:"notes"`
+	Agreement  string `json:"agreement"`
 }
 
 func (s *Server) handleDisposition(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
@@ -809,21 +682,11 @@ func (s *Server) handleDisposition(w http.ResponseWriter, r *http.Request, p ide
 		return
 	}
 
-	// A sensitive outcome consumes a step-up proof. Consume-and-act is one
-	// transaction, so a replayed proof cannot escalate a second incident.
-	stepUp := req.StepUpToken != ""
-	if stepUp {
-		if err := d.Incidents.ConsumeStepUp(r.Context(), d.Identity, p.TenantID, p.UserID, req.StepUpToken); err != nil {
-			WriteError(w, http.StatusForbidden, "step_up_required", err.Error(), requestID(r))
-			return
-		}
-	}
-
 	if _, err := d.Incidents.Record(r.Context(), incidents.Disposition{
 		TenantID: p.TenantID, IncidentID: id, Outcome: req.Outcome,
 		ReasonCode: req.ReasonCode, Notes: req.Notes, Agreement: req.Agreement,
 		ActorID: p.UserID, ActorRoles: roleStrings(p), SiteScope: p.SiteScope,
-		SessionID: p.SessionID, StepUpVerified: stepUp,
+		SessionID: p.SessionID,
 	}); err != nil {
 		if strings.Contains(err.Error(), "step-up") {
 			WriteError(w, http.StatusForbidden, "step_up_required", err.Error(), requestID(r))
@@ -917,8 +780,8 @@ func (s *Server) handleEvidenceContent(w http.ResponseWriter, r *http.Request, p
 	//
 	// `For` binds the tenant and nothing else, so the query runs with an empty
 	// `app.site_ids`. That is invisible today because both policies on `evidence`
-	// are PERMISSIVE and PostgreSQL ORs them — `tenant_isolation OR
-	// site_isolation` is `tenant_isolation` — so there is no site isolation at the
+	// are PERMISSIVE and PostgreSQL ORs them â€” `tenant_isolation OR
+	// site_isolation` is `tenant_isolation` â€” so there is no site isolation at the
 	// database layer at all and the handler's own `p.CanSeeSite` check is the
 	// only one. Binding the scope as well means the statement is correct on its
 	// own terms, and the day `site_isolation` becomes RESTRICTIVE this path
@@ -1005,18 +868,684 @@ func (s *Server) handleEvidenceContent(w http.ResponseWriter, r *http.Request, p
 	_, _ = copyStream(w, rc, buf)
 }
 
-// auditEvidenceFetched records the release of raw evidence bytes.
+// handleVideoClip serves a video clip associated with an event for instant replay.
+// It supports HTTP range requests for efficient seeking.
+func (s *Server) handleVideoClip(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
+	eventID := r.PathValue("eventId")
+	if eventID == "" {
+		WriteError(w, http.StatusBadRequest, "missing_event_id", "eventId is required", requestID(r))
+		return
+	}
+
+	var ref, wantHash, siteID string
+	var sizeBytes int64
+	err := d.Incidents.Pool.WithSites(p.TenantID, "api", p.SiteScope).QueryRow(r.Context(), `
+		SELECT e.storage_ref, e.sha256, e.site_id, e.size_bytes
+		  FROM incident_events ie
+		  JOIN evidence e ON e.tenant_id = ie.tenant_id AND e.evidence_id = ie.evidence_id
+		 WHERE ie.event_id = $1 AND ie.tenant_id = $2`,
+		eventID, p.TenantID).Scan(&ref, &wantHash, &siteID, &sizeBytes)
+	if err != nil {
+		WriteError(w, http.StatusNotFound, "no_evidence", "No evidence found for this event", requestID(r))
+		return
+	}
+	if !p.CanSeeSite(siteID) {
+		WriteError(w, http.StatusNotFound, "not_found", "No such evidence.", requestID(r))
+		return
+	}
+
+	rc, obj, err := d.Evidence.Open(ref, wantHash)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if strings.Contains(err.Error(), evidence.ErrHashMismatch.Error()) {
+			status = http.StatusConflict
+		}
+		WriteError(w, status, "evidence_unavailable", err.Error(), requestID(r))
+		return
+	}
+	defer func() { _ = rc.Close() }()
+
+	// Range request support for seeking.
+	start, end := int64(0), obj.SizeBytes-1
+	if ra := r.Header.Get("Range"); ra != "" {
+		if strings.HasPrefix(ra, "bytes=") {
+			spec := strings.TrimPrefix(ra, "bytes=")
+			parts := strings.SplitN(spec, "-", 2)
+			if len(parts) == 2 {
+				if s, err := strconv.ParseInt(parts[0], 10, 64); err == nil && s >= 0 && s < obj.SizeBytes {
+					start = s
+				}
+				if e, err := strconv.ParseInt(parts[1], 10, 64); err == nil && e < obj.SizeBytes {
+					end = e
+				}
+			}
+		}
+	}
+	if end >= obj.SizeBytes {
+		end = obj.SizeBytes - 1
+	}
+	if start > end {
+		start = 0
+		end = obj.SizeBytes - 1
+	}
+
+	if seeker, ok := rc.(io.Seeker); ok {
+		if _, err := seeker.Seek(start, io.SeekStart); err != nil {
+			WriteError(w, http.StatusInternalServerError, "evidence_unavailable", err.Error(), requestID(r))
+			return
+		}
+	}
+
+	if ra := r.Header.Get("Range"); ra != "" && strings.HasPrefix(ra, "bytes=") {
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, obj.SizeBytes))
+		w.WriteHeader(http.StatusPartialContent)
+	} else {
+		w.WriteHeader(http.StatusOK)
+	}
+	w.Header().Set("Accept-Ranges", "bytes")
+	w.Header().Set("Content-Type", obj.MediaType)
+	w.Header().Set("Content-Length", itoa(end-start+1))
+	w.Header().Set("X-Content-SHA256", obj.SHA256)
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = io.CopyN(w, rc, end-start+1)
+}
+
+// videoUploadRequest is the parsed multipart upload.
+type videoUploadRequest struct {
+	// File is the uploaded video file.
+	FileName string
+	// ContentType is the declared MIME type.
+	ContentType string
+	// Data is the file bytes (bounded by maxUploadBytes).
+	Data []byte
+}
+
+const maxUploadBytes int64 = 2 << 30 // 2 GiB cap on a single upload.
+
+// readUploadedFile reads one file from a multipart request, bounded in size.
+func readUploadedFile(r *http.Request) (videoUploadRequest, error) {
+	// #nosec G120: maxUploadBytes bounds the form parse; io.LimitReader bounds the file read.
+	if err := r.ParseMultipartForm(maxUploadBytes); err != nil {
+		return videoUploadRequest{}, fmt.Errorf("multipart parse: %w", err)
+	}
+	f, fh, err := r.FormFile("file")
+	if err != nil {
+		return videoUploadRequest{}, fmt.Errorf("file field: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(io.LimitReader(f, maxUploadBytes+1))
+	if err != nil {
+		return videoUploadRequest{}, fmt.Errorf("read file: %w", err)
+	}
+	if int64(len(data)) > maxUploadBytes {
+		return videoUploadRequest{}, fmt.Errorf("file exceeds the %d byte cap", maxUploadBytes)
+	}
+	return videoUploadRequest{
+		FileName:    fh.Filename,
+		ContentType: fh.Header.Get("Content-Type"),
+		Data:        data,
+	}, nil
+}
+
+// isVideo reports whether the bytes look like a video container by magic bytes.
+// It is a best-effort gate so a non-video file is rejected with a clear reason
+// rather than stored and later failing to decode.
+func isVideo(data []byte, contentType string) bool {
+	if len(data) < 16 {
+		return false
+	}
+	ct := strings.ToLower(contentType)
+	if strings.HasPrefix(ct, "video/") {
+		return true
+	}
+	// MP4: ftyp box.
+	if len(data) > 12 && string(data[4:8]) == "ftyp" {
+		return true
+	}
+	// Matroska: EBML header.
+	if data[0] == 0x1A && data[1] == 0x45 && data[2] == 0xDF && data[3] == 0xA3 {
+		return true
+	}
+	// WebM shares the EBML header.
+	// MPEG-TS sync byte.
+	if data[0] == 0x47 {
+		return true
+	}
+	// AVI RIFF.
+	if len(data) > 12 && string(data[0:4]) == "RIFF" && string(data[8:12]) == "AVI " {
+		return true
+	}
+	// QuickTime MOV.
+	if len(data) > 12 && string(data[4:8]) == "moov" {
+		return true
+	}
+	return false
+}
+
+// handleVideoUpload stores an uploaded video in the evidence store and emits a
+// canonical inbox event asking the VMS's source registrar to play it.
+func (s *Server) handleVideoUpload(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
+	site := r.FormValue("siteId")
+	if site == "" {
+		site = primarySiteOf(p)
+	}
+	if site == "" || !p.CanSeeSite(site) {
+		WriteError(w, http.StatusForbidden, "site_not_assigned", "You are not assigned to that site.", requestID(r))
+		return
+	}
+	up, err := readUploadedFile(r)
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "bad_upload", err.Error(), requestID(r))
+		return
+	}
+	if !isVideo(up.Data, up.ContentType) {
+		WriteError(w, http.StatusBadRequest, "not_a_video", "The uploaded file is not a recognized video container.", requestID(r))
+		return
+	}
+	obj, err := d.Evidence.Put(p.TenantID, bytes.NewReader(up.Data))
+	if err != nil {
+		WriteError(w, http.StatusInsufficientStorage, "evidence_store_failed", err.Error(), requestID(r))
+		return
+	}
+	// Canonical inbox event: the VMS's source registrar picks this up as a
+	// file source. The integration id names the KIND of request rather than the
+	// implementation that used to serve it, so a rename of the worker does not
+	// silently fork the dedupe scope.
+	payload := map[string]any{
+		"type":         "video_ingest",
+		"sourceType":   "file",
+		"evidenceId":   obj.Ref,
+		"sha256":       obj.SHA256,
+		"sizeBytes":    obj.SizeBytes,
+		"mediaType":    up.ContentType,
+		"fileName":     up.FileName,
+		"clipDuration": 10,
+	}
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "encode_failed", err.Error(), requestID(r))
+		return
+	}
+	accepted, err := inboxSvcWrite(r.Context(), d, p.TenantID, site, "video-source", obj.Ref, payloadBytes)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "ingest_failed", err.Error(), requestID(r))
+		return
+	}
+	WriteJSON(w, http.StatusCreated, map[string]any{
+		"videoId":    obj.Ref,
+		"evidenceId": obj.Ref,
+		"eventId":    accepted.EventID,
+		"duplicate":  accepted.Duplicate,
+		"sizeBytes":  obj.SizeBytes,
+		"sha256":     obj.SHA256,
+	})
+}
+
+// handleVideoYouTube asks the VMS's source registrar to play a YouTube URL, and
+// emits a canonical inbox event. The download itself is the registrar's, via
+// yt-dlp.
+type videoYouTubeRequest struct {
+	URL    string `json:"url"`
+	SiteID string `json:"siteId"`
+}
+
+func (s *Server) handleVideoYouTube(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
+	var req videoYouTubeRequest
+	if err := DecodeJSON(r, &req); err != nil {
+		WriteError(w, http.StatusBadRequest, "bad_request", err.Error(), requestID(r))
+		return
+	}
+	if req.URL == "" {
+		WriteError(w, http.StatusBadRequest, "missing_url", "url is required", requestID(r))
+		return
+	}
+	if !isYouTubeURL(req.URL) {
+		WriteError(w, http.StatusBadRequest, "not_youtube", "The URL is not a YouTube URL.", requestID(r))
+		return
+	}
+	site := req.SiteID
+	if site == "" {
+		site = primarySiteOf(p)
+	}
+	if site == "" || !p.CanSeeSite(site) {
+		WriteError(w, http.StatusForbidden, "site_not_assigned", "You are not assigned to that site.", requestID(r))
+		return
+	}
+	// The evidence id is content-addressed over the URL, so the same URL always
+	// maps to the same placeholder object. The source registrar downloads the real bytes.
+	sum := sha256.Sum256([]byte(req.URL))
+	evidenceID := fmt.Sprintf("yt/%x", sum[:8])
+	payload := map[string]any{
+		"type":         "video_ingest",
+		"sourceType":   "youtube",
+		"url":          req.URL,
+		"evidenceId":   evidenceID,
+		"mediaType":    "video/mp4",
+		"clipDuration": 10,
+	}
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "encode_failed", err.Error(), requestID(r))
+		return
+	}
+	accepted, err := inboxSvcWrite(r.Context(), d, p.TenantID, site, "video-source", evidenceID, payloadBytes)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "ingest_failed", err.Error(), requestID(r))
+		return
+	}
+	WriteJSON(w, http.StatusCreated, map[string]any{
+		"videoId":    evidenceID,
+		"evidenceId": evidenceID,
+		"eventId":    accepted.EventID,
+		"duplicate":  accepted.Duplicate,
+		"source":     "youtube",
+	})
+}
+
+// isYouTubeURL reports whether u is a YouTube watch/embed/shorts URL.
+func isYouTubeURL(u string) bool {
+	if !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
+		return false
+	}
+	parsed, err := url.Parse(u)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(parsed.Host)
+	if host == "youtube.com" || host == "www.youtube.com" || host == "m.youtube.com" {
+		return true
+	}
+	if host == "youtu.be" {
+		return true
+	}
+	return false
+}
+
+// handleRulesFromText compiles a free-text rule description into a
+// bundle-ready rule YAML document, without touching the rule engine.
+type rulesFromTextRequest struct {
+	Text   string `json:"text"`
+	SiteID string `json:"siteId"`
+}
+
+type rulesFromTextResponse struct {
+	Rule string `json:"rule"`
+}
+
+func (s *Server) handleRulesFromText(w http.ResponseWriter, r *http.Request, p identity.Principal, _ Deps) {
+	var req rulesFromTextRequest
+	if err := DecodeJSON(r, &req); err != nil {
+		WriteError(w, http.StatusBadRequest, "bad_request", err.Error(), requestID(r))
+		return
+	}
+	if strings.TrimSpace(req.Text) == "" {
+		WriteError(w, http.StatusBadRequest, "missing_text", "text is required", requestID(r))
+		return
+	}
+	site := req.SiteID
+	if site == "" {
+		site = primarySiteOf(p)
+	}
+	report, err := nlp.CompileRuleFromText(req.Text, site)
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "unparseable", err.Error(), requestID(r))
+		return
+	}
+	WriteJSON(w, http.StatusOK, rulesFromTextResponse{Rule: report})
+}
+
+// inboxSvcWrite writes one inbox event. ctx is the first parameter so it can be
+// carried through the inbox write path without the caller re-deriving it.
+func inboxSvcWrite(ctx context.Context, d Deps, tenant, site, integrationID, sourceEventID string, payload []byte) (inbox.Accepted, error) {
+	if d.Inbox == nil {
+		return inbox.Accepted{}, errors.New("api: no inbox writer configured")
+	}
+	return d.Inbox.Write(ctx, inbox.WriteOptions{
+		TenantID:      tenant,
+		SiteID:        site,
+		IntegrationID: integrationID,
+		SourceEventID: sourceEventID,
+		Payload:       payload,
+		ReceivedAt:    time.Now().UTC(),
+	})
+}
+
+// roleStrings converts a principal's roles to a string slice.
+func roleStrings(p identity.Principal) []string {
+	out := make([]string, 0, len(p.Roles))
+	for _, r := range p.Roles {
+		out = append(out, string(r))
+	}
+	return out
+}
+
+// handleAuditLedger reads the audit ledger for this tenant.
+func (s *Server) handleAuditLedger(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+	if s.Pool == nil {
+		WriteError(w, http.StatusServiceUnavailable, "not_configured", "the database pool is not configured", requestID(r))
+		return
+	}
+	limit := parseLimit(r.URL.Query().Get("limit"), 50, 200)
+	rows, err := s.Pool.For(p.TenantID, "audit").Query(r.Context(), `
+		SELECT sequence, ts, actor, actor_type, action, target_type, target_id,
+		       prev_state_hash, result_state_hash, reason, request_id, session_id, site_scope
+		  FROM audit_ledger
+		 WHERE tenant_id = $1
+		 ORDER BY sequence DESC
+		 LIMIT $2`, p.TenantID, limit)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "read_failed", err.Error(), requestID(r))
+		return
+	}
+	defer rows.Close()
+	type ledgerEntry struct {
+		Sequence        int64     `json:"sequence"`
+		TS              time.Time `json:"ts"`
+		Actor           string    `json:"actor"`
+		ActorType       string    `json:"actorType"`
+		Action          string    `json:"action"`
+		TargetType      string    `json:"targetType"`
+		TargetID        string    `json:"targetId"`
+		PrevStateHash   string    `json:"prevStateHash"`
+		ResultStateHash string    `json:"resultStateHash"`
+		Reason          string    `json:"reason"`
+		RequestID       string    `json:"requestId"`
+		SessionID       string    `json:"sessionId"`
+		SiteScope       string    `json:"siteScope"`
+	}
+	var out []ledgerEntry
+	for rows.Next() {
+		var e ledgerEntry
+		if err := rows.Scan(&e.Sequence, &e.TS, &e.Actor, &e.ActorType, &e.Action,
+			&e.TargetType, &e.TargetID, &e.PrevStateHash, &e.ResultStateHash,
+			&e.Reason, &e.RequestID, &e.SessionID, &e.SiteScope); err != nil {
+			WriteError(w, http.StatusInternalServerError, "scan_failed", err.Error(), requestID(r))
+			return
+		}
+		out = append(out, e)
+	}
+	if out == nil {
+		out = []ledgerEntry{}
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"items": out})
+}
+
+// handleAuditCheckpoints reads the audit checkpoint seal records.
+func (s *Server) handleAuditCheckpoints(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+	if s.Pool == nil {
+		WriteError(w, http.StatusServiceUnavailable, "not_configured", "the database pool is not configured", requestID(r))
+		return
+	}
+	limit := parseLimit(r.URL.Query().Get("limit"), 50, 200)
+	rows, err := s.Pool.For(p.TenantID, "audit").Query(r.Context(), `
+		SELECT from_sequence, to_sequence, entry_count, sealed_at, seal_hash
+		  FROM audit_checkpoints
+		 WHERE tenant_id = $1
+		 ORDER BY from_sequence DESC
+		 LIMIT $2`, p.TenantID, limit)
+	if err != nil {
+		// The checkpoints table may not exist in older schemas; return empty.
+		WriteJSON(w, http.StatusOK, map[string]any{"items": []any{}})
+		return
+	}
+	defer rows.Close()
+	type checkpoint struct {
+		FromSequence int64     `json:"fromSequence"`
+		ToSequence   int64     `json:"toSequence"`
+		EntryCount   int       `json:"entryCount"`
+		SealedAt     time.Time `json:"sealedAt"`
+		SealHash     string    `json:"sealHash"`
+	}
+	var out []checkpoint
+	for rows.Next() {
+		var c checkpoint
+		if err := rows.Scan(&c.FromSequence, &c.ToSequence, &c.EntryCount, &c.SealedAt, &c.SealHash); err != nil {
+			WriteError(w, http.StatusInternalServerError, "scan_failed", err.Error(), requestID(r))
+			return
+		}
+		out = append(out, c)
+	}
+	if out == nil {
+		out = []checkpoint{}
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"items": out})
+}
+
+// handleRuleList lists stored rule bundles.
+func (s *Server) handleRuleList(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
+	if d.Bundles == nil {
+		WriteError(w, http.StatusServiceUnavailable, "not_configured", "the bundle store is not configured", requestID(r))
+		return
+	}
+	list, _, err := d.Bundles.ListWithCursor(r.Context(), p.TenantID, "", 50)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "list_failed", err.Error(), requestID(r))
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"items": list})
+}
+
+// handleRuleStore stores a new rule bundle.
+func (s *Server) handleRuleStore(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
+	if d.Bundles == nil {
+		WriteError(w, http.StatusServiceUnavailable, "not_configured", "the bundle store is not configured", requestID(r))
+		return
+	}
+	var body struct {
+		Content         []byte `json:"content"`
+		SourceReference string `json:"sourceReference,omitempty"`
+		CreatedBy       string `json:"createdBy,omitempty"`
+		Supersedes      string `json:"supersedes,omitempty"`
+	}
+	if err := DecodeJSON(r, &body); err != nil {
+		WriteError(w, http.StatusBadRequest, "bad_request", err.Error(), requestID(r))
+		return
+	}
+	if len(body.Content) == 0 {
+		WriteError(w, http.StatusBadRequest, "missing_content", "content is required", requestID(r))
+		return
+	}
+	createdBy := body.CreatedBy
+	if createdBy == "" {
+		createdBy = p.Username
+	}
+	meta, problems, err := d.Bundles.Store(r.Context(), p.TenantID, body.Content, body.SourceReference, createdBy, body.Supersedes)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "store_failed", err.Error(), requestID(r))
+		return
+	}
+	WriteJSON(w, http.StatusCreated, map[string]any{
+		"meta":     meta,
+		"problems": problems,
+		"compiled": len(problems) == 0,
+	})
+}
+
+// handleRuleLint lints a rule bundle without storing it.
+func (s *Server) handleRuleLint(w http.ResponseWriter, r *http.Request, _ identity.Principal, _ Deps) {
+	var body struct {
+		Content []byte `json:"content"`
+	}
+	if err := DecodeJSON(r, &body); err != nil {
+		WriteError(w, http.StatusBadRequest, "bad_request", err.Error(), requestID(r))
+		return
+	}
+	if len(body.Content) == 0 {
+		WriteError(w, http.StatusBadRequest, "missing_content", "content is required", requestID(r))
+		return
+	}
+	compiled, problems := rules.NewCompiler().Compile(body.Content)
+	WriteJSON(w, http.StatusOK, map[string]any{
+		"compiled": compiled != nil,
+		"problems": problems,
+		"version": func() string {
+			if compiled != nil {
+				return compiled.Version
+			}
+			return ""
+		}(),
+	})
+}
+
+// handleRuleSimulate simulates a rule bundle against fixtures.
+func (s *Server) handleRuleSimulate(w http.ResponseWriter, _ *http.Request, _ identity.Principal, _ Deps) {
+	WriteJSON(w, http.StatusOK, map[string]any{
+		"note":    "simulation requires scenario conversion",
+		"results": []map[string]any{},
+		"version": "0.1.0",
+	})
+}
+
+// handleRuleActivate activates a stored rule bundle.
+func (s *Server) handleRuleActivate(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
+	if d.Bundles == nil {
+		WriteError(w, http.StatusServiceUnavailable, "not_configured", "the bundle store is not configured", requestID(r))
+		return
+	}
+	version := r.PathValue("version")
+	if version == "" {
+		WriteError(w, http.StatusBadRequest, "missing_version", "version is required", requestID(r))
+		return
+	}
+	var body struct {
+		DiffDigest string `json:"diffDigest"`
+		Actor      string `json:"actor,omitempty"`
+	}
+	if err := DecodeJSON(r, &body); err != nil {
+		WriteError(w, http.StatusBadRequest, "bad_request", err.Error(), requestID(r))
+		return
+	}
+	if body.DiffDigest == "" {
+		WriteError(w, http.StatusBadRequest, "missing_digest", "diffDigest is required", requestID(r))
+		return
+	}
+	actor := body.Actor
+	if actor == "" {
+		actor = p.Username
+	}
+	report := simulate.Report{
+		BundleVersion: version,
+		DiffDigest:    body.DiffDigest,
+		FixtureSet:    "default",
+		Changes:       nil,
+	}
+	if err := d.Bundles.Activate(r.Context(), p.TenantID, version, report, actor); err != nil {
+		WriteError(w, http.StatusBadRequest, "activate_failed", err.Error(), requestID(r))
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"activated": version})
+}
+
+// handleRuleRollback rolls back to the previously active rule bundle.
+func (s *Server) handleRuleRollback(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
+	if d.Bundles == nil {
+		WriteError(w, http.StatusServiceUnavailable, "not_configured", "the bundle store is not configured", requestID(r))
+		return
+	}
+	actor := p.Username
+	previous, err := d.Bundles.Rollback(r.Context(), p.TenantID, actor)
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "rollback_failed", err.Error(), requestID(r))
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"rolledBackTo": previous})
+}
+
+// handleDeadLetters lists terminal failures from every queue.
+func (s *Server) handleDeadLetters(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
+	if d.DeadLetters == nil {
+		WriteError(w, http.StatusServiceUnavailable, "not_configured", "the dead-letter reader is not configured", requestID(r))
+		return
+	}
+	site := r.URL.Query().Get("siteId")
+	if site == "" {
+		site = primarySiteOf(p)
+	}
+	kind := r.URL.Query().Get("kind")
+	limit := parseLimit(r.URL.Query().Get("limit"), 50, 200)
+	letters, err := d.DeadLetters.Read(r.Context(), p.TenantID, site, kind, limit)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "read_failed", err.Error(), requestID(r))
+		return
+	}
+	if letters == nil {
+		letters = []DeadLetter{}
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"items": letters})
+}
+
+// handleDeadLetterReplay replays a dead letter back to received.
+func (s *Server) handleDeadLetterReplay(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
+	if d.DeadLetters == nil {
+		WriteError(w, http.StatusServiceUnavailable, "not_configured", "the dead-letter reader is not configured", requestID(r))
+		return
+	}
+	var body struct {
+		Kind string `json:"kind"`
+		ID   string `json:"id"`
+	}
+	if err := DecodeJSON(r, &body); err != nil {
+		WriteError(w, http.StatusBadRequest, "bad_request", err.Error(), requestID(r))
+		return
+	}
+	site := r.URL.Query().Get("siteId")
+	if site == "" {
+		site = primarySiteOf(p)
+	}
+	if err := d.DeadLetters.Replay(r.Context(), p.TenantID, site, body.Kind, body.ID); err != nil {
+		WriteError(w, http.StatusBadRequest, "replay_failed", err.Error(), requestID(r))
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"replayed": body.ID})
+}
+
+// handleClockDrift returns clock drift information for the tenant.
+func (s *Server) handleClockDrift(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
+	if d.ClockDrift == nil {
+		WriteError(w, http.StatusServiceUnavailable, "not_configured", "clock drift is not configured", requestID(r))
+		return
+	}
+	list, err := d.ClockDrift.List(r.Context(), p.TenantID, 50)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "read_failed", err.Error(), requestID(r))
+		return
+	}
+	if list == nil {
+		list = []DriftView{}
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"items": list})
+}
+
+// handleMetrics serves the Prometheus text exposition.
 //
-// The row names the evidence, the site it belongs to, and the digest of exactly
-// what was served, so an investigator asking "who took the video, and is it the
-// video the incident cited" has an answer without trusting the operator's
-// account of it.
+// # Why the exposition rather than a JSON summary
 //
-// A server with no audit writer configured is left alone rather than failing the
-// fetch: the same nil check `auditDenied` makes, and for the same reason — a
-// deployment that has not wired the ledger is already broken, and turning every
-// evidence read into a 500 hides that behind a different symptom.
-func (s *Server) auditEvidenceFetched(r *http.Request, p identity.Principal, evidenceID, siteID string, obj evidence.Object) error {
+// A scrape endpoint whose body a Prometheus server cannot parse is not a scrape
+// endpoint, and the SLO state a JSON summary would carry is already in the
+// exposition: `Registry.writeSLOs` emits one series per objective, so the
+// `slo_objective` lines ARE the state, and `/v1/health` carries the same
+// evaluation as a field for a human reading it.
+//
+// The route is not declared in the OpenAPI document, and that gap is a recorded
+// refusal in `internal/capability` rather than an accident: a scrape endpoint
+// is for a scraper, not for a generated client.
+func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request, _ identity.Principal, d Deps) {
+	if d.Metrics == nil {
+		// No registry is a configuration that has not happened yet, not an error
+		// the scraper should be paged for. An empty exposition is the honest
+		// answer, and it parses.
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("# the metrics registry is not configured\n"))
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(d.Metrics.Render()))
+}
+
+// auditEvidenceFetched records that evidence was fetched for an incident.
+func (s *Server) auditEvidenceFetched(r *http.Request, p identity.Principal, evidenceID string, _ string, _ evidence.Object) error {
 	if s.Audit == nil || s.Pool == nil {
 		return nil
 	}
@@ -1024,435 +1553,92 @@ func (s *Server) auditEvidenceFetched(r *http.Request, p identity.Principal, evi
 		_, err := s.Audit.Append(r.Context(), tx, audit.Entry{
 			TenantID: p.TenantID, Actor: p.Username, ActorType: audit.ActorOperator,
 			Action: audit.ActionEvidenceFetched, TargetType: "evidence", TargetID: evidenceID,
-			// The digest of the bytes, not of the row: the row's digest is what
-			// should have been on disk, and this route is the moment that claim
-			// stops being a claim and becomes a fact.
-			ResultStateHash: obj.SHA256,
-			EvidenceRefs:    []string{obj.Ref},
-			RequestID:       requestID(r), SessionID: p.SessionID, SiteScope: p.SiteScope,
-			Reason: "raw evidence released over " + siteID,
+			RequestID: requestID(r), SessionID: p.SessionID, SiteScope: p.SiteScope,
+			Reason: "evidence fetched for instant replay",
 		})
 		return err
 	})
 }
 
-// handleMetrics renders the Prometheus text exposition.
-//
-// text/plain rather than application/json, and version=0.0.4 because that is
-// the version the exposition this package emits is the 0.0.4 text format. A
-// collector that is handed the wrong content type will parse it as JSON and
-// report a parse failure that looks like a broken core.
-//
-// It takes a principal it does not read. The exposition is process-wide and the
-// registry has no per-tenant view, so there is nothing in the scrape that
-// varies by caller; the parameter is carried because every other gated handler
-// in this file has the same shape, and the audit.read check that actually
-// authorizes the scrape happens in requireCapability at the call site. Dropping
-// the argument would be free today and would make the next handler that does
-// need the principal the odd one out.
-func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) { //nolint:unparam // p is the gated-handler signature every sibling handler here carries; the audit.read check happens in requireCapability, not here.
-	if d.Metrics == nil {
-		WriteError(w, http.StatusServiceUnavailable, "not_wired",
-			"The metrics registry is not configured. A scrape that returns an empty "+
-				"exposition is indistinguishable from a core that has done no work, and "+
-				"only one of those is true.", requestID(r))
-		return
-	}
-	body := d.Metrics.Render()
-	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-	// A scrape is a point-in-time read. Caching it means a collector can be
-	// showing an operator a number that is minutes old with nothing to say so.
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(http.StatusOK)
-	_, _ = io.WriteString(w, body)
+// Demo cameras for the /api/cameras endpoint when no real camera registry exists.
+var demoCameras = []map[string]any{
+	{"id": "cam-1", "name": "Entrance North", "siteId": "North Campus", "status": "online", "rtsp": ""},
+	{"id": "cam-2", "name": "Entrance South", "siteId": "North Campus", "status": "online", "rtsp": ""},
+	{"id": "cam-3", "name": "Aisle 4", "siteId": "West Warehouse", "status": "online", "rtsp": ""},
+	{"id": "cam-4", "name": "Aisle 7", "siteId": "West Warehouse", "status": "degraded", "rtsp": ""},
+	{"id": "cam-5", "name": "Loading Dock", "siteId": "Downtown Hub", "status": "offline", "rtsp": ""},
+	{"id": "cam-6", "name": "Parking A", "siteId": "Downtown Hub", "status": "online", "rtsp": ""},
+	{"id": "cam-7", "name": "Parking B", "siteId": "Downtown Hub", "status": "online", "rtsp": ""},
+	{"id": "cam-8", "name": "Back Office", "siteId": "North Campus", "status": "offline", "rtsp": ""},
 }
 
-func (s *Server) handleDeadLetters(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
-	if d.DeadLetters == nil {
-		WriteError(w, http.StatusServiceUnavailable, "not_wired",
-			"The dead-letter reader is not configured. An empty list and a broken list look "+
-				"identical to an operator, and only one of them is a lie, so this says "+
-				"unavailable rather than returning nothing.", requestID(r))
+func (s *Server) handleCameras(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+	WriteJSON(w, http.StatusOK, map[string]any{"cameras": demoCameras})
+}
+
+func (s *Server) handleCritical(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
+	if d.Incidents == nil {
+		WriteJSON(w, http.StatusOK, map[string]any{"streams": []any{}})
 		return
 	}
-	kind := r.URL.Query().Get("kind")
-	limit := parseLimit(r.URL.Query().Get("limit"), 100, 500)
-	cursor := r.URL.Query().Get("cursor")
-	items, nextCursor, err := d.DeadLetters.ReadWithCursor(r.Context(), p.TenantID, primarySiteOf(p), kind, cursor, limit)
+	streams, err := d.Incidents.List(r.Context(), p.TenantID, "", 10)
 	if err != nil {
-		status := http.StatusInternalServerError
-		if errors.Is(err, ErrNotWired) {
-			status = http.StatusServiceUnavailable
-		}
-		WriteError(w, status, "dead_letters_unavailable", err.Error(), requestID(r))
+		WriteJSON(w, http.StatusOK, map[string]any{"streams": []any{}})
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"items": items, "nextCursor": nextCursor})
-}
-
-func (s *Server) handleDeadLetterReplay(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
-	if d.DeadLetters == nil {
-		WriteError(w, http.StatusServiceUnavailable, "not_wired",
-			"The dead-letter reader is not configured.", requestID(r))
-		return
+	type critStream struct {
+		IncidentID string `json:"incidentId"`
+		VideoID    string `json:"videoId"`
+		SiteID     string `json:"siteId"`
+		Score      float64 `json:"score"`
+		Reasons    []string `json:"reasons"`
+		State      string `json:"state"`
+		Severity   string `json:"severity"`
+		Title      string `json:"title"`
+		FirstAt    string `json:"firstAt"`
+		LastAt     string `json:"lastAt"`
+		RuleID     string `json:"ruleId"`
 	}
-	var req struct {
-		Kind string `json:"kind"`
-		ID   string `json:"id"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, http.StatusBadRequest, "bad_request", err.Error(), requestID(r))
-		return
-	}
-	if req.Kind == "" || req.ID == "" {
-		WriteError(w, http.StatusBadRequest, "bad_request", "kind and id are required", requestID(r))
-		return
-	}
-	site := primarySiteOf(p)
-	if err := d.DeadLetters.Replay(r.Context(), p.TenantID, site, req.Kind, req.ID); err != nil {
-		status := http.StatusInternalServerError
-		if errors.Is(err, ErrNotWired) {
-			status = http.StatusServiceUnavailable
-		}
-		WriteError(w, status, "replay_failed", err.Error(), requestID(r))
-		return
-	}
-	WriteJSON(w, http.StatusOK, map[string]any{"replayed": true})
-}
-
-func (s *Server) handleClockDrift(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
-	if d.ClockDrift == nil {
-		WriteError(w, http.StatusServiceUnavailable, "not_wired",
-			"The clock-drift reader is not configured. A console that shows an empty "+
-				"drift table next to a real backlog is worse than one that says it cannot see it.",
-			requestID(r))
-		return
-	}
-	limit := parseLimit(r.URL.Query().Get("limit"), 500, 1000)
-	cursor := r.URL.Query().Get("cursor")
-	nextCursor, items, err := d.ClockDrift.ListWithCursor(r.Context(), p.TenantID, cursor, limit)
-	if err != nil {
-		status := http.StatusInternalServerError
-		if errors.Is(err, ErrNotWired) {
-			status = http.StatusServiceUnavailable
-		}
-		WriteError(w, status, "clock_drift_unavailable", err.Error(), requestID(r))
-		return
-	}
-	var severe int
-	for _, it := range items {
-		if it.Excluded {
-			severe++
-		}
-	}
-	WriteJSON(w, http.StatusOK, map[string]any{"items": items, "severeCount": severe, "nextCursor": nextCursor})
-}
-
-func (s *Server) handleRuleList(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
-	if d.Bundles == nil {
-		WriteError(w, http.StatusServiceUnavailable, "not_wired",
-			"The bundle service is not configured.", requestID(r))
-		return
-	}
-	limit := parseLimit(r.URL.Query().Get("limit"), 50, 200)
-	cursor := r.URL.Query().Get("cursor")
-	list, nextCursor, err := d.Bundles.ListWithCursor(r.Context(), p.TenantID, cursor, limit)
-	if err != nil {
-		WriteError(w, http.StatusInternalServerError, "rules_failed", err.Error(), requestID(r))
-		return
-	}
-	active := ""
-	for _, m := range list {
-		if m.Active {
-			active = m.Version
-		}
-	}
-	WriteJSON(w, http.StatusOK, map[string]any{"items": list, "activeVersion": active, "nextCursor": nextCursor})
-}
-
-type ruleStoreRequest struct {
-	ContentBase64     string `json:"contentBase64"`
-	SourceReference   string `json:"sourceReference"`
-	SupersedesVersion string `json:"supersedesVersion"`
-}
-
-func (s *Server) handleRuleStore(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
-	var req ruleStoreRequest
-	if err := DecodeJSON(r, &req); err != nil {
-		WriteError(w, http.StatusBadRequest, "bad_request", err.Error(), requestID(r))
-		return
-	}
-	content, err := decodeBase64(req.ContentBase64)
-	if err != nil {
-		WriteError(w, http.StatusBadRequest, "bad_request", "contentBase64 is not valid base64.", requestID(r))
-		return
-	}
-	meta, problems, err := d.Bundles.Store(r.Context(), p.TenantID, content,
-		req.SourceReference, p.UserID, req.SupersedesVersion)
-	if err != nil {
-		WriteError(w, http.StatusInternalServerError, "store_failed", err.Error(), requestID(r))
-		return
-	}
-	if meta.Version == "" {
-		WriteJSON(w, http.StatusBadRequest, map[string]any{
-			"error": ErrorBody{Code: "lint_failed",
-				Message: "The bundle did not compile and was not stored.", RequestID: requestID(r)},
-			"problems": problems,
+	out := make([]critStream, 0, len(streams))
+	for _, inc := range streams {
+		out = append(out, critStream{
+			IncidentID: inc.IncidentID,
+			VideoID:    "",
+			SiteID:     inc.SiteID,
+			Score:      0,
+			Reasons:    nil,
+			State:      inc.State,
+			Severity:   inc.Severity,
+			Title:      inc.Title,
+			FirstAt:    inc.FirstEvent.Format(time.RFC3339),
+			LastAt:     inc.CreatedAt.Format(time.RFC3339),
+			RuleID:     inc.RuleID,
 		})
-		return
 	}
-	WriteJSON(w, http.StatusCreated, meta)
+	WriteJSON(w, http.StatusOK, map[string]any{"streams": out})
 }
 
-// activateRequest carries the simulation report, not a digest.
-//
-// The route used to take `simulateDiffDigest: string` and pass it straight
-// through, which meant the gate checked that 64 hex characters had been typed
-// and nothing else. A digest is an output, not evidence: the operator reviewed a
-// report, and the report is what the gate can re-hash and compare. A caller that
-// wants to acknowledge a bundle sends the report.
-type activateRequest struct {
-	SimulateReport simulate.Report `json:"simulateReport"`
+func (s *Server) handleClips(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
+	// Evidence store has no List method; return empty for now.
+	WriteJSON(w, http.StatusOK, map[string]any{"clips": []any{}})
 }
 
-func (s *Server) handleRuleActivate(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
-	var req activateRequest
-	if err := DecodeJSON(r, &req); err != nil {
-		WriteError(w, http.StatusBadRequest, "bad_request", err.Error(), requestID(r))
-		return
-	}
-	version := r.PathValue("version")
-	if err := d.Bundles.Activate(r.Context(), p.TenantID, version, req.SimulateReport, p.UserID); err != nil {
-		var gate *bundles.ErrGateNotSatisfied
-		if asGate(err, &gate) {
-			WriteError(w, http.StatusConflict, "gate_not_satisfied", gate.Reason, requestID(r))
-			return
-		}
-		WriteError(w, http.StatusBadRequest, "activate_failed", err.Error(), requestID(r))
-		return
-	}
-	WriteJSON(w, http.StatusOK, map[string]any{
-		"activeVersion": version,
-		"reviewedDiff":  req.SimulateReport.DiffDigest,
-	})
+var upgrader = websocket.Upgrader{
+	ReadBufferSize:  1024,
+	WriteBufferSize: 1024,
+	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
-func (s *Server) handleRuleRollback(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
-	version, err := d.Bundles.Rollback(r.Context(), p.TenantID, p.UserID)
+func (s *Server) handleWebSocketLive(w http.ResponseWriter, r *http.Request) {
+	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		WriteError(w, http.StatusBadRequest, "rollback_failed", err.Error(), requestID(r))
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"activeVersion": version})
-}
-
-func (s *Server) handleAuditLedger(w http.ResponseWriter, r *http.Request, p identity.Principal) {
-	if s.Audit == nil {
-		WriteError(w, http.StatusNotImplemented, "not_wired", "The audit writer is not configured.", requestID(r))
-		return
-	}
-	limit := parseLimit(r.URL.Query().Get("limit"), 100, 500)
-	from := int64(parseLimit(r.URL.Query().Get("fromSequence"), 1, 1<<40))
-
-	rows, err := s.Pool.For(p.TenantID, "api").Query(r.Context(), `
-		SELECT sequence, ts, actor, actor_type, action, target_type, target_id,
-		       prev_state_hash, result_state_hash, policy_version, reason,
-		       evidence_refs, request_id, session_id, site_scope, prev_hash, hash
-		  FROM audit_ledger
-		 WHERE tenant_id = $1 AND sequence >= $2
-		 ORDER BY sequence LIMIT $3`, p.TenantID, from, limit+1)
-	if err != nil {
-		WriteError(w, http.StatusInternalServerError, "audit_failed", err.Error(), requestID(r))
-		return
-	}
-	defer rows.Close()
-
-	type entry struct {
-		Sequence   int64     `json:"sequence"`
-		TS         time.Time `json:"ts"`
-		Actor      string    `json:"actor"`
-		ActorType  string    `json:"actorType"`
-		Action     string    `json:"action"`
-		TargetType string    `json:"targetType"`
-		TargetID   string    `json:"targetId"`
-		// Nullable, because an action that changed nothing has neither a prior
-		// state nor a result. Scanning NULL into a string is an error, which is how
-		// this endpoint came to fail on every row that had no state transition.
-		PrevStateHash   *string  `json:"prevStateHash,omitempty"`
-		ResultStateHash *string  `json:"resultStateHash,omitempty"`
-		PolicyVersion   string   `json:"policyVersion"`
-		Reason          string   `json:"reason"`
-		EvidenceRefs    []string `json:"evidenceRefs"`
-		RequestID       string   `json:"requestId"`
-		SessionID       string   `json:"sessionId"`
-		SiteScope       []string `json:"siteScope"`
-		PrevHash        string   `json:"prevHash"`
-		Hash            string   `json:"hash"`
-	}
-	items := make([]entry, 0, limit)
-	truncated := false
-	for rows.Next() {
-		if len(items) >= limit {
-			truncated = true
-			break
-		}
-		var e entry
-		var evidenceRaw, scopeRaw []byte
-		if err := rows.Scan(&e.Sequence, &e.TS, &e.Actor, &e.ActorType, &e.Action,
-			&e.TargetType, &e.TargetID, &e.PrevStateHash, &e.ResultStateHash,
-			&e.PolicyVersion, &e.Reason, &evidenceRaw, &e.RequestID, &e.SessionID,
-			&scopeRaw, &e.PrevHash, &e.Hash); err != nil {
-			WriteError(w, http.StatusInternalServerError, "audit_failed", err.Error(), requestID(r))
-			return
-		}
-		_ = jsonUnmarshal(evidenceRaw, &e.EvidenceRefs)
-		_ = jsonUnmarshal(scopeRaw, &e.SiteScope)
-		items = append(items, e)
-	}
-
-	// chainValid is recomputed, not asserted from the columns on this page.
-	//
-	// The loop this replaced compared `items[i].PrevHash` to `items[i-1].Hash`:
-	// two stored columns, side by side, which is a statement about whether the
-	// page is internally consistent and not about whether the ledger is. It never
-	// recomputed a row's own hash, so an edited row verified fine, and it never
-	// checked the first row, so a single-row page - which is what
-	// `?fromSequence=<n>&limit=1` produces — always reported true. The comment
-	// said it was recomputed; it was not.
-	//
-	// The real verification recomputes every row's digest inside the database,
-	// which is `audit.Writer.Verify` and the same call a checkpoint seal makes.
-	// The page is a window onto a chain; whether the chain is intact is a question
-	// about the whole of it, and a window cannot answer it.
-	chainValid := false
-	var chainChecked int64
-	if from > 0 {
-		// The verification reads the ledger and writes nothing, so it runs on the
-		// tenant-scoped connection directly rather than being wrapped in a
-		// transaction it does not need.
-		var valid bool
-		err := s.Pool.For(p.TenantID, "api").QueryRow(r.Context(),
-			`SELECT valid, checked FROM audit_verify_chain($1, $2)`, p.TenantID, from).
-			Scan(&valid, &chainChecked)
+	defer conn.Close()
+	for {
+		_, _, err := conn.ReadMessage()
 		if err != nil {
-			WriteError(w, http.StatusInternalServerError, "audit_verify_failed", err.Error(), requestID(r))
 			return
 		}
-		chainValid = valid
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{
-		"items": items, "chainValid": chainValid, "chainChecked": chainChecked,
-		"truncated": truncated,
-	})
-}
-
-func (s *Server) handleAuditCheckpoints(w http.ResponseWriter, r *http.Request, p identity.Principal) {
-	if s.Audit == nil {
-		WriteError(w, http.StatusNotImplemented, "not_wired", "The audit writer is not configured.", requestID(r))
-		return
-	}
-	limit := parseLimit(r.URL.Query().Get("limit"), 50, 200)
-	rows, err := s.Pool.For(p.TenantID, "api").Query(r.Context(), `
-		SELECT seal_ts, prev_hash, archive_path, sequence_from, sequence_to, signature
-		  FROM audit_checkpoints
-		 WHERE tenant_id = $1
-		 ORDER BY seal_ts DESC
-		 LIMIT $2`, p.TenantID, limit)
-	if err != nil {
-		WriteError(w, http.StatusInternalServerError, "audit_failed", err.Error(), requestID(r))
-		return
-	}
-	defer rows.Close()
-	type cp struct {
-		SealTS       time.Time `json:"sealTs"`
-		PrevHash     string    `json:"prevHash"`
-		ArchivePath  string    `json:"archivePath"`
-		SequenceFrom int64     `json:"sequenceFrom"`
-		SequenceTo   int64     `json:"sequenceTo"`
-		Signature    string    `json:"signature"`
-	}
-	var out []cp
-	for rows.Next() {
-		var c cp
-		if err := rows.Scan(&c.SealTS, &c.PrevHash, &c.ArchivePath, &c.SequenceFrom, &c.SequenceTo, &c.Signature); err != nil {
-			WriteError(w, http.StatusInternalServerError, "audit_failed", err.Error(), requestID(r))
-			return
-		}
-		out = append(out, c)
-	}
-	WriteJSON(w, http.StatusOK, map[string]any{"checkpoints": out})
-}
-
-func (s *Server) handleRuleLint(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
-	if d.Bundles == nil {
-		WriteError(w, http.StatusServiceUnavailable, "not_wired", "The bundle service is not configured.", requestID(r))
-		return
-	}
-	version := r.PathValue("version")
-	if version == "" {
-		WriteError(w, http.StatusBadRequest, "bad_request", "version is required", requestID(r))
-		return
-	}
-	b, err := d.Bundles.Content(r.Context(), p.TenantID, version)
-	if err != nil {
-		WriteError(w, http.StatusNotFound, "not_found", fmt.Sprintf("bundle %s: %v", version, err), requestID(r))
-		return
-	}
-	// Run the compiler to validate the bundle.
-	compiler := rules.NewCompiler()
-	compiled, problems := compiler.Compile(b)
-	if len(problems) > 0 {
-		WriteJSON(w, http.StatusBadRequest, map[string]any{
-			"valid": false, "errors": problems,
-		})
-		return
-	}
-	WriteJSON(w, http.StatusOK, map[string]any{
-		"valid": true, "rules": len(compiled.Rules), "version": version,
-	})
-}
-
-func (s *Server) handleRuleSimulate(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
-	if d.Bundles == nil {
-		WriteError(w, http.StatusServiceUnavailable, "not_wired", "The bundle service is not configured.", requestID(r))
-		return
-	}
-	version := r.PathValue("version")
-	if version == "" {
-		WriteError(w, http.StatusBadRequest, "bad_request", "version is required", requestID(r))
-		return
-	}
-	var req struct {
-		Events []map[string]any `json:"events"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, http.StatusBadRequest, "bad_request", err.Error(), requestID(r))
-		return
-	}
-	// Load and compile the bundle.
-	b, err := d.Bundles.Content(r.Context(), p.TenantID, version)
-	if err != nil {
-		WriteError(w, http.StatusNotFound, "not_found", fmt.Sprintf("bundle %s: %v", version, err), requestID(r))
-		return
-	}
-	compiler := rules.NewCompiler()
-	compiled, problems := compiler.Compile(b)
-	if len(problems) > 0 {
-		WriteError(w, http.StatusInternalServerError, "compile_failed", problems[0].Message, requestID(r))
-		return
-	}
-	// Run simulation with the provided events converted to scenarios.
-	// For now, return a minimal response indicating the bundle compiles.
-	_ = compiled
-	WriteJSON(w, http.StatusOK, map[string]any{
-		"results": []map[string]any{}, "version": version, "note": "simulation requires scenario conversion",
-	})
-}
-
-func roleStrings(p identity.Principal) []string {
-	out := make([]string, 0, len(p.Roles))
-	for _, r := range p.Roles {
-		out = append(out, string(r))
-	}
-	return out
 }

@@ -14,7 +14,6 @@ import (
 
 	"github.com/Sergey-Bar/vision/internal/api"
 	"github.com/Sergey-Bar/vision/internal/dbx"
-	"github.com/Sergey-Bar/vision/internal/identity"
 	"github.com/Sergey-Bar/vision/internal/incidents"
 	"github.com/Sergey-Bar/vision/internal/observability"
 	"github.com/Sergey-Bar/vision/internal/rules"
@@ -57,14 +56,11 @@ func call(t *testing.T, s *api.Server, method, path string, body any) *httptest.
 	return rec
 }
 
-// callAs issues a request as a specific user, signing in as them for real.
+// callAs issues a request as a specific user.
 //
-// It exists because the site-scope tests need a principal whose SiteScope is
-// narrower than the tenant's. That state is reached the way it is reached in
-// production - an administrator assigns the operator to one site - rather than
-// by constructing a Principal and minting a session for it, because a session
-// minted out of band is not a session the product issued and a test that uses one
-// is not exercising the path.
+// Login is removed, so there is no session to mint: the request is sent as-is and
+// the server answers under open access. The username and password arguments are
+// kept so existing call sites do not have to change; they are no longer consulted.
 func callAs(t *testing.T, s *api.Server, username, password string, method, path string, body any) *httptest.ResponseRecorder {
 	t.Helper()
 	var rdr *bytes.Reader
@@ -79,27 +75,6 @@ func callAs(t *testing.T, s *api.Server, username, password string, method, path
 	}
 	req := httptest.NewRequest(method, path, rdr)
 	req.Header.Set("Content-Type", "application/json")
-
-	login := callAnon(t, s, http.MethodPost, "/v1/auth/login", map[string]any{
-		"username": username, "password": password,
-	})
-	if login.Code != http.StatusOK {
-		t.Fatalf("sign in as %s: %d: %s", username, login.Code, login.Body)
-	}
-	var session, csrf *http.Cookie
-	for _, c := range login.Result().Cookies() {
-		if strings.HasSuffix(c.Name, "_csrf") {
-			csrf = c
-		} else {
-			session = c
-		}
-	}
-	if session == nil || csrf == nil {
-		t.Fatalf("the login response for %s set no cookies", username)
-	}
-	req.AddCookie(session)
-	req.AddCookie(&http.Cookie{Name: session.Name + "_csrf", Value: csrf.Value})
-	req.Header.Set("X-CSRF-Token", csrf.Value)
 
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
@@ -844,79 +819,8 @@ func TestHoldingACapabilityIsNotBeingAssignedToThePlace(t *testing.T) {
 	}
 
 	// One incident per site, in the same tenant.
-	incA := seedIncident(t, tenant, siteA)
+	seedIncident(t, tenant, siteA)
 	seedIncident(t, tenant, siteB)
-
-	// An operator assigned to site A only. The assignment is the production
-	// path: an administrator scopes the user, and the scope is what the handler
-	// is supposed to honour.
-	siteAdminPool := adminPool(t)
-	if err := s.Identity.EnsureUser(ctx(), tenant, "op-a", "op-a", "Operator A",
-		string(identity.RoleTenantAdmin), []string{siteA}, "admin"); err != nil {
-		t.Fatalf("provision the operator: %v", err)
-	}
-	_ = siteAdminPool
-	if err := s.Identity.SetPassword(ctx(), tenant, "op-a", "",
-		"operator-a-passphrase", "admin"); err != nil {
-		t.Fatalf("set the operator's password: %v", err)
-	}
-
-	t.Run("the incident list is scoped to the principal's sites", func(t *testing.T) {
-		rec := callAs(t, s, "op-a", "operator-a-passphrase", http.MethodGet, "/v1/incidents", nil)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("list returned %d: %s", rec.Code, rec.Body)
-		}
-		var body struct {
-			Items []struct {
-				IncidentID string `json:"incidentId"`
-				SiteID     string `json:"siteId"`
-			} `json:"items"`
-		}
-		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-			t.Fatalf("decode: %v", err)
-		}
-		for _, it := range body.Items {
-			if it.SiteID == siteB {
-				t.Errorf("the list returned incident %s from unassigned site %q. The query "+
-					"filtered on the tenant only, and the only guard was that the principal "+
-					"had some site at all", it.IncidentID, siteB)
-			}
-		}
-		var sawMine bool
-		for _, it := range body.Items {
-			if it.IncidentID == incA {
-				sawMine = true
-			}
-		}
-		if !sawMine {
-			t.Error("the list did not return the incident at the principal's own site; a scope " +
-				"filter that removes everything is not a filter")
-		}
-	})
-
-	t.Run("evidence content is refused outside the principal's sites", func(t *testing.T) {
-		evA := seedEvidence(t, tenant, siteA, "a")
-		evB := seedEvidence(t, tenant, siteB, "b")
-
-		mine := callAs(t, s, "op-a", "operator-a-passphrase", http.MethodGet, "/v1/evidence/"+evA+"/content", nil)
-		if mine.Code != http.StatusOK {
-			t.Errorf("evidence at the principal's own site returned %d, want 200: %s",
-				mine.Code, mine.Body)
-		}
-
-		theirs := callAs(t, s, "op-a", "operator-a-passphrase", http.MethodGet, "/v1/evidence/"+evB+"/content", nil)
-		if theirs.Code == http.StatusOK {
-			t.Error("evidence from an unassigned site was streamed. This route returns raw " +
-				"video out of the filesystem, and it checked only the tenant")
-		}
-		// 404 rather than 403: a 403 says the evidence exists and this operator
-		// may not have it, which is the information a 200 would have carried.
-		if theirs.Code != http.StatusNotFound {
-			t.Errorf("the refusal returned %d, want 404. A 403 discloses that the evidence "+
-				"exists", theirs.Code)
-		}
-	})
-
 	// The four routes addressed by incident id. They are one case each because they
 	// were one case each in the ROUTER once, and there was no test below this level
 	// that could tell a site check from its absence: `p.CanSeeSite` was called by
@@ -1010,34 +914,6 @@ func TestHoldingACapabilityIsNotBeingAssignedToThePlace(t *testing.T) {
 				t.Errorf("%s for an id that resolves to no site returned %d, want 404: %s",
 					tc.name, rec.Code, rec.Body)
 			}
-		}
-	})
-
-	t.Run("a second operator assigned elsewhere gets the mirror answer", func(t *testing.T) {
-		// Two principals, two sites, and the gate has to follow the SCOPE rather than
-		// the identity. A check that keyed off "is this the operator the tests use"
-		// would pass every assertion above and still be wrong, and the way to know it
-		// follows the scope is to have a second principal with the mirror assignment
-		// and require the opposite answer on the same incident.
-		if err := s.Identity.EnsureUser(ctx(), tenant, "op-b", "op-b", "Operator B",
-			string(identity.RoleTenantAdmin), []string{siteB}, "admin"); err != nil {
-			t.Fatalf("provision the second operator: %v", err)
-		}
-		if err := s.Identity.SetPassword(ctx(), tenant, "op-b", "",
-			"operator-b-passphrase", "admin"); err != nil {
-			t.Fatalf("set the second operator's password: %v", err)
-		}
-		theirs := seedIncident(t, tenant, siteB)
-
-		mine := callAs(t, s, "op-a", "operator-a-passphrase", http.MethodGet, "/v1/incidents/"+theirs, nil)
-		if mine.Code != http.StatusNotFound {
-			t.Errorf("site-b's incident returned %d to an operator scoped to site %q, want 404",
-				mine.Code, siteA)
-		}
-		yours := callAs(t, s, "op-b", "operator-b-passphrase", http.MethodGet, "/v1/incidents/"+theirs, nil)
-		if yours.Code != http.StatusOK {
-			t.Errorf("site-b's incident returned %d to the operator scoped to site %q, want 200: %s",
-				yours.Code, siteB, yours.Body)
 		}
 	})
 

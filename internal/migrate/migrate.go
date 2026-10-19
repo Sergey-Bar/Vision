@@ -109,37 +109,32 @@ func (r *Runner) EnsurePartitions(ctx context.Context, yearsAhead int) (int, err
 
 	// Find the latest partition boundary for each table
 	for _, t := range tables {
-		// Get the maximum partition boundary
+		// Find existing partitions by name pattern. `pg_get_partition_constraint_def`
+		// does not exist before Postgres 17, so we discover partitions from relname
+		// instead and derive their boundary from the suffix.
 		var maxBoundary time.Time
 		err := r.Pool.QueryRow(ctx, fmt.Sprintf(`
-			SELECT max(pg_get_partition_constraint_def(c.oid))
-			FROM pg_class c
-			JOIN pg_namespace n ON n.oid = c.relnamespace
-			WHERE n.nspname = 'public' AND c.relname = '%s'`, t.name)).Scan(&maxBoundary)
+			SELECT max(to_boundary)
+			FROM (
+				SELECT
+					substring(relname FROM '_(\d{4}_\d{2})$') as part,
+					CASE
+						WHEN substring(relname FROM '_(\d{4}_\d{2})$') ~ '^\d{4}_\d{2}$'
+						THEN (substring(relname FROM '_(\d{4}_\d{2})$') || '-01T00:00:00Z')::timestamptz
+						ELSE NULL
+					END as to_boundary
+				FROM pg_class c
+				JOIN pg_namespace n ON n.oid = c.relnamespace
+				WHERE n.nspname = 'public'
+				  AND c.relkind = 'r'
+				  AND c.relname LIKE '%s_%%'
+				  AND c.relname NOT LIKE '%%_default'
+			) s
+			WHERE to_boundary IS NOT NULL`, t.name)).Scan(&maxBoundary)
 		if err != nil || maxBoundary.IsZero() {
-			// No partitions exist yet or error - fall back to finding from existing partitions
-			err = r.Pool.QueryRow(ctx, fmt.Sprintf(`
-				SELECT max(to_boundary)
-				FROM (
-					SELECT
-						substring(relname FROM '_(\d{4}_\d{2})$') as part,
-						CASE
-							WHEN substring(relname FROM '_(\d{4}_\d{2})$') ~ '^\d{4}_\d{2}$'
-							THEN (substring(relname FROM '_(\d{4}_\d{2})$') || '-01T00:00:00Z')::timestamptz
-						END as to_boundary
-					FROM pg_class c
-					JOIN pg_namespace n ON n.oid = c.relnamespace
-					WHERE n.nspname = 'public'
-					  AND c.relkind = 'r'
-					  AND c.relname LIKE '%s_%%'
-					  AND c.relname NOT LIKE '%%_default'
-				) s
-				WHERE to_boundary IS NOT NULL`, t.name)).Scan(&maxBoundary)
-			if err != nil || maxBoundary.IsZero() {
-				// No partitions found, start from the beginning of the current year
-				maxBoundary = time.Now().UTC().Truncate(24 * time.Hour)
-				maxBoundary = time.Date(maxBoundary.Year(), 1, 1, 0, 0, 0, 0, time.UTC)
-			}
+			// No partitions found, start from the beginning of the current year
+			maxBoundary = time.Now().UTC().Truncate(24 * time.Hour)
+			maxBoundary = time.Date(maxBoundary.Year(), 1, 1, 0, 0, 0, 0, time.UTC)
 		}
 
 		// Create partitions for the next N years

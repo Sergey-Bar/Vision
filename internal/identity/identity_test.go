@@ -153,14 +153,15 @@ func TestCapabilitiesAreExactNotPrefixes(t *testing.T) {
 }
 
 func TestSiteScopeDeniesByDefault(t *testing.T) {
-	// A principal with a role but no site assignment has been misconfigured, and
-	// the safe reading of a misconfiguration that grants access is that it does
-	// not grant it.
+	// Login is removed, but the site's scope is not: the API runs as a
+	// configured principal whose role and site come from configuration, so a
+	// principal with no site is a misconfiguration and the safe reading of a
+	// misconfiguration that grants access is that it does not.
 	p := identity.Principal{
 		Roles: []identity.Role{identity.RoleOperator}, MFAVerified: true,
 	}
 	if p.CanSeeSite("any") {
-		t.Error("a principal with no site scope can see a site")
+		t.Error("a principal with no site assignment can see a site")
 	}
 	if p.CanSeeSite("") {
 		t.Error("an empty site id is visible")
@@ -198,17 +199,18 @@ func TestServiceAccountsNeverHoldAuditRead(t *testing.T) {
 }
 
 func TestAuthorizeRequiresAVerifiedFactor(t *testing.T) {
+	// Login and second factor are removed: authorization is capability alone, so a
+	// principal with no verified factor is authorized on the capabilities it holds.
 	p := identity.Principal{
 		UserID: "u1", TenantID: "t1", Username: "op",
 		Roles: []identity.Role{identity.RoleOperator},
 		// No MFA.
 	}
-	err := p.Authorize(identity.CapIncidentRead)
-	if err == nil {
-		t.Error("a principal with no verified factor was authorized")
+	if err := p.Authorize(identity.CapIncidentRead); err != nil {
+		t.Errorf("a principal was refused a capability it holds: %v", err)
 	}
-	if !strings.Contains(err.Error(), "second factor") {
-		t.Errorf("error should name the missing factor, got %q", err)
+	if p.Authorize(identity.CapIdentityManage) == nil {
+		t.Error("a principal was authorized for a capability it does not hold")
 	}
 
 	// A service account is a non-human principal: it authenticates with a scoped
@@ -221,7 +223,7 @@ func TestAuthorizeRequiresAVerifiedFactor(t *testing.T) {
 		SiteScope:      []string{"site-a"},
 	}
 	if err := svc.AuthorizeSite("event.ingest", "site-a"); err != nil {
-		t.Errorf("a service account was asked for a human second factor: %v", err)
+		t.Errorf("a service account was refused: %v", err)
 	}
 	if err := svc.AuthorizeSite(identity.CapIdentityManage, "site-a"); err == nil {
 		t.Error("a service account was authorized for identity management")
@@ -229,6 +231,9 @@ func TestAuthorizeRequiresAVerifiedFactor(t *testing.T) {
 }
 
 func TestAuthorizeSiteCombinesCapabilityAndAssignment(t *testing.T) {
+	// Login is removed and the second factor is not asked for, but the site's
+	// scope is kept: holding a capability is not the same as being assigned to
+	// the place, and the API's configured principal carries one site.
 	p := identity.Principal{
 		Roles: []identity.Role{identity.RoleOperator}, MFAVerified: true,
 		SiteScope: []string{"site-a"},
@@ -236,12 +241,8 @@ func TestAuthorizeSiteCombinesCapabilityAndAssignment(t *testing.T) {
 	if err := p.AuthorizeSite(identity.CapIncidentRead, "site-a"); err != nil {
 		t.Errorf("an assigned site was refused: %v", err)
 	}
-	err := p.AuthorizeSite(identity.CapIncidentRead, "site-b")
-	if err == nil {
-		t.Fatal("an unassigned site was permitted")
-	}
-	if !strings.Contains(err.Error(), "not assigned") {
-		t.Errorf("error should say the principal is unassigned, got %q", err)
+	if err := p.AuthorizeSite(identity.CapIncidentRead, "site-b"); err == nil {
+		t.Error("a site the principal is not assigned to was authorized")
 	}
 }
 

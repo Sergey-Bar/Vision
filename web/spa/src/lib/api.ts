@@ -39,3 +39,22 @@ export function get(path: string): Promise<Response> {
 export function post(path: string, body: unknown): Promise<Response> {
   return request(path, { method: 'POST', body: JSON.stringify(body) })
 }
+
+export function upload(path: string, formData: FormData): Promise<Response> {
+  return fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    body: formData,
+    // Do not set Content-Type: the browser sets it with the multipart boundary.
+  }).then(async (res) => {
+    if (!res.ok) {
+      let body = ''
+      try {
+        body = await res.text()
+      } catch {
+        // ignore
+      }
+      throw new ApiError(res.status, body || res.statusText)
+    }
+    return res
+  })
+}

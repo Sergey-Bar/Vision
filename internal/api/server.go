@@ -15,11 +15,9 @@ package api
 import (
 	"context"
 	"crypto/rand"
-	"crypto/subtle"
 	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -33,14 +31,11 @@ import (
 	"github.com/Sergey-Bar/vision/internal/dbx"
 	"github.com/Sergey-Bar/vision/internal/identity"
 	"github.com/Sergey-Bar/vision/internal/observability"
-	"github.com/jackc/pgx/v5"
 )
 
 // Server is the HTTP surface.
 type Server struct {
-	Identity *identity.Service
-	Audit    *audit.Writer
-	Log      *slog.Logger
+	Log *slog.Logger
 	// Tenant is the site this server serves. Single-site per install, so it is
 	// configuration rather than a routing decision.
 	Tenant string
@@ -65,9 +60,11 @@ type Server struct {
 	// convenience: a client address the caller can choose is a limiter key the
 	// caller can rotate.
 	TrustedProxies []*net.IPNet
-	// Pool is used for the audit writes a denial produces. A refusal nobody can
-	// see is a refusal nobody can investigate.
+	// Pool is the database pool handlers write audit rows through.
 	Pool *dbx.Pool
+	// Audit writes the append-only ledger. Nil means audit routes say so rather
+	// than failing every read.
+	Audit *audit.Writer
 	// HealthCheck is the readiness set. A check named "aiRuntime" is informational
 	// and never makes the core unready.
 	HealthCheck map[string]func(context.Context) error
@@ -158,7 +155,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/health/ready", s.ready)
 
 	var h http.Handler = mux
-	h = s.requireCSRF(h)
 	h = s.contentSecurityPolicy(h)
 	h = s.securityHeaders(h)
 	h = s.recoverPanics(h)
@@ -332,318 +328,42 @@ func (s *statusRecorder) WriteHeader(code int) {
 	s.ResponseWriter.WriteHeader(code)
 }
 
-// principal resolves the session, or writes 401 and returns false.
-func (s *Server) principal(w http.ResponseWriter, r *http.Request) (identity.Principal, bool) {
-	cookie, err := r.Cookie(s.cookieName())
-	if err != nil || cookie.Value == "" {
-		WriteError(w, http.StatusUnauthorized, "no_session",
-			"Sign in to continue.", requestID(r))
-		return identity.Principal{}, false
+// openPrincipal is the principal every request runs as when login is removed.
+// Open access: the configured tenant, no site restriction, no MFA gate, no
+// session. Every route is reachable by anyone who can reach the listener.
+func (s *Server) openPrincipal(_ *http.Request) identity.Principal {
+	return identity.Principal{
+		TenantID:    s.Tenant,
+		MFAVerified: true,
 	}
-	p, rotated, err := s.Identity.Resolve(r.Context(), s.Tenant, cookie.Value, s.clientIP(r))
-	if err != nil {
-		WriteError(w, http.StatusUnauthorized, "no_session",
-			"Sign in to continue.", requestID(r))
-		return identity.Principal{}, false
-	}
-	// Resolve rotates the token on every use, so the client always gets the
-	// current one back. A browser mid-refresh is not logged out by rotation.
-	s.setSessionCookie(w, rotated, p.CSRFToken)
-	return p, true
 }
 
-// requirePrincipal is the wrapper for authenticated handlers.
+// requirePrincipal is the wrapper for authenticated handlers. With login removed
+// it always succeeds and synthesizes an open-access principal.
 func (s *Server) requirePrincipal(h func(http.ResponseWriter, *http.Request, identity.Principal)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		p, ok := s.principal(w, r)
-		if !ok {
-			return
-		}
-		h(w, r, p)
+		h(w, r, s.openPrincipal(r))
 	}
 }
 
-// requireCapability is the wrapper for a capability-gated handler.
-func (s *Server) requireCapability(needed identity.Capability, h func(http.ResponseWriter, *http.Request, identity.Principal)) http.HandlerFunc {
+// requireCapability is the wrapper for a capability-gated handler. With login
+// removed it never denies.
+func (s *Server) requireCapability(_ identity.Capability, h func(http.ResponseWriter, *http.Request, identity.Principal)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		p, ok := s.principal(w, r)
-		if !ok {
-			return
-		}
-		if err := p.Authorize(needed); err != nil {
-			s.auditDenied(r, p, needed)
-			WriteError(w, http.StatusForbidden, "not_authorized", err.Error(), requestID(r))
-			return
-		}
-		h(w, r, p)
+		h(w, r, s.openPrincipal(r))
 	}
 }
 
-// requireCapabilityAtSite is requireCapability plus the site check, in one call.
-//
-// # Why the site check belongs HERE rather than in each handler
-//
-// `p.CanSeeSite` was called by hand, inside each handler that knew a site, after
-// that handler had fetched the thing the site belonged to. Two consequences, and
-// the second is the one that mattered:
-//
-//   - It was a SECOND thing to remember. A handler added tomorrow that took a site
-//     from the path or the query would be written with `requireCapability`, because
-//     that is what every sibling looks like, and it would hand another site's rows
-//     to a principal not assigned to them. Nothing in the router could notice: the
-//     capability check passed. The RLS canary connects as the PRODUCTION role,
-//     which is assigned per site and so does catch this -- but only for the one
-//     route the canary names, and only once somebody writes that row.
-//   - It ran AFTER the handler's own work, so a caller who is not assigned could
-//     make the server read a row and only then learn no. Migration 21's RESTRICTIVE
-//     `site_isolation` policy is the database side of this rule and is real; this
-//     is the application edge of the same rule, and it belongs beside the capability
-//     check rather than scattered through the handlers that remembered.
-//
-// # What `resolve` is, and why failing to resolve is a refusal
-//
-// `resolve` maps the request, for the principal it will run as, to the site the
-// addressed resource belongs to. It returns an empty string when the site cannot be
-// established: an unknown id, a failed lookup, a request that names no site.
-//
-// An unresolvable site is a REFUSAL, not a pass. The alternative is to fall through
-// to `Authorize(cap)` alone, which is exactly the behaviour this function exists to
-// remove -- a route whose site cannot be determined becomes a route with no site
-// check at all, and it fails silently.
-//
-// The answer it gives is a 404 carrying the SAME text as the existing per-handler
-// refusal, rather than a 403 naming the site. "That incident does not exist" and
-// "that incident is not yours" must not be distinguishable, or the 403 is a
-// confirmation that the row exists.
-//
-// `GET /v1/incidents` is the one route that legitimately means "every site I may
-// see", so it stays on `requireCapability` and filters per row. That is the correct
-// answer for a scope-wide read, not an exemption from this one.
+// requireCapabilityAtSite is requireCapability plus the site check. With login
+// removed it never denies.
 func (s *Server) requireCapabilityAtSite(
-	needed identity.Capability,
-	resolve func(*http.Request, identity.Principal) string,
+	_ identity.Capability,
+	_ func(*http.Request, identity.Principal) string,
 	h func(http.ResponseWriter, *http.Request, identity.Principal),
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		p, ok := s.principal(w, r)
-		if !ok {
-			return
-		}
-		if err := s.authorizeAtSite(p, needed, resolve(r, p)); err != nil {
-			s.auditDenied(r, p, needed)
-			WriteError(w, http.StatusNotFound, "not_found", err.Error(), requestID(r))
-			return
-		}
-		h(w, r, p)
+		h(w, r, s.openPrincipal(r))
 	}
-}
-
-// errNotYours is the answer for both "no such row" and "not your site", and it is
-// one constant rather than two strings written out twice, because the two must stay
-// identical: a caller who can tell them apart has an oracle for which incident ids
-// exist at another site.
-var errNotYours = errors.New("no such incident, or you are not assigned to its site")
-
-// authorizeAtSite is the check itself, so a handler that already knows its site can
-// ask the same question the router asks.
-//
-// It is here rather than inline in the wrapper because the two must never be able to
-// disagree. A handler that re-implemented the check could return a different answer
-// for the same request, and the one that is weaker would be the one that ships.
-func (s *Server) authorizeAtSite(p identity.Principal, needed identity.Capability, site string) error {
-	if strings.TrimSpace(site) == "" {
-		return errNotYours
-	}
-	if err := p.AuthorizeSite(needed, site); err != nil {
-		return errNotYours
-	}
-	return nil
-}
-
-// siteOfIncident is `resolve` for every route addressed by incident id.
-//
-// It is the one lookup all of them were doing anyway, hoisted into the router so the
-// authorisation decision happens before the handler rather than inside it. The
-// handler still re-reads the incident; that read is now redundant, and removing it
-// is a follow-up rather than something to do in the same commit as the gate that
-// makes it safe to remove.
-func siteOfIncident(d Deps) func(*http.Request, identity.Principal) string {
-	return func(r *http.Request, p identity.Principal) string {
-		detail, err := d.Incidents.Get(r.Context(), p.TenantID, r.PathValue("id"))
-		if err != nil {
-			return ""
-		}
-		return detail.SiteID
-	}
-}
-
-// csrfExempt lists the routes a CSRF token cannot protect.
-//
-// Login and its second step are exempt because a caller has no session yet, and
-// therefore no token to present - requiring one would make authentication
-// impossible. A forged login request can only log the attacker in as themselves,
-// which costs them nothing.
-//
-// What protects these two routes is the per-account exponential lockout on the
-// password step and the per-challenge attempt counter on the second factor, both
-// in internal/identity. Per-source rate limiting is a separate control, keyed on
-// the client address, and is documented separately: this comment used to claim
-// the routes were "rate limited" when no source-keyed limiter existed anywhere in
-// the tree, and the only thing bounding guessing was the six digits in a TOTP
-// code.
-//
-// Everything that acts on an existing session is covered, logout included --
-// `POST /logout` included, which is the console's form-encoded sign-out.
-var csrfExempt = map[string]bool{
-	"POST /v1/auth/login":      true,
-	"POST /v1/auth/mfa/verify": true,
-	// The console's sign-in page, for the same reason as `POST /v1/auth/login` and
-	// not as a concession to having a form: there is no session yet, so there is no
-	// token to present, and requiring one would make authentication impossible. What
-	// bounds guessing is the per-account exponential lockout in internal/identity,
-	// which both front doors go through -- which is why `passwordStep` is shared
-	// rather than written twice.
-	"POST /login": true,
-}
-
-// requireCSRF rejects a state-changing method without a matching token.
-//
-// The cookie alone is not authorization: a browser attaches it to any request to
-// this origin, including one another page caused. The token is read from a
-// readable cookie so a server-rendered form can carry it, and is checked against
-// the session row, so it authorises nothing on its own.
-func (s *Server) requireCSRF(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet, http.MethodHead, http.MethodOptions:
-			next.ServeHTTP(w, r)
-			return
-		}
-		if csrfExempt[r.Method+" "+r.URL.Path] {
-			next.ServeHTTP(w, r)
-			return
-		}
-		presented := r.Header.Get("X-CSRF-Token")
-		if presented == "" {
-			// A form post cannot set a header, so the token rides in a form field.
-			presented = r.FormValue("csrf_token")
-		}
-		cookie, err := r.Cookie(s.cookieName())
-		if err != nil {
-			WriteError(w, http.StatusUnauthorized, "no_session", "Sign in to continue.", requestID(r))
-			return
-		}
-		// The CSRF token lives in a separate, readable cookie so a form can
-		// carry it. It is bound to the session server-side, so its value alone
-		// authorises nothing.
-		csrfCookie, err := r.Cookie(s.cookieName() + "_csrf")
-		if err != nil {
-			WriteError(w, http.StatusForbidden, "csrf_missing",
-				"This request is missing its CSRF token. Reload the page and try again.", requestID(r))
-			return
-		}
-		if subtle.ConstantTimeCompare([]byte(presented), []byte(csrfCookie.Value)) != 1 {
-			WriteError(w, http.StatusForbidden, "csrf_mismatch",
-				"This request's CSRF token did not match. Reload the page and try again.", requestID(r))
-			return
-		}
-		// The CSRF cookie is deliberately not HttpOnly: the server-rendered console
-		// reads it to stamp the token into a form. It authorises nothing on its
-		// own, because the server checks it against the session row.
-		//
-		// The session is found by the token, not by an id derived from it. Resolve
-		// rotates the token on every request, so a session id derived from the
-		// token that just arrived is always one rotation stale - and a check
-		// against a stale session refuses every correctly-tokened request, which
-		// looks exactly like a CSRF attack.
-		if err := s.Identity.CheckCSRFByToken(r.Context(), s.Tenant, cookie.Value, presented); err != nil {
-			WriteError(w, http.StatusForbidden, "csrf_mismatch", err.Error(), requestID(r))
-			return
-		}
-		_ = csrfCookie
-		next.ServeHTTP(w, r)
-	})
-}
-
-// tenantHeader is the X-Tenant-Id check.
-//
-// The header exists for a service that fronts several sites. It is honoured
-// only when it matches the session tenant: a header that selected a tenant would
-// make the whole authorization model decorative.
-func (s *Server) tenantHeader(r *http.Request, p identity.Principal) error {
-	header := strings.TrimSpace(r.Header.Get("X-Tenant-Id"))
-	if header == "" {
-		return nil
-	}
-	if header != p.TenantID {
-		return fmt.Errorf("X-Tenant-Id %q does not match the session tenant", header)
-	}
-	return nil
-}
-
-func (s *Server) auditDenied(r *http.Request, p identity.Principal, needed identity.Capability) {
-	if s.Audit == nil || s.Pool == nil {
-		return
-	}
-	_ = s.Pool.InSystemTenant(r.Context(), func(tx pgx.Tx) error {
-		_, err := s.Audit.Append(r.Context(), tx, audit.Entry{
-			TenantID: p.TenantID, Actor: p.Username, ActorType: audit.ActorOperator,
-			Action: "api.access.denied", TargetType: "capability", TargetID: string(needed),
-			RequestID: requestID(r), SessionID: p.SessionID, SiteScope: p.SiteScope,
-			Reason: "capability not held",
-		})
-		return err
-	})
-}
-
-func (s *Server) cookieName() string {
-	return s.cookieNameOrDefault()
-}
-
-func (s *Server) cookieNameOrDefault() string {
-	if s.CookieName == "" {
-		return "sp_session"
-	}
-	return s.CookieName
-}
-
-// setSessionCookie writes the session cookie and the readable CSRF cookie, with
-// every attribute the threat model names.
-func (s *Server) setSessionCookie(w http.ResponseWriter, sessionToken, csrfToken string) {
-	if sessionToken == "" {
-		return
-	}
-	http.SetCookie(w, &http.Cookie{
-		Name:     s.cookieName(),
-		Value:    sessionToken,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   s.Secure,
-		// Strict, because every legitimate request is same-origin: the console and
-		// the API are served by this one listener.
-		SameSite: http.SameSiteStrictMode,
-		MaxAge:   int((12 * time.Hour).Seconds()),
-	})
-	if csrfToken == "" {
-		return
-	}
-	http.SetCookie(w, &http.Cookie{
-		Name: s.cookieName() + "_csrf", Value: csrfToken, Path: "/",
-		Secure: s.Secure, SameSite: http.SameSiteStrictMode,
-		MaxAge: int((12 * time.Hour).Seconds()),
-	})
-}
-
-// clearSessionCookie removes the session cookie.
-func (s *Server) clearSessionCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{
-		Name: s.cookieName(), Value: "", Path: "/",
-		HttpOnly: true, Secure: s.Secure, SameSite: http.SameSiteStrictMode, MaxAge: -1,
-	})
-	http.SetCookie(w, &http.Cookie{
-		Name: s.cookieName() + "_csrf", Value: "", Path: "/",
-		Secure: s.Secure, SameSite: http.SameSiteStrictMode, MaxAge: -1,
-	})
 }
 
 // ListenAndServe starts the listener.

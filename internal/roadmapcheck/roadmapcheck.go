@@ -115,6 +115,15 @@ func derive(root string) (Derived, error) {
 //   - A directory holding its own go.mod is a separate module. `poc/` is inside
 //     the root module, but `poc/active-monitoring/` is not — it has its own
 //     go.mod and is excluded from `./...` at the root, so it is excluded here.
+//   - A directory named `node_modules` is a package manager's working directory,
+//     not the repository's. It is gitignored, it differs per machine, and the go
+//     tool DOES pick up Go files inside it — `web/spa/node_modules/flatted/golang`
+//     ships a Go package, so on a machine that has run `npm install` the count
+//     came out one higher than on a machine that has not. A count that depends on
+//     what a developer installed is not a count of this repository, and a gate that
+//     fails on one machine and passes on another is a gate nobody can trust.
+//     The rule is stated here rather than left implicit because it is the one
+//     place in this repository where the go tool and the repository disagree.
 //   - The root itself holds the module's own go.mod and is never skipped.
 //
 // The walk is what makes the count derive: adding a package and forgetting the
@@ -130,6 +139,9 @@ func countPackages(root string) (int, error) {
 		}
 		if path != root {
 			if name := d.Name(); strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") {
+				return fs.SkipDir
+			}
+			if d.Name() == "node_modules" {
 				return fs.SkipDir
 			}
 			if _, statErr := os.Stat(filepath.Join(path, "go.mod")); statErr == nil {

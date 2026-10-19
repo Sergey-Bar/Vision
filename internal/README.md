@@ -7,7 +7,7 @@ incidents, and records everything in a hash-chained audit ledger.
 
 This file is for two readers: a new engineer on day one, and an AI agent with no
 prior context. It answers *where things are* and *what each package is for* so
-neither of you has to open 88 packages to find out.
+neither of you has to open 89 packages to find out.
 
 It is a map, not an architecture document. It does not restate build state —
 `docs/status.md` is the only source of truth for that — and it does not restate
@@ -101,6 +101,7 @@ Only five do. Everything else reaches the ledger through its caller.
 | `migrate` | The forward-only migration runner: ordered SQL, checksums, phase window, advisory lock | store | no | `migrate.Runner`, `Runner.Up`, `Runner.Verify`, `Runner.CurrentVersion` |
 | `milestone` | The XProtect protocol adapter. The *only* place vendor concepts may exist | ingest | no | `milestone.Adapter`, `milestone.Transport`, `RawRecord`, `Routes`, `ReplayTransport` |
 | `mp4` | The Annex-B H.264 parser and the pre-roll ring buffer. Currently unused by the core; a demo capture path | ingest (demo) | no | `mp4.Decode`, `mp4.PreRoll`, `mp4.NAL`, `mp4.Max` |
+| `nlp` | Free-text rule descriptions → deterministic rule-bundle rule documents. Keyword-based and demo-grade: it recognises an entity word, a time phrase and a zone word, and it emits YAML the existing `rules.Compiler` already compiles. It calls no model and infers nothing | evaluate | no | `nlp.CompileRuleFromText` |
 | `normalize` | Inbox row → canonical event, committing with the inbox transition in one transaction | normalize | no | `normalize.Normalizer`, `Input`, `Result`, `DeriveEventID`, `ToProto` |
 | `observability` | The metric registry (closed name set) and SLO evaluation | support | no | `observability.Registry`, `observability.Breaches`, `observability.SLO` |
 | `operatormetrics` | The DURABLE half of the metric surface: attention minutes, MTTI/MTTV, the two silent verification states, and the evidence-failure proxy, all as Postgres computations. The registry answers "what is happening now"; this answers "what happened in the window", which is the only shape a gate artefact may quote. Read-only | support | no | `operatormetrics.Queries`, `Queries.Attention`, `Queries.MTTI`, `Queries.MTTV`, `Queries.VerificationStates`, `Queries.EvidenceFetchFailures` |

@@ -1,0 +1,14 @@
+version: 1
+destinations:
+  # The escalation path for this site. on-call is what a rule
+  # means when it omits `target`.
+  - name: on-call
+    url: https://hooks.example.internal/security-platform
+    # Names an environment variable holding a bearer token. The value is read at
+    # delivery and is never stored in this file, a log, or a payload.
+    secret_ref: SP_DISPATCH_OPERATOR_TOKEN
+
+  # A different receiver for security-manager escalation.
+  - name: security-manager
+    url: https://security.example.com/platform-alerts
+    secret_ref: SP_DISPATCH_SUPERVISOR_TOKEN

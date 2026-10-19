@@ -3,14 +3,10 @@ package main
 import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
-	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha1" //nolint:gosec // RFC 6238 with SHA-1; identity's verifier accepts both
 	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/base32"
-	"encoding/binary"
 	"encoding/pem"
 	"fmt"
 	"math/big"
@@ -191,39 +187,3 @@ func formatFingerprint(sum []byte) string {
 	}
 	return strings.Join(parts, ":")
 }
-
-// totpCodeFor computes an RFC 6238 code from a base32 shared secret.
-//
-// It is an authenticator, not a bypass. `identity`'s verifier accepts a code
-// derived from the enrolled secret under either SHA-1 or SHA-256 — see
-// `internal/identity/mfa.go`, which hashes the raw secret bytes and checks both —
-// and this is the same arithmetic an authenticator app performs. Nothing here
-// reaches into the stored row or skips the second factor; the console still
-// requires the code, and this only means the demo does not need a phone.
-func totpCodeFor(base32Secret string, at time.Time) (string, error) {
-	raw, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(base32Secret)
-	if err != nil {
-		return "", fmt.Errorf("the enrolled TOTP secret is not base32: %w", err)
-	}
-	// Divided BEFORE the conversion, so a pre-epoch instant cannot wrap into a huge
-	// unsigned counter and produce a code that looks valid. `identity`'s verifier
-	// does the same, and the reason is in the `//nolint:gosec` there.
-	counter := at.Unix() / totpPeriodSeconds
-	var buf [8]byte
-	binary.BigEndian.PutUint64(buf[:], uint64(counter)) //nolint:gosec // G115: see above.
-	mac := hmac.New(sha1.New, raw)
-	mac.Write(buf[:])
-	sum := mac.Sum(nil)
-
-	// RFC 4226 dynamic truncation, then RFC 6238's modulo.
-	offset := sum[len(sum)-1] & 0x0f
-	value := (uint32(sum[offset]&0x7f) << 24) |
-		(uint32(sum[offset+1]) << 16) |
-		(uint32(sum[offset+2]) << 8) |
-		uint32(sum[offset+3])
-	code := value % 1000000
-	return fmt.Sprintf("%06d", code), nil
-}
-
-// totpPeriodSeconds is the time step. Thirty seconds, as RFC 6238 specifies.
-const totpPeriodSeconds = 30

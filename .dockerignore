@@ -46,7 +46,21 @@ Thumbs.db
 # Local secrets. A `.env` in the build context is a secret in the image, and this
 # repository has a `dist/` that a developer may have populated with real
 # credentials during the live Pentest. There are no committed `.pem`, `.key` or
-# `.env` files — checked, not assumed — so excluding them by glob costs the gate
+# `.env` files â€” checked, not assumed â€” so excluding them by glob costs the gate
 # nothing.
 .env
 .env.*
+
+# Large build-context junk that slows the image build without adding anything
+# the runtime or verify images need.
+web/spa/node_modules/
+web/spa/playwright-report/
+web/spa/test-results/
+web/static/spa/
+*.exe
+yolo11x.pt
+record.log
+record2.log
+inc_*.incident.json
+inc_*.observation.json
+.venv-poc/

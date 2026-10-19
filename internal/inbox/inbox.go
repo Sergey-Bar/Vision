@@ -647,7 +647,7 @@ func (w *Writer) DeadLetters(ctx context.Context, tenantID, siteID string, limit
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	rows, err := w.Pool.WithSites(tenantID, "inbox", []string{siteID}).Query(ctx, `
+	rows, err := w.Pool.WithSites(tenantID, "", []string{siteID}).Query(ctx, `
 		SELECT tenant_id, integration_id, source_event_id, site_id,
 		       attempt_count, COALESCE(dead_letter_reason, last_error, ''),
 		       first_seen_at, completed_at

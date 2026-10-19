@@ -61,7 +61,7 @@ x-integration-id: &integration-id "xprotect-north-gate"
 services:
   # --- the database -----------------------------------------------------------
   db:
-    image: postgres:16.10-bookworm
+    image: pgvector/pgvector:pg16
     # max_connections=300 because `internal/testutil` gives each package its own
     # database and the `verify` profile runs `go test -p 8`, which is eight pools
     # plus a second pool in the packages that test a different role. The Postgres

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -167,48 +166,7 @@ func (s *seeder) writeIdentity(ctx context.Context, _ string) error {
 	s.say("site operator %q and system worker %q created; the worker has NO site assignment, "+
 		"which is the safe default rather than a gap", demoSiteOperator, demoSystemWorker)
 
-	// The administrator's second factor, confirmed so the console can be reached.
-	secret, err := s.enrolAdminFactor(ctx, ident, adminID)
-	if err != nil {
-		return err
-	}
-	s.report.TOTPSecret = secret
-	s.report.TOTPSecretPath = s.secretKeyPath
-	if secret != "" {
-		s.say("the administrator's TOTP factor is enrolled and confirmed; the seed is an " +
-			"authenticator, so it prints the shared secret rather than making the demo " +
-			"depend on somebody having a phone")
-	}
 	return nil
-}
-
-// enrolAdminFactor enrols and confirms, and returns the shared secret when it
-// enrolled a new one.
-//
-// Confirmation is not optional: `EnrollTOTP` stores the credential with a null
-// `verified_at`, and the first sign-in at three in the morning fails with a row
-// that looks enrolled.
-func (s *seeder) enrolAdminFactor(ctx context.Context, ident *identity.Service, adminID string) (string, error) {
-	secret, _, err := ident.EnrollTOTP(ctx, s.opts.tenant, adminID, "seed")
-	if err != nil {
-		// Already enrolled. That is the second run, not a failure, and the secret
-		// is not recoverable — which is why the report prints the credential the
-		// operator can use rather than pretending it can be re-derived.
-		if strings.Contains(err.Error(), "already") {
-			s.say("the administrator already has a confirmed TOTP factor; its secret is " +
-				"not recoverable by design and is not printed again")
-			return "", nil
-		}
-		return "", fmt.Errorf("enrol the administrator's TOTP factor: %w", err)
-	}
-	code, err := totpCodeFor(secret, time.Now().UTC())
-	if err != nil {
-		return "", err
-	}
-	if err := ident.VerifyTOTPEnrollment(ctx, s.opts.tenant, adminID, code); err != nil {
-		return "", fmt.Errorf("confirm the administrator's TOTP factor: %w", err)
-	}
-	return secret, nil
 }
 
 // findUser reads an existing principal's id, so a second run does not create a

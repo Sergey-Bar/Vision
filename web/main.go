@@ -73,6 +73,7 @@ func main() {
 	registerSearchRoutes(repoRoot, pool)
 	registerChatRoutes(repoRoot, pool)
 	registerClipsAndCriticalRoutes(repoRoot, pool)
+	registerCameraRoutes(repoRoot, pool)
 
 	// The SPA lives under web/static/spa (built by `npm run build` in web/spa).
 	// Its assets are served by the /static/ handler above; its index.html is the
@@ -83,14 +84,8 @@ func main() {
 	spaHandler := func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, spaIndex)
 	}
-	for _, p := range []string{"/", "/console", "/pipeline", "/trust", "/lab", "/census", "/operations", "/ask", "/live", "/fleet", "/chief"} {
-		http.HandleFunc(p, func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path != "/" {
-				http.Redirect(w, r, "/", http.StatusMovedPermanently)
-				return
-			}
-			spaHandler(w, r)
-		})
+	for _, p := range []string{"/", "/cameras", "/clips", "/console", "/events", "/incidents", "/pipeline", "/trust", "/lab", "/census", "/operations", "/ask", "/live", "/fleet", "/chief", "/sites", "/users", "/audit", "/settings"} {
+		http.HandleFunc(p, spaHandler)
 	}
 
 	registerLiveRoutes(repoRoot)

@@ -103,3 +103,26 @@ __pycache__/
 # A scratch copy of the POC config's Go type declarations, kept next to the code
 # it was copied from while that code was being rewritten.
 /poc/config_types_restore.txt
+
+# The operator's own footage. `Videos/` holds 375 MB of MP4 that the demo plays
+# as virtual cameras. It is the owner's material and not the repository's: a
+# clone does not need it, and a commit that carries it makes every diff carry
+# it. The demo script references it by path and says so when it is absent.
+/Videos/
+
+# Another project entirely, which was sitting in this working tree. It is not
+# part of this product, and it must never enter this history.
+/product-scraper/
+
+# The SPA's build output. `npm run build` in web/spa writes it; the source that
+# produces it is committed. A committed bundle is a binary that no build step
+# reproduces and that every clone pays for.
+/web/spa/node_modules/
+/web/spa/playwright-report/
+/web/spa/test-results/
+/web/static/spa/
+
+# Editor and tooling backups. A `.bak` file is a copy of a file that is already
+# in the history, and it goes stale the moment the original changes.
+*.bak
+*.bak2

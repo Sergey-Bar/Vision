@@ -1,6 +1,6 @@
 import { Link, useNavigate } from 'react-router-dom'
 import { useState } from 'react'
-import { Menu, LayoutGrid, Activity, ClipboardList, Video, ShieldAlert, Users, Settings } from 'lucide-react'
+import { Menu, LayoutGrid, Activity, ClipboardList, Video, ShieldAlert, Users, Settings, ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const NAV = [
@@ -8,6 +8,7 @@ const NAV = [
   { href: '/events', label: 'Events', icon: Activity },
   { href: '/incidents', label: 'Incidents', icon: ClipboardList },
   { href: '/clips', label: 'Clips', icon: Video },
+  { href: '/upload', label: 'Upload', icon: Video },
   { href: '/cameras', label: 'Cameras', icon: Video },
   { href: '/sites', label: 'Sites', icon: ShieldAlert },
   { href: '/users', label: 'Users', icon: Users },
@@ -20,23 +21,24 @@ export function Sidebar({ currentPath }: { currentPath: string }) {
   const navigate = useNavigate()
 
   return (
-    <aside className="flex-shrink-0 border-r border-border bg-surface z-10 transition-all duration-300" style={{ width: collapsed ? 72 : 260 }}>
-      <div className="flex items-center justify-between px-4 h-12 border-b border-border">
+    <aside className="flex-shrink-0 border-r border-white/10 bg-black/40 backdrop-blur-md z-40 transition-all duration-500" style={{ width: collapsed ? 80 : 300 }}>
+      <div className="flex items-center justify-between px-8 h-22 border-b border-white/10">
         {!collapsed && (
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-sm bg-accent flex items-center justify-center text-[rgb(0,26,38)] font-bold text-xs">V</div>
-            <span className="text-sm font-bold text-text tracking-tight">Vision VMS</span>
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-accent flex items-center justify-center text-[14px] font-black tracking-wider text-white shadow-lg shadow-accent/50">
+              V
+            </div>
           </div>
         )}
         <button
           onClick={() => setCollapsed((c) => !c)}
-          className="p-2 text-text-muted hover:text-text hover:bg-surface-lift rounded-sm transition-colors"
+          className="p-3 text-text-muted hover:text-text hover:bg-white/5 rounded-2xl transition-all duration-300"
           aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
         >
-          <Menu size={18} />
+          <Menu size={20} />
         </button>
       </div>
-      <nav className="flex-1 py-3 overflow-y-auto">
+      <nav className="flex-1 py-8 overflow-y-auto">
         {NAV.map((item) => {
           const Icon = item.icon
           const active = currentPath === item.href || (item.href !== '/' && currentPath.startsWith(item.href))
@@ -48,18 +50,27 @@ export function Sidebar({ currentPath }: { currentPath: string }) {
                 void navigate(item.href)
               }}
               className={cn(
-                'flex items-center gap-3 px-4 py-2.5 text-sm font-medium transition-colors rounded-sm',
+                'flex items-center gap-5 px-8 py-4 text-sm font-bold transition-all duration-300 rounded-2xl',
                 active
-                  ? 'bg-accent text-[rgb(0,26,38)]'
-                  : 'text-text-muted hover:text-text hover:bg-surface-lift',
+                  ? 'bg-accent text-white shadow-2xl shadow-accent/50'
+                  : 'text-text hover:text-text hover:bg-white/5 hover:border-white/5 border-transparent',
               )}
             >
-              <Icon size={16} className="shrink-0" />
-              {!collapsed && <span>{item.label}</span>}
+              <Icon size={19} className="shrink-0" />
+              {!collapsed && <span className="font-black">{item.label}</span>}
+              {collapsed ? (
+                <ChevronRight size={16} className="text-text-dim opacity-50 ml-auto" />
+              ) : null}
             </Link>
           )
         })}
       </nav>
+      <div className="px-8 py-8 border-t border-white/10">
+        <div className="flex items-center gap-4 p-4 rounded-3xl border border-white/5 bg-black/20 hover:bg-white/5 transition-all duration-300 cursor-pointer">
+          <ShieldAlert size={19} className="text-accent shadow-lg shadow-accent/30" />
+          <span className="text-[12px] font-black text-text">System health</span>
+        </div>
+      </div>
     </aside>
   )
 }

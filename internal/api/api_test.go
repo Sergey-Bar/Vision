@@ -20,7 +20,6 @@ import (
 	"github.com/Sergey-Bar/vision/internal/dbx"
 	"github.com/Sergey-Bar/vision/internal/eventsearch"
 	"github.com/Sergey-Bar/vision/internal/evidence"
-	"github.com/Sergey-Bar/vision/internal/identity"
 	"github.com/Sergey-Bar/vision/internal/incidents"
 	"github.com/Sergey-Bar/vision/internal/migrate"
 	"github.com/Sergey-Bar/vision/internal/observability"
@@ -90,13 +89,7 @@ func serverWithRegistry(t *testing.T, registry *observability.Registry) (*api.Se
 
 	tenant, site, _ := testutil.NewTenant(t, raw)
 	writer := &audit.Writer{Pool: pool}
-	ident := &identity.Service{
-		Pool: pool, Audit: writer,
-		Now:         func() time.Time { return clock },
-		SecretStore: testSecretStore{},
-	}
 	s := &api.Server{}
-	s.Identity = ident
 	s.Audit = writer
 	s.Pool = pool
 	s.Tenant = tenant
@@ -127,7 +120,6 @@ func serverWithRegistry(t *testing.T, registry *observability.Registry) (*api.Se
 	theEvidenceStore = evStore
 
 	deps := api.Deps{
-		Identity:  ident,
 		Evidence:  evStore,
 		Incidents: &incidents.Service{Pool: pool, Audit: writer},
 		Bundles:   &bundles.Service{Pool: pool, Compiler: rules.NewCompiler(), Audit: writer},
@@ -140,14 +132,6 @@ func serverWithRegistry(t *testing.T, registry *observability.Registry) (*api.Se
 	// than inside the literal.
 	s.Routes = func(mux *http.ServeMux) { s.RegisterRoutes(deps)(mux) }
 
-	// Every test needs a signed-in operator, so the first administrator is
-	// created here rather than in each test. A bootstrap account has no enrolled
-	// factor, which is the one state that can sign in on a password alone, and
-	// that is exactly what these tests exercise.
-	if _, err := ident.BootstrapAdmin(context.Background(), tenant, "admin",
-		"a-long-bootstrap-passphrase", site); err != nil {
-		t.Fatalf("bootstrap: %v", err)
-	}
 	return s, tenant, site, registry
 }
 
@@ -229,100 +213,11 @@ func TestHealthExcludesTheAIPlane(t *testing.T) {
 	}
 }
 
-func TestUnauthenticatedRequestsAreRefused(t *testing.T) {
-	s, _, _ := server(t)
-	for _, path := range []string{
-		"/v1/incidents",
-		"/v1/auth/session",
-		"/v1/audit/ledger",
-		"/v1/ops/dead-letters",
-		"/incidents",
-	} {
-		rec := httptest.NewRecorder()
-		s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
-		if rec.Code != http.StatusUnauthorized {
-			t.Errorf("%s returned %d with no session, want 401", path, rec.Code)
-		}
-	}
-}
-
-// The cookie alone is not authorization. A browser attaches it to any request to
-// this origin, including one a page elsewhere caused.
-func TestStateChangingRequestWithoutCSRFIsRefused(t *testing.T) {
-	s, _, _ := server(t)
-
-	cookie, csrf := mustSignIn(t, s)
-	csrfToken := csrf
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/v1/incidents/inc_x/dispositions",
-		strings.NewReader(`{"outcome":"dismissed"}`))
-	req.AddCookie(cookie)
-	s.Handler().ServeHTTP(rec, req)
-	if rec.Code == http.StatusOK || rec.Code == http.StatusCreated {
-		t.Error("a disposition succeeded with no CSRF token")
-	}
-
-	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/v1/incidents/inc_x/dispositions",
-		strings.NewReader(`{"outcome":"dismissed"}`))
-	req.AddCookie(cookie)
-	req.AddCookie(&http.Cookie{Name: cookieNameOf(s) + "_csrf", Value: csrfToken})
-	req.Header.Set("X-CSRF-Token", csrfToken)
-	req.Header.Set("Content-Type", "application/json")
-	s.Handler().ServeHTTP(rec, req)
-	// With both halves present the request gets past CSRF and fails on the missing
-	// incident, not on the token. That is the property: the two checks are
-	// independent, and a correct token is not refused.
-	if rec.Code == http.StatusForbidden && strings.Contains(rec.Body.String(), "csrf") {
-		t.Errorf("a correct CSRF token was still refused: %s", rec.Body)
-	}
-	if rec.Code == http.StatusForbidden && strings.Contains(rec.Body.String(), "csrf") {
-		t.Error("a correct CSRF token was still refused")
-	}
-}
-
-func TestCSRFTokenIsBoundToTheSession(t *testing.T) {
-	s, _, _ := server(t)
-	cookie, _ := mustSignIn(t, s)
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/v1/incidents/inc_x/dispositions",
-		strings.NewReader(`{"outcome":"dismissed"}`))
-	req.AddCookie(cookie)
-	req.Header.Set("X-CSRF-Token", "a-token-from-another-session")
-	s.Handler().ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusForbidden {
-		t.Errorf("a foreign CSRF token returned %d, want 403", rec.Code)
-	}
-}
-
-// X-Tenant-Id is honoured only when it matches the session tenant. A header that
-// selected a tenant would make the whole authorization model decorative.
-func TestTenantHeaderMismatchIsRefused(t *testing.T) {
-	s, _, _ := server(t)
-	mustSignIn(t, s)
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/v1/incidents", nil)
-	req.Header.Set("X-Tenant-Id", "some-other-tenant")
-	s.Handler().ServeHTTP(rec, req)
-
-	// Either the request is refused outright or the session is rejected, but it
-	// must not succeed as the other tenant.
-	if rec.Code == http.StatusOK {
-		t.Error("a request with a mismatched tenant header succeeded")
-	}
-}
-
 func TestConsoleIsLeftToRight(t *testing.T) {
 	s, _, _ := server(t)
-	session, _ := mustSignIn(t, s)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/incidents", nil)
-	req.AddCookie(session)
 	s.Handler().ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
@@ -347,7 +242,6 @@ func TestConsoleIsLeftToRight(t *testing.T) {
 
 func TestJSONIsNeverNegotiatedIntoHTML(t *testing.T) {
 	s, _, _ := server(t)
-	mustSignIn(t, s)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/v1/incidents", nil)

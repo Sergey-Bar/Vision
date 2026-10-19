@@ -23,7 +23,7 @@ asks.
 
 ## Where we are
 
-**Milestone 1 of 8. The deterministic spine is built and green.** 88 Go
+**Milestone 1 of 8. The deterministic spine is built and green.** 89 Go
 packages, 27 forward-only migrations, 14 contracts, a hash-chained
 audit ledger, a fixture-driven replay path, a content-addressed evidence store, a
 rule engine with no shell, SQL, network, dynamic code or regex, a working

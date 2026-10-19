@@ -237,17 +237,6 @@ func (s *seeder) print() {
 		}
 		fmt.Fprintf(w, "  %-9s roles %-14s %s\n", p.Username, strings.Join(p.Roles, ","), sites)
 	}
-	if s.report.TOTPSecret != "" {
-		fmt.Fprintf(w, "\n  second factor, required by the console:\n")
-		fmt.Fprintf(w, "    secret  %s\n", s.report.TOTPSecret)
-		fmt.Fprintf(w, "    code    securityctl auth code --secret %s\n", s.report.TOTPSecret)
-		fmt.Fprintf(w, "    (a six-digit code, RFC 6238 SHA-1, valid for 30 seconds. Any\n")
-		fmt.Fprintf(w, "     authenticator app computes the same code from the same secret.)\n")
-	} else {
-		fmt.Fprintf(w, "\n  second factor: already enrolled on a previous run. Its secret is not\n")
-		fmt.Fprintf(w, "  recoverable and is not printed again — a wrapped factor that could be\n")
-		fmt.Fprintf(w, "  read back would not be wrapped.\n")
-	}
 	fmt.Fprintf(w, "  passphrase: %s (a demo credential with a fixed value, printed on purpose)\n",
 		s.report.Passphrase)
 	fmt.Fprintf(w, "\n")
