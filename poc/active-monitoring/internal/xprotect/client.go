@@ -34,11 +34,11 @@ import (
 // something to compare against the specification file.
 const (
 	PathToken      = "/API/IDP/connect/token"
-	PathEvents     = "/API/rest/v1/events"
-	PathEventsBulk = "/API/rest/v1/events/bulk"
-	PathBookmarks  = "/API/rest/v1/bookmarks"
-	PathEventTypes = "/API/rest/v1/eventTypes"
-	APIRestPrefix  = "/API/rest/v1"
+	PathEvents     = "/api/rest/v1/events"
+	PathEventsBulk = "/api/rest/v1/events/bulk"
+	PathBookmarks  = "/api/rest/v1/bookmarks"
+	PathEventTypes = "/api/rest/v1/eventTypes"
+	APIRestPrefix  = "/api/rest/v1"
 )
 
 // The documented status codes.

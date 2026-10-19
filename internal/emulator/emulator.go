@@ -114,6 +114,9 @@ type camera struct {
 	refusal    string
 	paused     bool
 	startedAt  time.Time
+	// seekTo is where the next loop restarts playback. It is consumed by the
+	// camera loop and cleared, so a seek is an instruction rather than a state.
+	seekTo time.Duration
 }
 
 // New builds an engine.
@@ -173,6 +176,7 @@ func New(opts Options) (*Engine, error) {
 			source:    src,
 			width:     opts.Width,
 			height:    opts.Height,
+			fps:       src.FPS,
 			startedAt: opts.Now(),
 		}
 	}
@@ -260,13 +264,37 @@ func (e *Engine) play(ctx context.Context, cam *camera) {
 	}
 	defer r.close()
 
-	interval := time.Duration(float64(time.Second) / cam.source.FPS)
 	next := time.Now()
 	seq := 0
 	for {
 		if ctx.Err() != nil {
 			return
 		}
+		// The camera's live settings: the rate it is measured at, and whether
+		// it is paused.
+		//
+		// They are read per frame rather than captured once, because the
+		// control surface changes them while the camera is running, and a
+		// control that took effect on the next restart is a control that does
+		// not work.
+		cam.mu.RLock()
+		fps := cam.fps
+		paused := cam.paused
+		seekTo := cam.seekTo
+		cam.mu.RUnlock()
+		if fps <= 0 {
+			fps = DefaultFPS
+		}
+		if seekTo > 0 {
+			cam.mu.Lock()
+			cam.seekTo = 0
+			cam.mu.Unlock()
+			if err := r.seek(ctx, seekTo); err != nil {
+				e.log.Error("camera cannot seek", "camera", cam.source.ID, "error", err.Error())
+			}
+		}
+		interval := time.Duration(float64(time.Second) / fps)
+
 		frame, err := r.next()
 		if err != nil {
 			if ctx.Err() != nil {
@@ -285,7 +313,15 @@ func (e *Engine) play(ctx context.Context, cam *camera) {
 			return
 		}
 		seq++
-		e.measure(ctx, cam, frame, seq)
+		// A PAUSED camera still plays -- the picture is still the picture -- but
+		// it stops measuring. A pause that stopped the video would be a
+		// different control, and the difference matters: an operator pausing a
+		// camera wants the scene to stop being reported, not to stop existing.
+		if !paused {
+			e.measure(ctx, cam, frame, seq)
+		} else {
+			e.storeFrame(cam, frame, nil)
+		}
 
 		// The pacing is the camera's, not the reader's: ffmpeg is asked for
 		// frames as fast as it can produce them and the camera decides when to
@@ -463,7 +499,7 @@ func (e *Engine) state(id string) (cameraState, bool) {
 		Name:        cam.source.Name,
 		Kind:        cam.source.Kind,
 		Location:    cam.source.Location,
-		FPS:         cam.source.FPS,
+		FPS:         cam.fps,
 		FrameIndex:  cam.frameIndex,
 		FrameCount:  cam.frameCount,
 		Measured:    cam.measured,

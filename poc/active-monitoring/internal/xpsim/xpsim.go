@@ -213,7 +213,7 @@ func faultList() string {
 }
 
 // Handler returns the HTTP handler. The paths are the published ones, under
-// /API/rest/v1, plus the two control paths this simulator adds.
+// /api/rest/v1, plus the two control paths this simulator adds.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
@@ -230,10 +230,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/API/IDP/connect/token", s.handleToken)
 
 	// The documented REST surface.
-	mux.HandleFunc("/API/rest/v1/events", s.handleEvents)
-	mux.HandleFunc("/API/rest/v1/events/bulk", s.handleBulkEvents)
-	mux.HandleFunc("/API/rest/v1/bookmarks", s.handleBookmarks)
-	mux.HandleFunc("/API/rest/v1/eventTypes", s.handleEventTypes)
+	mux.HandleFunc("/api/rest/v1/events", s.handleEvents)
+	mux.HandleFunc("/api/rest/v1/events/bulk", s.handleBulkEvents)
+	mux.HandleFunc("/api/rest/v1/bookmarks", s.handleBookmarks)
+	mux.HandleFunc("/api/rest/v1/eventTypes", s.handleEventTypes)
 
 	return mux
 }

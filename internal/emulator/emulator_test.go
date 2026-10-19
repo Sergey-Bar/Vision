@@ -317,6 +317,87 @@ func TestTheCountTravelsInTheClassID(t *testing.T) {
 	}
 }
 
+// TestTheControlsTakeEffectImmediately is what a control is for.
+//
+// A control that took effect on the next restart would be a control that does
+// not work: the operator pauses a camera because something is happening in front
+// of it, and the picture has to stop being REPORTED at once, not after the
+// source is replayed.
+func TestTheControlsTakeEffectImmediately(t *testing.T) {
+	engine := startEmulator(t, fakeDetector{})
+	base := engine.URL()
+
+	post := func(path string) map[string]any {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodPost, base+path, nil)
+		if err != nil {
+			t.Fatalf("build the request: %v", err)
+		}
+		req.Header.Set("Authorization", "Bearer test-token")
+		resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+		if err != nil {
+			t.Fatalf("reach %s: %v", path, err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s answered %s, want 200", path, resp.Status)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+			t.Fatalf("decode %s: %v", path, err)
+		}
+		return body
+	}
+
+	paused := post(controlPrefix + "/cameras/entrance/pause")
+	if paused["paused"] != true {
+		t.Errorf("a pause answered with paused=%v, want true", paused["paused"])
+	}
+	playing := post(controlPrefix + "/cameras/entrance/play")
+	if playing["paused"] != false {
+		t.Errorf("a play answered with paused=%v, want false", playing["paused"])
+	}
+	rate := post(controlPrefix + "/cameras/entrance/fps?value=2")
+	if rate["fps"] != 2.0 {
+		t.Errorf("a frame rate of 2 answered with fps=%v", rate["fps"])
+	}
+	// The camera's own state agrees, because the control and the state are the
+	// same camera.
+	st, ok := engine.state("entrance")
+	if !ok {
+		t.Fatal("the camera was not created")
+	}
+	if st.FPS != 2 {
+		t.Errorf("the camera's frame rate is %v after a control set it to 2", st.FPS)
+	}
+}
+
+// TestAFrameRateOutsideTheRangeIsRefused is the control that is not a typo.
+//
+// A frame rate of zero measures nothing and reports a detection rate of zero
+// over a scene with people in it, and a frame rate of a thousand asks the GPU
+// for more than it can do. Both are refused by name.
+func TestAFrameRateOutsideTheRangeIsRefused(t *testing.T) {
+	engine := startEmulator(t, fakeDetector{})
+	base := engine.URL()
+	for _, value := range []string{"0", "600", "-1"} {
+		req, err := http.NewRequest(http.MethodPost, base+controlPrefix+"/cameras/entrance/fps?value="+value, nil)
+		if err != nil {
+			t.Fatalf("build the request: %v", err)
+		}
+		req.Header.Set("Authorization", "Bearer test-token")
+		resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+		if err != nil {
+			t.Fatalf("reach the control: %v", err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			t.Errorf("a frame rate of %s was accepted. A rate outside the range is a typo, "+
+				"and a typo that measures nothing is a camera that reports an empty road", value)
+		}
+	}
+}
+
 // TestTheSameFramesProduceTheSameEvents is the determinism the whole fixture
 // design exists to protect, applied to the device that now publishes them.
 //

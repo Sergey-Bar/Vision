@@ -348,7 +348,7 @@ func cmdRehearse(args []string) error {
 		sim.Clear()
 		// Scope every fault to the POST on /events, so the rehearsal measures the
 		// push and not the token call or the read-back.
-		if err := sim.ArmOn(r.fault, 0, "/API/rest/v1/events", "POST"); err != nil {
+		if err := sim.ArmOn(r.fault, 0, "/api/rest/v1/events", "POST"); err != nil {
 			return err
 		}
 		tag := "aicap-rehearsal-" + string(r.fault)

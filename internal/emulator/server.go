@@ -580,6 +580,10 @@ func (s *server) handleControlCameras(w http.ResponseWriter, r *http.Request) {
 // The sub-resource is named in the path: `/__control/cameras/{id}/frame.png`
 // is the picture, `/__control/cameras/{id}/detections` is the boxes, and
 // `/__control/cameras/{id}` is everything.
+//
+// A POST to a camera is a CONTROL: `pause`, `play`, `seek` and `fps` are the
+// four things an operator does to a camera, and each one takes effect
+// immediately rather than at the next restart.
 func (s *server) handleControlCamera(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, controlPrefix+"/cameras/")
 	parts := strings.SplitN(rest, "/", 2)
@@ -602,11 +606,89 @@ func (s *server) handleControlCamera(w http.ResponseWriter, r *http.Request) {
 			out = append(out, describeDetection(d))
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"array": out})
+	case "pause":
+		s.controlCamera(w, r, id, func(cam *camera) { cam.paused = true })
+	case "play":
+		s.controlCamera(w, r, id, func(cam *camera) { cam.paused = false })
+	case "seek":
+		at, err := durationParam(r, "at")
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		s.controlCamera(w, r, id, func(cam *camera) { cam.seekTo = at })
+	case "fps":
+		rate, err := floatParam(r, "value")
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		if rate < 0.1 || rate > 60 {
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"error": "the frame rate must be between 0.1 and 60 frames a second, and a rate outside that is a typo rather than a request",
+			})
+			return
+		}
+		s.controlCamera(w, r, id, func(cam *camera) { cam.fps = rate })
 	case "":
+		if r.Method == http.MethodPost {
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"error": "a control needs a name: pause, play, seek or fps",
+			})
+			return
+		}
 		writeJSON(w, http.StatusOK, describeState(st))
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "no such camera resource: " + what})
 	}
+}
+
+// controlCamera applies a control to a camera and reports the camera's state
+// afterwards.
+//
+// The state comes back because a control that returns nothing is a control an
+// operator has to check by looking elsewhere, and the answer to "did that
+// work" should be the thing the control did.
+func (s *server) controlCamera(w http.ResponseWriter, r *http.Request, id string, apply func(*camera)) {
+	cam, ok := s.engine.camera(id)
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "no such camera: " + id})
+		return
+	}
+	cam.mu.Lock()
+	apply(cam)
+	cam.mu.Unlock()
+	st, _ := s.engine.state(id)
+	writeJSON(w, http.StatusOK, describeState(st))
+}
+
+// durationParam reads a duration in seconds from the query.
+func durationParam(r *http.Request, name string) (time.Duration, error) {
+	raw := strings.TrimSpace(r.URL.Query().Get(name))
+	if raw == "" {
+		return 0, fmt.Errorf("%s is required, in seconds", name)
+	}
+	seconds, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be a number of seconds", name)
+	}
+	if seconds < 0 {
+		return 0, fmt.Errorf("%s must not be negative", name)
+	}
+	return time.Duration(seconds * float64(time.Second)), nil
+}
+
+// floatParam reads a number from the query.
+func floatParam(r *http.Request, name string) (float64, error) {
+	raw := strings.TrimSpace(r.URL.Query().Get(name))
+	if raw == "" {
+		return 0, fmt.Errorf("%s is required", name)
+	}
+	value, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be a number", name)
+	}
+	return value, nil
 }
 
 // serveFrame writes the camera's latest picture as a PNG.

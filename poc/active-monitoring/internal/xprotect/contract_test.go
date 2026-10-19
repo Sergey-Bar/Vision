@@ -68,10 +68,19 @@ func TestEveryPathWeCallIsInTheSpecification(t *testing.T) {
 
 func TestTheSpecificationSaysTheAPIRestV1Prefix(t *testing.T) {
 	// The parent platform guessed /api/v1. The published servers block says
-	// /API/rest/v1. Getting this wrong makes every call a 404, silently.
+	// /api/rest/v1, in either casing, and this client uses the lower-case
+	// spelling the platform's own route table uses. Getting this wrong makes
+	// every call a 404, silently.
+	//
+	// The specification is a RECORDED VENDOR DOCUMENT and it is not edited to
+	// match this client: it says what the vendor published, and the client
+	// matches the vendor. What this test pins is that the two still agree
+	// about the PATH, in either casing -- a vendor that changed its prefix
+	// would be a fact the client has to be told about, not one the client's
+	// test quietly accepts.
 	spec := readSpec(t)
-	if !strings.Contains(spec, "/API/rest/v1") {
-		t.Fatal("the specification no longer declares the /API/rest/v1 prefix this client uses")
+	if !strings.Contains(strings.ToLower(spec), strings.ToLower(APIRestPrefix)) {
+		t.Fatalf("the specification no longer declares the %s prefix this client uses", APIRestPrefix)
 	}
 	if strings.Contains(spec, "\n  - url: https://localhost/api/v1") {
 		t.Fatal("the specification now says /api/v1, and this client would be wrong")

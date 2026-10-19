@@ -250,7 +250,7 @@ func TestFaultRehearsal(t *testing.T) {
 			if err := h.client.Authenticate(context.Background()); err != nil {
 				t.Fatal(err)
 			}
-			if err := h.sim.ArmOn(tc.fault, 0, "/API/rest/v1/events", "POST"); err != nil {
+			if err := h.sim.ArmOn(tc.fault, 0, "/api/rest/v1/events", "POST"); err != nil {
 				t.Fatal(err)
 			}
 			_, err := h.client.TriggerEvent(context.Background(), input("aicap-"+string(tc.fault)))
@@ -270,7 +270,7 @@ func TestTruncatedResponseIsNotTreatedAsSent(t *testing.T) {
 	if err := h.client.Authenticate(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.sim.ArmOn(xpsim.FaultTruncatedJSON, 0, "/API/rest/v1/events", "POST"); err != nil {
+	if err := h.sim.ArmOn(xpsim.FaultTruncatedJSON, 0, "/api/rest/v1/events", "POST"); err != nil {
 		t.Fatal(err)
 	}
 	out, err := h.client.TriggerEvent(context.Background(), input("aicap-truncated"))

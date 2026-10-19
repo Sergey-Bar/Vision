@@ -270,6 +270,21 @@ func (r *reader) restart(ctx context.Context) error {
 	return r.start(ctx)
 }
 
+// seek restarts the source at a position.
+//
+// It is a RESTART rather than a seek inside the running process, because the
+// process is decoding a file from the beginning and there is no way to move its
+// read head without stopping it. A VMS's seek is the same: the recording
+// server finds the position and starts serving from there.
+func (r *reader) seek(ctx context.Context, at time.Duration) error {
+	r.close()
+	saved := r.source.StartAt
+	r.source.StartAt = at
+	err := r.start(ctx)
+	r.source.StartAt = saved
+	return err
+}
+
 // resolveYouTube turns a YouTube URL into a direct media URL.
 //
 // `yt-dlp` is an external binary and may be absent, and the answer then is a

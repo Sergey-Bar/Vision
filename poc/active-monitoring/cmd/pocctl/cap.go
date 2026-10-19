@@ -400,7 +400,7 @@ func cmdSim(args []string) error {
 	fmt.Println("reachable. Every run against it prints that line in its report.")
 	fmt.Println()
 	fmt.Println("  GET  /__control/whoami            who the simulator says it is")
-	fmt.Println("  POST /__control/fault             {\"fault\":\"500\",\"count\":1,\"path\":\"/API/rest/v1/events\",\"method\":\"POST\"}")
+	fmt.Println("  POST /__control/fault             {\"fault\":\"500\",\"count\":1,\"path\":\"/api/rest/v1/events\",\"method\":\"POST\"}")
 	fmt.Println("  POST /__control/reset             forget every pushed event")
 	fmt.Println("  GET  /__control/events            what the simulator actually holds")
 	fmt.Println()

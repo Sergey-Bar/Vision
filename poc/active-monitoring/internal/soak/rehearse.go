@@ -171,7 +171,7 @@ func (r *Rehearser) arm(ctx context.Context, fault string) error {
 		// fault that is really a rejected credential. A real 401 storm does not
 		// stop after one call, and neither does the rehearsal's.
 		"fault": fault, "count": 0,
-		"path": "/API/rest/v1/events", "method": "POST",
+		"path": "/api/rest/v1/events", "method": "POST",
 	})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		strings.TrimRight(r.BaseURL, "/")+"/__control/fault", bytes.NewReader(payload))
