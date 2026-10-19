@@ -44,8 +44,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -169,7 +169,7 @@ func newReader(ctx context.Context, bin string, src Source, width, height int, n
 
 // start launches one ffmpeg process for the source.
 func (r *reader) start(ctx context.Context) error {
-	input, err := r.input()
+	input, err := r.input(ctx)
 	if err != nil {
 		return err
 	}
@@ -209,16 +209,25 @@ func (r *reader) start(ctx context.Context) error {
 // A YouTube URL is not a media URL: it is a web page that happens to contain
 // one. `yt-dlp` resolves it, and its absence is a refusal by name rather than
 // an ffmpeg error about a stream.
-func (r *reader) input() (string, error) {
+//
+// A LOCAL path is made absolute before it is handed over, and that is not
+// tidiness: ffmpeg reads a leading dash as a flag, so a file called "-dash.mp4"
+// would be read as an option. An absolute path cannot begin with a dash.
+func (r *reader) input(ctx context.Context) (string, error) {
 	switch r.source.Kind {
 	case KindYouTube:
-		resolved, err := resolveYouTube(r.source.Location)
+		resolved, err := resolveYouTube(ctx, r.source.Location)
 		if err != nil {
 			return "", err
 		}
 		return resolved, nil
 	case KindFile:
-		return r.source.Location, nil
+		absolute, err := filepath.Abs(r.source.Location)
+		if err != nil {
+			return "", fmt.Errorf("emulator: %s: the path %q cannot be resolved: %w",
+				r.source.ID, r.source.Location, err)
+		}
+		return absolute, nil
 	case KindURL, KindRTSP:
 		return r.source.Location, nil
 	default:
@@ -290,13 +299,13 @@ func (r *reader) seek(ctx context.Context, at time.Duration) error {
 // `yt-dlp` is an external binary and may be absent, and the answer then is a
 // refusal by name: "the YouTube path needs yt-dlp" is a fact an operator can
 // act on, and "ffmpeg failed" is not.
-func resolveYouTube(url string) (string, error) {
+func resolveYouTube(ctx context.Context, url string) (string, error) {
 	bin, err := exec.LookPath("yt-dlp")
 	if err != nil {
 		return "", fmt.Errorf("emulator: the YouTube path needs yt-dlp on PATH, and it is not there. "+
 			"A local file plays without it: %w", err)
 	}
-	out, err := exec.Command(bin, "--no-playlist", "-f", "mp4/best", "-g", url).Output()
+	out, err := exec.CommandContext(ctx, bin, "--no-playlist", "-f", "mp4/best", "-g", "--", url).Output()
 	if err != nil {
 		return "", fmt.Errorf("emulator: yt-dlp could not resolve %q: %w", url, err)
 	}
@@ -400,10 +409,4 @@ func snapshotAt(ctx context.Context, bin, path string, at time.Duration, out str
 		return fmt.Errorf("emulator: take a snapshot: %w: %s", err, strings.TrimSpace(string(combined)))
 	}
 	return nil
-}
-
-// httpStatusText is here so the control surface's errors read like the
-// vendor's.
-func httpStatusText(code int) string {
-	return http.StatusText(code)
 }

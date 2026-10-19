@@ -175,7 +175,7 @@ func TestNoRowIsWrittenForAnIncidentAtAnotherSite(t *testing.T) {
 	}
 	theirs := seedIncident(t, tenant, siteB)
 
-	rec := callAs(t, s, "op-a", "operator-a-passphrase", http.MethodGet,
+	rec := callAs(t, s, http.MethodGet,
 		"/v1/incidents/"+theirs, nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("read an incident: got %d, want 200: %s", rec.Code, rec.Body.String())

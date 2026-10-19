@@ -85,7 +85,10 @@ type Candidate struct {
 func (b Box) Centre() (float64, float64) { return (b.X1 + b.X2) / 2, (b.Y1 + b.Y2) / 2 }
 
 // Width and Height are the box's size in normalised units.
-func (b Box) Width() float64  { return b.X2 - b.X1 }
+func (b Box) Width() float64 { return b.X2 - b.X1 }
+
+// Height is the box's height, and it is a method rather than a subtraction because a
+// caller that forgets which is the top draws the box upside down.
 func (b Box) Height() float64 { return b.Y2 - b.Y1 }
 
 // NonEmpty reports whether the box names an actual region.

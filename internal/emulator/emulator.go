@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -91,7 +90,6 @@ type Engine struct {
 	cameras    map[string]*camera
 	events     []event
 	lastID     int
-	frameSeq   uint64
 }
 
 // camera is one virtual camera's live state.
@@ -217,10 +215,7 @@ func (e *Engine) announceCameras() {
 // It returns when the context is cancelled. The surface stops first, so a
 // client that is mid-poll gets a connection error rather than a hang.
 func (e *Engine) Run(ctx context.Context) error {
-	srv, err := newServer(e)
-	if err != nil {
-		return err
-	}
+	srv := newServer(e)
 	// The server is published BEFORE the listener is bound, so a caller that
 	// asks for the URL gets an empty string until the surface is up rather than
 	// a race on the pointer.
@@ -278,7 +273,9 @@ func (e *Engine) play(ctx context.Context, cam *camera) {
 	defer r.close()
 
 	next := time.Now()
-	seq := 0
+	// The frame counter is unsigned because the detector's sequence number is, and a
+	// counter that cannot go negative is one that cannot need a conversion.
+	var seq uint64
 	for {
 		if ctx.Err() != nil {
 			return
@@ -354,7 +351,7 @@ func (e *Engine) play(ctx context.Context, cam *camera) {
 }
 
 // measure runs the detector over one frame and publishes what it found.
-func (e *Engine) measure(ctx context.Context, cam *camera, frame Frame, seq int) {
+func (e *Engine) measure(_ context.Context, cam *camera, frame Frame, seq uint64) {
 	cam.mu.Lock()
 	cam.frameCount++
 	cam.mu.Unlock()
@@ -363,7 +360,7 @@ func (e *Engine) measure(ctx context.Context, cam *camera, frame Frame, seq int)
 		e.storeFrame(cam, frame, nil)
 		return
 	}
-	ans := e.opts.Detector.Detect(uint64(seq), frame.Pix, frame.Width, frame.Height, ortdetect.Rect{})
+	ans := e.opts.Detector.Detect(seq, frame.Pix, frame.Width, frame.Height, ortdetect.Rect{})
 	cam.mu.Lock()
 	cam.measured++
 	cam.latencyMS = ans.LatencyMS
@@ -535,16 +532,6 @@ func (e *Engine) frame(id string) ([]byte, int, int, bool) {
 	cam.mu.RLock()
 	defer cam.mu.RUnlock()
 	return cam.lastFrame, cam.width, cam.height, true
-}
-
-// clipPath is where a clip for a camera and a moment is written.
-//
-// The name carries the camera and the nanosecond of the moment, so two clips
-// of the same camera at the same moment are the same file and two clips at
-// different moments never collide.
-func (e *Engine) clipPath(cameraID string, at time.Time) string {
-	name := fmt.Sprintf("%s-%d.mp4", sanitiseName(cameraID), at.UTC().UnixNano())
-	return filepath.Join(e.clip, name)
 }
 
 // sanitiseName makes a camera id safe to put in a file name.

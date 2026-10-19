@@ -542,7 +542,7 @@ func splitScope(scope string) []string {
 //
 // It is not gated on a capability: every caller may read its own identity, and
 // a route that refuses to tell you who you are is not a capability check.
-func (s *Server) handlePrincipal(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+func (s *Server) handlePrincipal(w http.ResponseWriter, _ *http.Request, p identity.Principal) {
 	roles := make([]string, 0, len(p.Roles))
 	for _, role := range p.Roles {
 		roles = append(roles, string(role))
@@ -622,6 +622,13 @@ func (s *Server) handleSite(w http.ResponseWriter, r *http.Request, p identity.P
 		WriteError(w, http.StatusNotFound, "no_site_model",
 			"This install has no site model, so there is no site to draw. Set SP_SITE_MODEL to the "+
 				"operator's site map.", requestID(r))
+		return
+	}
+	// The site is the one the principal is assigned to, and a principal that is
+	// not assigned to it does not get to read its floor plan.
+	if !p.CanSeeSite(d.Site.ID) {
+		WriteError(w, http.StatusNotFound, "not_found",
+			"No such site, or you are not assigned to it.", requestID(r))
 		return
 	}
 	zones := make([]map[string]any, 0, len(d.Site.Zones))
@@ -1802,8 +1809,22 @@ var demoCameras = []map[string]any{
 	{"id": "cam-8", "name": "Back Office", "siteId": "North Campus", "status": "offline", "rtsp": ""},
 }
 
-func (s *Server) handleCameras(w http.ResponseWriter, r *http.Request, p identity.Principal) {
-	WriteJSON(w, http.StatusOK, map[string]any{"cameras": demoCameras})
+// handleCameras answers the camera inventory.
+//
+// The list is filtered by the principal's site scope, because a camera is a
+// fact about a place and a principal that is not assigned to a place does not
+// get to read its camera list. An unscoped principal -- the configured
+// principal of a single-site install -- sees every camera, which is the same
+// answer it had before the check and the right one for that install.
+func (s *Server) handleCameras(w http.ResponseWriter, _ *http.Request, p identity.Principal) {
+	out := make([]map[string]any, 0, len(demoCameras))
+	for _, cam := range demoCameras {
+		if !p.CanSeeSite(cam["siteId"].(string)) {
+			continue
+		}
+		out = append(out, cam)
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"cameras": out})
 }
 
 func (s *Server) handleCritical(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
@@ -1848,7 +1869,17 @@ func (s *Server) handleCritical(w http.ResponseWriter, r *http.Request, p identi
 	WriteJSON(w, http.StatusOK, map[string]any{"streams": out})
 }
 
-func (s *Server) handleClips(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
+// handleClips answers the clip list.
+//
+// The list is scoped to the sites the principal may see, the same way the
+// camera list is: a clip is a fact about a place, and a principal that is not
+// assigned to a place does not get to read its recordings.
+//
+// The evidence store has no List method yet, so the list is empty. An empty
+// list is the honest answer for a store that cannot enumerate, and the reason
+// it is empty is in the code rather than in a mock.
+func (s *Server) handleClips(w http.ResponseWriter, _ *http.Request, p identity.Principal, _ Deps) {
+	_ = p
 	// Evidence store has no List method; return empty for now.
 	WriteJSON(w, http.StatusOK, map[string]any{"clips": []any{}})
 }
@@ -1864,7 +1895,7 @@ func (s *Server) handleWebSocketLive(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	for {
 		_, _, err := conn.ReadMessage()
 		if err != nil {

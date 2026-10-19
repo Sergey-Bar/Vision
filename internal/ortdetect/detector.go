@@ -379,7 +379,14 @@ func (d *Detector) ClassCount() (n int, declared bool) {
 // computed over frames the detector never saw — is the confusion this package
 // exists to end, so the count is on the detector rather than in the report.
 func (d *Detector) Seen() uint64 {
-	return uint64(d.lat.Count())
+	count := d.lat.Count()
+	// The count is a length, so it cannot be negative; the check is here
+	// because a reader of this file cannot know that and a narrowing
+	// conversion that looks unchecked is one somebody has to re-derive.
+	if count < 0 {
+		return 0
+	}
+	return uint64(count)
 }
 
 func shapeOf(ts []Tensor) [][]int64 {

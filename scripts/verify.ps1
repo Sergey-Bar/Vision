@@ -677,6 +677,19 @@ Invoke-Gate 'no-silent-skips' {
 # plus the margin also fails and is told the number to record, so raising the floor
 # is a one-line edit rather than a measurement somebody has to redo.
 Invoke-Gate 'cover-floor' {
+    # A run with no database measured a DIFFERENT tree.
+    #
+    # The database-backed suites skip rather than fail when there is no Postgres,
+    # and a package whose tests did not run measures near zero. A floor compared
+    # against that is not a floor that moved -- it is a floor compared against a
+    # tree that was never built. The gate SKIPS, visibly, and the record says
+    # so; the alternative is a gate that fires on every package whose tests need
+    # a database, which is every package the floors were measured to protect.
+    if (-not $env:SP_TEST_DATABASE_URL) {
+        Invoke-Skip 'cover-floor' ('no database: the database-backed suites did not run, so the coverage ' +
+                                   'measured is not the coverage the floors were measured against')
+        return
+    }
     # The build mode is passed through because coverage is not a property of the
     # source: `internal/migrate` measures 78.6% without -race and 71.4% with it on
     # an unchanged tree. A floor from one mode is not a floor for the other, and a
@@ -1152,11 +1165,11 @@ Invoke-Gate 'red-check' {
              # decorative; this one moved in public - twice.
              name = 'a stale package count in the roadmap is refused'
              file = 'ROADMAP.md'
-             from = '88 Go'
-             to   = '90 Go'
+             from = '103 Go'
+             to   = '105 Go'
              test = 'TestRoadmapMatchesTheTree'
-            pkg  = './internal/roadmapcheck'
-            why  = 'the milestone plan is where scope is locked, and a number in it that the tree contradicts reads as checked. Three documents carried three different stale counts of the same tree at once, and the migration count had been wrong for thirteen migrations'
+             pkg  = './internal/roadmapcheck'
+             why  = 'the milestone plan is where scope is locked, and a number in it that the tree contradicts reads as checked. Three documents carried three different stale counts of the same tree at once, and the migration count had been wrong for thirteen migrations'
         }
         @{
             # The naming decision, proved against the name it superseded.

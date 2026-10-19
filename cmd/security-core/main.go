@@ -700,18 +700,13 @@ func milestoneBaseURL() string {
 // milestoneToken is the adapter's bearer credential.
 func milestoneToken() string { return strings.TrimSpace(os.Getenv("SP_MILESTONE_TOKEN")) }
 
-// secretKeyPath is where the MFA wrapping key lives.
+// The MFA wrapping key belongs to the SEED, not to the daemon.
 //
-// A fixed path rather than a configuration field: it is created by the installer
-// at a known location with known permissions, and a setting that lets an operator
-// point it somewhere else is a setting that lets them point it somewhere the core
-// cannot read.
-func secretKeyPath() string {
-	if v := strings.TrimSpace(os.Getenv("SP_SECRET_KEY")); v != "" {
-		return v
-	}
-	return "/etc/security-platform/secret.key"
-}
+// The seed enrols a factor, and the enrolment wraps the secret with a key the
+// installer put at a known location with known permissions. The daemon has no
+// enrolment path -- the console has no login -- so it has no reason to know
+// where the key is, and a function that names a key path the daemon never
+// opens is a function that invites somebody to open it.
 
 // clockPolicy is the site's clock policy.
 //

@@ -2,6 +2,12 @@ version: "2"
 
 run:
   timeout: 10m
+  skip-dirs:
+    # The package manager's working directory. It is gitignored, it is not the
+    # repository's, and it ships a Go package of its own -- so the go tool
+    # picks it up and so does the linter, and a finding in a third party's
+    # node_modules is a finding nobody can fix.
+    - web/spa/node_modules
 
 linters:
   default: standard
@@ -22,6 +28,12 @@ linters:
 
   exclusions:
     # Every exclusion below is a considered decision, not a way to quiet a build.
+    #
+    # The package manager's working directory is not the repository's, and it
+    # ships a Go package of its own, so the go tool and the linter both pick it
+    # up. A finding in a third party's node_modules is a finding nobody can fix.
+    paths:
+      - web/spa/node_modules
     rules:
       # Writing to stdout is this program's job. A CLI's output stream closing
       # under it (a closed pipe) is not a condition the process can do anything
@@ -53,6 +65,15 @@ linters:
       - path: _test\.go$
         linters: [errcheck]
         text: "testutil\\.(Exec|QueryOne)"
+
+      # QF1008, "could remove embedded field from selector", in the proposal
+      # test. The explicit `c.Box.Class` is the POINT of the test: it compares
+      # the promoted field with the embedded one to prove there is only one
+      # class, and removing the qualifier makes the comparison a tautology --
+      # which is the shape the test exists to catch.
+      - path: internal/proposal/proposal_test\.go$
+        linters: [staticcheck]
+        text: "QF1008"
 
       # A test builds a request and the handler reads nothing from its context.
       # The two places where a context matters — the health endpoints — do carry
@@ -165,16 +186,25 @@ linters:
         text: "G115"
 
       # G204/G702, "subprocess launched with a variable" / command-injection
-      # taint, in the POC trees. The three sites run fixed executables —
-      # `yt-dlp` and `ffmpeg` by name, and `securityctl.exe` resolved from the
-      # repository root — with an argument *slice*, so no shell is involved and
-      # a hostile string cannot become a second command. At every call site the
-      # slice is compile-time literals: no request field, URL or config value is
-      # ever spliced into the argument list (the one URL the console accepts is
-      # passed to a stub that returns "not implemented"). What the variable
-      # carries is one argument to a program whose whole purpose is to receive
-      # it. An allow-list would only restate what the call sites already say.
+      # taint, in the POC trees and in the VMS emulator. The sites run fixed
+      # executables — `yt-dlp` and `ffmpeg` by name, and `securityctl.exe`
+      # resolved from the repository root — with an argument *slice*, so no shell
+      # is involved and a hostile string cannot become a second command. At
+      # every call site the slice is compile-time literals: no request field,
+      # URL or config value is ever spliced into the argument list (the one URL
+      # the console accepts is passed to a stub that returns "not implemented").
+      # What the variable carries is one argument to a program whose whole
+      # purpose is to receive it. An allow-list would only restate what the call
+      # sites already say.
+      #
+      # The emulator's own call sites are the same shape: ffmpeg is named, and
+      # the operator's file path and camera id are arguments to it. A path that
+      # began with a dash would be read as a flag by ffmpeg, which is why the
+      # argument list carries `--` before the operator's own values.
       - path: (poc|web)/
+        linters: [gosec]
+        text: "G(204|702)"
+      - path: (internal/emulator|cmd/vms-emulator)/
         linters: [gosec]
         text: "G(204|702)"
 

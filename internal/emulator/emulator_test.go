@@ -42,14 +42,14 @@ func (f fakeDetector) Identity() ortdetect.Identity {
 // No video means no camera loop, so the test publishes by hand. That is the
 // honest shape for a wire test: the publisher is the unit under test and the
 // video is not.
-func startEmulator(t *testing.T, det Detector) *Engine {
+func startEmulator(t *testing.T) *Engine {
 	t.Helper()
 	engine, err := New(Options{
 		Listen:   "127.0.0.1:0",
 		Token:    "test-token",
 		Now:      func() time.Time { return time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC) },
 		Sources:  []Source{{ID: "entrance", Name: "Entrance", Kind: KindFile, Location: "test.mp4", FPS: 1}},
-		Detector: det,
+		Detector: fakeDetector{},
 		Vendor:   "test-detector",
 	})
 	if err != nil {
@@ -106,7 +106,7 @@ func publishOne(t *testing.T, engine *Engine, dets []Detection) {
 // checked here is that the routes this emulator serves answer; what is checked
 // there is that the two sides agree about which routes there are.
 func TestTheEmulatorAnswersTheVendorsRoutes(t *testing.T) {
-	engine := startEmulator(t, fakeDetector{})
+	engine := startEmulator(t)
 	publishOne(t, engine, []Detection{{Class: classPerson, Confidence: 0.9, X1: 0.1, Y1: 0.1, X2: 0.4, Y2: 0.6}})
 	base := engine.URL()
 
@@ -123,7 +123,7 @@ func TestTheEmulatorAnswersTheVendorsRoutes(t *testing.T) {
 		APIPrefix + "/recordingServers",
 	} {
 		t.Run(path, func(t *testing.T) {
-			req, err := http.NewRequest(http.MethodGet, base+path, nil)
+			req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, base+path, nil)
 			if err != nil {
 				t.Fatalf("build the request: %v", err)
 			}
@@ -151,8 +151,12 @@ func TestTheEmulatorAnswersTheVendorsRoutes(t *testing.T) {
 // and an emulator that answers an anonymous reader is an emulator that would
 // let anything on the machine read the site's camera inventory.
 func TestTheEmulatorRefusesAnUncredentialedRequest(t *testing.T) {
-	engine := startEmulator(t, fakeDetector{})
-	resp, err := http.Get(engine.URL() + "/api/rest/v1/Servlets")
+	engine := startEmulator(t)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, engine.URL()+"/api/rest/v1/Servlets", nil)
+	if err != nil {
+		t.Fatalf("build the request: %v", err)
+	}
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
 	if err != nil {
 		t.Fatalf("reach the emulator: %v", err)
 	}
@@ -170,11 +174,11 @@ func TestTheEmulatorRefusesAnUncredentialedRequest(t *testing.T) {
 // here would be a disagreement the adapter resolves by degrading, and a degraded
 // event is an event the operator never sees.
 func TestThePublishedEventCarriesTheAnalyticShape(t *testing.T) {
-	engine := startEmulator(t, fakeDetector{})
+	engine := startEmulator(t)
 	publishOne(t, engine, []Detection{{Class: classPerson, Confidence: 0.9, X1: 0.1, Y1: 0.1, X2: 0.4, Y2: 0.6}})
 	base := engine.URL()
 
-	req, err := http.NewRequest(http.MethodGet, base+"/api/rest/v1/events?size=5", nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, base+"/api/rest/v1/events?size=5", nil)
 	if err != nil {
 		t.Fatalf("build the request: %v", err)
 	}
@@ -226,11 +230,11 @@ func TestThePublishedEventCarriesTheAnalyticShape(t *testing.T) {
 // returns the same page every poll, which is a cursor that never advances and a
 // platform that re-reads its whole retention window on every tick.
 func TestTheVendorFilterIsRead(t *testing.T) {
-	engine := startEmulator(t, fakeDetector{})
+	engine := startEmulator(t)
 	publishOne(t, engine, []Detection{{Class: classPerson, Confidence: 0.9}})
 
 	base := engine.URL()
-	req, err := http.NewRequest(http.MethodGet, base+"/api/rest/v1/events?time=gt:'2030-01-01T00:00:00Z'", nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, base+"/api/rest/v1/events?time=gt:'2030-01-01T00:00:00Z'", nil)
 	if err != nil {
 		t.Fatalf("build the request: %v", err)
 	}
@@ -296,7 +300,7 @@ func TestABagBesideAPersonIsNotAPersonWithABag(t *testing.T) {
 // else in the object's value subtree, so a count in any other field is
 // redacted on ingest and the platform silently loses it.
 func TestTheCountTravelsInTheClassID(t *testing.T) {
-	engine := startEmulator(t, fakeDetector{})
+	engine := startEmulator(t)
 	publishOne(t, engine, []Detection{
 		{Class: classPerson, Confidence: 0.9},
 		{Class: classPerson, Confidence: 0.8},
@@ -324,12 +328,12 @@ func TestTheCountTravelsInTheClassID(t *testing.T) {
 // of it, and the picture has to stop being REPORTED at once, not after the
 // source is replayed.
 func TestTheControlsTakeEffectImmediately(t *testing.T) {
-	engine := startEmulator(t, fakeDetector{})
+	engine := startEmulator(t)
 	base := engine.URL()
 
 	post := func(path string) map[string]any {
 		t.Helper()
-		req, err := http.NewRequest(http.MethodPost, base+path, nil)
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, base+path, nil)
 		if err != nil {
 			t.Fatalf("build the request: %v", err)
 		}
@@ -378,10 +382,10 @@ func TestTheControlsTakeEffectImmediately(t *testing.T) {
 // over a scene with people in it, and a frame rate of a thousand asks the GPU
 // for more than it can do. Both are refused by name.
 func TestAFrameRateOutsideTheRangeIsRefused(t *testing.T) {
-	engine := startEmulator(t, fakeDetector{})
+	engine := startEmulator(t)
 	base := engine.URL()
 	for _, value := range []string{"0", "600", "-1"} {
-		req, err := http.NewRequest(http.MethodPost, base+controlPrefix+"/cameras/entrance/fps?value="+value, nil)
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, base+controlPrefix+"/cameras/entrance/fps?value="+value, nil)
 		if err != nil {
 			t.Fatalf("build the request: %v", err)
 		}
@@ -420,7 +424,7 @@ func TestTheSameFramesProduceTheSameEvents(t *testing.T) {
 	}
 
 	publish := func() []string {
-		engine := startEmulator(t, fakeDetector{})
+		engine := startEmulator(t)
 		cam, ok := engine.camera("entrance")
 		if !ok {
 			t.Fatal("the camera was not created")

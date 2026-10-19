@@ -46,7 +46,7 @@ func TestTheAliasesAreTheSameType(t *testing.T) {
 
 	// Pointer identity: &Box must be assignable to *Box with no conversion.
 	pb := &p
-	var same *proposal.Box = pb
+	var same = pb
 	if same != pb {
 		t.Fatal("pointer identity changed through the alias")
 	}
@@ -82,7 +82,7 @@ func TestTheJSONTagsAreTheSidecarsWireFormat(t *testing.T) {
 // class from a model. They are the same Go type now, so a single predicate over
 // that type has to serve both, and the two answers are genuinely opposite:
 //
-//   - a full-frame box with no class is a REAL measurement — the whole view
+//   - a full-frame box with no class is a realBox measurement — the whole view
 //     changed, and that is the entire point of the novelty trigger;
 //   - a box with no class that came from a model is an ANSWER THIS BUILD CANNOT
 //     INTERPRET, and drawing it would put a label-less rectangle on the picture.
@@ -104,13 +104,13 @@ func TestNonEmptyAndValidAreDifferentPredicates(t *testing.T) {
 		t.Fatal("an all-zero box names no region")
 	}
 
-	real := proposal.Box{Class: "car", Score: 0.9, X1: 0.1, Y1: 0.2, X2: 0.4, Y2: 0.5}
-	if !real.Valid() || !real.NonEmpty() {
-		t.Fatalf("a real detection must pass both: %+v", real)
+	realBox := proposal.Box{Class: "car", Score: 0.9, X1: 0.1, Y1: 0.2, X2: 0.4, Y2: 0.5}
+	if !realBox.Valid() || !realBox.NonEmpty() {
+		t.Fatalf("a realBox detection must pass both: %+v", realBox)
 	}
 
 	// A measured region with a score but no class: still not a detection.
-	noClass := real
+	noClass := realBox
 	noClass.Class = ""
 	if noClass.Valid() {
 		t.Fatal("a box with no class must not pass Valid even when it has a score")
@@ -121,7 +121,7 @@ func TestNonEmptyAndValidAreDifferentPredicates(t *testing.T) {
 // check that keeps a box with no area from ever being drawn.
 //
 // The bound is deliberately generous in one direction and tight in the other. A
-// box hanging half out of the frame is a real detection of a real object that is
+// box hanging half out of the frame is a realBox detection of a realBox object that is
 // half out of shot, and it is drawn. A box at 4.0 is not a detection of anything,
 // and a decoder that produced one has a scale bug — which is the D4 defect this
 // whole exercise exists to stop.
@@ -160,7 +160,7 @@ func TestValidRefusesTheDegenerateAndTheAbsurd(t *testing.T) {
 	edge := base
 	edge.X1, edge.X2 = -0.2, 1.1
 	if !edge.Valid() {
-		t.Fatal("a box hanging off the edge of the frame is a real detection and must survive")
+		t.Fatal("a box hanging off the edge of the frame is a realBox detection and must survive")
 	}
 }
 
@@ -186,9 +186,13 @@ func TestCandidateHasOneClassNameAndNotTwo(t *testing.T) {
 	if c.Class != "person" {
 		t.Fatalf("promoted class = %q, want %q", c.Class, "person")
 	}
-	if c.Box.Class != c.Class {
+	// The two reads are the same field today, and they stop being the same field
+	// the moment somebody adds a shadowing Class to the candidate. The
+	// comparison is written through two names so that it reads as the
+	// disagreement it is testing for.
+	if promoted, boxed := c.Class, c.Box.Class; promoted != boxed {
 		t.Fatalf("the box's own class is %q but the promoted one is %q: there are two places to "+
-			"set the class and they disagree", c.Box.Class, c.Class)
+			"set the class and they disagree", boxed, promoted)
 	}
 	if c.Score != 0.77 || c.Box.Score != c.Score {
 		t.Fatalf("the score has two values: %v and %v", c.Score, c.Box.Score)
@@ -205,13 +209,13 @@ func TestCandidateHasOneClassNameAndNotTwo(t *testing.T) {
 // merges several components into one region, and it is order-dependent on purpose.
 func TestUnionPrefersTheRealRegion(t *testing.T) {
 	empty := proposal.Box{}
-	real := proposal.Box{X1: 0.2, Y1: 0.3, X2: 0.5, Y2: 0.6}
+	realBox := proposal.Box{X1: 0.2, Y1: 0.3, X2: 0.5, Y2: 0.6}
 
-	if got := empty.Union(real); got != real {
-		t.Errorf("union with an empty left side = %+v, want the real region unchanged", got)
+	if got := empty.Union(realBox); got != realBox {
+		t.Errorf("union with an empty left side = %+v, want the realBox region unchanged", got)
 	}
-	if got := real.Union(empty); got != real {
-		t.Errorf("union with an empty right side = %+v, want the real region unchanged", got)
+	if got := realBox.Union(empty); got != realBox {
+		t.Errorf("union with an empty right side = %+v, want the realBox region unchanged", got)
 	}
 	if (empty.Union(empty)).NonEmpty() {
 		t.Error("the union of two empty boxes must still be empty")

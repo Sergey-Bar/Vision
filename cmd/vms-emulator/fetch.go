@@ -2,6 +2,7 @@ package main
 
 import (
 	"archive/zip"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -112,7 +113,7 @@ func runFetchModel(args []string) error {
 		}
 	}
 	fmt.Printf("fetching %s\n  from %s\n  sha256 %s\n", spec.Name, spec.URL, spec.SHA256)
-	if err := download(spec.URL, target); err != nil {
+	if err := download(context.Background(), spec.URL, target); err != nil {
 		return err
 	}
 	digest, size, err := digestFile(target)
@@ -174,7 +175,7 @@ func runFetchRuntime(args []string) error {
 	}
 	archive := filepath.Join(*out, "onnxruntime.zip")
 	fmt.Printf("fetching the ONNX Runtime\n  from %s\n", *url)
-	if err := download(*url, archive); err != nil {
+	if err := download(context.Background(), *url, archive); err != nil {
 		return err
 	}
 	digest, size, err := digestFile(archive)
@@ -198,9 +199,9 @@ func runFetchRuntime(args []string) error {
 }
 
 // download writes a URL to a path.
-func download(url, target string) error {
+func download(ctx context.Context, url, target string) error {
 	client := &http.Client{Timeout: 20 * time.Minute}
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return fmt.Errorf("build the request for %s: %w", url, err)
 	}
@@ -280,12 +281,29 @@ func unzip(archive, dir string) error {
 			_ = src.Close()
 			return fmt.Errorf("create %s: %w", target, err)
 		}
-		_, copyErr := io.Copy(out, src)
+		// The copy is BOUNDED. An archive that expands to more than this is
+		// not a runtime, it is a bomb, and the runtime is a thing the operator
+		// asked to run -- not a thing that may fill the disk.
+		written, copyErr := io.CopyN(out, src, maxArchiveEntryBytes)
+		if copyErr != nil && !errors.Is(copyErr, io.EOF) {
+			_ = src.Close()
+			_ = out.Close()
+			return fmt.Errorf("write %s: %w", target, copyErr)
+		}
 		_ = src.Close()
 		_ = out.Close()
-		if copyErr != nil {
-			return fmt.Errorf("write %s: %w", target, copyErr)
+		if written >= maxArchiveEntryBytes {
+			return fmt.Errorf("the archive entry %q expands past the %d-byte limit, and it was not written",
+				entry.Name, maxArchiveEntryBytes)
 		}
 	}
 	return nil
 }
+
+// maxArchiveEntryBytes bounds one extracted entry.
+//
+// The ONNX Runtime bundle is a couple of gigabytes, so the limit is well above
+// it; it is here to stop a zip that expands without bound from filling the
+// disk, and a number that is comfortably above the real thing is the point --
+// a limit that broke the real thing would be a limit that got removed.
+const maxArchiveEntryBytes = 8 << 30

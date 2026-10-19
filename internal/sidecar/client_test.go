@@ -49,14 +49,17 @@ func newClient(t *testing.T, h func(http.ResponseWriter, *http.Request)) (*Clien
 	return c, srv, f
 }
 
-func rgb(w, h int) []byte { return make([]byte, w*h*3) }
+// rgb is a frame of the given size. The width is always two: a sidecar test
+// does not need a frame of every shape, and a parameter that never varies is a
+// parameter a reader has to check.
+func rgb() []byte { return make([]byte, 2*2*3) }
 
 func TestDetectEmptyAnswerIsNoObjects(t *testing.T) {
 	c, _, f := newClient(t, nil)
 	// The default handler echoes an incrementing counter; seed it so the
 	// answer's seq matches the request's.
 	f.seq.Store(6)
-	r := c.Detect(context.Background(), 7, rgb(2, 2), 2, 2)
+	r := c.Detect(context.Background(), 7, rgb(), 2, 2)
 	if r.State != StateNoObjects {
 		t.Fatalf("state = %q, want %q", r.State, StateNoObjects)
 	}
@@ -70,7 +73,7 @@ func TestDetectWithBoxesIsAnswered(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"seq":1,"boxes":[{"cls":"bird","score":0.87,"x1":0.1,"y1":0.2,"x2":0.3,"y2":0.4}],"width":640,"height":384,"model":"yolov4n","infer_ms":12.5,"telemetry":{"layout":"nchw","decoder_family":"fused","coord_space":"pixel","has_objectness":false,"fields":84,"classes":80,"candidates":1200,"pre_nms":9,"post_nms_class":4,"post_nms":4,"dropped_degenerate":0,"dropped_tiny":0,"nms_class_iou":0.45,"nms_global_iou":0.75,"median_box_area":0.004,"median_object_px":24.5,"identical_geometry":0,"scales":1,"note":""}}`))
 	})
-	r := c.Detect(context.Background(), 1, rgb(2, 2), 2, 2)
+	r := c.Detect(context.Background(), 1, rgb(), 2, 2)
 	if r.State != StateAnswered {
 		t.Fatalf("state = %q, want %q (%s)", r.State, StateAnswered, r.Reason)
 	}
@@ -124,7 +127,7 @@ func TestMalformedAnswerIsNeverNoObjects(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			c, _, _ := newClient(t, tc.handler)
-			r := c.Detect(context.Background(), 1, rgb(2, 2), 2, 2)
+			r := c.Detect(context.Background(), 1, rgb(), 2, 2)
 			if r.State == StateNoObjects {
 				t.Fatalf("a broken answer was reported as no_objects: %s", r.Reason)
 			}
@@ -145,7 +148,7 @@ func TestTimeoutIsDegradedNotEmpty(t *testing.T) {
 	c, _, _ := newClient(t, func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(2 * time.Second)
 	})
-	r := c.Detect(context.Background(), 1, rgb(2, 2), 2, 2)
+	r := c.Detect(context.Background(), 1, rgb(), 2, 2)
 	if r.State != StateDegraded {
 		t.Fatalf("a slow answer produced %q, want %q", r.State, StateDegraded)
 	}
@@ -157,7 +160,7 @@ func TestTimeoutIsDegradedNotEmpty(t *testing.T) {
 func TestSidecarGoneIsDegraded(t *testing.T) {
 	c, srv, _ := newClient(t, nil)
 	srv.Close()
-	r := c.Detect(context.Background(), 1, rgb(2, 2), 2, 2)
+	r := c.Detect(context.Background(), 1, rgb(), 2, 2)
 	if r.State != StateDegraded {
 		t.Fatalf("a dead sidecar produced %q", r.State)
 	}
@@ -321,7 +324,7 @@ func TestTheWireFormatIsABareOctetStream(t *testing.T) {
 func TestEveryAbsenceCarriesAReason(t *testing.T) {
 	c, srv, _ := newClient(t, nil)
 	srv.Close()
-	r := c.Detect(context.Background(), 1, rgb(2, 2), 2, 2)
+	r := c.Detect(context.Background(), 1, rgb(), 2, 2)
 	if r.Reason == "" {
 		t.Fatal("a dead sidecar produced no reason")
 	}

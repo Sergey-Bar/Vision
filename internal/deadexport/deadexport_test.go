@@ -250,6 +250,8 @@ var (
 
 		"internal/checkpoint.SealOnce": {Symbol: "internal/checkpoint.SealOnce", Why: "UNWIRED. The single-interval seal entry point nothing calls. Its range sibling SealRange was one of the nine dead exports that started this gate; this is the same cluster. Close it by having the scheduler call it, or delete it"},
 
+		"internal/milestone.FetchSnapshot": {Symbol: "internal/milestone.FetchSnapshot", Why: "PART OF AN INTERFACE. The media surface is a three-method interface -- probe, clip, snapshot -- and a transport that implements two of the three is not a transport that implements the interface. The evidence schema allows a snapshot kind and the worker's policy may ask for one; today it fetches clips. The exemption is the interface, not the method: a caller with the interface can reach it, and the gate matches a method by a bare name and cannot see an interface"},
+
 		// The detector, the class taxonomy, the sidecar wire and the box geometry
 		// moved into this module from the POC module. The POC module is a SEPARATE
 		// Go module: it cannot import `internal/`, so it reaches these through the

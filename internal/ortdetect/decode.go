@@ -450,7 +450,7 @@ func Decode(t Tensor, g Geometry, classCount int, cfg DecodeConfig) DecodeResult
 
 	obj := DecideObjectness(fields, classCount)
 	if obj == ObjectnessUnknown {
-		want := ""
+		var want string
 		if classCount > 0 {
 			want = sprintf("this model declares %d class names, so a record must have %v fields", classCount,
 				[]int{4 + classCount, 5 + classCount})

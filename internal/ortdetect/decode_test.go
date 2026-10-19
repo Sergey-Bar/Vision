@@ -261,7 +261,7 @@ func TestTheTensorIsWrittenInTheModelsOwnMemoryOrder(t *testing.T) {
 	//
 	// The padding is found from the GEOMETRY rather than assumed: a 3x2 frame in a
 	// 3x3 canvas pads the bottom row only, so checking row 0 would be checking a
-	// row of real pixels.
+	// row of realClass pixels.
 	_, geom := mustLetterboxLayout(t, rgb, w, h, size, size, "nchw")
 	for y := 0; y < size; y++ {
 		if y >= geom.PadY && y < geom.PadY+geom.ContentH {
@@ -746,7 +746,7 @@ func TestClampHappensBeforeTheGate(t *testing.T) {
 // unreadable.
 func TestADegenerateBoxIsNeverEmitted(t *testing.T) {
 	// Three live records in a field of dead ones: zero width, zero height, and a
-	// real box. The dead records matter — a zero-FILLED background would be
+	// realClass box. The dead records matter — a zero-FILLED background would be
 	// sigmoided into a score of 0.5 by the class-block check (which has to look at
 	// the whole block, because a single-channel check misses a logit tensor whose
 	// first class channel is near zero), and then 81 phantom candidates would
@@ -872,7 +872,7 @@ func TestTheEmitFloorIsLowAndTheApprovalBarIsNotHere(t *testing.T) {
 	// A weak box must be EMITTED and left for the run to refuse. That band is the
 	// ghost band, and it is where the two-stage recovery later reads from.
 	//
-	// The background is real dead records rather than zeros, because the
+	// The background is realClass dead records rather than zeros, because the
 	// class-block sigmoid turns a zero into a score of 0.5 — which is above the
 	// floor and would make every record a candidate.
 	weak := rec{cx: 0.5, cy: 0.5, w: 0.06, h: 0.06, class: 2, logit: -1, pixels: 1}
@@ -1102,7 +1102,7 @@ func TestTheClassBlockIsCheckedWholeNotOneChannel(t *testing.T) {
 	// Channel 4 is the first class channel. Force it to a value inside [0,1] so a
 	// single-channel check would call the whole block probabilities.
 	for r := 0; r < int(tn.Dims[1]); r++ {
-		tn.Data[int(r)*84+4] = 0
+		tn.Data[r*84+4] = 0
 	}
 	if !isProbabilityColumn(tn.Data, 4, int(tn.Dims[1]), 84) {
 		t.Fatal("the fixture no longer fools a single-channel check; it has stopped testing the bug")
@@ -1128,7 +1128,7 @@ func TestTheClassBlockIsCheckedWholeNotOneChannel(t *testing.T) {
 	// is not sigmoid(-1): once the block is sigmoided, the forced channel-4 value
 	// of 0.0 becomes sigmoid(0) = 0.5 and outranks the winning car channel, so the
 	// box comes back as `person` at 0.5. That is correct behaviour over a
-	// deliberately odd tensor — a real model does not publish 0.0 for an ambiguous
+	// deliberately odd tensor — a realClass model does not publish 0.0 for an ambiguous
 	// class next to a logit for the rest — and what the assertion is here to catch
 	// is a score of -1 or 0, which is what a missed sigmoid produces.
 	if res.Boxes[0].Score <= 0 || res.Boxes[0].Score >= 1 {
@@ -1193,15 +1193,15 @@ func TestTheFieldsFirstGatherIsStridedNotContiguous(t *testing.T) {
 
 	// And with the field count the shape actually declares, the gather must be
 	// exact. Build [1, F, N] where F is a valid record width.
-	const real = 84
+	const realClass = 84
 	const recs = 6
-	big := make([]float32, real*recs)
-	for f := 0; f < real; f++ {
+	big := make([]float32, realClass*recs)
+	for f := 0; f < realClass; f++ {
 		for r := 0; r < recs; r++ {
 			big[f*recs+r] = float32(f*100 + r)
 		}
 	}
-	tn2 := Tensor{Name: "o", Dims: []int64{1, real, recs}, Data: big}
+	tn2 := Tensor{Name: "o", Dims: []int64{1, realClass, recs}, Data: big}
 	data, count, gotFields, layout, err := records(tn2, NumClasses)
 	if err != nil {
 		t.Fatal(err)
@@ -1209,15 +1209,15 @@ func TestTheFieldsFirstGatherIsStridedNotContiguous(t *testing.T) {
 	if layout != LayoutFieldsFirst {
 		t.Fatalf("layout = %q, want fields-first", layout)
 	}
-	if gotFields != real || count != recs {
-		t.Fatalf("count=%d fields=%d, want %d and %d", count, gotFields, recs, real)
+	if gotFields != realClass || count != recs {
+		t.Fatalf("count=%d fields=%d, want %d and %d", count, gotFields, recs, realClass)
 	}
 	for r := 0; r < recs; r++ {
-		for f := 0; f < real; f++ {
+		for f := 0; f < realClass; f++ {
 			want := float32(f*100 + r)
-			if data[r*real+f] != want {
+			if data[r*realClass+f] != want {
 				t.Fatalf("record %d field %d = %v, want %v: the gather is reading the wrong "+
-					"elements, so every field is another record's", r, f, data[r*real+f], want)
+					"elements, so every field is another record's", r, f, data[r*realClass+f], want)
 			}
 		}
 	}

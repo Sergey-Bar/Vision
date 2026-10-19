@@ -50,7 +50,6 @@ import (
 	"fmt"
 	"math"
 	"sort"
-	"time"
 
 	"github.com/Sergey-Bar/vision/internal/proposal"
 	"github.com/Sergey-Bar/vision/internal/sidecar"
@@ -300,13 +299,17 @@ func (l *Latencies) Percentile(p float64) (float64, bool) {
 	return s[rank-1], true
 }
 
-// P50, P95 and P99, each reporting whether it could be computed.
+// P50 is the median measured frame, and it reports whether it could be computed.
 //
 // The bool is `ok=false` over an empty window and it is load-bearing: a percentile
 // with no samples is not zero, and a report that printed 0 ms because nothing had
 // been measured would claim the detector was infinitely fast.
 func (l *Latencies) P50() (float64, bool) { return l.Percentile(50) }
+
+// P95 is the 95th percentile measured frame.
 func (l *Latencies) P95() (float64, bool) { return l.Percentile(95) }
+
+// P99 is the 99th percentile measured frame.
 func (l *Latencies) P99() (float64, bool) { return l.Percentile(99) }
 
 // Max is the slowest frame in the window.
@@ -405,8 +408,6 @@ type Tensor struct {
 // nowUTC is here rather than imported so every timestamp this package writes has
 // one spelling. Storage is UTC everywhere; a local-time timestamp in a table the
 // report reads is a bug that only appears in November.
-func nowUTC() time.Time { return time.Now().UTC() }
-
 // unusedGuards keep the compiler honest about helpers that exist for symmetry
 // with the Python reference and are not yet called by the fused path. They are
 // referenced here rather than deleted because each names a refusal a caller will

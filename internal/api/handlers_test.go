@@ -61,7 +61,7 @@ func call(t *testing.T, s *api.Server, method, path string, body any) *httptest.
 // Login is removed, so there is no session to mint: the request is sent as-is and
 // the server answers under open access. The username and password arguments are
 // kept so existing call sites do not have to change; they are no longer consulted.
-func callAs(t *testing.T, s *api.Server, username, password string, method, path string, body any) *httptest.ResponseRecorder {
+func callAs(t *testing.T, s *api.Server, method, path string, body any) *httptest.ResponseRecorder {
 	t.Helper()
 	var rdr *bytes.Reader
 	if body != nil {
@@ -861,14 +861,14 @@ func TestHoldingACapabilityIsNotBeingAssignedToThePlace(t *testing.T) {
 		t.Run("an incident at an unassigned site is refused on "+tc.name, func(t *testing.T) {
 			theirs := seedIncident(t, tenant, siteB)
 
-			rec := callAs(t, s, "op-a", "operator-a-passphrase", tc.method, tc.path(theirs), tc.body)
+			rec := callAs(t, s, tc.method, tc.path(theirs), tc.body)
 			if rec.Code != http.StatusNotFound {
 				t.Fatalf("an incident at unassigned site %q returned %d, want 404: %s",
 					siteB, rec.Code, rec.Body)
 			}
 			// The body must be indistinguishable from a nonexistent id, or the 404
 			// still leaks that this one exists.
-			missing := callAs(t, s, "op-a", "operator-a-passphrase", tc.method, tc.path("no-such-incident"), tc.body)
+			missing := callAs(t, s, tc.method, tc.path("no-such-incident"), tc.body)
 			if rec.Code != missing.Code {
 				t.Errorf("a real incident at another site answered %d and a nonexistent one "+
 					"answered %d; the difference is an existence oracle", rec.Code, missing.Code)
@@ -909,7 +909,7 @@ func TestHoldingACapabilityIsNotBeingAssignedToThePlace(t *testing.T) {
 				map[string]any{"outcome": "true_positive", "reasonCode": "reviewed", "agreement": "agreed"}},
 			{"the console page", http.MethodGet, func(id string) string { return "/incidents/" + id }, nil},
 		} {
-			rec := callAs(t, s, "op-a", "operator-a-passphrase", tc.method, tc.path("no-such-incident"), tc.body)
+			rec := callAs(t, s, tc.method, tc.path("no-such-incident"), tc.body)
 			if rec.Code != http.StatusNotFound {
 				t.Errorf("%s for an id that resolves to no site returned %d, want 404: %s",
 					tc.name, rec.Code, rec.Body)
@@ -932,7 +932,7 @@ func TestHoldingACapabilityIsNotBeingAssignedToThePlace(t *testing.T) {
 			{"the evidence list", http.MethodGet, func(id string) string { return "/v1/incidents/" + id + "/evidence" }, nil},
 			{"the console page", http.MethodGet, func(id string) string { return "/incidents/" + id }, nil},
 		} {
-			rec := callAs(t, s, "op-a", "operator-a-passphrase", tc.method, tc.path(mine), tc.body)
+			rec := callAs(t, s, tc.method, tc.path(mine), tc.body)
 			if rec.Code != http.StatusOK {
 				t.Errorf("%s at the principal's own site returned %d, want 200: %s",
 					tc.name, rec.Code, rec.Body)

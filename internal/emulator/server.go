@@ -7,8 +7,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -52,8 +50,8 @@ type server struct {
 }
 
 // newServer builds the surface.
-func newServer(e *Engine) (*server, error) {
-	return &server{engine: e}, nil
+func newServer(e *Engine) *server {
+	return &server{engine: e}
 }
 
 // start binds the listener and serves.
@@ -77,9 +75,16 @@ func (s *server) start(ctx context.Context) error {
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 	}
+	// The shutdown goroutine waits for the context and then stops the server.
+	//
+	// The shutdown's own context is the engine's context WITHOUT its
+	// cancellation, plus a deadline: the engine's context is already done by
+	// then, and a shutdown that inherits a cancelled parent stops before it has
+	// closed anything. The deadline is what says "stop waiting and close the
+	// connections".
 	go func() {
 		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 		defer cancel()
 		_ = s.srv.Shutdown(shutdownCtx)
 	}()
@@ -165,9 +170,15 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST "+APIPrefix+"/rules", s.handleWrite)
 
 	// The media surface.
-	mux.HandleFunc("/media/clip", s.handleMediaClip)
-	mux.HandleFunc("/media/snapshot", s.handleMediaSnapshot)
-	mux.HandleFunc("/media/probe", s.handleMediaProbe)
+	//
+	// These are the VENDOR's paths -- the ones the platform's adapter asks --
+	// and the adapter's paths are declared in one place in the adapter's own
+	// package. The emulator serving the same paths is what makes the instant
+	// replay real, and a test asks the adapter for a clip from the emulator, so
+	// a disagreement is a failing test rather than a 404 in production.
+	mux.HandleFunc(APIPrefix+"/media/probe", s.handleMediaProbe)
+	mux.HandleFunc(APIPrefix+"/media/clip", s.handleMediaClip)
+	mux.HandleFunc(APIPrefix+"/media/snapshot", s.handleMediaSnapshot)
 
 	// The control surface.
 	mux.HandleFunc(controlPrefix+"/cameras", s.handleControlCameras)
@@ -312,7 +323,7 @@ func (s *server) handleEventByID(w http.ResponseWriter, r *http.Request) {
 const placeholderID = "{id}"
 
 // handleEventTypes serves the analytics types the VMS publishes.
-func (s *server) handleEventTypes(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleEventTypes(w http.ResponseWriter, _ *http.Request) {
 	types := []map[string]any{
 		{"id": "emu-object-detected", "name": "Object Detected", "generatorType": "MIPDevice"},
 		{"id": "emu-person-count", "name": "Person Count", "generatorType": "MIPDevice"},
@@ -325,7 +336,7 @@ func (s *server) handleEventTypes(w http.ResponseWriter, r *http.Request) {
 // "Servlets" is the vendor's name for the devices it serves. The console's
 // camera list comes from here rather than from a mock, which is the point: the
 // list of cameras is the VMS's fact.
-func (s *server) handleServlets(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleServlets(w http.ResponseWriter, _ *http.Request) {
 	s.engine.mu.RLock()
 	ids := make([]string, 0, len(s.engine.cameras))
 	for id := range s.engine.cameras {
@@ -393,25 +404,10 @@ func (s *server) handleCameraByID(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleTime serves the vendor's clock.
-func (s *server) handleTime(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleTime(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"dateTime": s.engine.opts.Now().UTC().Format("2006-01-02T15:04:05.000Z"),
 	})
-}
-
-// handleEmptyArray answers a route the VMS has and nothing in it.
-//
-// An empty `array` is a CONTRADICTION for a route the vendor declares as an
-// array, and it is the honest answer for a device that has the route and
-// nothing to put in it.
-//
-// The routes below are NOT empty, though, because the emulator really does have
-// these things: it IS a recording server, it DOES have analytics rules, and it
-// DOES raise alarms. A VMS that answered an empty list for its own recording
-// servers would be claiming it holds no recordings while serving clips out of
-// them.
-func (s *server) handleEmptyArray(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"array": []any{}, "eventCount": 0})
 }
 
 // handleRecordingServers serves the recording servers.
@@ -419,7 +415,7 @@ func (s *server) handleEmptyArray(w http.ResponseWriter, r *http.Request) {
 // The emulator is one. It holds the source files and it cuts clips out of them,
 // and a device that served an empty list here would be denying the thing it
 // does every time the platform asks for a clip.
-func (s *server) handleRecordingServers(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleRecordingServers(w http.ResponseWriter, _ *http.Request) {
 	items := []map[string]any{{
 		"Id":          "emulator-recording-server",
 		"Name":        "vms-emulator",
@@ -437,7 +433,7 @@ func (s *server) handleRecordingServers(w http.ResponseWriter, r *http.Request) 
 // The platform never reads this route to decide what an incident is — its own
 // bundle does that — but a VMS with no analytics rules is a VMS whose analytics
 // come from nowhere, and the route is where a reader would look.
-func (s *server) handleRules(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleRules(w http.ResponseWriter, _ *http.Request) {
 	items := make([]map[string]any, 0, len(emulatorRuleNames))
 	for _, name := range emulatorRuleNames {
 		items = append(items, map[string]any{
@@ -452,7 +448,7 @@ func (s *server) handleRules(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleAlarmDefinitions serves the alarm types the VMS can raise.
-func (s *server) handleAlarmDefinitions(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleAlarmDefinitions(w http.ResponseWriter, _ *http.Request) {
 	items := make([]map[string]any, 0, len(alarmClassNames))
 	for _, name := range alarmClassNames {
 		items = append(items, map[string]any{
@@ -472,7 +468,7 @@ func (s *server) handleAlarmDefinitions(w http.ResponseWriter, r *http.Request) 
 // attention happened: a person with a bag, or a vehicle. The platform turns
 // those into incidents with its own rules; this list is the vendor's side of
 // the same fact.
-func (s *server) handleAlarms(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleAlarms(w http.ResponseWriter, _ *http.Request) {
 	events := s.engine.eventsSince(time.Time{})
 	items := make([]map[string]any, 0, len(events))
 	for _, ev := range events {
@@ -497,7 +493,7 @@ func (s *server) handleAlarms(w http.ResponseWriter, r *http.Request) {
 //
 // One group, holding every camera, because that is how the emulator is
 // arranged: a site is a set of cameras and the emulator plays them all.
-func (s *server) handleResourceGroups(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleResourceGroups(w http.ResponseWriter, _ *http.Request) {
 	s.engine.mu.RLock()
 	ids := make([]string, 0, len(s.engine.cameras))
 	for id := range s.engine.cameras {
@@ -525,7 +521,7 @@ func (s *server) handleResourceGroups(w http.ResponseWriter, r *http.Request) {
 // no user model: it is a device on a loopback socket with a bearer credential,
 // and the credential is the whole of its access control. A group that claimed
 // to restrict anything would be a fiction.
-func (s *server) handleUserGroups(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleUserGroups(w http.ResponseWriter, _ *http.Request) {
 	items := []map[string]any{{
 		"Id":      "emulator-administrators",
 		"Name":    "Administrators",
@@ -582,7 +578,7 @@ func (s *server) handleBookmarks(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleControlCameras lists the cameras for the console.
-func (s *server) handleControlCameras(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleControlCameras(w http.ResponseWriter, _ *http.Request) {
 	s.engine.mu.RLock()
 	ids := make([]string, 0, len(s.engine.cameras))
 	for id := range s.engine.cameras {
@@ -673,7 +669,7 @@ func (s *server) handleControlCamera(w http.ResponseWriter, r *http.Request) {
 // The state comes back because a control that returns nothing is a control an
 // operator has to check by looking elsewhere, and the answer to "did that
 // work" should be the thing the control did.
-func (s *server) controlCamera(w http.ResponseWriter, r *http.Request, id string, apply func(*camera)) {
+func (s *server) controlCamera(w http.ResponseWriter, _ *http.Request, id string, apply func(*camera)) {
 	cam, ok := s.engine.camera(id)
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "no such camera: " + id})
@@ -741,7 +737,7 @@ func (s *server) serveFrame(w http.ResponseWriter, id string) {
 
 // handleControlState serves the engine's own state: the cameras, the detector's
 // identity, and what was measured.
-func (s *server) handleControlState(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleControlState(w http.ResponseWriter, _ *http.Request) {
 	body := map[string]any{
 		"vendor": s.engine.opts.Vendor,
 		"now":    s.engine.opts.Now().UTC().Format(time.RFC3339Nano),
@@ -841,11 +837,3 @@ func sortStrings(in []string) {
 
 // clipDirFor is where the media surface writes.
 func (s *server) clipDirFor() string { return s.engine.clip }
-
-// ensureDir makes a directory exist.
-func ensureDir(path string) error {
-	return os.MkdirAll(path, 0o750)
-}
-
-// pathJoin is filepath.Join, named so the media handlers read as one line.
-func pathJoin(parts ...string) string { return filepath.Join(parts...) }

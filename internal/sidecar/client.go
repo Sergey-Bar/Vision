@@ -154,6 +154,8 @@ func New(baseURL string, deadline time.Duration) (*Client, error) {
 	}, nil
 }
 
+// ProbeResult is what the sidecar's health probe answered.
+//
 // Probe checks that the sidecar is up and that its model is loaded. Preflight
 // calls this before the run, because a model that fails to load is a crash in
 // minute one.
@@ -165,6 +167,7 @@ type ProbeResult struct {
 	Detail    string
 }
 
+// Probe asks the sidecar whether it is up and whether its model is loaded.
 func (c *Client) Probe(ctx context.Context) (ProbeResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.Deadline)
 	defer cancel()
@@ -176,7 +179,7 @@ func (c *Client) Probe(ctx context.Context) (ProbeResult, error) {
 	if err != nil {
 		return ProbeResult{Detail: err.Error()}, fmt.Errorf("ai: the sidecar at %s is not answering: %w", c.BaseURL, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
 	if resp.StatusCode != http.StatusOK {
 		return ProbeResult{Detail: string(body)}, fmt.Errorf("ai: the sidecar answered %s on /healthz: %s", resp.Status, firstLine(string(body)))
@@ -238,7 +241,7 @@ func (c *Client) Detect(ctx context.Context, seq uint64, rgb []byte, w, h int) R
 		return Result{State: StateDegraded, Seq: seq, Latency: lat,
 			Reason: fmt.Sprintf("frame %d could not be delivered to the sidecar: %v", seq, err)}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if readErr != nil {
 		return Result{State: StateDegraded, Seq: seq, Latency: lat,

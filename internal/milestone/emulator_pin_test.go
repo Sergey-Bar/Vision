@@ -3,6 +3,7 @@ package milestone_test
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -85,7 +86,7 @@ func TestEveryRouteTheAdapterReadsIsAnsweredByTheEmulator(t *testing.T) {
 			continue
 		}
 		t.Run(route.Path, func(t *testing.T) {
-			req, err := http.NewRequest(http.MethodGet, base+route.Path, nil)
+			req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, base+route.Path, nil)
 			if err != nil {
 				t.Fatalf("build the request: %v", err)
 			}
@@ -100,5 +101,88 @@ func TestEveryRouteTheAdapterReadsIsAnsweredByTheEmulator(t *testing.T) {
 					"would be a quiet site rather than an error", route.Path)
 			}
 		})
+	}
+}
+
+// TestTheEmulatorAnswersTheMediaSurfaceTheAdapterAsks is the pin for the
+// instant replay.
+//
+// The adapter asks the vendor's media surface for the bytes over a window, and
+// the emulator is the vendor. If the two disagree about the PATH, the fetch
+// 404s in production and the incident's evidence is a bookmark and nothing
+// else -- which is the shape of a working system that records where something
+// happened and never what happened.
+//
+// The test asks through the ADAPTER, not with a raw HTTP call, so it checks
+// the path AND the shape: a probe that answers 200 with a body the adapter
+// cannot read is as broken as one that answers 404.
+func TestTheEmulatorAnswersTheMediaSurfaceTheAdapterAsks(t *testing.T) {
+	engine, err := emulator.New(emulator.Options{
+		Listen: "127.0.0.1:0",
+		Sources: []emulator.Source{{
+			ID: "entrance", Name: "Entrance", Kind: emulator.KindFile, Location: "test.mp4", FPS: 1,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("build the emulator: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = engine.Run(ctx)
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for engine.URL() == "" && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if engine.URL() == "" {
+		t.Fatal("the emulator never reported its URL")
+	}
+
+	transport, err := milestone.NewHTTPTransport(engine.URL(), "pin-token", 10*time.Second)
+	if err != nil {
+		t.Fatalf("build the transport: %v", err)
+	}
+	media, err := milestone.MediaFor(transport)
+	if err != nil {
+		t.Fatalf("the transport has no media surface: %v", err)
+	}
+
+	now := time.Now().UTC()
+	probe, err := media.ProbeRange(ctx, "entrance", now.Add(-time.Minute), now)
+	if err != nil {
+		t.Fatalf("the emulator did not answer the adapter's probe: %v", err)
+	}
+	if probe.CameraRef != "entrance" {
+		t.Errorf("the probe answered about %q, want the camera that was asked about", probe.CameraRef)
+	}
+	if len(probe.Available) == 0 {
+		t.Error("the probe answered that the camera holds nothing, and a camera that is playing " +
+			"holds everything it has played")
+	}
+}
+
+// TestTheMediaSurfaceLivesUnderTheAPIPrefix is the media surface's place.
+//
+// It belongs to the same device as the events: a recording fetched from a
+// different host than the events that describe it is a recording from somebody
+// else's site, and the two would be joined by an accident of the code rather
+// than by the configuration.
+func TestTheMediaSurfaceLivesUnderTheAPIPrefix(t *testing.T) {
+	for _, path := range []string{
+		milestone.MediaProbePath,
+		milestone.MediaClipPath,
+		milestone.MediaSnapshotPath,
+	} {
+		if !strings.HasPrefix(path, milestone.APIPrefix+"/") {
+			t.Errorf("the media path %q is not under the API prefix %q. A recording "+
+				"fetched from a different host than the events that describe it is a "+
+				"recording from somebody else's site", path, milestone.APIPrefix)
+		}
 	}
 }

@@ -31,6 +31,7 @@
 package ortdetect
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -165,7 +166,7 @@ func checkCUDA(deviceID int, list deviceLister) (DeviceCheck, error) {
 // asking ORT, because ORT's answer is the log line this whole file exists not to have
 // to trust.
 func visibleCUDADevices() ([]int, error) {
-	out, err := exec.Command(nvidiaSMI, "--query-gpu=index", "--format=csv,noheader").Output()
+	out, err := exec.CommandContext(context.Background(), nvidiaSMI, "--query-gpu=index", "--format=csv,noheader").Output()
 	if err != nil {
 		return nil, err
 	}

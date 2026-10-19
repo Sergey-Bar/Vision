@@ -107,9 +107,7 @@ func TestTheInputTensorIsLaidOutTheWayTheModelDeclares(t *testing.T) {
 			t.Fatalf("layout %q: %v", tc.layout, err)
 		}
 		dims := make([]int64, len(got))
-		for i, d := range got {
-			dims[i] = int64(d)
-		}
+		copy(dims, got)
 		if len(dims) != len(tc.want) {
 			t.Fatalf("layout %q gave %v, want %v", tc.layout, dims, tc.want)
 		}

@@ -180,13 +180,13 @@ func (d Deps) Scoped(actor string) (*dbx.Tenant, error) {
 	return d.Pool.WithSites(d.Tenant, actor, []string{d.SiteID}), nil
 }
 
-// IngestScoped is Scoped for the ingest path, which runs every poll and is the
+// ingestScoped is Scoped for the ingest path, which runs every poll and is the
 // one a missing site id would be least visible in.
 //
 // It takes no context. The context belongs to the statement, not to choosing which
 // connection to use, and threading one here would invite a caller to pass a
 // request's context to something that outlives it.
-func (d Deps) IngestScoped() (*dbx.Tenant, error) {
+func (d Deps) ingestScoped() (*dbx.Tenant, error) {
 	return d.Scoped("ingest")
 }
 
@@ -724,7 +724,7 @@ func (l *Loops) PollOnce(ctx context.Context) {
 	// Refusing the whole pass is the correct shape: a pass that cannot establish
 	// which site it is ingesting for should not ingest anything, and the cursor is
 	// unchanged so the next pass re-reads the same window once the operator fixes it.
-	if _, err := l.Deps.IngestScoped(); err != nil {
+	if _, err := l.Deps.ingestScoped(); err != nil {
 		l.log("the ingest pass was refused before it began",
 			"error", err.Error(),
 			"hint", "set SP_SITE_ID to the site this integration feeds; nothing was polled and nothing was written")

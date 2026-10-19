@@ -329,7 +329,7 @@ func Open(cfg SessionConfig) (*Session, error) {
 		sess: sess, opts: opts,
 		vocabulary: vocabulary,
 		input: InputSpec{
-			Name: inInfo[0].Name, W: int(w), H: int(h), Layout: layout,
+			Name: inInfo[0].Name, W: w, H: h, Layout: layout,
 			Rank: len(inInfo[0].Dimensions), Dynamic: w < 0 || h < 0,
 		},
 		outputs:  outputs,

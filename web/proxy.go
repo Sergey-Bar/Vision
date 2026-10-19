@@ -68,7 +68,7 @@ func proxyTo(prefix, target, rewrite string, decorate func(*http.Request)) http.
 	base, err := url.Parse(target)
 	if err != nil {
 		log.Printf("console: the upstream %q is not a URL, so %s is not proxied: %v", target, prefix, err)
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			http.Error(w, "console: this upstream is not configured", http.StatusBadGateway)
 		})
 	}
@@ -82,7 +82,7 @@ func proxyTo(prefix, target, rewrite string, decorate func(*http.Request)) http.
 				decorate(pr.Out)
 			}
 		},
-		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
 			// The upstream's absence is reported as an upstream's absence, with
 			// its address, because "the page is broken" is the least useful thing
 			// a console can tell an operator.

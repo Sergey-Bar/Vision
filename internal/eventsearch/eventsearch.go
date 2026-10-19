@@ -440,23 +440,23 @@ func parseNaturalLanguage(text string) Query {
 		// Movement activity
 		query.EventType = "motion"
 	}
-	if strings.Contains(text, "door") || strings.Contains(text, "entrance") || strings.Contains(text, "exit") {
-		// Would map to specific zones/cameras in a real implementation
-		// For demo, we'll leave it in free text to be handled by keyword search
-	}
+	// A door, an entrance or an exit would map to specific zones and cameras in
+	// a real implementation. For the demo they are left in the free text, where
+	// the keyword path can still find the events that mention them.
 	if strings.Contains(text, "car") || strings.Contains(text, "vehicle") {
 		// Vehicle detection
 		query.EventType = "motion" // Simplified
 	}
 
 	// Time-based phrases
-	if strings.Contains(text, "last hour") || strings.Contains(text, "past hour") {
+	switch {
+	case strings.Contains(text, "last hour") || strings.Contains(text, "past hour"):
 		query.From = time.Now().Add(-time.Hour)
 		query.To = time.Now()
-	} else if strings.Contains(text, "last 24 hours") || strings.Contains(text, "past day") {
+	case strings.Contains(text, "last 24 hours") || strings.Contains(text, "past day"):
 		query.From = time.Now().Add(-24 * time.Hour)
 		query.To = time.Now()
-	} else if strings.Contains(text, "today") {
+	case strings.Contains(text, "today"):
 		todayStart := time.Now().Truncate(24 * time.Hour)
 		query.From = todayStart
 		query.To = time.Now()

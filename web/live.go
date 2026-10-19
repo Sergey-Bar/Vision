@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	cryptorand "crypto/rand"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,7 +16,6 @@ import (
 	"image/jpeg"
 	"io"
 	"log"
-	"math/rand"
 	"net/http"
 	"os"
 	"os/exec"
@@ -261,7 +262,11 @@ func streamDetector(ctx context.Context, repoRoot string, conn *websocket.Conn, 
 // It renders an animated street scene with a DEMO watermark so operators can
 // tell the difference between simulated demo analytics and a real camera feed.
 func demoStream(ctx context.Context, conn *websocket.Conn) error {
-	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	// The jitter is a DEMO animation, not a secret: the numbers it produces are
+	// thrown away and nothing is derived from them. The generator is crypto/rand
+	// anyway, because a reader of this file cannot tell a jitter from a secret
+	// and a linter cannot either.
+	rng := cryptorand.Reader
 	const width, height = 1280, 720
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
@@ -311,7 +316,7 @@ func demoStream(ctx context.Context, conn *websocket.Conn) error {
 			// windows
 			for wx := 0.0; wx < b.w-0.03; wx += 0.05 {
 				for wy := 0.0; wy < b.h-0.04; wy += 0.06 {
-					if rng.Float64() > 0.7 {
+					if demoFloat(rng) > 0.7 {
 						wr := image.Rect(int((b.x+wx+0.01)*wf), int((0.70-b.h+wy+0.01)*hf), int((b.x+wx+0.035)*wf), int((0.70-b.h+wy+0.04)*hf))
 						draw.Draw(img, wr, &image.Uniform{color.RGBA{255, 220, 120, 255}}, image.Point{}, draw.Src)
 					}
@@ -366,7 +371,7 @@ func demoStream(ctx context.Context, conn *websocket.Conn) error {
 			img := image.NewRGBA(image.Rect(0, 0, width, height))
 			drawScene(img, frame)
 
-			nDetections := 3 + rng.Intn(5)
+			nDetections := 3 + demoIntn(rng, 5)
 			people := 0
 			vehicles := 0
 			restricted := 0
@@ -405,17 +410,17 @@ func demoStream(ctx context.Context, conn *websocket.Conn) error {
 					Category:    o.cat,
 					Color:       "",
 					VehicleType: "",
-					Confidence:  0.70 + rng.Float64()*0.25,
+					Confidence:  0.70 + demoFloat(rng)*0.25,
 					BBox:        [4]float64{o.x, o.y, o.w, o.h},
 					Zone:        z,
 					Violation:   z == "no-zone",
 				})
 			}
 			for i := 0; i < nDetections; i++ {
-				x := float64(rng.Intn(800)) / 1000
-				y := 0.52 + float64(rng.Intn(300))/1000
-				w := 0.05 + rng.Float64()*0.14
-				h := 0.07 + rng.Float64()*0.18
+				x := float64(demoIntn(rng, 800)) / 1000
+				y := 0.52 + float64(demoIntn(rng, 300))/1000
+				w := 0.05 + demoFloat(rng)*0.14
+				h := 0.07 + demoFloat(rng)*0.18
 				if x+w > 0.98 {
 					x = 0.98 - w
 				}
@@ -426,9 +431,11 @@ func demoStream(ctx context.Context, conn *websocket.Conn) error {
 				if z == "no-zone" {
 					restricted++
 				}
-				cat := "other"
-				label := "cone"
-				if rng.Float64() < 0.5 {
+				// The two are declared without a value because both are assigned
+				// in one branch or the other, and a value that is written and
+				// then overwritten is a value nobody reads.
+				var cat, label string
+				if demoFloat(rng) < 0.5 {
 					cat = "biological"
 					label = "person"
 					people++
@@ -443,7 +450,7 @@ func demoStream(ctx context.Context, conn *websocket.Conn) error {
 					Category:    cat,
 					Color:       "",
 					VehicleType: "",
-					Confidence:  0.60 + rng.Float64()*0.30,
+					Confidence:  0.60 + demoFloat(rng)*0.30,
 					BBox:        [4]float64{x, y, w, h},
 					Zone:        z,
 					Violation:   z == "no-zone",
@@ -545,4 +552,26 @@ func stopProcessTree(ctx context.Context, cmd *exec.Cmd) {
 		return
 	}
 	_ = cmd.Process.Kill()
+}
+
+// demoFloat and demoIntn are the demo stream's jitter.
+//
+// The generator is crypto/rand and the helpers are thin wrappers, because the
+// numbers a DEMO animation throws away do not need a seedable generator and a
+// reader of this file cannot tell a jitter from a secret. A math/rand here
+// would draw the same linter finding a real secret would draw, and the triage
+// of that finding would have to be repeated every time somebody read it.
+func demoFloat(rng io.Reader) float64 {
+	var b [8]byte
+	if _, err := io.ReadFull(rng, b[:]); err != nil {
+		return 0.5
+	}
+	return float64(binary.LittleEndian.Uint64(b[:])>>11) / float64(1<<53)
+}
+
+func demoIntn(rng io.Reader, n int) int {
+	if n <= 0 {
+		return 0
+	}
+	return int(demoFloat(rng) * float64(n))
 }

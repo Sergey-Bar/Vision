@@ -43,6 +43,8 @@ type Geometry struct {
 // converts back to FRAME fractions and a frame's size is not derivable from a
 // square input.
 func (g Geometry) FrameW() int { return g.ContentW }
+
+// FrameH is the frame's own height.
 func (g Geometry) FrameH() int { return g.ContentH }
 
 // Content returns the letterboxed content width and height, the divisors.

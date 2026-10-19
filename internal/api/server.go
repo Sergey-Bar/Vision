@@ -370,14 +370,6 @@ func (s *Server) openPrincipal(_ *http.Request) identity.Principal {
 	}
 }
 
-// requirePrincipal is the wrapper for authenticated handlers. With login removed
-// it always succeeds and synthesizes an open-access principal.
-func (s *Server) requirePrincipal(h func(http.ResponseWriter, *http.Request, identity.Principal)) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		h(w, r, s.openPrincipal(r))
-	}
-}
-
 // requireCapability is the wrapper for a capability-gated handler.
 //
 // The check is REAL. The console has no login, but the configured principal

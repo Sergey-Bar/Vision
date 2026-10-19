@@ -48,10 +48,6 @@ type rec struct {
 }
 
 // live is a record that clears any sane emit floor.
-func live(cx, cy, w, h float64, class int, pixels float64) rec {
-	return rec{cx: cx, cy: cy, w: w, h: h, class: class, logit: 4, pixels: pixels}
-}
-
 // dead is a record below the emit floor: a candidate anchor the model scored out.
 func dead() rec {
 	return rec{cx: 0.5, cy: 0.5, w: 0.001, h: 0.001, class: 2, logit: -30, pixels: 1}
@@ -184,25 +180,10 @@ func rawTensor(dims []int64) Tensor {
 
 // paddedRaw is [1, N, fields] zero-filled with N at or above minCandidates, for a
 // test that writes only the first few records by hand and leaves the rest silent.
-func paddedRaw(fields int, n int) Tensor {
-	if n < minCandidates {
-		n = minCandidates
-	}
-	return rawTensor([]int64{1, int64(n), int64(fields)})
-}
-
 // square640 is the geometry of a square frame in a square 640 input: no pad, and
 // the content divisor equals the input divisor.
 func square640() Geometry {
 	return Geometry{InputW: 640, InputH: 640, ContentW: 640, ContentH: 640, Scale: 1}
-}
-
-func prod(dims []int64) int {
-	n := 1
-	for _, d := range dims {
-		n *= int(d)
-	}
-	return n
 }
 
 // isFieldCount is the fixture's own copy of the record-width rule, deliberately
