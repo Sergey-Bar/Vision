@@ -75,6 +75,11 @@ func main() {
 	registerClipsAndCriticalRoutes(repoRoot, pool)
 	registerCameraRoutes(repoRoot, pool)
 
+	// The console is a third thing: it is the operator's window onto the
+	// product and onto the VMS, so it proxies to both rather than asking the
+	// browser to.
+	registerProxies()
+
 	// The SPA lives under web/static/spa (built by `npm run build` in web/spa).
 	// Its assets are served by the /static/ handler above; its index.html is the
 	// single entry point for every non-API route. Old HTML pages (hub, console,

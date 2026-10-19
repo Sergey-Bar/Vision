@@ -1,61 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+﻿import { useEffect, useRef, useState } from 'react'
 import { PageHeader, Page } from '@/components/Shell'
 import { ArrowUpRight, Play, Pause, Volume2, VolumeX, Search, Layout } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useCameras, useAIRuntime } from '@/hooks/api'
-import type { Camera, Detection } from '@/api'
-
-// WebSocket with automatic reconnect and error suppression
-function useWebSocket(url: string, onMessage: (data: any) => void) {
-  const wsRef = useRef<WebSocket | null>(null)
-  const reconnectRef = useRef<ReturnType<typeof setInterval> | null>(null)
-
-  const connect = () => {
-    try {
-      wsRef.current = new WebSocket(url)
-      wsRef.current.onopen = () => {
-        console.log('[WebSocket] connected')
-        if (reconnectRef.current) {
-          clearInterval(reconnectRef.current)
-          reconnectRef.current = null
-        }
-      }
-      wsRef.current.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data)
-          onMessage(data)
-        } catch {
-          // Ignore parse errors
-        }
-      }
-      wsRef.current.onclose = () => {
-        wsRef.current = null
-        // Auto-reconnect after 3 seconds
-        reconnectRef.current = setInterval(() => {
-          connect()
-        }, 3000)
-      }
-      wsRef.current.onerror = () => {
-        // Suppress proxy tunnel errors - silent retry
-        if (wsRef.current) {
-          wsRef.current.close()
-        }
-      }
-    } catch {
-      // WebSocket not available - silent
-    }
-  }
-
-  useEffect(() => {
-    connect()
-    return () => {
-      if (reconnectRef.current) clearInterval(reconnectRef.current)
-      if (wsRef.current) wsRef.current.close()
-    }
-  }, [url, onMessage])
-
-  return wsRef.current
-}
+import { useVMSCameras, vmsFrameUrl, type VMSCamera, type VMSDetection } from '@/hooks/vms'
+import type { Camera } from '@/api'
 
 function statusStyle(status: string) {
   switch (status) {
@@ -77,40 +26,125 @@ function getUploadedVideos(): Camera[] {
   }
 }
 
-// Client-side AI detection simulation for uploaded videos
-function simulateDetection(videoElement: HTMLVideoElement): Detection[] | null {
-  if (!videoElement || videoElement.readyState < 2) return null
-  
-  const detections: Detection[] = []
-  const width = videoElement.videoWidth || 640
-  const height = videoElement.videoHeight || 360
-  const currentTime = videoElement.currentTime
-  
-  const seed = Math.floor(currentTime * 10) % 100
-  
-  if (seed < 35) {
-    detections.push({
-      label: 'person',
-      confidence: 0.85 + (seed % 15) / 100,
-      bbox: [width * 0.3, height * 0.3, width * 0.5, height * 0.5],
-    })
-  }
-  if (seed > 60 && seed < 80) {
-    detections.push({
-      label: 'vehicle',
-      confidence: 0.78 + (seed % 20) / 100,
-      bbox: [width * 0.1, height * 0.5, width * 0.4, height * 0.3],
-    })
-  }
-  if (seed > 85) {
-    detections.push({
-      label: 'bag',
-      confidence: 0.72 + (seed % 15) / 100,
-      bbox: [width * 0.5, height * 0.4, width * 0.2, height * 0.2],
-    })
-  }
-  
-  return detections.length > 0 ? detections : null
+// Client-side AI detection simulation for uploaded videos.
+//
+// This is gone. The boxes on a camera are now the VMS's own assertions about
+// the frame it is looking at, fetched from the device. A detection the browser
+// invented is a detection nobody can check, and the number of them on the
+// screen was a number the browser made up.
+
+// The boxes the VMS asserted about the frame.
+//
+// They are the DEVICE's detections, in the device's normalised coordinates, and
+// they are drawn where the device says they are. The previous version of this
+// page derived boxes from the video element's current time -- `14 + (i * 21) % 68`
+// for the left edge and so on -- which is a box that is not on the picture, and
+// a detection rate that measures the arithmetic rather than the scene.
+function BoxOverlay({ detections, filter }: { detections: VMSDetection[]; filter: string }) {
+  const visible = detections.filter((d) => filter === 'all' || d.class === filter)
+  if (visible.length === 0) return null
+  return (
+    <div className="absolute inset-0 z-20 pointer-events-none">
+      {visible.map((d, i) => {
+        const left = d.x1 * 100
+        const top = d.y1 * 100
+        const width = (d.x2 - d.x1) * 100
+        const height = (d.y2 - d.y1) * 100
+        const isPerson = d.class === 'person' || d.class === 'person-with-bag'
+        return (
+          <div
+            key={`${d.class}-${i}`}
+            className={cn(
+              'absolute border-2 rounded-sm',
+              isPerson
+                ? 'border-apple-red bg-apple-red/40 shadow-xl shadow-apple-red/50'
+                : 'border-white/40 bg-white/15 shadow-xl shadow-black/50',
+            )}
+            style={{ left: `${left}%`, top: `${top}%`, width: `${width}%`, height: `${height}%` }}
+          >
+            <div
+              className={cn(
+                'absolute -top-3 left-2 px-2.5 py-1 rounded-t-sm text-[10px] font-black shadow-lg',
+                isPerson ? 'bg-apple-red text-white shadow-apple-red/50' : 'bg-black/80 text-white',
+              )}
+            >
+              {d.class.toUpperCase()} {(d.confidence * 100).toFixed(0)}%
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// The picture the device is looking at, with the boxes on it.
+function VMSFrame({ camera, filter }: { camera: VMSCamera; filter: string }) {
+  return (
+    <div className="relative w-full h-full bg-black">
+      <img
+        src={vmsFrameUrl(camera)}
+        alt={`${camera.name} live view`}
+        className="w-full h-full object-contain"
+      />
+      <BoxOverlay detections={camera.detections} filter={filter} />
+    </div>
+  )
+}
+
+// A camera tile that shows the VMS's own picture.
+function VMSTile({ camera, active, onClick }: { camera: VMSCamera; active: boolean; onClick?: () => void }) {
+  const people = camera.detections.filter((d) => d.class === 'person' || d.class === 'person-with-bag').length
+  const vehicles = camera.detections.filter((d) => d.class === 'vehicle').length
+  const online = !camera.refusal
+  return (
+    <div
+      className={cn(
+        'relative overflow-hidden border border-white/10 rounded-3xl bg-black aspect-video transition-all duration-500 hover:border-white/30 hover:shadow-2xl hover:-translate-y-2 cursor-pointer group',
+        active ? 'ring-2 ring-apple-red shadow-2xl shadow-apple-red/50 scale-105 z-20' : '',
+      )}
+      onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onClick?.()
+        }
+      }}
+      role="button"
+      tabIndex={0}
+      aria-label={camera.name}
+    >
+      <VMSFrame camera={camera} filter="all" />
+      <div className="absolute top-5 left-5 z-20 flex flex-col gap-3">
+        <div
+          className={cn(
+            'flex items-center gap-3 px-3 py-1.5 rounded-full bg-black/60 backdrop-blur-sm text-[10px] font-black border border-white/10',
+            online ? 'bg-apple-green' : 'bg-apple-red text-white',
+          )}
+        >
+          <span className={cn('w-3 h-3 rounded-full', online ? 'bg-apple-green' : 'bg-apple-red')} />
+          <span>{online ? 'Online' : 'No feed'}</span>
+        </div>
+        <div className="px-3 py-1.5 rounded-full bg-black/60 backdrop-blur-sm text-[10px] font-black border border-white/10 text-text-dim">
+          {people} people · {vehicles} vehicles · {camera.latencyMs.toFixed(0)} ms
+        </div>
+      </div>
+      <div className="absolute bottom-0 left-0 right-0 p-8 bg-gradient-to-t from-black/95 via-black/60 to-transparent">
+        <div className="text-xl font-black text-text">{camera.name}</div>
+        <div className="text-sm text-text-muted mt-3 font-black">{camera.kind}</div>
+      </div>
+      {active && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center gap-5 bg-black/75 backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+          <button
+            onClick={onClick}
+            className="p-4 rounded-3xl bg-white/10 text-white hover:bg-white/20 transition-all duration-300 backdrop-blur-sm border border-white/10 shadow-xl shadow-black/60"
+            aria-label="Open fullscreen"
+          >
+            <ArrowUpRight size={24} />
+          </button>
+        </div>
+      )}
+    </div>
+  )
 }
 
 function CameraTile({ camera, active, onClick }: { camera: Camera; active: boolean; onClick?: () => void }) {
@@ -181,23 +215,14 @@ export function LivePage() {
   const [cols, setCols] = useState<'1' | '2' | '4' | '6' | '9' | '16'>('1')
   const [activeId, setActiveId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
-  const [frame, setFrame] = useState<{ people?: number; vehicles?: number; detections?: Detection[] } | null>(null)
   const [isPlaying, setIsPlaying] = useState(true)
   const [isMuted, setIsMuted] = useState(false)
   const [entityFilter, setEntityFilter] = useState<string>('all')
   const videoRef = useRef<HTMLVideoElement | null>(null)
-  const detectionIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const pausedRef = useRef(false)
   const { data: cameras, isPending, error } = useCameras()
   const { data: aiRuntime } = useAIRuntime()
   const listSource = cameras ?? []
-
-  // WebSocket connection (silent retry on failure)
-  useWebSocket(`ws://127.0.0.1:8080/ws/live?protocol=2`, (data) => {
-    if (data && typeof data === 'object' && !('type' in data)) {
-      setFrame(data as { people?: number; vehicles?: number; detections?: Detection[] })
-    }
-  })
 
   // Shared uploaded videos - synced with Upload page via localStorage
   const [uploadedVideos, setUploadedVideos] = useState<Camera[]>([])
@@ -212,45 +237,28 @@ export function LivePage() {
     camera.siteId.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
-  const active = list.find((camera) => camera.id === activeId)
+  // The VMS's own cameras, polled. These are the facts the DEVICE holds: the
+  // picture it is looking at and the boxes its analytics engine asserted.
+  const { data: vmsCameras } = useVMSCameras()
 
-  // Detection simulation loop for active video
-  useEffect(() => {
-    if (!active || !active.id.startsWith('upload-')) {
-      if (detectionIntervalRef.current) {
-        clearInterval(detectionIntervalRef.current)
-        detectionIntervalRef.current = null
-      }
-      setFrame(null)
-      return
-    }
-
-    const videoEl = document.querySelector(`video[src*="${active.id}"]`) as HTMLVideoElement | null
-    if (!videoEl) {
-      videoRef.current = null
-      return
-    }
-
-    videoRef.current = videoEl
-
-    detectionIntervalRef.current = setInterval(() => {
-      if (videoEl.paused || videoEl.ended) return
-      const detections = simulateDetection(videoEl)
-      if (detections) {
-        setFrame({
-          people: detections.filter(d => d.label === 'person').length,
-          vehicles: detections.filter(d => d.label === 'vehicle').length,
-          detections,
-        })
-      } else {
-        setFrame({ people: 0, vehicles: 0, detections: [] })
-      }
-    }, 1000)
-
-    return () => {
-      if (detectionIntervalRef.current) clearInterval(detectionIntervalRef.current)
-    }
-  }, [active])
+  // The camera list is the VMS's own inventory when the device is reachable,
+  // and the platform's device rows otherwise. A camera the device says it has
+  // is a camera that is playing; a camera the platform has heard of is a camera
+  // somebody once configured.
+  const grid = vmsCameras && vmsCameras.length > 0
+    ? vmsCameras.map((c) => ({
+        id: c.id,
+        name: c.name,
+        siteId: c.kind,
+        status: (c.refusal ? 'offline' : 'online') as Camera['status'],
+        vms: c,
+      }))
+    : list.map((c) => ({ id: c.id, name: c.name, siteId: c.siteId, status: c.status, vms: undefined }))
+  const visibleGrid = grid.filter((c) =>
+    c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    c.siteId.toLowerCase().includes(searchQuery.toLowerCase())
+  )
+  const active = visibleGrid.find((c) => c.id === activeId)
 
   return (
     <Page>
@@ -320,7 +328,7 @@ export function LivePage() {
             Unable to load cameras: {error?.message ?? 'Unknown error'}
           </div>
         )}
-        {!isPending && !error && list.length === 0 && (
+        {!isPending && !error && visibleGrid.length === 0 && (
           <div className="empty">
             <div className="empty-icon">
               <Layout size={40} />
@@ -337,15 +345,24 @@ export function LivePage() {
           )}
           style={{ height: activeId ? undefined : 'calc(100vh - 380px)' }}
         >
-          {list.map((camera) => (
-            <CameraTile
-              key={camera.id}
-              camera={camera}
-              active={activeId === camera.id}
-              onClick={() => setActiveId(camera.id)}
-            />
-          ))}
-          {list.length === 0 && (
+          {visibleGrid.map((camera) =>
+            camera.vms ? (
+              <VMSTile
+                key={camera.id}
+                camera={camera.vms}
+                active={activeId === camera.id}
+                onClick={() => setActiveId(camera.id)}
+              />
+            ) : (
+              <CameraTile
+                key={camera.id}
+                camera={{ id: camera.id, name: camera.name, siteId: camera.siteId, status: camera.status }}
+                active={activeId === camera.id}
+                onClick={() => setActiveId(camera.id)}
+              />
+            )
+          )}
+          {visibleGrid.length === 0 && (
             <div className="col-span-full empty">
               <div className="empty-icon">
                 <Layout size={40} />
@@ -360,7 +377,9 @@ export function LivePage() {
           <div className="fixed inset-0 z-50 bg-black flex flex-col page-transition animate-fade-in">
             <div className="flex-1 relative flex items-center justify-center">
               <div className="relative w-full h-full max-w-[1200px] aspect-video">
-                {active.id.startsWith('upload-') ? (
+                {active.vms ? (
+                  <VMSFrame camera={active.vms} filter={entityFilter} />
+                ) : active.id.startsWith('upload-') ? (
                   <video
                     ref={videoRef}
                     className="w-full h-full object-cover"
@@ -371,42 +390,9 @@ export function LivePage() {
                     loop
                   />
                 ) : (
-                  <div className="w-full h-full object-cover bg-black">
-                    {frame && frame.people !== undefined ? (
-                      <div className="w-full h-full flex items-center justify-center text-text-dim text-sm font-medium">
-                        Live feed — {frame.people} people, {frame.vehicles ?? 0} vehicles
-                      </div>
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-text-dim text-sm">
-                        Live feed unavailable
-                      </div>
-                    )}
-                    {frame?.detections?.length ? (
-                      <div className="absolute inset-0 z-20 pointer-events-none">
-                        {frame.detections
-                          .filter((d) => entityFilter === 'all' || d.label === entityFilter)
-                          .map((d, i) => {
-                            const x = 14 + (i * 21) % 68
-                            const y = 14 + (i * 17) % 68
-                            const w = 16 + (i * 9) % 20
-                            const h = 14 + (i * 11) % 18
-                            return (
-                              <div
-                                key={i}
-                                className={cn(
-                                  'absolute border-2 border-apple-red bg-apple-red/30 rounded-sm',
-                                  d.label === 'person' ? 'border-apple-red bg-apple-red/40 shadow-xl shadow-apple-red/50' : 'border-white/30 bg-white/15 shadow-xl shadow-black/50',
-                                )}
-                                style={{ left: `${x}%`, top: `${y}%`, width: `${w}%`, height: `${h}%` }}
-                              >
-                                <div className="absolute -top-3 left-2 px-2.5 py-1 rounded-t-sm text-[10px] font-black bg-apple-red text-white shadow-lg shadow-apple-red/50">
-                                  {d.label.toUpperCase()} {(d.confidence * 100).toFixed(0)}%
-                                </div>
-                              </div>
-                            )
-                          })}
-                      </div>
-                    ) : null}
+                  <div className="w-full h-full object-cover bg-black flex items-center justify-center text-text-dim text-sm">
+                    This camera has no live feed. The VMS emulator holds the live views; the
+                    platform holds the record of what it saw.
                   </div>
                 )}
                 <div className="absolute top-5 left-5 z-30 flex flex-col gap-3">
@@ -445,8 +431,8 @@ export function LivePage() {
             </div>
             <div className="flex items-center justify-between px-10 py-8 bg-black/70 backdrop-blur-sm border-t border-white/10">
               <div className="flex items-center gap-5">
-                <div className="w-16 h-16 rounded-3xl bg-white/5 flex items-center justify-center overflow-hidden shadow-xl shadow-black/60">
-                  <img src={`https://ui-avatars.com/api/?name=${encodeURIComponent(active.name)}&background=random&size=512`} alt="" className="w-full h-full object-cover" />
+                <div className="w-16 h-16 rounded-3xl bg-white/5 flex items-center justify-center overflow-hidden shadow-xl shadow-black/60 text-text-dim text-xl font-black">
+                  {active.name.slice(0, 2).toUpperCase()}
                 </div>
                 <div>
                   <div className="text-lg font-black text-text">{active.name}</div>
