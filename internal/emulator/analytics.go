@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/Sergey-Bar/vision/internal/classify"
 )
 
 // Detection is one object the detector found in one frame.
@@ -182,6 +184,13 @@ func canonicalClass(name string) string {
 	key := strings.ToLower(strings.TrimSpace(name))
 	if canonical, ok := taxonomy[key]; ok {
 		return canonical
+	}
+	// A FAMILY name is already canonical. A prompt that names "vehicle" or
+	// "animal" -- and a prompt is free text, so it will -- is naming a family
+	// the product already has, and mapping it to "other" would say the opposite
+	// of what the device meant.
+	if classify.IsFamily(key) {
+		return key
 	}
 	switch {
 	case vehicleClasses[key]:

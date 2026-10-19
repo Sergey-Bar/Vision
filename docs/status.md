@@ -207,13 +207,21 @@ been made. Wiring it anyway would mean either keeping positions the record
 deliberately does not keep, or scoring an anomaly over a camera-level
 "something happened here" and calling it an entity.
 
-The open-vocabulary model is not
-here: the class list is a parameter and the vocabulary is honest about being
-COCO-80, but the export that would name a drone or a balloon by prompt is not
-fetched, so those two classes have a rule behind them and nothing that
-produces them. `airuntime.DetectObjects` is still unwired: the AI runtime
-does not host an object-detection model. The console's remaining pages still
-carry the wireframes' static data where there was no endpoint to read.
+`airuntime.DetectObjects` is still unwired: the AI runtime does not host an
+object-detection model, and adding one is a model bundle and a provider rather
+than a wire.
+
+The open-vocabulary model IS here. `vms-emulator fetch-model --name
+yolov8x-worldv2.onnx` fetches the digest-pinned YOLO-World WEIGHTS and exports
+them with the prompt the manifest records, and the run is started with
+`--prompt "person,backpack,handbag,drone,balloon,kite,vehicle,animal"`. The
+classes are named by the prompt rather than carried by the export, which is
+what makes a new class a prompt and not a retrain. The export's own digest is
+recorded beside the weights' rather than pinned, because an export is a
+function of the weights AND of the exporter's version.
+
+The console's remaining pages still carry the wireframes' static data where
+there was no endpoint to read.
 
 ### `no-silent-skips`: the run that tested nothing is now a red gate
 
@@ -2448,7 +2456,7 @@ plan for turning the POC into a product, and this table is its state.
 | Phase | State |
 |---|---|
 | **0 - the tree** | **done.** The footage, the package manager's working directory, the SPA's build output and the backups are gitignored; `product-scraper/` moved out of the repository; `AGENTS.md` restored; the `videoingest` stub deleted rather than built on. The package count no longer depends on whether a developer has run `npm install` |
-| **1 - the detector** | **done.** The decoder, the taxonomy, the sidecar and the box geometry moved into the product module; the module graph inverted; `shared/` is the seam. The model is a digest-pinned fused-head YOLO11 and the detector accepts a dynamic input size. The class list is a VALUE with a prompt and a family map, not a table of eighty names; the licence is recorded from the manifest beside the model; the GPU is checked before the session opens. **Not done:** the open-vocabulary export, so the vocabulary is honestly COCO-80 |
+| **1 - the detector** | **done.** The decoder, the taxonomy, the sidecar and the box geometry moved into the product module; the module graph inverted; `shared/` is the seam. The model is a digest-pinned fused-head YOLO11 and the detector accepts a dynamic input size. The class list is a VALUE with a prompt and a family map, not a table of eighty names; the licence is recorded from the manifest beside the model; the GPU is checked before the session opens. The open-vocabulary model is fetched and exported by the same command, so a new class is a prompt |
 | **2 - the VMS** | **done.** `internal/emulator` and `cmd/vms-emulator`: file, URL, RTSP and YouTube sources, an ffmpeg reader, a real MP4 clip writer, measured latency and frame cost, and play/pause/seek/frame-rate controls that take effect at once |
 | **3 - the analytics** | **done.** One event per object with the analytic shape, the spatial association that makes a person with a bag, the person count in the class id, the media surface, the control surface, the camera inventory and the bookmark route |
 | **4 - the platform** | **done.** Six canonical classes, each with a rule; the base URL no longer doubles the prefix; the POC's client moved to the documented prefix and a test pins the two together; the probe reports 17 routes, 14 confirmed, 0 contradicted, 0 unreachable, 3 skipped |

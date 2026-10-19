@@ -248,13 +248,19 @@ func openDetector(model, ortLib, provider string, device, threads, detInput int,
 	// declared, and the FAMILIES the product groups them into. The product's
 	// taxonomy is the one that knows what a family is; the detector only carries
 	// what it was told.
+	//
+	// A PROMPT replaces the names, and it is a comma-separated list of class
+	// names rather than a sentence: the names are what the model indexes, and a
+	// sentence is not a list of names. The count is DECLARED from the list, and
+	// the decoder's arithmetic then becomes exact: a detection record is
+	// 4+classes fields wide and nothing else can be one. A prompt of the wrong
+	// length is refused by the decoder, which is the right place for it -- the
+	// decoder is what knows the model's output shape.
 	vocabulary := ortdetect.COCOVocabulary()
 	families := classify.FamiliesFor(vocabulary.Names)
-	if strings.TrimSpace(prompt) != "" {
-		// A model whose classes are named by a PROMPT has a vocabulary that
-		// records the prompt, because a measurement whose class list is not
-		// reproducible is not a measurement.
-		vocabulary = ortdetect.OpenVocabulary(prompt, vocabulary.Names, families)
+	prompted := promptClassNames(prompt)
+	if len(prompted) > 0 {
+		vocabulary = ortdetect.OpenVocabulary(prompt, prompted, families)
 	} else {
 		vocabulary.Families = families
 	}
@@ -274,7 +280,31 @@ func openDetector(model, ortLib, provider string, device, threads, detInput int,
 		_ = sess.Close()
 		return nil, nil, nil, err
 	}
+	if len(prompted) > 0 {
+		// The class count is DECLARED, and that is what makes the decoder's
+		// arithmetic exact rather than a guess: a detection record is 4+classes
+		// fields wide and nothing else can be one. Without the declaration the
+		// decoder falls back to a shape heuristic, and a heuristic over a
+		// prompt-named model is a heuristic that can be wrong in a way the
+		// operator cannot see.
+		detector.DeclareClassCount(len(prompted))
+	}
 	return detector, sess, vocabulary, nil
+}
+
+// promptClassNames reads the class names out of a prompt.
+//
+// The prompt is a comma-separated list of class names, and the names are
+// matched to the model's classes BY POSITION. An empty prompt means the
+// model's own names, which is the closed export's case.
+func promptClassNames(prompt string) []string {
+	var out []string
+	for _, name := range strings.Split(prompt, ",") {
+		if name = strings.TrimSpace(name); name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 // envOr reads an environment variable or takes a default.

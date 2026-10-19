@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -41,6 +42,12 @@ type modelSpec struct {
 	Licence string
 	// Note says what the export is, in one line.
 	Note string
+	// Prompt is the class list an open-vocabulary export is told, and the
+	// vocabulary the run records.
+	Prompt string
+	// Export says the fetched file is WEIGHTS and the ONNX has to be built from
+	// them.
+	Export bool
 }
 
 // modelSpecs are the models this emulator fetches.
@@ -50,6 +57,11 @@ type modelSpec struct {
 // every box — and the anchored export that was committed before refuses to be
 // decoded at all. A detector that cannot read the model is a detector that
 // reports nothing.
+//
+// The open-vocabulary model is fetched as its WEIGHTS and exported here,
+// because the export is derived from the weights rather than published: the
+// weights are digest-pinned, and the export's own digest is recorded beside
+// them so a second run can be checked against the first.
 var modelSpecs = []modelSpec{
 	{
 		Name:    "yolo11n.onnx",
@@ -60,6 +72,18 @@ var modelSpecs = []modelSpec{
 		Note: "YOLO11 nano, fused head, COCO-80. The head is fused: one output carries " +
 			"every box, which is the shape the Go decoder reads.",
 	},
+	{
+		Name:    "yolov8x-worldv2.onnx",
+		URL:     "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8x-worldv2.pt",
+		SHA256:  "41e771bfbbb8894dd857f3fef7cac3b3578dffd49fd3547101efa6a606a02a0e",
+		Bytes:   146355704,
+		Licence: "AGPL-3.0",
+		Note: "YOLO-World, exported here with the prompt below. The classes are NAMED by " +
+			"the prompt rather than carried by the export, which is what makes a new " +
+			"class a prompt and not a retrain.",
+		Prompt: "person,backpack,handbag,drone,balloon,kite,vehicle,animal",
+		Export: true,
+	},
 }
 
 // modelManifest is what the fetch writes beside the model.
@@ -67,14 +91,21 @@ var modelSpecs = []modelSpec{
 // It is written because a model without a recorded provenance is a file, and a
 // file is not an answer anybody can check.
 type modelManifest struct {
-	Name      string `json:"name"`
-	Path      string `json:"path"`
-	SHA256    string `json:"sha256"`
-	Bytes     int64  `json:"bytes"`
-	Licence   string `json:"licence"`
-	Source    string `json:"source"`
-	Note      string `json:"note"`
-	FetchedAt string `json:"fetched_at"`
+	Name    string `json:"name"`
+	Path    string `json:"path"`
+	SHA256  string `json:"sha256"`
+	Bytes   int64  `json:"bytes"`
+	Licence string `json:"licence"`
+	Source  string `json:"source"`
+	Note    string `json:"note"`
+	// Prompt is the class list an open-vocabulary export was told, and the
+	// vocabulary a run of that model records.
+	Prompt string `json:"prompt,omitempty"`
+	// WeightsSHA256 is the digest of the weights an export was built from, when
+	// the model is one. The export is DERIVED from them, so the export's own
+	// digest is a function of the exporter's version as well as of the weights.
+	WeightsSHA256 string `json:"weights_sha256,omitempty"`
+	FetchedAt     string `json:"fetched_at"`
 }
 
 // runFetchModel fetches a digest-pinned model.
@@ -104,46 +135,146 @@ func runFetchModel(args []string) error {
 	if err := os.MkdirAll(*out, 0o750); err != nil {
 		return fmt.Errorf("make %s: %w", *out, err)
 	}
+	// The WEIGHTS are fetched under their own name, and the export is built from
+	// them. A model that is fetched and exported is two files, and the manifest
+	// records both digests: the weights are pinned by the source, and the
+	// export is a function of the weights AND of the exporter's version, so its
+	// digest is recorded rather than pinned.
+	weightsPath := filepath.Join(*out, strings.TrimSuffix(spec.Name, ".onnx")+".pt")
 	target := filepath.Join(*out, spec.Name)
-	if existing, err := os.Stat(target); err == nil && existing.Size() == spec.Bytes {
-		digest, _, err := digestFile(target)
+	fetched := weightsPath
+	if !spec.Export {
+		fetched = target
+	}
+	if existing, err := os.Stat(fetched); err == nil && existing.Size() == spec.Bytes {
+		digest, _, err := digestFile(fetched)
 		if err == nil && digest == spec.SHA256 {
-			fmt.Printf("%s is already here and matches the pinned digest.\n", target)
-			return nil
+			fmt.Printf("%s is already here and matches the pinned digest.\n", fetched)
+			if spec.Export {
+				if err := exportModel(spec, weightsPath, target, *out); err != nil {
+					return err
+				}
+			}
+			// The manifest is written either way. A model that is here with no
+			// manifest beside it is a model whose licence and prompt nobody can
+			// read, and the fetch is the thing that knows them.
+			return writeManifest(spec, target, *out)
 		}
 	}
-	fmt.Printf("fetching %s\n  from %s\n  sha256 %s\n", spec.Name, spec.URL, spec.SHA256)
-	if err := download(context.Background(), spec.URL, target); err != nil {
+	fmt.Printf("fetching %s\n  from %s\n  sha256 %s\n", filepath.Base(fetched), spec.URL, spec.SHA256)
+	if err := download(context.Background(), spec.URL, fetched); err != nil {
 		return err
 	}
-	digest, size, err := digestFile(target)
+	digest, size, err := digestFile(fetched)
 	if err != nil {
 		return err
 	}
 	if digest != spec.SHA256 {
-		_ = os.Remove(target)
+		_ = os.Remove(fetched)
 		return fmt.Errorf("the file that arrived has digest %s and the pinned one is %s. It was deleted: "+
 			"a model whose bytes are not the ones that were measured is a model whose numbers describe "+
 			"nothing in particular", digest, spec.SHA256)
 	}
 	if spec.Bytes > 0 && size != spec.Bytes {
-		_ = os.Remove(target)
+		_ = os.Remove(fetched)
 		return fmt.Errorf("the file that arrived is %d bytes and the pinned one is %d. It was deleted", size, spec.Bytes)
+	}
+	if spec.Export {
+		if err := exportModel(spec, weightsPath, target, *out); err != nil {
+			return err
+		}
+	}
+	return writeManifest(spec, target, *out)
+}
+
+// writeManifest records a model's provenance beside it.
+//
+// The manifest is named after the model, so fetching a second model does not
+// overwrite the first one's provenance. A manifest that describes a model which
+// is not there is worse than no manifest: the licence and the prompt would be
+// read off the wrong file.
+func writeManifest(spec modelSpec, target, dir string) error {
+	digest, size, err := digestFile(target)
+	if err != nil {
+		return err
 	}
 	manifest := modelManifest{
 		Name: spec.Name, Path: target, SHA256: digest, Bytes: size,
 		Licence: spec.Licence, Source: spec.URL, Note: spec.Note,
+		Prompt:    spec.Prompt,
 		FetchedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	if spec.Export {
+		manifest.WeightsSHA256 = spec.SHA256
 	}
 	raw, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(*out, "model.json"), raw, 0o600); err != nil {
+	manifestPath := filepath.Join(dir, strings.TrimSuffix(spec.Name, filepath.Ext(spec.Name))+".json")
+	if err := os.WriteFile(manifestPath, raw, 0o600); err != nil {
 		return err
 	}
 	fmt.Printf("wrote %s (%d bytes)\n", target, size)
 	fmt.Printf("licence: %s\n", spec.Licence)
+	if spec.Prompt != "" {
+		fmt.Printf("prompt  : %s\n", spec.Prompt)
+		fmt.Printf("run it with: --prompt \"%s\"\n", spec.Prompt)
+	}
+	return nil
+}
+
+// exportModel builds the ONNX export from fetched weights.
+//
+// The export is DERIVED, not downloaded: the weights are the pinned thing and
+// the export is a function of them and of the exporter's version. So the
+// exporter is a dependency, and its absence is a refusal by name rather than an
+// export that silently differs from the one the demo was measured with.
+//
+// The export is FUSED and STATIC, which is the shape the Go decoder reads: one
+// output carrying every box, and an input size the model declares rather than
+// one the run chooses.
+func exportModel(spec modelSpec, weightsPath, target, dir string) error {
+	python, err := exec.LookPath("python")
+	if err != nil {
+		python, err = exec.LookPath("py")
+	}
+	if err != nil {
+		return fmt.Errorf("exporting %s needs Python with ultralytics installed, and no Python was found: %w",
+			spec.Name, err)
+	}
+	classes := strings.Split(spec.Prompt, ",")
+	for i := range classes {
+		classes[i] = strings.TrimSpace(classes[i])
+	}
+	// The exporter runs in the output directory, so the weights are named by
+	// their ABSOLUTE path: a relative one would be resolved against the wrong
+	// directory and the export would fail with a file that does not exist.
+	absoluteWeights, err := filepath.Abs(weightsPath)
+	if err != nil {
+		return fmt.Errorf("resolve %s: %w", weightsPath, err)
+	}
+	script := fmt.Sprintf(`
+from ultralytics import YOLOWorld
+m = YOLOWorld(%q)
+m.set_classes(%q)
+m.export(format='onnx', imgsz=640, dynamic=False, simplify=False, opset=12)
+`, absoluteWeights, classes)
+	cmd := exec.CommandContext(context.Background(), python, "-c", script)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("exporting %s failed: %w: %s", spec.Name, err, strings.TrimSpace(string(out)))
+	}
+	// The exporter writes the file next to the weights, under the weights' own
+	// name. It is moved to the name the spec asked for.
+	produced := filepath.Join(dir, strings.TrimSuffix(filepath.Base(weightsPath), ".pt")+".onnx")
+	if produced != target {
+		if err := os.Rename(produced, target); err != nil {
+			return fmt.Errorf("move the export to %s: %w", target, err)
+		}
+	}
+	fmt.Printf("exported %s from %s with the prompt %q\n", target, filepath.Base(weightsPath), spec.Prompt)
 	return nil
 }
 

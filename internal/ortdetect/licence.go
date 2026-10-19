@@ -34,21 +34,27 @@ const manifestName = "model.json"
 // honest answer in all three cases -- "reported rather than defaulted" -- and
 // it is why [Identity.Licence] documents itself as empty when nothing said.
 //
-// The search is for `model.json` in the model's own directory. A manifest
-// somewhere else is a manifest about another model, and reading it would be
-// recording one model's licence against another's answer.
+// The manifest is named after the model, so a directory holding two models has
+// two manifests and neither describes the other. The plain `model.json` is
+// still read, for a manifest written before the naming was per model.
 func readLicence(modelPath string) string {
 	if strings.TrimSpace(modelPath) == "" {
 		return ""
 	}
 	dir := filepath.Dir(modelPath)
-	raw, err := os.ReadFile(filepath.Join(dir, manifestName))
-	if err != nil {
-		return ""
+	stem := strings.TrimSuffix(filepath.Base(modelPath), filepath.Ext(modelPath))
+	for _, name := range []string{stem + ".json", manifestName} {
+		raw, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			continue
+		}
+		var manifest modelManifest
+		if err := json.Unmarshal(raw, &manifest); err != nil {
+			continue
+		}
+		if licence := strings.TrimSpace(manifest.Licence); licence != "" {
+			return licence
+		}
 	}
-	var manifest modelManifest
-	if err := json.Unmarshal(raw, &manifest); err != nil {
-		return ""
-	}
-	return strings.TrimSpace(manifest.Licence)
+	return ""
 }
