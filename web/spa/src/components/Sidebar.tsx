@@ -1,6 +1,6 @@
 import { Link, useNavigate } from 'react-router-dom'
 import { useState } from 'react'
-import { Menu, LayoutGrid, Activity, ClipboardList, Video, ShieldAlert, Users, Settings, ChevronRight, Gauge } from 'lucide-react'
+import { Menu, LayoutGrid, Activity, ClipboardList, Video, ShieldAlert, Users, Settings, ChevronRight, Gauge, MapPin } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 // The navigation.
@@ -17,6 +17,7 @@ const NAV = [
   { href: '/clips', label: 'Clips', icon: Video },
   { href: '/upload', label: 'Upload', icon: Video },
   { href: '/cameras', label: 'Cameras', icon: Video },
+  { href: '/site', label: 'Site', icon: MapPin },
   { href: '/sites', label: 'Sites', icon: ShieldAlert },
   { href: '/users', label: 'Users', icon: Users },
   { href: '/audit', label: 'Audit', icon: Activity },

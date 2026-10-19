@@ -110,6 +110,80 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Principal" }
 
+  /v1/site:
+    get:
+      tags: [site]
+      summary: The site's own model
+      description: >
+        The zones, their polygons, the cameras and the routes the operator
+        declared. It is the source of the site view, and it is a drawing rather
+        than an inference: the numbers mean metres, so two zones that touch on
+        the map touch in the building. The live state of the cameras is NOT here
+        -- it comes from the VMS, which is the device that has it.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [siteId, zones, cameras, routes]
+                properties:
+                  siteId: { type: string }
+                  zones:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, type, polygon]
+                      properties:
+                        id: { type: string }
+                        type: { type: string }
+                        name: { type: string }
+                        polygon:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              x: { type: number }
+                              y: { type: number }
+                  cameras:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, position]
+                      properties:
+                        id: { type: string }
+                        zoneIds:
+                          type: array
+                          items: { type: string }
+                        position:
+                          type: object
+                          properties:
+                            x: { type: number }
+                            y: { type: number }
+                  routes:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, points]
+                      properties:
+                        id: { type: string }
+                        allowedDirection: { type: string }
+                        points:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              x: { type: number }
+                              y: { type: number }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404":
+          description: This install has no site model.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
   /v1/attention:
     get:
       tags: [incidents]

@@ -71,6 +71,7 @@ import (
 	"github.com/Sergey-Bar/vision/internal/outbox"
 	"github.com/Sergey-Bar/vision/internal/pipeline"
 	"github.com/Sergey-Bar/vision/internal/rules"
+	"github.com/Sergey-Bar/vision/internal/sitemodel"
 )
 
 func main() {
@@ -147,6 +148,22 @@ func run() error {
 		log.Warn("could not tell whether this database has pgvector; the free-text search will use the keyword path only", "error", err.Error())
 	} else if !hasVector {
 		log.Warn("this database has no pgvector, so the free-text search ranks by keyword and the vector path is unavailable")
+	}
+
+	// The site's own model, when the operator has drawn one.
+	//
+	// It is the source of the site view, and it is loaded once at startup: the
+	// drawing changes when somebody changes it, and a file read per request
+	// would make the view flicker between two versions of the site.
+	var siteModel *sitemodel.Site
+	if cfg.SiteModelPath != "" {
+		loaded, err := sitemodel.LoadFromFile(cfg.SiteModelPath)
+		if err != nil {
+			return fmt.Errorf("load the site model from %s: %w", cfg.SiteModelPath, err)
+		}
+		siteModel = loaded
+		log.Info("site model loaded", "path", cfg.SiteModelPath, "site", loaded.ID,
+			"zones", len(loaded.Zones), "cameras", len(loaded.Cameras))
 	}
 
 	correlatorSvc := &correlator.Correlator{Pool: pool}
@@ -310,6 +327,9 @@ func run() error {
 		// it is compared to. Two embedders that disagreed would produce a
 		// ranking that is confidently wrong.
 		EventSearch: &eventsearch.Service{Pool: pool, Embed: embeddings.Embedder{}},
+		// The site's own model: the zones, cameras and routes the operator
+		// declared. The console draws them; the live state comes from the VMS.
+		Site:        siteModel,
 		DeadLetters: api.DeadLetters{Inbox: inboxSvc, Jobs: jobWorker},
 		// The coverage panel's counts. Supplied here rather than inside `internal/api`
 		// because these tables belong to the packages that own them, and a COUNT over

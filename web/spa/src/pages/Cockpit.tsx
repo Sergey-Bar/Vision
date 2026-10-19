@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Page, PageHeader } from '@/components/Shell'
 import { Search, Layout, Activity, ShieldAlert, Cpu } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { useAttention, useIncidents, useHealth, useCoverage, useHandover, useEvidenceSearch } from '@/hooks/product'
+import { useAttention, useIncidents, useHealth, useCoverage, useHandover, useEvidenceSearch, useRecentEvents } from '@/hooks/product'
 import { useVMSCameras, useVMSState, vmsFrameUrl, type VMSCamera } from '@/hooks/vms'
 
 // The cockpit.
@@ -336,6 +336,61 @@ function SitePanel() {
   )
 }
 
+// The recent moments.
+//
+// The record, newest first: what the platform has seen, when, and from where.
+// It is the structured path over the canonical event record -- no model, no
+// prose -- so every row is a fact with a time on it, and a reader can go and
+// look at the picture.
+//
+// The search above asks the same record a question; this asks it for the last
+// hour.
+function RecentMoments() {
+  const { data: hits, isError } = useRecentEvents(20)
+  const [query, setQuery] = useState('')
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-black/30 px-5 py-5">
+      <div className="text-[10px] font-black uppercase tracking-[0.12em] text-text-dim mb-3">
+        Recent moments
+      </div>
+      {isError ? (
+        <Unreachable what="The record" />
+      ) : (
+        <>
+          <div className="flex items-center gap-3 pb-3">
+            <input
+              className="input flex-1"
+              placeholder="the last hour, or a class, or a camera"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              aria-label="Filter the recent moments"
+            />
+          </div>
+          <div className="divide-y divide-white/5">
+            {(hits ?? []).slice(0, 8).map((h, i) => (
+              <div key={h.eventId ?? i} className="py-2.5 flex items-center gap-4">
+                <Activity size={13} className="text-accent shrink-0" />
+                <span className="text-xs font-black text-text">{h.eventType}</span>
+                <span className="text-[11px] text-text-dim truncate flex-1">{h.deviceId ?? h.siteId ?? ''}</span>
+                <span className="text-[11px] text-text-dim">
+                  {h.normalizedAt ? new Date(h.normalizedAt).toLocaleTimeString() : ''}
+                </span>
+              </div>
+            ))}
+            {(hits ?? []).length === 0 && (
+              <p className="text-xs text-text-dim py-2">
+                Nothing yet. The platform records what the VMS tells it, and the VMS has not
+                said anything.
+              </p>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 export function CockpitPage() {
   return (
     <Page>
@@ -378,6 +433,15 @@ export function CockpitPage() {
             <h2 className="text-sm font-black text-text">Search</h2>
           </div>
           <SearchPanel />
+        </section>
+
+        <section className="space-y-4">
+          <div className="flex items-center gap-3">
+            <Activity size={16} className="text-accent" />
+            <h2 className="text-sm font-black text-text">The record</h2>
+            <span className="text-[11px] text-text-dim">what the platform has seen, and when</span>
+          </div>
+          <RecentMoments />
         </section>
       </div>
     </Page>

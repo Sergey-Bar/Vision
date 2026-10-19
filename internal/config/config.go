@@ -162,6 +162,14 @@ type Config struct {
 	// Set to 0 to disable automatic sweeps.
 	RetentionSweepInterval time.Duration
 
+	// SiteModelPath is the operator's site map: the YAML that declares the
+	// site's zones, cameras and routes.
+	//
+	// It is the SOURCE of the site view, and it is the operator's own drawing
+	// rather than something the product inferred. Empty means this install has
+	// no site model, and the site view says so rather than drawing an empty
+	// map, because a map with no zones says the site has no zones.
+	SiteModelPath string
 	// VLMConcurrency is how many VLM jobs run in parallel. Default 1.
 	// Set to 0 to disable the VLM worker entirely.
 	VLMConcurrency int
@@ -224,6 +232,7 @@ func LoadFrom(get Lookup) (Config, error) {
 	c.Tenant = strings.TrimSpace(get("SP_TENANT_ID"))
 	c.SiteID = strings.TrimSpace(get("SP_SITE_ID"))
 	c.IntegrationID = strings.TrimSpace(get("SP_INTEGRATION_ID"))
+	c.SiteModelPath = strings.TrimSpace(get("SP_SITE_MODEL"))
 	c.PrincipalRole = strings.TrimSpace(get("SP_PRINCIPAL_ROLE"))
 	if c.PrincipalRole == "" {
 		c.PrincipalRole = "tenant_admin"

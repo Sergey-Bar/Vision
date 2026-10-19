@@ -175,6 +175,11 @@ $env:SP_LISTEN_ADDR = "127.0.0.1:$ApiPort"
 # `/api/rest/v1` itself, and a base that already carries it asks for
 # `/api/api/rest/v1/events` -- which is a working system that sees nothing.
 $env:SP_MILESTONE_BASE_URL = "http://127.0.0.1:$VmsPort"
+# The operator's own drawing of the site: the zones, the cameras and the
+# routes. The console draws it, and the live state comes from the VMS.
+if (Test-Path -LiteralPath "poc/sitemap.yaml") {
+    $env:SP_SITE_MODEL = "poc/sitemap.yaml"
+}
 $env:SP_MILESTONE_TOKEN = ""
 New-Item -ItemType Directory -Path $env:SP_EVIDENCE_ROOT -Force | Out-Null
 $daemon = Start-Process -FilePath "go" -ArgumentList @("run", "./cmd/security-core") -PassThru -NoNewWindow

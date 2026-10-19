@@ -29,6 +29,7 @@ import (
 	"github.com/Sergey-Bar/vision/internal/observability"
 	"github.com/Sergey-Bar/vision/internal/rules"
 	"github.com/Sergey-Bar/vision/internal/simulate"
+	"github.com/Sergey-Bar/vision/internal/sitemodel"
 	"github.com/gorilla/websocket"
 	"github.com/jackc/pgx/v5"
 )
@@ -73,6 +74,14 @@ type Deps struct {
 	// rather than answering every query with an empty page: an empty result and
 	// an unconfigured one are different answers, and only one of them is true.
 	EventSearch *eventsearch.Service
+	// Site is the site's own model: its zones, their polygons, its cameras and
+	// its routes.
+	//
+	// Nil means this install has no site model, and the site view says so. An
+	// empty map and a missing map look identical on a screen, and only one of
+	// them is true: a map with no zones says the site has no zones, and a site
+	// with no model says nobody has drawn the site yet.
+	Site *sitemodel.Site
 }
 
 // DeadLetterReader is the dead-letter surface.
@@ -185,6 +194,14 @@ func (s *Server) RegisterRoutes(d Deps) func(*http.ServeMux) {
 		mux.Handle("GET /v1/attention",
 			s.requireCapability(identity.CapIncidentRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
 				s.handleAttention(w, r, p, d)
+			}))
+
+		// The site's own model: the zones, the cameras and the routes the
+		// operator declared. The console draws it, and the live state comes
+		// from the VMS.
+		mux.Handle("GET /v1/site",
+			s.requireCapability(identity.CapIncidentRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleSite(w, r, p, d)
 			}))
 		mux.Handle("GET /v1/incidents/{id}",
 			s.requireCapabilityAtSite(identity.CapIncidentRead, siteOfIncident(d),
@@ -586,6 +603,59 @@ func (s *Server) handleIncidentList(w http.ResponseWriter, r *http.Request, p id
 	WriteJSON(w, http.StatusOK, map[string]any{
 		"items":      items,
 		"nextCursor": nextCursor,
+	})
+}
+
+// handleSite answers the site's own model: the zones, their polygons, the
+// cameras and the routes.
+//
+// It is the SOURCE of the site view, and it is the operator's own drawing
+// rather than something the product inferred: the zones are what somebody
+// walked the site and declared, and the console draws them.
+//
+// The live state is NOT here. The cameras' state comes from the VMS, which is
+// the device that has it, and the console asks the VMS for it. A product that
+// published a camera's live state would be publishing a state it does not
+// have.
+func (s *Server) handleSite(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
+	if d.Site == nil {
+		WriteError(w, http.StatusNotFound, "no_site_model",
+			"This install has no site model, so there is no site to draw. Set SP_SITE_MODEL to the "+
+				"operator's site map.", requestID(r))
+		return
+	}
+	zones := make([]map[string]any, 0, len(d.Site.Zones))
+	for _, z := range d.Site.Zones {
+		polygon := make([]map[string]float64, 0, len(z.Polygon))
+		for _, pt := range z.Polygon {
+			polygon = append(polygon, map[string]float64{"x": pt.X, "y": pt.Y})
+		}
+		zones = append(zones, map[string]any{
+			"id": z.ID, "type": z.Type, "name": z.Name, "polygon": polygon,
+		})
+	}
+	cameras := make([]map[string]any, 0, len(d.Site.Cameras))
+	for _, c := range d.Site.Cameras {
+		cameras = append(cameras, map[string]any{
+			"id": c.ID, "zoneIds": c.ZoneIDs,
+			"position": map[string]float64{"x": c.Position.X, "y": c.Position.Y},
+		})
+	}
+	routes := make([]map[string]any, 0, len(d.Site.Routes))
+	for _, rt := range d.Site.Routes {
+		points := make([]map[string]float64, 0, len(rt.Points))
+		for _, pt := range rt.Points {
+			points = append(points, map[string]float64{"x": pt.X, "y": pt.Y})
+		}
+		routes = append(routes, map[string]any{
+			"id": rt.ID, "points": points, "allowedDirection": rt.AllowedDirection,
+		})
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{
+		"siteId":  d.Site.ID,
+		"zones":   zones,
+		"cameras": cameras,
+		"routes":  routes,
 	})
 }
 

@@ -206,6 +206,24 @@ export function usePrincipal() {
   })
 }
 
+// The recent record: the structured path over the canonical events, newest
+// first.
+//
+// No model and no prose: every row is an event with a time on it, which is the
+// only shape a reader can go and check against the picture.
+export function useRecentEvents(limit = 20) {
+  return useQuery({
+    queryKey: ['recent-events', limit],
+    queryFn: async () => {
+      const res = await get(`/v1/evidence?limit=${limit}`)
+      const data = (await res.json()) as { hits?: EvidenceHit[]; results?: EvidenceHit[]; items?: EvidenceHit[] }
+      return data.hits ?? data.results ?? data.items ?? []
+    },
+    refetchInterval: 5_000,
+    retry: 1,
+  })
+}
+
 // The search: a question, and the moments it found.
 //
 // The free-text path is the deterministic one: the product's structured search

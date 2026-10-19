@@ -8,6 +8,7 @@ import { IncidentsPage } from '../pages/Incidents'
 import { ClipsPage } from '../pages/Clips'
 import { UploadPage } from '../pages/Upload'
 import { CamerasPage } from '../pages/Cameras'
+import { SitePage } from '../pages/Site'
 import { SitesPage } from '../pages/Sites'
 import { UsersPage } from '../pages/Users'
 import { AuditPage } from '../pages/Audit'
@@ -30,6 +31,7 @@ export function Shell() {
           <Route path="clips" element={<ClipsPage />} />
           <Route path="upload" element={<UploadPage />} />
           <Route path="cameras" element={<CamerasPage />} />
+          <Route path="site" element={<SitePage />} />
           <Route path="sites" element={<SitesPage />} />
           <Route path="users" element={<UsersPage />} />
           <Route path="audit" element={<AuditPage />} />
