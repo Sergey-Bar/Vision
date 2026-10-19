@@ -12,6 +12,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Sergey-Bar/vision/internal/classify"
+	"github.com/Sergey-Bar/vision/internal/ortdetect"
 )
 
 // APIPrefix is the vendor's documented API prefix.
@@ -654,10 +657,45 @@ func (s *server) handleControlState(w http.ResponseWriter, r *http.Request) {
 			"classes":         classes,
 			"classesDeclared": declared,
 		}
+		// The vocabulary: where the class names came from, the prompt that
+		// produced them if a prompt produced them, and the families the
+		// PRODUCT groups them into.
+		//
+		// It is reported because a detection whose class list cannot be named
+		// cannot be checked: a reader who sees "class 7" has nothing to look up.
+		body["vocabulary"] = describeVocabulary(s.engine.vocabulary)
 	} else {
 		body["detector"] = nil
 	}
 	writeJSON(w, http.StatusOK, body)
+}
+
+// describeVocabulary renders the class list for the control surface.
+//
+// It names the SOURCE the class names came from and the PROMPT that produced
+// them, because a detection whose class list cannot be named cannot be
+// checked: a reader who sees "class 7" has nothing to look up.
+//
+// The open classes are listed because they are the ones a PROMPT can add, and
+// knowing which ones the taxonomy knows is the difference between "the model
+// cannot say that" and "the model did not say that".
+func describeVocabulary(v *ortdetect.Vocabulary) map[string]any {
+	if v == nil {
+		return nil
+	}
+	families := map[string]string{}
+	for _, name := range v.Names {
+		if family := v.FamilyOf(name); family != "" {
+			families[name] = family
+		}
+	}
+	return map[string]any{
+		"source":      v.Source,
+		"prompt":      v.Prompt,
+		"size":        v.Size(),
+		"families":    families,
+		"openClasses": classify.OpenClasses,
+	}
 }
 
 // describeState renders one camera for the control surface.

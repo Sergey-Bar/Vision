@@ -371,6 +371,21 @@ type DecodeConfig struct {
 	// MinBoxArea is the smallest box treated as an object, as a fraction of the
 	// frame.
 	MinBoxArea float64
+	// Vocabulary is the class list the boxes are named from.
+	//
+	// Nil means the built-in eighty-name list, which is what a fixed export
+	// needs. A session whose model names its own classes passes the session's
+	// vocabulary here, so a box is named by the model that found it rather than
+	// by a table that happens to have eighty entries.
+	Vocabulary *Vocabulary
+}
+
+// vocabulary is the class list the decoder names boxes from.
+func (c DecodeConfig) vocabulary() *Vocabulary {
+	if c.Vocabulary == nil {
+		return COCOVocabulary()
+	}
+	return c.Vocabulary
 }
 
 // DecodeResult is one frame's decode: the boxes and the arithmetic that produced
@@ -628,7 +643,7 @@ func Decode(t Tensor, g Geometry, classCount int, cfg DecodeConfig) DecodeResult
 			tel.DroppedTiny++
 			continue
 		}
-		name := ClassName(s.class)
+		name := cfg.vocabulary().Name(s.class)
 		if name == "" {
 			// The model has more classes than this vocabulary knows. The box is
 			// counted and dropped rather than sent nameless: an unnamed box would be

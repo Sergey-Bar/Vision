@@ -56,6 +56,15 @@ type SessionConfig struct {
 	// CUDADeviceID is SP_POC_ORT_CUDA_DEVICE: which GPU, zero-based, as CUDA numbers
 	// them. Only read when ExecutionProvider is "cuda".
 	CUDADeviceID int
+	// Vocabulary is the class list the model's boxes are named from.
+	//
+	// Nil means the built-in eighty-name list, which is right for a fixed
+	// export. A model whose classes are named by a PROMPT passes the session's
+	// vocabulary here, so the class list is a property of the session rather
+	// than of the build -- which is the whole point: a new class is a prompt,
+	// and a prompt that cannot change the class list is a prompt that changes
+	// nothing.
+	Vocabulary *Vocabulary
 }
 
 // Session is an open ONNX Runtime session and the facts about the model it was
@@ -66,13 +75,15 @@ type SessionConfig struct {
 // hash, which licence, what input size, and which output shape. [Identity] is the
 // bundle RC-18 requires.
 type Session struct {
-	mu       sync.Mutex
-	sess     *ort.DynamicAdvancedSession
-	opts     *ort.SessionOptions
-	input    InputSpec
-	outputs  []OutputSpec
-	identity Identity
-	closed   bool
+	mu      sync.Mutex
+	sess    *ort.DynamicAdvancedSession
+	opts    *ort.SessionOptions
+	input   InputSpec
+	outputs []OutputSpec
+	// vocabulary is the class list the boxes are named from.
+	vocabulary *Vocabulary
+	identity   Identity
+	closed     bool
 }
 
 // InputSpec is the model's declared input.
@@ -288,6 +299,13 @@ func Open(cfg SessionConfig) (*Session, error) {
 		}
 	}
 	id.SHA256, id.Bytes = sum, size
+	// The licence, from the manifest the fetch command wrote beside the model.
+	//
+	// It is a fact about the ANSWER and not about the file: the weights decide
+	// what the model says, and the licence decides what the product may do with
+	// that. A model used without recording its licence is a model whose terms
+	// nobody read, and the manifest is where the fetch command put them.
+	id.Licence = readLicence(cfg.ModelPath)
 	if md, err := sess.GetModelMetadata(); err == nil {
 		// The runtime's VERSION, not the metadata's address.
 		//
@@ -303,8 +321,13 @@ func Open(cfg SessionConfig) (*Session, error) {
 		_ = md.Destroy()
 	}
 
+	vocabulary := cfg.Vocabulary
+	if vocabulary == nil {
+		vocabulary = COCOVocabulary()
+	}
 	return &Session{
 		sess: sess, opts: opts,
+		vocabulary: vocabulary,
 		input: InputSpec{
 			Name: inInfo[0].Name, W: int(w), H: int(h), Layout: layout,
 			Rank: len(inInfo[0].Dimensions), Dynamic: w < 0 || h < 0,
@@ -331,6 +354,18 @@ func (s *Session) Outputs() []OutputSpec {
 
 // Identity returns what a decision made through this session must name.
 func (s *Session) Identity() Identity { return s.identity }
+
+// Vocabulary returns the class list this session names its boxes from.
+//
+// It is never nil: a session with no vocabulary declared has the built-in one,
+// and a reader asking the session what it calls its classes gets an answer
+// rather than a nil.
+func (s *Session) Vocabulary() *Vocabulary {
+	if s.vocabulary == nil {
+		return COCOVocabulary()
+	}
+	return s.vocabulary
+}
 
 // CheckInputSize refuses a configured input size the model does not declare.
 //

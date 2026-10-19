@@ -52,6 +52,14 @@ type Config struct {
 	// InputSize is SP_POC_DET_INPUT, cross-checked against the model's declared
 	// input at construction rather than at the first frame.
 	InputSize int
+	// Vocabulary is the class list the boxes are named from.
+	//
+	// Nil means the SESSION's vocabulary, which in turn defaults to the
+	// built-in eighty-name list. It is a separate field so a caller can name
+	// the classes the session found without opening the session again --
+	// and so a mismatch between the two is a caller's mistake rather than a
+	// silent fallback to a table of eighty.
+	Vocabulary *Vocabulary
 }
 
 // Detector runs one model over frames, and remembers what it cost.
@@ -106,9 +114,18 @@ func NewDetector(cfg Config) (*Detector, error) {
 		}
 	}
 	in := cfg.Session.Input()
+	// The class list the boxes are named from: the caller's, the session's, or
+	// the built-in one. The order matters -- a caller's vocabulary wins, because
+	// a caller that names its classes is the one that knows them.
+	vocabulary := cfg.Vocabulary
+	if vocabulary == nil {
+		vocabulary = cfg.Session.Vocabulary()
+	}
+	decode := cfg.Decode
+	decode.Vocabulary = vocabulary
 	d := &Detector{
 		sess:   cfg.Session,
-		decode: cfg.Decode,
+		decode: decode,
 		lat:    NewLatencies(cfg.LatencyWindow),
 		input:  in,
 	}

@@ -11,6 +11,12 @@ import (
 // is in COCO and not in the family table would arrive as `other` with nothing to
 // distinguish it from a chair, and the family histogram would quietly under-count
 // vehicles for as long as nobody noticed.
+//
+// The table holds the eighty COCO classes AND the open classes -- the ones a
+// model names by a PROMPT rather than carrying in its export. The two lists are
+// checked separately, because "a class the model can emit and the table does not
+// group" and "a table entry for a class nothing can emit" are different defects
+// and a single count would hide both.
 func TestEveryCOCOClassIsMapped(t *testing.T) {
 	if len(COCO) != 80 {
 		t.Fatalf("COCO has %d classes; the COCO-80 vocabulary is 80 and a fixture built against a different length is a fixture built against an assumption", len(COCO))
@@ -20,8 +26,8 @@ func TestEveryCOCOClassIsMapped(t *testing.T) {
 			t.Errorf("%q is in the COCO vocabulary and is not in the family table", c)
 		}
 	}
-	// And nothing beyond it: a table entry for a class the model cannot emit is a
-	// class nobody will ever see counted in a taxonomy total.
+	// And nothing beyond the two lists: a table entry for a class the model
+	// cannot emit is a class nobody will ever see counted in a taxonomy total.
 	for c := range families {
 		found := false
 		for _, k := range COCO {
@@ -31,23 +37,72 @@ func TestEveryCOCOClassIsMapped(t *testing.T) {
 			}
 		}
 		if !found {
-			t.Errorf("the family table has %q, which is not a COCO class", c)
+			for _, k := range OpenClasses {
+				if k == c {
+					found = true
+					break
+				}
+			}
+		}
+		if !found {
+			t.Errorf("the family table has %q, which is neither a COCO class nor an open class", c)
 		}
 	}
-	if len(families) != len(COCO) {
-		t.Fatalf("the family table has %d entries and the vocabulary has %d", len(families), len(COCO))
+	if len(families) != len(COCO)+len(OpenClasses) {
+		t.Fatalf("the family table has %d entries and the vocabulary has %d plus %d open classes",
+			len(families), len(COCO), len(OpenClasses))
+	}
+}
+
+// TestTheOpenClassesAreGrouped pins the open classes' families.
+//
+// A drone is a vehicle because it is a machine that moves under its own power,
+// and the aeroplane in the table above is one too. A balloon is `other`,
+// because it carries nothing and it is not alive.
+func TestTheOpenClassesAreGrouped(t *testing.T) {
+	want := map[string]Family{
+		"drone":   FamilyVehicle,
+		"balloon": FamilyOther,
+	}
+	for class, family := range want {
+		if got := FamilyOf(class); got != family {
+			t.Errorf("%q is in the %s family, want %s", class, got, family)
+		}
+	}
+}
+
+// TestFamiliesForBuildsTheMapForAVocabulary is the product's half of the
+// one-way ownership: the DETECTOR's vocabulary holds the names the model
+// declared, and the PRODUCT supplies the families, because the family
+// judgement is the product's and not the model's.
+func TestFamiliesForBuildsTheMapForAVocabulary(t *testing.T) {
+	families := FamiliesFor([]string{"person", "truck", "drone", "banana", ""})
+	if len(families) != 4 {
+		t.Fatalf("the map has %d entries, want four: %v", len(families), families)
+	}
+	if families["person"] != string(FamilyPerson) {
+		t.Errorf("person is in the %s family, want %s", families["person"], FamilyPerson)
+	}
+	if families["drone"] != string(FamilyVehicle) {
+		t.Errorf("drone is in the %s family, want %s", families["drone"], FamilyVehicle)
+	}
+	if _, empty := families[""]; empty {
+		t.Error("the map has an entry for the empty class name")
 	}
 }
 
 // TestTheFourFamiliesHoldWhatTheyClaim: the counts are pinned because a family that
 // grows without a decision about what it means is how a taxonomy becomes a
 // synonym list.
+//
+// The counts include the open classes, because a class the model can emit is a
+// class the histogram counts.
 func TestTheFourFamiliesHoldWhatTheyClaim(t *testing.T) {
 	want := map[Family]int{
-		FamilyVehicle: 12,
+		FamilyVehicle: 13,
 		FamilyPerson:  1,
 		FamilyAnimal:  10,
-		FamilyOther:   57,
+		FamilyOther:   58,
 	}
 	for f, n := range want {
 		if got := len(Classes(f)); got != n {

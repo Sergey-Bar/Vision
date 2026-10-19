@@ -150,6 +150,47 @@ var families = map[string]Family{
 	"teddy bear":     FamilyOther,
 	"hair drier":     FamilyOther,
 	"toothbrush":     FamilyOther,
+
+	// The open classes.
+	//
+	// A model whose classes are named by a PROMPT can name things the eighty
+	// never had. These are the ones the product's own class table acts on --
+	// a drone anywhere, a balloon anywhere -- and they are mapped here so a
+	// prompt-named class is grouped rather than arriving as an unlabelled
+	// `other` with no way to tell it apart from a chair.
+	//
+	// A drone is a vehicle: it is a machine that moves under its own power,
+	// and the aeroplane beside it in the table above is one too. A balloon is
+	// `other`, because it is not a machine that carries anything and it is not
+	// alive.
+	//
+	// "kite" is not here because the fixed vocabulary already has it, and a
+	// table with two entries for one class is a table whose lookup is a guess.
+	"drone":   FamilyVehicle,
+	"balloon": FamilyOther,
+}
+
+// OpenClasses are the classes that do not come from the fixed vocabulary.
+//
+// They are named by a prompt and grouped by the product, and they are listed
+// here so a reader can tell a class the model was told about from one the
+// export happened to carry.
+var OpenClasses = []string{"drone", "balloon"}
+
+// FamiliesFor maps a class list to the family's map for a vocabulary.
+//
+// It is how the product fills a vocabulary's family map: the detector's
+// vocabulary holds the NAMES the model declared, and the product supplies the
+// FAMILIES, because the family judgement is the product's and not the model's.
+func FamiliesFor(names []string) map[string]string {
+	out := make(map[string]string, len(names))
+	for _, name := range names {
+		if name = normalise(name); name == "" {
+			continue
+		}
+		out[name] = string(FamilyOf(name))
+	}
+	return out
 }
 
 // COCO is the 80-class vocabulary, in index order. It is here so this package can

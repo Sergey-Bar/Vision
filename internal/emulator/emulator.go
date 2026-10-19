@@ -69,6 +69,10 @@ type Options struct {
 	ClipDir string
 	// Loop says whether a source that reaches its end starts again.
 	Loop bool
+	// Vocabulary is the class list the detector names its boxes from. It is
+	// reported on the control surface, because a detection whose class list
+	// cannot be named cannot be checked.
+	Vocabulary *ortdetect.Vocabulary
 	// Logger receives the engine's own lines. Nil takes the default logger.
 	Logger *slog.Logger
 }
@@ -82,11 +86,12 @@ type Engine struct {
 	clip   string
 	server *server
 
-	mu       sync.RWMutex
-	cameras  map[string]*camera
-	events   []event
-	lastID   int
-	frameSeq uint64
+	mu         sync.RWMutex
+	vocabulary *ortdetect.Vocabulary
+	cameras    map[string]*camera
+	events     []event
+	lastID     int
+	frameSeq   uint64
 }
 
 // camera is one virtual camera's live state.
@@ -144,10 +149,11 @@ func New(opts Options) (*Engine, error) {
 		return nil, fmt.Errorf("emulator: make the clip directory %s: %w", clipDir, err)
 	}
 	e := &Engine{
-		opts:    opts,
-		log:     opts.Logger,
-		clip:    clipDir,
-		cameras: map[string]*camera{},
+		opts:       opts,
+		vocabulary: opts.Vocabulary,
+		log:        opts.Logger,
+		clip:       clipDir,
+		cameras:    map[string]*camera{},
 	}
 	for _, src := range opts.Sources {
 		if src.ID == "" {
