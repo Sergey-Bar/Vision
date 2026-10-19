@@ -74,7 +74,7 @@ func (s *seeder) writeTopology(ctx context.Context) error {
 		return fmt.Errorf("insert the integration: %w", err)
 	}
 
-	for _, z := range fixture.FixtureZones {
+	for _, z := range fixture.Zones {
 		var parent any
 		if z.Parent != "" {
 			parent = z.Parent
@@ -88,7 +88,7 @@ func (s *seeder) writeTopology(ctx context.Context) error {
 		}
 	}
 
-	for _, d := range fixture.FixtureDevices {
+	for _, d := range fixture.Devices {
 		if _, err := s.scoped(ctx).Exec(ctx, `
 			INSERT INTO devices (tenant_id, device_id, site_id, zone_id, kind, display_name,
 			                     attributes, source_device_id)

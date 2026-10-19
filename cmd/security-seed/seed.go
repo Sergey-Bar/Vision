@@ -165,8 +165,8 @@ func (s *seeder) run(ctx context.Context) error {
 	}
 	s.report.Tenant = s.opts.tenant
 	s.report.Site = s.opts.site
-	s.report.Zones = len(fixture.FixtureZones)
-	s.report.Devices = len(fixture.FixtureDevices)
+	s.report.Zones = len(fixture.Zones)
+	s.report.Devices = len(fixture.Devices)
 
 	s.step("secret material: the MFA wrapping key and the console certificate")
 	secretKey, err := s.writeSecretMaterial(ctx)

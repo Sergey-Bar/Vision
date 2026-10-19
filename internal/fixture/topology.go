@@ -29,8 +29,8 @@ package fixture
 // failing, which is the specific outcome `internal/rules/semantic.go` exists to
 // prevent.
 
-// FixtureDevice is one device the committed scenarios name.
-type FixtureDevice struct {
+// Device is one device the committed scenarios name.
+type Device struct {
 	// SourceDeviceID is the reference the source wrote, e.g. "CAM-001".
 	SourceDeviceID string
 	// DeviceID is the platform's own id for it.
@@ -43,8 +43,8 @@ type FixtureDevice struct {
 	Name string
 }
 
-// FixtureZone is one zone of the fixture site.
-type FixtureZone struct {
+// Zone is one zone of the fixture site.
+type Zone struct {
 	ZoneID string
 	Name   string
 	Path   string
@@ -52,18 +52,18 @@ type FixtureZone struct {
 	Depth  int
 }
 
-// FixtureDevices are the devices the committed scenarios name.
+// Devices are the devices the committed scenarios name.
 //
 // The list is derived from the fixtures rather than invented, and the seeder
 // prints it. If a scenario gains a device reference, the seed says so rather
 // than quietly attributing the event to the nearest camera it knows.
-var FixtureDevices = []FixtureDevice{
+var Devices = []Device{
 	{"CAM-001", "dev-entrance-01", "zone-restricted-bay", "camera", "Entrance Camera 01"},
 	{"CAM-014", "dev-perimeter-north", "zone-perimeter", "camera", "Perimeter North"},
 	{"DOR-004", "dev-loading-bay-door", "zone-restricted-bay", "door", "Loading Bay Door"},
 }
 
-// FixtureZones are the zones the shipped bundle's production rules need.
+// Zones are the zones the shipped bundle's production rules need.
 //
 // `core.person-in-restricted-zone-after-hours` filters on
 // `zone.pathPrefix: /restricted`, and `pathHasPrefix` matches a contiguous run
@@ -74,7 +74,7 @@ var FixtureDevices = []FixtureDevice{
 // Depth is written because the column is `CHECK (depth >= 0)` and because a
 // zone tree with a wrong depth is a zone tree the recursive traversal gets
 // wrong.
-var FixtureZones = []FixtureZone{
+var Zones = []Zone{
 	{"zone-site", "North Gate", "/north-gate", "", 0},
 	{"zone-restricted", "Restricted", "/north-gate/restricted", "zone-site", 1},
 	{"zone-restricted-bay", "Loading Bay", "/north-gate/restricted/loading-bay", "zone-restricted", 2},
@@ -91,7 +91,7 @@ var FixtureZones = []FixtureZone{
 func ZonePathFor(sourceDeviceID string) (zoneID string, zonePath string, ok bool) {
 	sourceDeviceID = trimBrackets(sourceDeviceID)
 	var deviceZone string
-	for _, d := range FixtureDevices {
+	for _, d := range Devices {
 		if d.SourceDeviceID == sourceDeviceID {
 			deviceZone = d.ZoneID
 			break
@@ -100,7 +100,7 @@ func ZonePathFor(sourceDeviceID string) (zoneID string, zonePath string, ok bool
 	if deviceZone == "" {
 		return "", "", false
 	}
-	for _, z := range FixtureZones {
+	for _, z := range Zones {
 		if z.ZoneID == deviceZone {
 			return z.ZoneID, z.Path, true
 		}
@@ -112,8 +112,8 @@ func ZonePathFor(sourceDeviceID string) (zoneID string, zonePath string, ok bool
 func trimBrackets(ref string) string {
 	ref = trimSpace(ref)
 	if open := lastIndexByte(ref, '['); open >= 0 {
-		if close := lastIndexByte(ref, ']'); close > open {
-			return trimSpace(ref[open+1 : close])
+		if end := lastIndexByte(ref, ']'); end > open {
+			return trimSpace(ref[open+1 : end])
 		}
 	}
 	return ref
