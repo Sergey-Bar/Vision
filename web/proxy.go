@@ -75,10 +75,8 @@ func proxyTo(prefix, target, rewrite string, decorate func(*http.Request)) http.
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(base)
-			pr.Out.URL.Path = strings.TrimRight(pr.In.URL.Path, "/")
-			if rewrite != "" {
-				pr.Out.URL.Path = rewrite + strings.TrimPrefix(pr.Out.URL.Path, prefix)
-			}
+			rest := strings.TrimPrefix(pr.In.URL.Path, prefix)
+			pr.Out.URL.Path = strings.TrimRight(rewrite+"/"+rest, "/")
 			pr.Out.Host = base.Host
 			if decorate != nil {
 				decorate(pr.Out)

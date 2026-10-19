@@ -154,14 +154,42 @@ write-side routes, which a read probe deliberately does not reach. All 17
 routes are still marked `Unverified`, because the probe never clears a flag; that
 stays a human editing `routes.go`.
 
-**What is NOT done.** The console has not been rebuilt: the SPA still proxies to
-a server that registers no `/v1` routes, and the live view still draws boxes
-the browser made up. The AI Operator's parts are still unwired. The smart
-search's embedding writer does not exist. The open-vocabulary model is not
+**The console is a cockpit.** The home page is the cockpit: a status strip, the
+attention queue with the reason chain open, the live grid with the VMS's own
+boxes, the search, the record and the site. The attention queue is served by
+the PRODUCT (`GET /v1/attention`) and not assembled by the console, because two
+operators must see the same order for the same site. The site's map is the
+operator's own drawing -- the YAML they walked the site with -- served by the
+product, and the LIVE STATE comes from the VMS, because the VMS is the device
+that has it. The console has no login: the API runs as a CONFIGURED principal
+whose role and site scope come from configuration, and the capability checks are
+real against it.
+
+**The search writes its own rows.** `event_embeddings` has existed since
+migration 0027 and nothing ever wrote a row, so the free-text path answered
+"unavailable" for every question. `internal/embeddings` is the writer, and the
+write is INSIDE the transaction that writes the canonical event: there is no
+window in which an event exists and its search row does not. The vector is a
+hashed bag of words, deterministic and model-free, and it says so in the
+`model` column.
+
+**The two implementations of the vendor's shape agree about the prefix.** The
+POC module's client wrote `/API/rest/v1` and the platform's adapter read
+`/api/rest/v1`; on a case-sensitive server those are different paths. The
+lower-case spelling is the platform's own contract, so the POC moved, and a
+test pins the two together.
+
+**What is NOT done.** The autonomy layer is still POC-only: `internal/threat`,
+`internal/anomaly` and `internal/correlation` are not in the product's
+pipeline, so the THREAT SCORE is not in the attention queue's ranking and the
+anomaly rules do not run. The queue ranks by severity and then recency, and
+the handler says so rather than hiding it. The open-vocabulary model is not
 here: the class list is a parameter and the vocabulary is honest about being
 COCO-80, but the export that would name a drone or a balloon by prompt is not
-fetched, so those two classes have a rule behind them and nothing that produces
-them.
+fetched, so those two classes have a rule behind them and nothing that
+produces them. `airuntime.DetectObjects` is still unwired: the AI runtime
+does not host an object-detection model. The console's remaining pages still
+carry the wireframes' static data where there was no endpoint to read.
 
 ### `no-silent-skips`: the run that tested nothing is now a red gate
 
@@ -2387,6 +2415,23 @@ entry more than one that does not.
 | **Phase 3 - the VLM** | Client **green** and key-free. P3.2 and P3.4 degrade to a shared category - see above. P3.1 unverified against a live endpoint |
 | **Phase 4 - spine and consoles** | P4.1, P4.2, P4.3 done. P4.4 the bookmark decision, pre-roll, drift correction and idempotency **built and tested; not yet dispatched from a live incident**. P4.5 shadow run, P4.6 console, P4.7 systemd not done |
 | **Phase 5 - soak and acceptance** | P5.1 the harness and its eight criteria **done**, P5.4 the fault-injection cases **done**, P5.3 the acceptance report **done** and runnable. No 7-day run, no 24-hour rehearsal, no measured false-positive rate |
+
+### The VMS product plan, and where it stands
+
+The plan is `.kilo/plans/1792431975225-hackathon-vms-product.md`. It is the
+plan for turning the POC into a product, and this table is its state.
+
+| Phase | State |
+|---|---|
+| **0 - the tree** | **done.** The footage, the package manager's working directory, the SPA's build output and the backups are gitignored; `product-scraper/` moved out of the repository; `AGENTS.md` restored; the `videoingest` stub deleted rather than built on. The package count no longer depends on whether a developer has run `npm install` |
+| **1 - the detector** | **done.** The decoder, the taxonomy, the sidecar and the box geometry moved into the product module; the module graph inverted; `shared/` is the seam. The model is a digest-pinned fused-head YOLO11 and the detector accepts a dynamic input size. The class list is a VALUE with a prompt and a family map, not a table of eighty names; the licence is recorded from the manifest beside the model; the GPU is checked before the session opens. **Not done:** the open-vocabulary export, so the vocabulary is honestly COCO-80 |
+| **2 - the VMS** | **done.** `internal/emulator` and `cmd/vms-emulator`: file, URL, RTSP and YouTube sources, an ffmpeg reader, a real MP4 clip writer, measured latency and frame cost, and play/pause/seek/frame-rate controls that take effect at once |
+| **3 - the analytics** | **done.** One event per object with the analytic shape, the spatial association that makes a person with a bag, the person count in the class id, the media surface, the control surface, the camera inventory and the bookmark route |
+| **4 - the platform** | **done.** Six canonical classes, each with a rule; the base URL no longer doubles the prefix; the POC's client moved to the documented prefix and a test pins the two together; the probe reports 17 routes, 14 confirmed, 0 contradicted, 0 unreachable, 3 skipped |
+| **5 - the AI Operator** | **partly done.** The attention queue is the product's (`GET /v1/attention`), ranked by severity and then recency, with the incident's own replay as the reason chain; the site view draws the operator's own map with the VMS's live state. **Not done:** the threat score, the anomaly engine and the correlation do not run in the product's pipeline, and `airuntime.DetectObjects` is unwired |
+| **6 - the smart search** | **done.** The embedding writer exists, writes inside the canonical event's transaction, and the free-text path answers with moments. The vector is a hashed bag of words: deterministic, model-free, and lexical, and it says so |
+| **7 - the console** | **done.** One design system, the cockpit as the home page, a configured principal instead of a login, real pages, and proxies to the product and the VMS so the browser never holds the device's credential |
+| **8 - the demo** | **done.** scripts/demo.ps1 starts Postgres, the product, the VMS and the console and prints the five minutes. scripts/verify.ps1 gained the SPA gate and the emulator's determinism gate |
 
 ### The vendor seam, and the three additions
 
