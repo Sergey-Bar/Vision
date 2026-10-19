@@ -48,6 +48,10 @@ export interface EvidenceHit {
   normalizedAt?: string
   summary?: string
   clipUrl?: string
+  // evidenceId is the clip the moment was captured in, when the incident has
+  // one. The content is served by the product's evidence route, so the console
+  // links to it and does not carry the bytes.
+  evidenceId?: string
 }
 
 export interface CoverageEntry {

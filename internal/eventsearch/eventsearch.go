@@ -95,6 +95,14 @@ type Hit struct {
 	CorrelationID string    `json:"correlationId,omitempty"`
 	ObservedAt    time.Time `json:"observedAt"`
 	NormalizedAt  time.Time `json:"normalizedAt"`
+	// EvidenceID is the clip the moment was captured in, when one was.
+	//
+	// It is a REFERENCE and not a promise: the clip belongs to the incident the
+	// event raised, and an incident with no fetch yet has no clip. The console
+	// shows it as a link that may be a 404, because a search that answered
+	// "there is no clip" for a moment that HAS one would be a lie in the other
+	// direction.
+	EvidenceID string `json:"evidenceId,omitempty"`
 }
 
 // Result is a page and the cursor that follows it.
@@ -134,11 +142,20 @@ const (
 const searchSQL = `
 SELECT e.event_id, e.site_id, e.event_type, e.device_id, e.zone_id,
        e.correlation_id, e.observed_at, e.normalized_at,
-       ie.incident_id
+       ie.incident_id,
+       clip.evidence_id AS evidence_id
   FROM canonical_events e
   LEFT JOIN incident_events ie
          ON ie.tenant_id = e.tenant_id AND ie.event_id = e.event_id
- WHERE e.tenant_id = $1
+  LEFT JOIN LATERAL (
+         -- The clip the moment was captured in, when the incident has one. A
+         -- LATERAL with a LIMIT so an incident with several clips does not
+         -- multiply the event into several rows.
+         SELECT ev.evidence_id FROM evidence ev
+          WHERE ev.tenant_id = e.tenant_id AND ev.incident_id = ie.incident_id
+            AND ev.kind = 'clip'
+          ORDER BY ev.observed_at DESC LIMIT 1
+       ) clip ON TRUE WHERE e.tenant_id = $1
    AND ($2::text[] IS NULL OR e.site_id = ANY($2::text[]))
    AND ($3 = '' OR e.event_type = $3)
    AND ($4 = '' OR e.device_id = $4)
@@ -159,13 +176,22 @@ SELECT e.event_id, e.site_id, e.event_type, e.device_id, e.zone_id,
 const freeTextVectorSQL = `
 SELECT e.event_id, e.site_id, e.event_type, e.device_id, e.zone_id,
        e.correlation_id, e.observed_at, e.normalized_at,
-       ie.incident_id
+       ie.incident_id,
+       clip.evidence_id AS evidence_id
   FROM event_embeddings em
   JOIN canonical_events e
     ON e.tenant_id = em.tenant_id AND e.event_id = em.event_id
   LEFT JOIN incident_events ie
     ON ie.tenant_id = e.tenant_id AND ie.event_id = e.event_id
- WHERE em.tenant_id = $1
+  LEFT JOIN LATERAL (
+         -- The clip the moment was captured in, when the incident has one. A
+         -- LATERAL with a LIMIT so an incident with several clips does not
+         -- multiply the event into several rows.
+         SELECT ev.evidence_id FROM evidence ev
+          WHERE ev.tenant_id = e.tenant_id AND ev.incident_id = ie.incident_id
+            AND ev.kind = 'clip'
+          ORDER BY ev.observed_at DESC LIMIT 1
+       ) clip ON TRUE WHERE em.tenant_id = $1
    AND ($2::text[] IS NULL OR e.site_id = ANY($2::text[]))
    AND ($3::timestamptz IS NULL OR e.normalized_at >= $3)
    AND ($4::timestamptz IS NULL OR e.normalized_at <= $4)
@@ -178,13 +204,22 @@ SELECT e.event_id, e.site_id, e.event_type, e.device_id, e.zone_id,
 const freeTextKeywordSQL = `
 SELECT e.event_id, e.site_id, e.event_type, e.device_id, e.zone_id,
        e.correlation_id, e.observed_at, e.normalized_at,
-       ie.incident_id
+       ie.incident_id,
+       clip.evidence_id AS evidence_id
   FROM event_embeddings em
   JOIN canonical_events e
     ON e.tenant_id = em.tenant_id AND e.event_id = em.event_id
   LEFT JOIN incident_events ie
     ON ie.tenant_id = e.tenant_id AND ie.event_id = e.event_id
- WHERE em.tenant_id = $1
+  LEFT JOIN LATERAL (
+         -- The clip the moment was captured in, when the incident has one. A
+         -- LATERAL with a LIMIT so an incident with several clips does not
+         -- multiply the event into several rows.
+         SELECT ev.evidence_id FROM evidence ev
+          WHERE ev.tenant_id = e.tenant_id AND ev.incident_id = ie.incident_id
+            AND ev.kind = 'clip'
+          ORDER BY ev.observed_at DESC LIMIT 1
+       ) clip ON TRUE WHERE em.tenant_id = $1
    AND ($2::text[] IS NULL OR e.site_id = ANY($2::text[]))
    AND ($3::timestamptz IS NULL OR e.normalized_at >= $3)
    AND ($4::timestamptz IS NULL OR e.normalized_at <= $4)
@@ -266,12 +301,16 @@ func (s *Service) Search(ctx context.Context, tenant string, q Query) (Result, e
 	for rows.Next() {
 		var h Hit
 		var incidentID *string
+		var evidenceID *string
 		if err := rows.Scan(&h.EventID, &h.SiteID, &h.EventType, &h.DeviceID,
-			&h.ZoneID, &h.CorrelationID, &h.ObservedAt, &h.NormalizedAt, &incidentID); err != nil {
+			&h.ZoneID, &h.CorrelationID, &h.ObservedAt, &h.NormalizedAt, &incidentID, &evidenceID); err != nil {
 			return Result{}, fmt.Errorf("eventsearch: scan: %w", err)
 		}
 		if incidentID != nil {
 			h.IncidentID = *incidentID
+		}
+		if evidenceID != nil {
+			h.EvidenceID = *evidenceID
 		}
 		hits = append(hits, h)
 		if len(hits) > limit {
@@ -364,12 +403,16 @@ func (s *Service) scanFreeText(rows pgx.Rows, limit int) (Result, error) {
 	for rows.Next() {
 		var h Hit
 		var incidentID *string
+		var evidenceID *string
 		if err := rows.Scan(&h.EventID, &h.SiteID, &h.EventType, &h.DeviceID,
-			&h.ZoneID, &h.CorrelationID, &h.ObservedAt, &h.NormalizedAt, &incidentID); err != nil {
+			&h.ZoneID, &h.CorrelationID, &h.ObservedAt, &h.NormalizedAt, &incidentID, &evidenceID); err != nil {
 			return Result{}, fmt.Errorf("eventsearch: scan: %w", err)
 		}
 		if incidentID != nil {
 			h.IncidentID = *incidentID
+		}
+		if evidenceID != nil {
+			h.EvidenceID = *evidenceID
 		}
 		hits = append(hits, h)
 		if len(hits) >= limit {

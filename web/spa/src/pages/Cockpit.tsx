@@ -376,6 +376,14 @@ function RecentMoments() {
                 <span className="text-[11px] text-text-dim">
                   {h.normalizedAt ? new Date(h.normalizedAt).toLocaleTimeString() : ''}
                 </span>
+                {h.evidenceId && (
+                  <a
+                    href={`/v1/evidence/${encodeURIComponent(h.evidenceId)}/content`}
+                    className="text-[10px] font-black uppercase tracking-[0.12em] text-accent hover:underline"
+                  >
+                    Clip
+                  </a>
+                )}
               </div>
             ))}
             {(hits ?? []).length === 0 && (

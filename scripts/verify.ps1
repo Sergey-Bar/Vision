@@ -471,11 +471,22 @@ if (-not $node) {
     Write-Host "    SKIPPED: node is not on PATH. The SPA gate did not run; this is not a pass." -ForegroundColor Yellow
 } else {
     Push-Location (Join-Path $repoRoot 'web/spa')
+    # npm and npx write their WARNINGS to stderr, and a native command that
+    # writes to stderr under `Stop` is a terminating error. So a deprecation
+    # notice from a transitive dependency aborted the install and the gate
+    # skipped itself -- with npm's own usage text as the reason, which says
+    # nothing about what went wrong.
+    #
+    # The preference is relaxed for these calls and restored after: the exit
+    # codes are still checked, and a non-zero exit is still a failure. What
+    # changes is that a warning on stderr is a warning.
+    $ErrorActionPreference = 'Continue'
     try {
         if (-not (Test-Path -LiteralPath 'node_modules')) {
             Write-Host "    installing the SPA's dependencies (once)" -ForegroundColor DarkGray
             $npmOutput = & npm ci --no-audit --no-fund 2>&1
-            if ($LASTEXITCODE -ne 0) {
+            $npmExit = $LASTEXITCODE
+            if ($npmExit -ne 0) {
                 # The reason is in the output, and it is printed: a skip that says
                 # only "it did not install" is a skip the next person has to
                 # reproduce to understand, and reproducing it is the whole cost of
@@ -483,7 +494,7 @@ if (-not $node) {
                 $npmOutput | Select-Object -Last 10 | ForEach-Object {
                     Write-Host "        $_" -ForegroundColor DarkGray
                 }
-                Invoke-Skip 'spa' ("the SPA dependencies could not be installed (npm ci exited $LASTEXITCODE), " +
+                Invoke-Skip 'spa' ("the SPA dependencies could not be installed (npm ci exited $npmExit), " +
                                    'so the type check, unit tests and build did not run')
             }
         }
@@ -497,6 +508,7 @@ if (-not $node) {
             }
         }
     } finally {
+        $ErrorActionPreference = 'Stop'
         Pop-Location
     }
 }
