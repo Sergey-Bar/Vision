@@ -190,6 +190,17 @@ the scenarios, and the seeder and the simulation read the same table: the seed
 writes it into a real database and the simulation answers the same question the
 database answers in production.
 
+**The demo runs.** `scripts/demo.ps1` starts the database, the migrations, the
+seed, the VMS playing the operator's footage with the detector on the GPU, the
+product ingesting the vendor's shape and raising incidents from the typed rules,
+and the console serving the cockpit. Four things stood between the plan and that
+working, and every one of them looked finished: `rules activate` and `rules
+store` took their flags on the wrong FlagSet, so the commands the demo needs
+refused the arguments they document; the emulator published its class as the
+event's type, so every event arrived flagged malformed; the events named no
+device, so every rule that filters on a zone was unreachable; and the console's
+proxy stripped the prefix, so the product answered 404 for a route it serves.
+
 **What is NOT done.** The autonomy layer is still POC-only: `internal/threat`,
 `internal/anomaly` and `internal/correlation` are not in the product's
 pipeline, so the THREAT SCORE is not in the attention queue's ranking and the
@@ -2463,7 +2474,7 @@ plan for turning the POC into a product, and this table is its state.
 | **5 - the AI Operator** | **partly done.** The attention queue is the product's (`GET /v1/attention`), ranked by severity and then recency, with the incident's own replay as the reason chain; the site view draws the operator's own map with the VMS's live state. **Not done:** the threat score, the anomaly engine and the correlation do not run in the product's pipeline, and `airuntime.DetectObjects` is unwired |
 | **6 - the smart search** | **done.** The embedding writer exists, writes inside the canonical event's transaction, and the free-text path answers with moments. The vector is a hashed bag of words: deterministic, model-free, and lexical, and it says so |
 | **7 - the console** | **done.** One design system, the cockpit as the home page, a configured principal instead of a login, real pages, and proxies to the product and the VMS so the browser never holds the device's credential |
-| **8 - the demo** | **done.** scripts/demo.ps1 starts Postgres, the product, the VMS and the console and prints the five minutes. scripts/verify.ps1 gained the SPA gate and the emulator's determinism gate |
+| **8 - the demo** | **done.** `scripts/demo.ps1` starts Postgres, the seed, the VMS and the console and prints the five minutes, and it has been RUN end to end: the VMS playing the operator's footage with the detector on the GPU, the product ingesting the vendor's shape and raising incidents from the typed rules, and the console serving the cockpit. `scripts/verify.ps1` gained the SPA gate and the emulator's determinism gate |
 
 ### The vendor seam, and the three additions
 
