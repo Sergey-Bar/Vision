@@ -82,6 +82,18 @@ const (
 	// built on cannot be one a restart can move.
 	ActionIncidentOpened  = "incident.opened"
 	ActionEvidenceFetched = "evidence.fetched"
+	// ActionIncidentDispatchUndeliverable is the row that records a dispatch
+	// that could not be built.
+	//
+	// It exists because the alternative was worse. A dispatch that cannot be
+	// built -- a rule asking for a model observation when the evidence for it
+	// does not exist yet -- used to be returned as an error, and the error
+	// rolled the INCIDENT back with it. A rule that matched produced no
+	// incident at all, because a side effect of the incident could not be
+	// built. The operator's record of a decision outranks the decision's side
+	// effect, and a side effect that cannot be built is a thing to record
+	// rather than a thing to lose the incident over.
+	ActionIncidentDispatchUndeliverable = "incident.dispatch.undeliverable"
 	// ActionEvidenceExported used to be declared here as "evidence.exported" and
 	// was appended to by nothing, ever. Its capability (evidence.export) was
 	// granted to two roles and enforced by no route, so there was no code path

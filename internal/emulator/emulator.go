@@ -201,10 +201,12 @@ func (e *Engine) announceCameras() {
 	}
 	sortStrings(ids)
 	for _, id := range ids {
+		cam := e.cameras[id]
 		e.lastID++
 		e.events = append(e.events, event{
 			ID:       fmt.Sprintf("emu-camera-online-%s", sanitiseName(id)),
 			Type:     "CameraOnline",
+			Source:   cam.source.Name + " [" + cam.source.DeviceRef + "]",
 			DeviceID: id,
 			At:       now,
 			Vendor:   e.opts.Vendor,
@@ -447,8 +449,14 @@ func (e *Engine) publish(cam *camera, dets []Detection) {
 	people := countPeople(dets)
 	e.lastID++
 	e.events = append(e.events, event{
-		ID:        fmt.Sprintf("emu-%s-%06d", cam.source.ID, e.lastID),
-		Type:      classPersonCount,
+		ID: fmt.Sprintf("emu-%s-%06d", cam.source.ID, e.lastID),
+		// The vendor's spelling of the type, as everywhere else. The COUNT
+		// travels in the analyticData subtree, in the class name and the class
+		// id, and publishing it as the event's TYPE is what a device with no
+		// vocabulary would do: the adapter reads it as an unknown type and
+		// flags every count.
+		Type:      "ObjectDetected",
+		Source:    cam.source.Name + " [" + cam.source.DeviceRef + "]",
 		DeviceID:  cam.source.ID,
 		At:        now,
 		ClassName: classPersonCount,

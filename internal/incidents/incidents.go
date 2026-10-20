@@ -224,11 +224,22 @@ func (s *Service) CreateIncident(ctx context.Context, in Create) (string, error)
 		// rows are written here and the relay drains them afterwards, which is what makes
 		// the commit atomic without making the delivery synchronous with the ingest.
 		//
-		// A dispatch that cannot be built is an ERROR rather than a skip. A rule whose
-		// notification could not be encoded is a rule whose notification is missing, and
-		// returning nil here would commit the incident and record nothing - the same
-		// silent gap this block removes.
-		if err := dispatch.EnqueueOutbox(ctx, tx, dispatch.Request{
+		// A dispatch that cannot be built is RECORDED and the incident is still
+		// raised.
+		//
+		// The earlier version returned the error, and the error rolled back the
+		// incident with it: a rule that MATCHED -- the product had decided that
+		// something happened -- produced no incident at all, because a side
+		// effect of the incident could not be built. The operator's record of a
+		// decision is more important than the decision's side effect, and a rule
+		// asking for a model that is not there is the ordinary case, not a
+		// misconfiguration: the rule asks for an observation, the observation is
+		// recorded as degraded with its reason, and the incident stands.
+		//
+		// The gap the old code was closing is still closed: the dispatch is not
+		// silently dropped. It is written to the ledger with the reason it could
+		// not be built, which is the same record the operator reads.
+		dispatchErr := dispatch.EnqueueOutbox(ctx, tx, dispatch.Request{
 			TenantID:   in.TenantID,
 			SiteID:     in.SiteID,
 			IncidentID: id,
@@ -241,8 +252,24 @@ func (s *Service) CreateIncident(ctx context.Context, in Create) (string, error)
 			Severity:   orDefault(in.Decision.Severity, "medium"),
 			OccurredAt: in.Decision.OccurredAt,
 			Dispatch:   in.Decision.Dispatch,
-		}); err != nil {
-			return fmt.Errorf("incidents: enqueue dispatches: %w", err)
+		})
+		if dispatchErr != nil {
+			if s.Audit != nil {
+				if _, err := s.Audit.Append(ctx, tx, audit.Entry{
+					TenantID:        in.TenantID,
+					Actor:           "verification",
+					ActorType:       audit.ActorSystem,
+					Action:          audit.ActionIncidentDispatchUndeliverable,
+					TargetType:      "incident",
+					TargetID:        id,
+					PolicyVersion:   in.PolicyVersion,
+					Reason:          "the incident stands; a dispatch of it could not be built: " + dispatchErr.Error(),
+					EvidenceRefs:    in.EvidenceIDs,
+					ResultStateHash: in.BundleContentHash,
+				}); err != nil {
+					return err
+				}
+			}
 		}
 
 		if s.Audit != nil {
