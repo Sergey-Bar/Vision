@@ -470,7 +470,7 @@ if (-not $node) {
     Invoke-Skip 'spa' 'node is not on PATH; the SPA type check, unit tests and build did not run'
     Write-Host "    SKIPPED: node is not on PATH. The SPA gate did not run; this is not a pass." -ForegroundColor Yellow
 } else {
-    Push-Location (Join-Path $repoRoot 'web/spa')
+    Push-Location (Join-Path $repo 'web/spa')
     # npm and npx write their WARNINGS to stderr, and a native command that
     # writes to stderr under `Stop` is a terminating error. So a deprecation
     # notice from a transitive dependency aborted the install and the gate
