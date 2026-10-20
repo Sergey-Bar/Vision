@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Activity, ChevronRight } from 'lucide-react'
+import { Activity, ChevronRight, Menu } from 'lucide-react'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from './ui/dropdown-menu'
 import { useAIRuntime } from '@/hooks/api'
 import { useIncidents } from '@/hooks/product'
@@ -17,7 +17,7 @@ import { useIncidents } from '@/hooks/product'
 //
 // The clock is the SITE's, not the host's, and it carries its offset: a time
 // without an offset is a time two people will read differently.
-export function TopBar() {
+export function TopBar({ onMenu }: { onMenu: () => void }) {
   const [now, setNow] = useState(new Date())
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000)
@@ -39,13 +39,23 @@ export function TopBar() {
   const open = (incidents ?? []).filter((i) => i.state === 'open' || i.state === 'detected').length
 
   return (
-    <header className="h-22 border-b border-white/10 bg-black/50 backdrop-blur-3xl flex items-center justify-between px-10 z-50 sticky top-0">
+    <header className="h-22 border-b border-white/10 bg-black/50 backdrop-blur-3xl flex items-center justify-between px-5 sm:px-10 z-50 sticky top-0">
       <div className="flex items-center gap-5">
+        {/* The navigation is a drawer on a narrow screen, and this is the button
+            that opens it. It is hidden on the wide screens, where the rail is
+            always there. */}
+        <button
+          onClick={onMenu}
+          className="lg:hidden p-3 -ml-3 text-text-muted hover:text-text hover:bg-white/5 rounded-2xl transition-all duration-300"
+          aria-label="Open navigation"
+        >
+          <Menu size={20} />
+        </button>
         <div className="flex items-center gap-4">
           <div className="w-12 h-12 rounded-2xl bg-accent flex items-center justify-center text-[14px] font-black tracking-wider text-white shadow-lg shadow-accent/50 glow-accent">
             V
           </div>
-          <span className="text-lg font-black text-text tracking-tight">Vision VMS</span>
+          <span className="text-lg font-black text-text tracking-tight hidden sm:inline">Vision VMS</span>
         </div>
       </div>
       <div className="flex items-center gap-8">

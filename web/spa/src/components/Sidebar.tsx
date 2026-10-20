@@ -24,13 +24,47 @@ const NAV = [
   { href: '/settings', label: 'Settings', icon: Settings },
 ]
 
-export function Sidebar({ currentPath }: { currentPath: string }) {
+// The navigation.
+//
+// It is a RAIL on a wide screen and a DRAWER on a narrow one.
+//
+// The rail is 300 pixels, which is right for a desktop an operator watches all
+// day and wrong for the half of the screen a laptop leaves: on a narrow
+// viewport the rail took more than half the width and pushed the page it was
+// supposed to be navigating out of sight. A navigation that hides the thing it
+// navigates is not a navigation, and the fix is a drawer with a button that
+// opens it -- which is what the Menu button on the top bar is for.
+export function Sidebar({
+  currentPath,
+  open,
+  onClose,
+}: {
+  currentPath: string
+  open: boolean
+  onClose: () => void
+}) {
   const [collapsed, setCollapsed] = useState(false)
   const navigate = useNavigate()
 
   return (
-    <aside className="flex-shrink-0 border-r border-white/10 bg-black/40 backdrop-blur-md z-40 transition-all duration-500" style={{ width: collapsed ? 80 : 300 }}>
-      <div className="flex items-center justify-between px-8 h-22 border-b border-white/10">
+    <>
+      {/* The scrim behind the drawer, on the narrow screens only. */}
+      {open && (
+        <div
+          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm lg:hidden"
+          onClick={onClose}
+          aria-hidden="true"
+        />
+      )}
+      <aside
+        className={cn(
+          'flex-shrink-0 border-r border-white/10 bg-black/40 backdrop-blur-md z-50 transition-all duration-500',
+          'fixed inset-y-0 left-0 lg:static lg:translate-x-0',
+          open ? 'translate-x-0' : '-translate-x-full',
+        )}
+        style={{ width: collapsed ? 80 : 300 }}
+      >
+        <div className="flex items-center justify-between px-8 h-22 border-b border-white/10">
         {!collapsed && (
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 rounded-2xl bg-accent flex items-center justify-center text-[14px] font-black tracking-wider text-white shadow-lg shadow-accent/50">
@@ -46,7 +80,7 @@ export function Sidebar({ currentPath }: { currentPath: string }) {
           <Menu size={20} />
         </button>
       </div>
-      <nav className="flex-1 py-8 overflow-y-auto">
+        <nav className="flex-1 py-8 overflow-y-auto">
         {NAV.map((item) => {
           const Icon = item.icon
           const active = currentPath === item.href || (item.href !== '/' && currentPath.startsWith(item.href))
@@ -73,12 +107,13 @@ export function Sidebar({ currentPath }: { currentPath: string }) {
           )
         })}
       </nav>
-      <div className="px-8 py-8 border-t border-white/10">
-        <div className="flex items-center gap-4 p-4 rounded-3xl border border-white/5 bg-black/20 hover:bg-white/5 transition-all duration-300 cursor-pointer">
-          <ShieldAlert size={19} className="text-accent shadow-lg shadow-accent/30" />
-          <span className="text-[12px] font-black text-text">System health</span>
+        <div className="px-8 py-8 border-t border-white/10">
+          <div className="flex items-center gap-4 p-4 rounded-3xl border border-white/5 bg-black/20 hover:bg-white/5 transition-all duration-300 cursor-pointer">
+            <ShieldAlert size={19} className="text-accent shadow-lg shadow-accent/30" />
+            <span className="text-[12px] font-black text-text">System health</span>
+          </div>
         </div>
-      </div>
-    </aside>
+      </aside>
+    </>
   )
 }

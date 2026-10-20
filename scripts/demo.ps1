@@ -101,16 +101,19 @@ if (-not $SkipChecks) {
 # ----------------------------------------------------------------- the database
 Write-Host "Starting the database" -ForegroundColor White
 $container = "vision-demo-pg"
-$running = docker ps --filter "name=$container" --format '{{.Names}}' 2>$null
-if ($running -eq $container) {
-    Say "the container is already running"
-} else {
-    docker rm -f $container 2>$null | Out-Null
-    docker run -d --name $container `
-        -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=vision_demo `
-        -p "${DatabasePort}:5432" pgvector/pgvector:pg16 -c max_connections=300 | Out-Null
-    Say "the container is up on port $DatabasePort"
-}
+# A FRESH database every time, and the container is the demo's own --
+# `vision-demo-pg` -- so nothing outside the demo is touched.
+#
+# The seed refuses to delete a disposition, and it is right to: a reviewer's
+# answer is a record, and a record that can be removed is not one. A demo that
+# inherited yesterday's dispositions would be a demo about yesterday, so the
+# database starts empty every time. Anything the operator wants to keep lives
+# in a database with a different name.
+docker rm -f $container 2>$null | Out-Null
+docker run -d --name $container `
+    -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=vision_demo `
+    -p "${DatabasePort}:5432" pgvector/pgvector:pg16 -c max_connections=300 | Out-Null
+Say "the container is up on port $DatabasePort"
 
 $env:SP_DATABASE_URL = "postgres://postgres:postgres@127.0.0.1:${DatabasePort}/vision_demo?sslmode=disable"
 $env:SP_TEST_DATABASE_URL = $env:SP_DATABASE_URL
@@ -268,6 +271,11 @@ $simulated = Get-Content -Raw -LiteralPath $report | ConvertFrom-Json
 # the same table the simulation replays over -- so the zones a rule filters on
 # are the zones the seeded devices are in.
 $secretKey = Join-Path $repoRoot "dist/demo/secret.key"
+# The demo's own scratch key, cleared before the seed. The seed REFUSES to
+# overwrite an existing key, and it is right to: a key that is replaced is a
+# factor that cannot be unwrapped any more. The key is the demo's, in the
+# demo's own directory, and the demo recreates it every time.
+Remove-Item -LiteralPath $secretKey -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path (Split-Path -Parent $secretKey) -Force | Out-Null
 # The MFA wrapping key, which the seed writes and the product reads. They are
 # the same file: an install that enrolled a factor with one key and serves with
@@ -287,7 +295,8 @@ $env:SP_DISPATCH_OPERATOR_TOKEN = "demo-dispatch-token"
     --console-tls (Join-Path $repoRoot "dist/demo/console-tls") `
     --bundle rules/builtin `
     --fixtures testdata/fixtures `
-    --passphrase "demo-operator-passphrase"
+    --passphrase "demo-operator-passphrase" `
+    --reset
 if ($LASTEXITCODE -ne 0) { Die "the seed did not run; there is no site, no devices and no active bundle." }
 Say "the site is seeded and bundle $($simulated.bundleVersion) is active"
 
