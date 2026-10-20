@@ -211,18 +211,13 @@ its box, and the product's record deliberately does not keep a person's
 position in a frame, so the product claims the weaker thing its own facts
 support and says so.
 
-**What is NOT done.** The autonomy layer is still POC-only: `internal/threat`,
-`internal/anomaly` and `internal/correlation` are not in the product's
-pipeline, so the THREAT SCORE is not in the attention queue's ranking and the
-anomaly rules do not run. The queue ranks by severity and then recency, and
-the handler says so rather than hiding it.
-
-The POC's entity-level rules -- dwell, loiter, flow, tailgate -- do not run in
-the product, and they cannot without a decision about whether the product keeps
-positions. They run over TRACKED entities, and tracking needs the box
-geometry; the adapter's redaction allow-list deliberately does not carry one,
-because a person's position in a frame is a privacy-bearing field. A product
-that tracked entities would be tracking something it threw away.
+**What is NOT done.** The POC's entity-level rules -- dwell, loiter, flow,
+tailgate -- do not run in the product, and they cannot without a decision about
+whether the product keeps positions. They run over TRACKED entities, and
+tracking needs the box geometry; the adapter's redaction allow-list
+deliberately does not carry one, because a person's position in a frame is a
+privacy-bearing field. A product that tracked entities would be tracking
+something it threw away.
 
 `airuntime.DetectObjects` is still unwired: the AI runtime does not host an
 object-detection model, and adding one is a model bundle and a provider rather
