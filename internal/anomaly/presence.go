@@ -112,6 +112,21 @@ func (r *presenceRule) Evaluate(inc *correlation.CorrelatedIncident, site *sitem
 	}}
 }
 
+// presenceThreshold is how long a class must keep being reported in a zone
+// before the presence is a finding.
+//
+// It is three seconds, and the reason is what the product's evidence actually
+// is. A presence is measured over the CORROBORATING EVENTS, and the
+// correlator reads a bounded number of them: at a busy site's event rate the
+// candidates it can hold cover a few seconds of the site's history, so a
+// threshold longer than that could never be reached and the rule would report
+// nothing for ever.
+//
+// Three seconds is not a long time to be somewhere. It is, however, seventy
+// detections of the same class in the same zone at a site's event rate, and a
+// thing reported seventy times is not noise.
+const presenceThreshold = 3 * time.Second
+
 // PresenceRuleSet builds the rule set a PRODUCT runs.
 //
 // It is one rule and not `DefaultRuleSet`'s four, and the difference is the
@@ -121,17 +136,18 @@ func (r *presenceRule) Evaluate(inc *correlation.CorrelatedIncident, site *sitem
 // every rule as having found nothing, and "nothing" is not a finding.
 //
 // The window is the one the correlator actually searched, so the autonomy
-// layer and the rule bundle agree about how long is long.
-//
-// The THRESHOLD is half of it, and that is not a guess: the window bounds the
-// candidates, so the span they cover is at most the window and a threshold
-// equal to the window would never be reached. Half the window is a presence
-// that fills at least half of the evidence the rule was given.
+// layer and the rule bundle agree about how long is long. The threshold is
+// bounded by it, because a presence longer than the window cannot be measured
+// from the evidence the window covers.
 func PresenceRuleSet(window time.Duration) *RuleSet {
 	if window <= 0 {
 		window = 15 * time.Second
 	}
-	return newRuleSet(newPresenceRule(window / 2))
+	threshold := presenceThreshold
+	if half := window / 2; half < threshold {
+		threshold = half
+	}
+	return newRuleSet(newPresenceRule(threshold))
 }
 
 // firstOf returns the first element, or the empty string.

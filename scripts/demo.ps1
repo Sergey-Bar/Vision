@@ -38,7 +38,7 @@ param(
     # The footage the street camera plays.
     [string]$StreetVideo = "Videos/road1.mp4",
     # Frames per second measured per camera.
-    [double]$Fps = 5,
+    [double]$Fps = 2,
     # Skip the checks and start anyway. The checks are the point; skipping them
     # is for the person who has already run them.
     [switch]$SkipChecks
@@ -289,6 +289,19 @@ if (Test-Path -LiteralPath "deploy/demo-site.yaml") {
     $env:SP_SITE_MODEL = "deploy/demo-site.yaml"
 }
 $env:SP_MILESTONE_TOKEN = $env:SP_VMS_TOKEN
+# The poll interval.
+#
+# The ingest latency SLO is "p95 under 5s", and the latency is how long an
+# event waits between the vendor publishing it and the product normalising it --
+# which is at least the poll interval, because an event waits for the next poll.
+# At the default five seconds the SLO is breached by the poll interval alone,
+# before a single event is looked at.
+#
+# So the demo polls every two seconds. The frame rate is set where the emulator
+# is started, and the reason it is not higher is the same: the VMS publishes one
+# event per object it sees, so the event rate is the frame rate times the
+# detections per frame.
+$env:SP_POLL_INTERVAL = "2s"
 # The product refuses to serve plaintext with nothing in front of it, and it is
 # right to: the API's bearer credentials and the site's evidence would be on
 # the wire in the clear.

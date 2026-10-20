@@ -253,12 +253,33 @@ func (s *server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	for _, ev := range events[start:end] {
 		items = append(items, ev.envelope())
 	}
+	// The next page, when there is one.
+	//
+	// The vendor's documented continuation is `?page=<n>` plus a `_links.next`
+	// value in the body, and the adapter FOLLOWS it. Without this link the
+	// adapter reads the first page and stops -- and the events on the second
+	// page, and on every page after it, are never ingested at all. That is
+	// invariant 1 broken on the vendor's side of the wire: accepted events
+	// lost silently, with no dead letter, because the reader never learned
+	// they existed.
+	//
+	// The link is ROOT-RELATIVE, because the adapter refuses a next link naming
+	// another host: the site's bearer credential must not be sent to a host
+	// nobody configured.
+	links := map[string]any{
+		"self": map[string]any{"href": r.URL.String()},
+	}
+	if end < len(events) {
+		next := *r.URL
+		query := next.Query()
+		query.Set("page", strconv.Itoa(page+1))
+		next.RawQuery = query.Encode()
+		links["next"] = map[string]any{"href": next.Path + "?" + next.RawQuery}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"array":      items,
 		"eventCount": len(events),
-		"_links": map[string]any{
-			"self": map[string]any{"href": r.URL.String()},
-		},
+		"_links":     links,
 	})
 }
 
