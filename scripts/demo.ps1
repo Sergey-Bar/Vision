@@ -48,13 +48,54 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Push-Location $repoRoot
 
-function Say($message) { Write-Host "  $message" -ForegroundColor Cyan }
-function Warn($message) { Write-Host "  $message" -ForegroundColor Yellow }
-function Die($message) { Write-Host "  $message" -ForegroundColor Red; exit 1 }
+# The demo's transcript.
+#
+# Every line the demo prints also goes to this file, as it is printed. A demo
+# that leaves a transcript behind can be read after the fact, and a demo whose
+# output lives only in a terminal that scrolls away says nothing to the person
+# who comes back to ask what happened.
+$transcript = Join-Path $PSScriptRoot "..\dist\demo\demo.log"
+New-Item -ItemType Directory -Path (Split-Path -Parent $transcript) -Force | Out-Null
+function Write-Line($message, $colour) {
+    Write-Host $message -ForegroundColor $colour
+    Add-Content -LiteralPath $transcript -Value $message
+}
+
+function Say($message) { Write-Line "  $message" Cyan }
+function Warn($message) { Write-Line "  $message" Yellow }
+function Die($message) { Write-Line "  $message" Red; exit 1 }
+
+# Invoke-Native runs a native command and returns its exit code.
+#
+# The error preference is relaxed for the call and restored after it, because a
+# native command that writes to stderr under `Stop` is a terminating error: the
+# migration's own output, Vite's chunk-size advice and a program's diagnostics
+# all go to stderr, and every one of them would stop the demo before it started
+# and hide the reason. The exit code is the answer, and the demo checks it.
+#
+# The command's OUTPUT is captured rather than returned, because a function that
+# returns everything its scriptblock wrote returns the output AND the exit code
+# -- and an array compared with `ne 0` is never equal to it, so the demo would
+# report a failure that had not happened.
+function Invoke-Native {
+    param([scriptblock]$Command)
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = & $Command 2>&1
+        $code = $LASTEXITCODE
+        foreach ($line in @($output)) {
+            Add-Content -LiteralPath $transcript -Value "    $line"
+        }
+        $output | Out-Host
+        return $code
+    } finally {
+        $ErrorActionPreference = 'Stop'
+    }
+}
 
 Write-Host ""
-Write-Host "The product: a VMS you can play video into" -ForegroundColor White
-Write-Host "============================================" -ForegroundColor White
+Write-Line "The product: a VMS you can play video into" White
+Write-Line "============================================" White
 Write-Host ""
 
 # ---------------------------------------------------------------- the checks
@@ -63,7 +104,7 @@ Write-Host ""
 # checks are the part that makes the five minutes repeatable. Every one of them
 # is a thing whose absence produces a confusing failure three minutes in.
 if (-not $SkipChecks) {
-    Write-Host "Checking what the demo needs" -ForegroundColor White
+    Write-Line "Checking what the demo needs" White
     Say "ffmpeg"
     if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
         Die "ffmpeg is not on PATH. The emulator decodes and cuts video with it, and there is no second demuxer here."
@@ -99,7 +140,7 @@ if (-not $SkipChecks) {
 }
 
 # ----------------------------------------------------------------- the database
-Write-Host "Starting the database" -ForegroundColor White
+Write-Line "Starting the database" White
 $container = "vision-demo-pg"
 # A FRESH database every time, and the container is the demo's own --
 # `vision-demo-pg` -- so nothing outside the demo is touched.
@@ -119,24 +160,49 @@ $env:SP_DATABASE_URL = "postgres://postgres:postgres@127.0.0.1:${DatabasePort}/v
 $env:SP_TEST_DATABASE_URL = $env:SP_DATABASE_URL
 $env:SP_TEST_DATABASE_PASSWORD = "postgres"
 
-# Wait for Postgres to answer, because the migration runs against it and a
-# connection refused is a confusing first error.
-$ready = $false
-for ($i = 0; $i -lt 40; $i++) {
-    docker exec $container pg_isready -U postgres -d vision_demo 2>$null | Out-Null
-    if ($LASTEXITCODE -eq 0) { $ready = $true; break }
+# Wait for the container to be RUNNING.
+#
+# Not for its log, and not with `pg_isready`.
+#
+# `docker logs` on a container that has not started yet BLOCKS: the log endpoint
+# waits for the container, so the demo waited for the log while the log waited
+# for the container, and neither of them was ever going to hear from the other.
+#
+# `pg_isready` is not enough either: during the image's INIT phase a temporary
+# server answers on the container's socket and `pg_isready` reports it ready --
+# and then that server shuts down and the real one starts, so a client that
+# connects in that window gets "unexpected EOF".
+#
+# So the wait is on the container's STATE, and the readiness of the server is
+# the migration's own retry.
+$running = $false
+for ($i = 0; $i -lt 60; $i++) {
+    $state = docker inspect -f '{{.State.Running}}' $container 2>$null
+    if ("$state".Trim() -eq "true") { $running = $true; break }
     Start-Sleep -Milliseconds 500
 }
-if (-not $ready) { Die "Postgres did not become ready." }
-Say "Postgres is ready"
+if (-not $running) { Die "the database container did not start; docker says why: $(docker logs --tail 20 $container 2>&1 | Out-String)" }
+Say "the container is running"
 
-Write-Host "Migrating" -ForegroundColor White
-& go run ./cmd/security-migrate up | Out-Null
-if ($LASTEXITCODE -ne 0) { Die "the migrations did not apply." }
+Write-Line "Migrating" White
+# The migration, retried.
+#
+# The container's state says it is RUNNING and the server inside it is still
+# finishing its init phase, and the first connection in that window is refused
+# with "unexpected EOF". A retry is the right answer: the database is coming, and
+# the migration is idempotent.
+$migrateExit = 1
+for ($attempt = 1; $attempt -le 10; $attempt++) {
+    $migrateExit = Invoke-Native { & go run ./cmd/security-migrate up | Out-Null }
+    if ($migrateExit -eq 0) { break }
+    Say "the database is not answering yet (attempt $attempt)"
+    Start-Sleep -Seconds 2
+}
+if ($migrateExit -ne 0) { Die "the migrations did not apply." }
 Say "the schema is up to date"
 
 # ------------------------------------------------------------------ the VMS
-Write-Host "Building the three programs" -ForegroundColor White
+Write-Line "Building the three programs" White
 #
 # Built, not `go run`. A `go run` compiles on the way in, and the operator is
 # watching a blank screen while it does; the first build of the day is a
@@ -148,17 +214,23 @@ if ($LASTEXITCODE -ne 0) { Die "the VMS emulator did not build." }
 & go build -o (Join-Path $bin "security-core") ./cmd/security-core
 if ($LASTEXITCODE -ne 0) { Die "the product did not build." }
 & go build -o (Join-Path $bin "console") ./web
-if ($LASTEXITCODE -ne 0) { Die "the console did not build." }
-Push-Location "web/spa"
+if ($LASTEXITCODE -ne 0) { Die "the console did not build." }Push-Location "web/spa"
 if (Test-Path -LiteralPath "node_modules") {
+    # The build's own WARNINGS go to stderr, and a native command that writes to
+    # stderr under `Stop` is a terminating error. So Vite's advice about chunk
+    # sizes killed the demo half way through its own build.
+    $ErrorActionPreference = 'Continue'
     & npm run build | Out-Null
+    $buildExit = $LASTEXITCODE
+    $ErrorActionPreference = 'Stop'
+    if ($buildExit -ne 0) { Die "the console's front end did not build." }
 } else {
     Say "the SPA is not built (no node_modules in web/spa). The console will serve the last build."
 }
 Pop-Location
 Say "the three programs are built"
 
-Write-Host "Starting the VMS emulator" -ForegroundColor White
+Write-Line "Starting the VMS emulator" White
 $env:SP_VMS_LISTEN = "127.0.0.1:$VmsPort"
 # The VMS's credential, and the product's copy of it.
 #
@@ -197,7 +269,7 @@ for ($i = 0; $i -lt 60; $i++) {
 if ($up) { Say "the vendor surface is answering" } else { Warn "the vendor surface has not answered yet; the daemon will retry" }
 
 # ---------------------------------------------------------------- the product
-Write-Host "Starting the product" -ForegroundColor White
+Write-Line "Starting the product" White
 $env:SP_TENANT_ID = "demo"
 $env:SP_SITE_ID = "demo-site"
 $env:SP_INTEGRATION_ID = "milestone"
@@ -255,7 +327,7 @@ New-Item -ItemType Directory -Path $env:SP_EVIDENCE_ROOT -Force | Out-Null
 # ingests is normalised and then dropped, with a line in the log saying so. So
 # the demo seeds the site, and the seed is what stores AND activates the bundle
 # through the same simulation report the operator would review.
-Write-Host "Seeding the site and activating the rule bundle" -ForegroundColor White
+Write-Line "Seeding the site and activating the rule bundle" White
 $report = Join-Path $repoRoot "dist/demo/simulation-report.json"
 # The report is written as UTF-8 with NO BOM.
 #
@@ -286,7 +358,7 @@ $env:SP_SECRET_KEY = $secretKey
 # delivery fails and the ledger says so -- which is the honest outcome for a
 # demo with nobody to notify.
 $env:SP_DISPATCH_OPERATOR_TOKEN = "demo-dispatch-token"
-& go run ./cmd/security-seed `
+$seedExit = Invoke-Native { & go run ./cmd/security-seed `
     --tenant $env:SP_TENANT_ID `
     --site $env:SP_SITE_ID `
     --integration $env:SP_INTEGRATION_ID `
@@ -296,17 +368,21 @@ $env:SP_DISPATCH_OPERATOR_TOKEN = "demo-dispatch-token"
     --bundle rules/builtin `
     --fixtures testdata/fixtures `
     --passphrase "demo-operator-passphrase" `
-    --reset
-if ($LASTEXITCODE -ne 0) { Die "the seed did not run; there is no site, no devices and no active bundle." }
+    --reset }
+if ($seedExit -ne 0) { Die "the seed did not run; there is no site, no devices and no active bundle." }
 Say "the site is seeded and bundle $($simulated.bundleVersion) is active"
 
 $daemon = Start-Process -FilePath (Join-Path $bin "security-core") -PassThru -NoNewWindow
 Say "the product is starting on port $ApiPort (pid $($daemon.Id))"
 
 # ---------------------------------------------------------------- the console
-Write-Host "Starting the console" -ForegroundColor White
+Write-Line "Starting the console" White
 $env:SP_API_URL = "http://127.0.0.1:$ApiPort"
 $env:SP_VMS_URL = "http://127.0.0.1:$VmsPort"
+# The console's proxy adds the VMS's credential to the browser's requests, so
+# the browser never holds it. The product's copy of the same credential is
+# SP_MILESTONE_TOKEN above.
+$env:SP_VMS_TOKEN = "demo-vms-token"
 $console = Start-Process -FilePath (Join-Path $bin "console") -PassThru -NoNewWindow -WorkingDirectory $repoRoot
 Say "the console is starting on port $ConsolePort (pid $($console.Id))"
 

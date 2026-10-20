@@ -300,7 +300,13 @@ export function LivePage() {
               aiRuntime?.available ? 'bg-apple-green/10 border-apple-green/30 text-apple-green shadow-xl shadow-apple-green/20' : 'bg-apple-red/10 border-apple-red/30 text-apple-red shadow-lg shadow-apple-red/30',
             )}>
               <span className={`w-4 h-4 rounded-full ${aiRuntime?.available ? 'bg-apple-green animate-pulse-green' : 'bg-apple-red animate-pulse-red'}`} />
-              <span>{aiRuntime?.available ? 'AI Runtime Connected' : 'AI Runtime Simulation Active'}</span>
+              <span>
+          {aiRuntime?.available
+            ? 'AI Runtime Connected'
+            : aiRuntime === undefined
+              ? 'AI Runtime — checking'
+              : 'AI Runtime Absent'}
+        </span>
             </div>
           </div>
           <div className="flex items-center gap-3">
