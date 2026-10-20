@@ -32,6 +32,7 @@ import (
 	"github.com/Sergey-Bar/vision/internal/dbx"
 	"github.com/Sergey-Bar/vision/internal/dispatch"
 	"github.com/Sergey-Bar/vision/internal/rules"
+	"github.com/Sergey-Bar/vision/internal/threat"
 )
 
 // State is an incident's lifecycle state.
@@ -71,6 +72,16 @@ type Create struct {
 	// cannot disagree.
 	SupportingEventIDs []string
 	EvidenceIDs        []string
+	// ThreatScore is the autonomy layer's score for this incident, 0..100, and
+	// the chain that produced it.
+	//
+	// The score is what the attention queue ranks by and the chain is what
+	// makes it checkable. They are written with the incident, in the incident's
+	// transaction, because a score that is computed on read is the expensive
+	// path on the hot path and a chain that lives somewhere else is a chain
+	// that can disagree with the score it explains.
+	ThreatScore       int
+	ThreatReasonChain []threat.ReasonStep
 }
 
 // Service manages incidents.
@@ -112,16 +123,28 @@ func (s *Service) CreateIncident(ctx context.Context, in Create) (string, error)
 			return fmt.Errorf("incidents: encode degradation: %w", err)
 		}
 
+		// The threat score and its chain, in the incident's transaction.
+		//
+		// A score stored apart from the incident is a score that can disagree with
+		// the incident it describes, and a chain stored apart from the score is a
+		// chain that explains something else.
+		chain, err := json.Marshal(in.ThreatReasonChain)
+		if err != nil {
+			return fmt.Errorf("incidents: encode the threat reason chain: %w", err)
+		}
+		if in.ThreatReasonChain == nil {
+			chain = []byte("[]")
+		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO incidents (incident_id, tenant_id, primary_site_id, related_site_ids,
 			                       rule_id, rule_bundle_version, bundle_content_hash, policy_version,
 			                       state, severity, title, first_event_at, last_event_at,
-			                       degraded, degraded_reasons)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'open',$9,$10,now(),now(),$11,$12)`,
+			                       degraded, degraded_reasons, threat_score, threat_reason_chain)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'open',$9,$10,now(),now(),$11,$12,$13,$14::jsonb)`,
 			id, in.TenantID, in.SiteID, related,
 			in.Decision.RuleID, in.RuleBundleVersion, in.BundleContentHash, in.PolicyVersion,
 			orDefault(in.Decision.Severity, "medium"), orDefault(in.Title, in.Decision.RuleID),
-			in.Decision.Degraded, degradedReasons); err != nil {
+			in.Decision.Degraded, degradedReasons, in.ThreatScore, chain); err != nil {
 			return fmt.Errorf("incidents: insert: %w", err)
 		}
 
@@ -339,11 +362,74 @@ type Summary struct {
 	DegradedReasons []string `json:"degradedReasons,omitempty"`
 	BundleVersion   string   `json:"ruleBundleVersion"`
 	PolicyVersion   string   `json:"policyVersion"`
+	// ThreatScore is the autonomy layer's score for this incident, 0..100, and
+	// the chain that produced it.
+	//
+	// The score is what the attention queue ranks by, and the chain is what
+	// makes it checkable: "why is this first" is answered by the chain, not by
+	// the number.
+	ThreatScore       int                 `json:"threatScore"`
+	ThreatReasonChain []threat.ReasonStep `json:"threatReasonChain,omitempty"`
 }
 
 // List returns a tenant's incident feed, newest first.
 func (s *Service) List(ctx context.Context, tenant, siteID string, limit int) ([]Summary, error) {
 	return s.ListScoped(ctx, tenant, siteID, limit)
+}
+
+// ListAttention returns the tenant's open incidents in the order the operator
+// should look at them.
+//
+// The order is the THREAT SCORE first and the recency inside it, and it is
+// different from the feed's order on purpose. The feed is a record: it is
+// newest first because that is what a record is for. The queue is a judgement:
+// an incident that scored 80 twenty minutes ago comes before one that scored 10
+// a second ago, because the score is the autonomy layer's answer to "which of
+// these needs a person" and recency is not that answer.
+//
+// A score of 0 is a legitimate rank: it says the autonomy layer found nothing
+// anomalous, and those incidents are ordered among themselves by recency.
+func (s *Service) ListAttention(ctx context.Context, tenant, siteIDs string, limit int) ([]Summary, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	var sites []string
+	for _, site := range strings.Split(siteIDs, ",") {
+		if site = strings.TrimSpace(site); site != "" {
+			sites = append(sites, site)
+		}
+	}
+	rows, err := s.Pool.For(tenant, "incidents").Query(ctx, `
+		SELECT incident_id, primary_site_id, state, severity, title, rule_id,
+		       created_at, first_event_at, degraded, degraded_reasons,
+		       rule_bundle_version, policy_version, threat_score, threat_reason_chain
+		  FROM incidents
+		 WHERE tenant_id = $1
+		   AND state = 'open'
+		   AND ($2::text[] IS NULL OR primary_site_id = ANY($2::text[]))
+		 ORDER BY threat_score DESC, created_at DESC
+		 LIMIT $3`, tenant, sites, limit)
+	if err != nil {
+		return nil, fmt.Errorf("incidents: list the attention queue: %w", err)
+	}
+	defer rows.Close()
+
+	var out []Summary
+	for rows.Next() {
+		var item Summary
+		var reasons []byte
+		var chain []byte
+		if err := rows.Scan(&item.IncidentID, &item.SiteID, &item.State, &item.Severity,
+			&item.Title, &item.RuleID, &item.CreatedAt, &item.FirstEvent,
+			&item.Degraded, &reasons, &item.BundleVersion, &item.PolicyVersion,
+			&item.ThreatScore, &chain); err != nil {
+			return nil, fmt.Errorf("incidents: scan: %w", err)
+		}
+		_ = json.Unmarshal(reasons, &item.DegradedReasons)
+		_ = json.Unmarshal(chain, &item.ThreatReasonChain)
+		out = append(out, item)
+	}
+	return out, rows.Err()
 }
 
 // ListWithCursor returns a page of incidents with cursor-based pagination.
@@ -453,7 +539,7 @@ func (s *Service) ListScoped(ctx context.Context, tenant, siteIDs string, limit 
 	rows, err := s.Pool.For(tenant, "incidents").Query(ctx, `
 		SELECT incident_id, primary_site_id, state, severity, title, rule_id,
 		       created_at, first_event_at, degraded, degraded_reasons,
-		       rule_bundle_version, policy_version
+		       rule_bundle_version, policy_version, threat_score, threat_reason_chain
 		  FROM incidents
 		 WHERE tenant_id = $1
 		   AND ($2::text[] IS NULL OR primary_site_id = ANY($2::text[]))
@@ -468,12 +554,15 @@ func (s *Service) ListScoped(ctx context.Context, tenant, siteIDs string, limit 
 	for rows.Next() {
 		var item Summary
 		var reasons []byte
+		var chain []byte
 		if err := rows.Scan(&item.IncidentID, &item.SiteID, &item.State, &item.Severity,
 			&item.Title, &item.RuleID, &item.CreatedAt, &item.FirstEvent,
-			&item.Degraded, &reasons, &item.BundleVersion, &item.PolicyVersion); err != nil {
+			&item.Degraded, &reasons, &item.BundleVersion, &item.PolicyVersion,
+			&item.ThreatScore, &chain); err != nil {
 			return nil, fmt.Errorf("incidents: scan: %w", err)
 		}
 		_ = json.Unmarshal(reasons, &item.DegradedReasons)
+		_ = json.Unmarshal(chain, &item.ThreatReasonChain)
 		out = append(out, item)
 	}
 	return out, rows.Err()

@@ -397,6 +397,11 @@ func run() error {
 		Graph:  &graph.Service{Pool: pool}, Correlat: correlatorSvc,
 		Incidents: incidentsSvc, Bundles: bundlesSvc, Enqueuer: jobs.New(pool),
 		Tenant: cfg.Tenant, SiteID: cfg.SiteID, IntegrationID: cfg.IntegrationID,
+		// The site's own model, for the autonomy layer: a presence in a
+		// restricted zone and a presence in a monitored zone are the same
+		// observation with different consequences, and the zone's type is where
+		// the difference comes from.
+		SiteModel: siteModel,
 		// The evidence volume, so `evidence_disk_free_percent` measures the
 		// filesystem the evidence store actually writes to rather than whatever the
 		// process's working directory happens to be on.

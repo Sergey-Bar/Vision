@@ -877,6 +877,28 @@ components:
         firstEventAt: { type: string, format: "date-time" }
         degraded: { type: boolean }
         disposition: { type: string }
+        threatScore:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: >
+            The autonomy layer's score for this incident, 0..100. The attention
+            queue is ordered by it, and the chain beside it is what makes the
+            order checkable. A score of 0 with a chain means the autonomy layer
+            computed a score and found nothing anomalous; a score of 0 with an
+            empty chain on a row written before the score existed means it was
+            never computed.
+        threatReasonChain:
+          type: array
+          description: The steps the threat scorer took, in order, with the factor each contributed.
+          items:
+            type: object
+            properties:
+              key: { type: string }
+              rule: { type: string }
+              factor: { type: integer }
+              evidence: { type: string }
+              at: { type: string, format: "date-time" }
 
     IncidentDetail:
       allOf:

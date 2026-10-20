@@ -94,6 +94,10 @@ export interface AttentionItem {
   degraded: boolean
   degradedReasons?: string[]
   rank: number
+  // threatScore is the autonomy layer's score, 0..100, and the queue is
+  // ordered by it. The chain beside it is what makes the order checkable.
+  threatScore: number
+  threatReasonChain?: { key?: string; rule?: string; factor?: number; evidence?: string; at?: string }[]
   why?: {
     ruleId?: string
     reasonCode?: string

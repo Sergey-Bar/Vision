@@ -54,6 +54,7 @@ import (
 	"github.com/Sergey-Bar/vision/internal/observability"
 	"github.com/Sergey-Bar/vision/internal/outbox"
 	"github.com/Sergey-Bar/vision/internal/rules"
+	"github.com/Sergey-Bar/vision/internal/sitemodel"
 )
 
 // Deps is everything the loops need.
@@ -101,6 +102,15 @@ type Deps struct {
 	SiteID        string
 	IntegrationID string
 
+	// SiteModel is the site's own model: its zones, their types and their
+	// polygons.
+	//
+	// The autonomy layer reads it to say how serious a presence is: a presence
+	// in a restricted zone and a presence in a monitored zone are the same
+	// observation with different consequences, and the zone's type is where the
+	// difference comes from. It is optional, and a nil model means the
+	// autonomy layer can say what it saw and not how serious it was.
+	SiteModel *sitemodel.Site
 	// SiteLocation is the site's timezone, used to evaluate a schedule.
 	// It used to be hardcoded UTC in the evaluation context, which makes a
 	// schedule wrong by the site's offset.
@@ -1219,6 +1229,23 @@ func (l *Loops) decide(ctx context.Context, item inbox.Lease, result normalize.R
 			"state", string(decision.State), "reason", decision.Reason)
 	}
 
+	// The threat score, and the chain that produced it.
+	//
+	// The score is what the attention queue ranks by, and the chain is what
+	// makes it checkable: an operator looking at a queue asks "why is this
+	// first", and the answer is the chain rather than a number.
+	//
+	// It is computed HERE, where the trigger event and the corroborating events
+	// are both in hand, and it is stored with the incident rather than
+	// recomputed on read. A score computed on read would re-run the anomaly
+	// engine and the scorer over every open incident on every poll of the queue,
+	// which is the expensive path on the hot path.
+	score, chainSteps := l.threatScore(ctx, item.Key.TenantID, l.Deps.SiteID, correlation, decision, result.NormalizedAt)
+	if score > 0 {
+		l.log("incident scored", "event_id", result.EventID, "rule_id", decision.RuleID,
+			"threat_score", score, "chain_steps", len(chainSteps))
+	}
+
 	incidentID, err := l.Deps.Incidents.CreateIncident(ctx, incidents.Create{
 		TenantID:          item.Key.TenantID,
 		SiteID:            l.Deps.SiteID,
@@ -1232,6 +1259,8 @@ func (l *Loops) decide(ctx context.Context, item inbox.Lease, result normalize.R
 		PolicyVersion:      bundle.Version,
 		Title:              incidentTitle(decision),
 		SupportingEventIDs: append([]string{result.EventID}, decision.SupportingEvents...),
+		ThreatScore:        score,
+		ThreatReasonChain:  chainSteps,
 	})
 	if err != nil {
 		l.log("incident could not be raised", "event_id", result.EventID, "error", err.Error())

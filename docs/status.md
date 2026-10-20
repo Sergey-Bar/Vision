@@ -201,22 +201,28 @@ event's type, so every event arrived flagged malformed; the events named no
 device, so every rule that filters on a zone was unreachable; and the console's
 proxy stripped the prefix, so the product answered 404 for a route it serves.
 
+**The autonomy layer runs in the product's pipeline.** The threat score is a
+first-class number: `internal/threat` computes it, the pipeline stores it on the
+incident with the chain that produced it, and the attention queue is ordered by
+it. The anomaly it runs is a PRESENCE — a class present in a zone, seen by a
+device, for longer than the bundle's window — and it is named differently from
+the POC's `dwell` because it is a different claim: the POC tracked an entity by
+its box, and the product's record deliberately does not keep a person's
+position in a frame, so the product claims the weaker thing its own facts
+support and says so.
+
 **What is NOT done.** The autonomy layer is still POC-only: `internal/threat`,
 `internal/anomaly` and `internal/correlation` are not in the product's
 pipeline, so the THREAT SCORE is not in the attention queue's ranking and the
 anomaly rules do not run. The queue ranks by severity and then recency, and
 the handler says so rather than hiding it.
 
-The reason it is not a wiring job is worth recording, because it looks like
-one. The anomaly rules run over TRACKED entities -- something that stayed in a
-zone for fifteen seconds -- and tracking needs the box geometry. The
-adapter's redaction allow-list deliberately does not carry one: a person's
-position in a frame is a privacy-bearing field, and the product's record does
-not keep it. So the autonomy layer cannot run over the product's record without
-a decision about whether the product keeps positions, and that decision has not
-been made. Wiring it anyway would mean either keeping positions the record
-deliberately does not keep, or scoring an anomaly over a camera-level
-"something happened here" and calling it an entity.
+The POC's entity-level rules -- dwell, loiter, flow, tailgate -- do not run in
+the product, and they cannot without a decision about whether the product keeps
+positions. They run over TRACKED entities, and tracking needs the box
+geometry; the adapter's redaction allow-list deliberately does not carry one,
+because a person's position in a frame is a privacy-bearing field. A product
+that tracked entities would be tracking something it threw away.
 
 `airuntime.DetectObjects` is still unwired: the AI runtime does not host an
 object-detection model, and adding one is a model bundle and a provider rather
@@ -2471,7 +2477,7 @@ plan for turning the POC into a product, and this table is its state.
 | **2 - the VMS** | **done.** `internal/emulator` and `cmd/vms-emulator`: file, URL, RTSP and YouTube sources, an ffmpeg reader, a real MP4 clip writer, measured latency and frame cost, and play/pause/seek/frame-rate controls that take effect at once |
 | **3 - the analytics** | **done.** One event per object with the analytic shape, the spatial association that makes a person with a bag, the person count in the class id, the media surface, the control surface, the camera inventory and the bookmark route |
 | **4 - the platform** | **done.** Six canonical classes, each with a rule; the base URL no longer doubles the prefix; the POC's client moved to the documented prefix and a test pins the two together; the probe reports 17 routes, 14 confirmed, 0 contradicted, 0 unreachable, 3 skipped |
-| **5 - the AI Operator** | **partly done.** The attention queue is the product's (`GET /v1/attention`), ranked by severity and then recency, with the incident's own replay as the reason chain; the site view draws the operator's own map with the VMS's live state. **Not done:** the threat score, the anomaly engine and the correlation do not run in the product's pipeline, and `airuntime.DetectObjects` is unwired |
+| **5 - the AI Operator** | **partly done.** The attention queue is the product's (`GET /v1/attention`), ranked by the THREAT SCORE the autonomy layer computed, with the chain that produced it beside it and the incident's own replay as the reason chain. The anomaly engine runs in the product's pipeline: a PRESENCE -- a class present in a zone, seen by a device, for longer than the bundle's window -- with the score stored on the incident and the queue ordered by it. **Not done:** the POC's entity-level rules (dwell, loiter, flow, tailgate) need tracked entities, and the product's record deliberately does not keep positions, so the product runs the one anomaly its own facts support and says so; `airuntime.DetectObjects` is unwired, because the AI runtime hosts no object-detection model |
 | **6 - the smart search** | **done.** The embedding writer exists, writes inside the canonical event's transaction, and the free-text path answers with moments. The vector is a hashed bag of words: deterministic, model-free, and lexical, and it says so |
 | **7 - the console** | **done.** One design system, the cockpit as the home page, a configured principal instead of a login, real pages, and proxies to the product and the VMS so the browser never holds the device's credential |
 | **8 - the demo** | **done.** `scripts/demo.ps1` starts Postgres, the seed, the VMS and the console and prints the five minutes, and it has been RUN end to end: the VMS playing the operator's footage with the detector on the GPU, the product ingesting the vendor's shape and raising incidents from the typed rules, and the console serving the cockpit. `scripts/verify.ps1` gained the SPA gate and the emulator's determinism gate |
@@ -3141,7 +3147,7 @@ literal was touched.
 
 ### Migrations
 
-Schema version is now 27 — the compatibility window in `migrations/compat.json`.
+Schema version is now 28 — the compatibility window in `migrations/compat.json`.
 
 The newest migration is `0026_camera_adjacency.expand.sql`: the C3 camera
 adjacency table, site-scoped, with the RLS policy derived isolation expects and

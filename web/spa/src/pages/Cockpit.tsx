@@ -138,6 +138,17 @@ function AttentionQueue() {
             <span className="block text-[11px] text-text-dim mt-1">
               {i.siteId} · {i.ruleId} · {new Date(i.createdAt).toLocaleString()}
             </span>
+            {i.threatReasonChain && i.threatReasonChain.length > 0 && (
+              <span className="block mt-2 space-y-1">
+                {i.threatReasonChain.map((s, n) => (
+                  <span key={n} className="block text-[11px] text-text-muted">
+                    {s.evidence ? `${s.evidence} — ` : ''}
+                    {s.rule ?? s.key}
+                    {s.factor !== undefined ? ` (+${s.factor})` : ''}
+                  </span>
+                ))}
+              </span>
+            )}
             {i.why?.steps && i.why.steps.length > 0 && (
               <span className="block mt-2 space-y-1">
                 {i.why.steps.map((s, n) => (
@@ -160,13 +171,26 @@ function AttentionQueue() {
               </span>
             )}
           </span>
-          <span
-            className={cn(
-              'shrink-0 text-[10px] font-black uppercase tracking-[0.12em] px-2 py-1 rounded-full border',
-              i.state === 'open' ? 'border-danger/40 text-danger' : 'border-white/10 text-text-dim',
-            )}
-          >
-            {i.severity}
+          <span className="shrink-0 flex flex-col items-end gap-1">
+            <span
+              className={cn(
+                'text-[10px] font-black uppercase tracking-[0.12em] px-2 py-1 rounded-full border',
+                i.state === 'open' ? 'border-danger/40 text-danger' : 'border-white/10 text-text-dim',
+              )}
+            >
+              {i.severity}
+            </span>
+            <span
+              className={cn(
+                'text-[10px] font-black px-2 py-1 rounded-full border',
+                i.threatScore > 0
+                  ? 'border-accent/40 bg-accent/10 text-accent'
+                  : 'border-white/10 text-text-dim',
+              )}
+              title="The autonomy layer's threat score, and the chain that produced it"
+            >
+              {i.threatScore}
+            </span>
           </span>
         </div>
       ))}

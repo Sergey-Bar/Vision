@@ -691,7 +691,10 @@ func (s *Server) handleSite(w http.ResponseWriter, r *http.Request, p identity.P
 func (s *Server) handleAttention(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
 	limit := parseLimit(r.URL.Query().Get("limit"), 20, 50)
 	scope := strings.Join(p.SiteScope, ",")
-	items, _, err := d.Incidents.ListWithCursor(r.Context(), p.TenantID, scope, "", limit, "open", nil)
+	// The queue's order is the product's: the threat score first, the recency
+	// inside it. The feed's order is the record's, and the two are different
+	// orders on purpose.
+	items, err := d.Incidents.ListAttention(r.Context(), p.TenantID, scope, limit)
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, "list_failed", err.Error(), requestID(r))
 		return
@@ -712,6 +715,11 @@ func (s *Server) handleAttention(w http.ResponseWriter, r *http.Request, p ident
 			"ruleId":     item.RuleID,
 			"createdAt":  item.CreatedAt,
 			"degraded":   item.Degraded,
+			// The score the queue is ordered by, and the chain that produced
+			// it. The chain is what makes the order checkable: "why is this
+			// first" is answered by the steps, not by the number.
+			"threatScore":       item.ThreatScore,
+			"threatReasonChain": item.ThreatReasonChain,
 		}
 		if item.Degraded {
 			entry["degradedReasons"] = item.DegradedReasons

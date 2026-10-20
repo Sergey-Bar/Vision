@@ -14,6 +14,15 @@ type ScorerConfig struct {
 	LoiterScore   int
 	FlowScore     int
 	TailgateScore int
+	// PresenceScore is the weight of the PRODUCT's own anomaly: a class
+	// present in a zone for longer than the window.
+	//
+	// It is a separate weight because it is a separate claim. The POC's dwell
+	// is an entity's, tracked by its box; the product's presence is a class's,
+	// seen by a device, because the product's record deliberately does not keep
+	// positions. A weaker claim gets a smaller weight, and the two do not share
+	// a name.
+	PresenceScore int
 	// Multipliers
 	ZoneTypeMultipliers map[string]float64
 	SeverityMultipliers map[string]float64
@@ -28,6 +37,7 @@ func DefaultScorerConfig() ScorerConfig {
 		LoiterScore:   15,
 		FlowScore:     25,
 		TailgateScore: 30,
+		PresenceScore: 18,
 		ZoneTypeMultipliers: map[string]float64{
 			"restricted": 2.0,
 			"choke":      1.5,
@@ -132,6 +142,8 @@ func (s *Scorer) baseScore(anomalyType string) int {
 		return s.cfg.FlowScore
 	case "tailgate":
 		return s.cfg.TailgateScore
+	case "presence":
+		return s.cfg.PresenceScore
 	default:
 		return 0
 	}
