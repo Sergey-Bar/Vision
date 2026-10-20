@@ -500,11 +500,18 @@ if (-not $node) {
         }
         if (Test-Path -LiteralPath 'node_modules') {
             Invoke-Gate 'spa' {
-                & npx tsc --noEmit -p tsconfig.json
-                if ($LASTEXITCODE -ne 0) { return }
-                & npx vitest run
-                if ($LASTEXITCODE -ne 0) { return }
+                # The package's own scripts, not `npx` and not the binaries by
+                # path.
+                #
+                # `npx` fetches a tool from the registry when the local one is
+                # missing, which turns a broken install into a silent upgrade
+                # and then into a failure about a WASI binding nobody asked for.
+                # `npm run build` is the type check AND the bundle, and
+                # `npm test` is the unit tests -- both through the package's own
+                # scripts, so they are the same commands a developer runs.
                 & npm run build
+                if ($LASTEXITCODE -ne 0) { return }
+                & npm test
             }
         }
     } finally {
