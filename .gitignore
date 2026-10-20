@@ -116,6 +116,11 @@ __pycache__/
 # 2.4 GB of CUDA libraries.
 /models/
 
+# The exporter's own working directory. Ultralytics downloads the CLIP weights it
+# uses for an open-vocabulary export into weights/, and 353 MB of a
+# third party's weights is not the repository's.
+/weights/
+
 # Another project entirely, which was sitting in this working tree. It is not
 # part of this product, and it must never enter this history.
 /product-scraper/
