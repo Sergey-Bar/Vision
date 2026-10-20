@@ -193,20 +193,33 @@ database answers in production.
 **The demo runs.** `scripts/demo.ps1` starts the database, the migrations, the
 seed, the VMS playing the operator's footage with the detector on the GPU, the
 product ingesting the vendor's shape and raising incidents from the typed rules,
-and the console serving the cockpit. Four things stood between the plan and that
-working, and every one of them looked finished: `rules activate` and `rules
-store` took their flags on the wrong FlagSet, so the commands the demo needs
-refused the arguments they document; the emulator published its class as the
-event's type, so every event arrived flagged malformed; the events named no
-device, so every rule that filters on a zone was unreachable; and the console's
-proxy stripped the prefix, so the product answered 404 for a route it serves.
+and the console serving the cockpit. It has been **run end to end** and the
+numbers it produced are in the log: two cameras live, ten and eleven boxes a
+frame at thirty milliseconds a frame on the GPU, an attention queue ordered by
+the threat score with its chain beside it, and the ingest keeping up.
+
+Three things stood between the script and a working demo and all three were the
+same shape: a native command whose stderr was a terminating error, and a wait
+that waited on itself. Vite's chunk-size advice goes to stderr and killed the
+demo half way through its own build; `docker logs` on a container that has not
+started blocks, because the log endpoint waits for the container; and
+`pg_isready` is not enough either, because during the image's init phase a
+temporary server answers and then shuts down.
+
+The demo also caught **invariant 1 broken on the vendor's side of the wire**: the
+adapter follows the vendor's documented continuation -- `?page=<n>` plus a
+`_links.next` in the body -- and the emulator's feed did not have one, so the
+adapter read the first page and stopped, and every event after it was never
+ingested at all. The poll's numbers said it plainly (`accepted=0,
+duplicates=405`, every three minutes) and the ingest latency SLO was breached
+by the poll taking three minutes to read a feed it had already read.
 
 **The autonomy layer runs in the product's pipeline.** The threat score is a
-first-class number: `internal/threat` computes it, the pipeline stores it on the
+first-class number: internal/threat computes it, the pipeline stores it on the
 incident with the chain that produced it, and the attention queue is ordered by
 it. The anomaly it runs is a PRESENCE — a class present in a zone, seen by a
 device, for longer than the bundle's window — and it is named differently from
-the POC's `dwell` because it is a different claim: the POC tracked an entity by
+the POC's dwell because it is a different claim: the POC tracked an entity by
 its box, and the product's record deliberately does not keep a person's
 position in a frame, so the product claims the weaker thing its own facts
 support and says so.

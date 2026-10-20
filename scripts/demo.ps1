@@ -38,7 +38,7 @@ param(
     # The footage the street camera plays.
     [string]$StreetVideo = "Videos/road1.mp4",
     # Frames per second measured per camera.
-    [double]$Fps = 2,
+    [double]$Fps = 1,
     # Skip the checks and start anyway. The checks are the point; skipping them
     # is for the person who has already run them.
     [switch]$SkipChecks
