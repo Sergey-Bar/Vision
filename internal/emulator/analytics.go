@@ -275,8 +275,12 @@ func countPeople(dets []Detection) int {
 // disagreement the adapter would resolve by degrading, and a degraded event is
 // an event the operator never sees.
 type event struct {
-	ID       string
-	Type     string
+	ID   string
+	Type string
+	// Source is the vendor's own name for where the event came from, in the
+	// bracket form the platform resolves to a device: "Entrance Camera 01
+	// [CAM-001]".
+	Source   string
 	DeviceID string
 	At       time.Time
 	// ClassName is the class the VMS asserted.
@@ -293,7 +297,7 @@ type event struct {
 
 // envelope renders the event in the vendor's wire shape.
 func (e event) envelope() map[string]any {
-	return map[string]any{
+	body := map[string]any{
 		"Id":        e.ID,
 		"Type":      e.Type,
 		"Timestamp": e.At.UTC().Format("2006-01-02T15:04:05.000Z"),
@@ -311,6 +315,13 @@ func (e event) envelope() map[string]any {
 			},
 		},
 	}
+	// The source is only present when there is one. A vendor that does not name
+	// the device is a vendor whose events are unattributable, and the envelope
+	// says so by not claiming otherwise.
+	if e.Source != "" {
+		body["Source"] = e.Source
+	}
+	return body
 }
 
 // describeDetection renders one detection for the control surface.

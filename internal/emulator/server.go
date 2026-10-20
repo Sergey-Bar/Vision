@@ -477,10 +477,27 @@ func (s *server) handleAlarms(w http.ResponseWriter, _ *http.Request) {
 		}
 		items = append(items, map[string]any{
 			"Id":          "emulator-alarm-" + ev.ID,
-			"Type":        ev.ClassName,
+			"Type":        "ObjectDetected",
 			"Timestamp":   ev.At.UTC().Format(time.RFC3339),
 			"DevicePath":  map[string]any{"type": "cameras", "id": ev.DeviceID},
 			"Description": ev.ClassName + " asserted by " + ev.Vendor,
+			// The class travels in the analyticData subtree, exactly as it does
+			// on the events route. An alarm whose TYPE is the class name is an
+			// alarm the adapter reads as an unknown type, and the whole feed
+			// arrives flagged.
+			"AnalyticData": map[string]any{
+				"Vendor":   ev.Vendor,
+				"RuleName": ev.RuleName,
+				"Object": map[string]any{
+					"Type": "ObjectDetected",
+					"Value": map[string]any{
+						"DeviceObject": map[string]any{"Id": ev.DeviceID},
+						"Confidence":   ev.Confidence,
+						"ClassId":      ev.ClassID,
+						"ClassName":    ev.ClassName,
+					},
+				},
+			},
 		})
 		if len(items) >= 200 {
 			break

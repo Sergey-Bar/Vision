@@ -1,0 +1,82 @@
+# The demo site's own drawing.
+#
+# It is the operator's map: the zones, their shapes, and where the cameras are.
+# The console draws it, and the live state comes from the VMS.
+#
+# The camera ids are the SEEDED devices -- the same ids the seed writes into the
+# platform's device registry -- because an event that names a device the
+# platform does not know is an event with no zone, and a rule that filters on a
+# zone is then unreachable. The names here are the ones the seed's fixtures
+# carry, and the two have to agree or the demo's rules never fire.
+site:
+  id: "demo-site"
+  cameras:
+    - id: "CAM-001"
+      zone_ids: ["zone-restricted-bay"]
+      position:
+        x: 200
+        y: 400
+    - id: "CAM-014"
+      zone_ids: ["zone-perimeter"]
+      position:
+        x: 700
+        y: 250
+  zones:
+    - id: "zone-site"
+      type: "monitor"
+      name: "North Gate"
+      polygon:
+        - x: 50
+          y: 50
+        - x: 950
+          y: 50
+        - x: 950
+          y: 550
+        - x: 50
+          y: 550
+    - id: "zone-restricted"
+      type: "restricted"
+      name: "Restricted"
+      polygon:
+        - x: 550
+          y: 50
+        - x: 950
+          y: 50
+        - x: 950
+          y: 450
+        - x: 550
+          y: 450
+    - id: "zone-restricted-bay"
+      type: "choke"
+      name: "Loading Bay"
+      polygon:
+        - x: 100
+          y: 300
+        - x: 350
+          y: 300
+        - x: 350
+          y: 550
+        - x: 100
+          y: 550
+    - id: "zone-perimeter"
+      type: "monitor"
+      name: "Perimeter"
+      polygon:
+        - x: 550
+          y: 450
+        - x: 950
+          y: 450
+        - x: 950
+          y: 550
+        - x: 550
+          y: 550
+  routes:
+    - id: "route-gate"
+      points:
+        - x: 100
+          y: 300
+        - x: 550
+          y: 250
+        - x: 700
+          y: 250
+      allowed_direction: both

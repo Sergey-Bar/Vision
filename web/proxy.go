@@ -75,8 +75,17 @@ func proxyTo(prefix, target, rewrite string, decorate func(*http.Request)) http.
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(base)
-			rest := strings.TrimPrefix(pr.In.URL.Path, prefix)
-			pr.Out.URL.Path = strings.TrimRight(rewrite+"/"+rest, "/")
+			// The path is rewritten only when there is a rewrite TO. A proxy with
+			// no rewrite keeps the path it was given, and the earlier version
+			// stripped the prefix in both cases: the product received "/attention"
+			// instead of "/v1/attention" and answered 404 for a route it
+			// serves.
+			if rewrite == "" {
+				pr.Out.URL.Path = pr.In.URL.Path
+			} else {
+				rest := strings.TrimPrefix(pr.In.URL.Path, prefix)
+				pr.Out.URL.Path = strings.TrimRight(rewrite, "/") + "/" + rest
+			}
 			pr.Out.Host = base.Host
 			if decorate != nil {
 				decorate(pr.Out)

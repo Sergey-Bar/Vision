@@ -94,10 +94,17 @@ carries, so a report edited after it was read, a report for a different
 bundle, and a digest typed by hand are all refused. A bundle that has not been
 simulated cannot be activated, so there is no path that turns a rule on without
 someone having read what it changes.`,
-			Flags: func(fs *flag.FlagSet) {
-				fs.String("version", "", "Bundle version to activate.")
-				fs.String("diff-digest", "", "Diff digest from `rules simulate`.")
-			},
+			// No Flags closure here either, and for the same reason as
+			// `rules simulate`: a command with a Flags closure has its flags
+			// parsed by the tree, and its Run then receives only the
+			// positionals.
+			//
+			// The tree declared `--version` and `--diff-digest` here while the
+			// Run declared `--version` and `--report`. So the tree consumed
+			// `--version` and `--diff-digest`, the Run's own FlagSet saw
+			// neither, and `--report` -- the flag the command's own usage says
+			// it takes -- was rejected by the tree as unknown. Activation was
+			// unreachable with the arguments it documents.
 			Run: runRulesActivate,
 		},
 		&command.Command{
@@ -122,10 +129,11 @@ someone having read what it changes.`,
 Storing is not activating. They are separate commands because a bundle that
 could be activated in one step would be activated without anyone reading what it
 changes.`,
-			Flags: func(fs *flag.FlagSet) {
-				fs.String("bundle", "", "Bundle file to store.")
-				fs.String("source", "", "Source reference recorded with the bundle.")
-			},
+			// No Flags closure here, for the same reason as `rules activate`: the
+			// tree would parse `--bundle` and the Run would receive only the
+			// positionals, and the Run's own FlagSet would find nothing to
+			// parse -- so `--bundle` arrived empty and the command refused with
+			// "required" for a flag that was on the command line.
 			Run: runRulesStore,
 		},
 	)

@@ -157,11 +157,19 @@ Say "the three programs are built"
 
 Write-Host "Starting the VMS emulator" -ForegroundColor White
 $env:SP_VMS_LISTEN = "127.0.0.1:$VmsPort"
-$env:SP_VMS_TOKEN = ""
+# The VMS's credential, and the product's copy of it.
+#
+# They are the same string and they are NOT empty: the adapter REFUSES to poll a
+# vendor with no credential -- a request with an empty bearer is a request with no
+# identity, and the answer would be a 401 that reads like a wrong URL. The
+# console's proxy adds the same credential to the browser's VMS requests, so the
+# browser never holds it.
+$env:SP_VMS_TOKEN = "demo-vms-token"
+$env:SP_MILESTONE_TOKEN = $env:SP_VMS_TOKEN
 $emulatorArgs = @(
     "--listen", "127.0.0.1:$VmsPort",
-    "--source", "entrance=file:$EntranceVideo",
-    "--source", "street=file:$StreetVideo",
+    "--source", "CAM-001=file:$EntranceVideo",
+    "--source", "CAM-014=file:$StreetVideo",
     "--fps", "$Fps"
 )
 if (Test-Path -LiteralPath "models/yolo11n.onnx") {
@@ -198,11 +206,91 @@ $env:SP_LISTEN_ADDR = "127.0.0.1:$ApiPort"
 $env:SP_MILESTONE_BASE_URL = "http://127.0.0.1:$VmsPort"
 # The operator's own drawing of the site: the zones, the cameras and the
 # routes. The console draws it, and the live state comes from the VMS.
-if (Test-Path -LiteralPath "poc/sitemap.yaml") {
-    $env:SP_SITE_MODEL = "poc/sitemap.yaml"
+#
+# It is the demo's own drawing and not the POC's, because its camera ids are the
+# SEEDED devices -- an event that names a device the platform does not know is an
+# event with no zone, and a rule that filters on a zone is then unreachable.
+if (Test-Path -LiteralPath "deploy/demo-site.yaml") {
+    $env:SP_SITE_MODEL = "deploy/demo-site.yaml"
 }
-$env:SP_MILESTONE_TOKEN = ""
+$env:SP_MILESTONE_TOKEN = $env:SP_VMS_TOKEN
+# The product refuses to serve plaintext with nothing in front of it, and it is
+# right to: the API's bearer credentials and the site's evidence would be on
+# the wire in the clear.
+#
+# The CONSOLE is in front of it -- the console proxies /v1 to the product so the
+# browser never holds a credential -- and the console is on loopback, so the
+# forwarded-for headers come from a trusted peer and the pair is safe to
+# configure.
+$env:SP_BEHIND_PROXY = "true"
+$env:SP_TRUSTED_PROXY_CIDRS = "127.0.0.1/32,::1/128"
+# The dispatch destinations.
+#
+# The bundle's rules ask for a notification, and a notification with nowhere to
+# go is a DEAD LETTER: the product refuses to start rather than accept a rule
+# whose dispatch it cannot deliver, because a dead letter discovered at 03:00 by
+# whoever is on call is worse than a refusal at 09:00 by whoever is deploying.
+#
+# The file is the one in the repository, so the demo dispatches where the
+# repository says it dispatches.
+if (Test-Path -LiteralPath "deploy/dispatch-destinations.yaml") {
+    $env:SP_DISPATCH_DESTINATIONS = "deploy/dispatch-destinations.yaml"
+}
 New-Item -ItemType Directory -Path $env:SP_EVIDENCE_ROOT -Force | Out-Null
+
+# The rule bundle, activated.
+#
+# The product makes NO DECISION without an active bundle -- every event it
+# ingests is normalised and then dropped, with a line in the log saying so. So
+# the demo activates the bundle, and it activates it the way an operator does:
+# the simulation produces a report, and the report is what gets activated. The
+# digest is not typed on the command line and the report is not edited: a
+# bundle that was activated without being simulated is a bundle nobody checked.
+# The rule bundle, activated.
+#
+# The product makes NO DECISION without an active bundle -- every event it
+# ingests is normalised and then dropped, with a line in the log saying so. So
+# the demo seeds the site, and the seed is what stores AND activates the bundle
+# through the same simulation report the operator would review.
+Write-Host "Seeding the site and activating the rule bundle" -ForegroundColor White
+$report = Join-Path $repoRoot "dist/demo/simulation-report.json"
+# The report is written as UTF-8 with NO BOM.
+#
+# PowerShell's `>` writes UTF-16, and a UTF-16 report is not a JSON report: the
+# activation re-reads it and refuses it, with a message about an invalid
+# character that says nothing about the encoding.
+$simulateOutput = & go run ./cmd/securityctl rules simulate --bundle rules/builtin/bundle.yaml --fixtures testdata/fixtures --json
+if ($LASTEXITCODE -ne 0) { Die "the simulation did not run; the bundle cannot be activated without it." }
+[System.IO.File]::WriteAllText($report, ($simulateOutput -join "`n"), (New-Object System.Text.UTF8Encoding $false))
+$simulated = Get-Content -Raw -LiteralPath $report | ConvertFrom-Json
+# The seed creates the tenant, the site, the devices and the zones, and it stores
+# and activates the bundle. The devices and zones are the FIXTURES' topology --
+# the same table the simulation replays over -- so the zones a rule filters on
+# are the zones the seeded devices are in.
+$secretKey = Join-Path $repoRoot "dist/demo/secret.key"
+New-Item -ItemType Directory -Path (Split-Path -Parent $secretKey) -Force | Out-Null
+# The MFA wrapping key, which the seed writes and the product reads. They are
+# the same file: an install that enrolled a factor with one key and serves with
+# another cannot verify the factor it enrolled.
+$env:SP_SECRET_KEY = $secretKey
+# The dispatch token, so a notification is attempted rather than refused for
+# want of a credential. There is no operator behind the example URL, so the
+# delivery fails and the ledger says so -- which is the honest outcome for a
+# demo with nobody to notify.
+$env:SP_DISPATCH_OPERATOR_TOKEN = "demo-dispatch-token"
+& go run ./cmd/security-seed `
+    --tenant $env:SP_TENANT_ID `
+    --site $env:SP_SITE_ID `
+    --integration $env:SP_INTEGRATION_ID `
+    --evidence-root $env:SP_EVIDENCE_ROOT `
+    --secret-key $secretKey `
+    --console-tls (Join-Path $repoRoot "dist/demo/console-tls") `
+    --bundle rules/builtin `
+    --fixtures testdata/fixtures `
+    --passphrase "demo-operator-passphrase"
+if ($LASTEXITCODE -ne 0) { Die "the seed did not run; there is no site, no devices and no active bundle." }
+Say "the site is seeded and bundle $($simulated.bundleVersion) is active"
+
 $daemon = Start-Process -FilePath (Join-Path $bin "security-core") -PassThru -NoNewWindow
 Say "the product is starting on port $ApiPort (pid $($daemon.Id))"
 

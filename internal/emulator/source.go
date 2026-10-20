@@ -79,6 +79,19 @@ type Source struct {
 	ID string
 	// Name is what the operator sees.
 	Name string
+	// DeviceRef is the reference the SOURCE writes, which is not always the
+	// camera's own id.
+	//
+	// A VMS's event names the device it came from in a bracket: "Entrance
+	// Camera 01 [CAM-001]". The platform resolves that bracket to its own
+	// device, and a device it does not know produces an event with no device
+	// and no zone — which is a fact, and one that silently makes every rule
+	// that filters on a zone unreachable.
+	//
+	// It defaults to the camera's id, which is right when the platform's device
+	// registry and the VMS's camera list agree, and is wrong exactly when they
+	// do not.
+	DeviceRef string
 	// Kind is where the video comes from.
 	Kind Kind
 	// Location is the path, URL or rtsp address.

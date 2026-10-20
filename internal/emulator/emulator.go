@@ -163,6 +163,9 @@ func New(opts Options) (*Engine, error) {
 		if src.FPS <= 0 {
 			src.FPS = DefaultFPS
 		}
+		if src.DeviceRef == "" {
+			src.DeviceRef = src.ID
+		}
 		if src.Kind == "" {
 			src.Kind = KindFile
 		}
@@ -420,8 +423,18 @@ func (e *Engine) publish(cam *camera, dets []Detection) {
 	for _, d := range dets {
 		e.lastID++
 		e.events = append(e.events, event{
-			ID:         fmt.Sprintf("emu-%s-%06d", cam.source.ID, e.lastID),
-			Type:       d.Class,
+			ID: fmt.Sprintf("emu-%s-%06d", cam.source.ID, e.lastID),
+			// The vendor's SPELLING of the type is "ObjectDetected", and the
+			// class travels in the analyticData subtree. Publishing the class as
+			// the type is what a device that had no vocabulary would do, and the
+			// adapter reads it as an unknown type: every event arrives flagged
+			// malformed, and a flag on every event is a flag nobody reads.
+			Type: "ObjectDetected",
+			// The SOURCE the vendor writes, which is how the platform resolves
+			// the event to a device and a device to a zone. Without it the
+			// events are attributed to nothing and every rule that filters on a
+			// zone is unreachable.
+			Source:     cam.source.Name + " [" + cam.source.DeviceRef + "]",
 			DeviceID:   cam.source.ID,
 			At:         now,
 			ClassName:  d.Class,

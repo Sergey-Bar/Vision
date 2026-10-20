@@ -268,6 +268,14 @@ func runRulesActivate(ctx context.Context, env *command.Env, args []string) erro
 	fs.SetOutput(env.Stderr)
 	version := fs.String("version", "", "Bundle version to activate.")
 	reportPath := fs.String("report", "", "Path to the JSON report `rules simulate --json` produced.")
+	// The old spelling, accepted and ignored.
+	//
+	// A digest on its own cannot be checked -- the gate re-hashes the report's
+	// change list and compares it with the digest the report carries -- so an
+	// operator who typed one was never authorised by the digest. The flag is
+	// still accepted so that an old command line is a refusal with a reason
+	// rather than "flag provided but not defined".
+	_ = fs.String("diff-digest", "", "Deprecated. The report carries the digest; a digest on its own is not checkable.")
 	fs.Usage = func() {
 		fmt.Fprintln(env.Stderr, "usage: securityctl rules activate --version V --report report.json")
 		fmt.Fprintln(env.Stderr,
