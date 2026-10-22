@@ -202,20 +202,26 @@ rules:
     tags: [production, object-detection, person, bag]
     when:
       all:
-        - eventType: [analytics]
+        # The canonical event type, not the generic one.
+        #
+        # The detection is the VMS's OWN analytics -- its analytics engine
+        # asserted a class and the platform refined it into a typed event
+        # (`analytics.person_with_bag`). It is not an AI observation, and this
+        # rule used to say it was: it carried an `aiObservation` condition
+        # naming the `object-detection/v1` profile, which this build has no
+        # schema for, so the compiler warned that the field was NOT CHECKED and
+        # the condition could never be satisfied. A rule that cannot match is
+        # a rule an operator believes is running.
+        - eventType: [analytics.person_with_bag]
         - zone:
             pathPrefix: /entrance
         - corroborate:
-            eventTypes: [analytics]
+            eventTypes: [analytics.person_with_bag]
             minSignals: 1
             minEvidenceTier: C
             requiresAIObservation: true
             ifAIAvailable:
               degradeTo: UNVERIFIED
-        - aiObservation:
-            profileId: object-detection/v1
-            field: detections
-            equals: person
     then:
       createIncident: true
       severity: medium
@@ -236,20 +242,19 @@ rules:
     tags: [production, object-detection, vehicle]
     when:
       all:
-        - eventType: [analytics]
+        # The canonical event type. See core.person-with-bag for why this is not
+        # the generic `analytics` and not an `aiObservation` on a profile this
+        # build has no schema for.
+        - eventType: [analytics.vehicle]
         - zone:
             pathPrefix: /gate
         - corroborate:
-            eventTypes: [analytics]
+            eventTypes: [analytics.vehicle]
             minSignals: 1
             minEvidenceTier: C
             requiresAIObservation: true
             ifAIAvailable:
               degradeTo: UNVERIFIED
-        - aiObservation:
-            profileId: object-detection/v1
-            field: detections
-            equals: vehicle
     then:
       createIncident: true
       severity: low
@@ -400,20 +405,19 @@ rules:
     tags: [production, object-detection, animal]
     when:
       all:
-        - eventType: [analytics]
+        # The canonical event type. See core.person-with-bag for why this is not
+        # the generic `analytics` and not an `aiObservation` on a profile this
+        # build has no schema for.
+        - eventType: [analytics.animal]
         - zone:
             pathPrefix: /perimeter
         - corroborate:
-            eventTypes: [analytics]
+            eventTypes: [analytics.animal]
             minSignals: 1
             minEvidenceTier: C
             requiresAIObservation: true
             ifAIAvailable:
               degradeTo: UNVERIFIED
-        - aiObservation:
-            profileId: object-detection/v1
-            field: detections
-            equals: animal
     then:
       createIncident: true
       severity: low

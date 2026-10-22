@@ -201,13 +201,22 @@ Everything marked ✅ exists and is wired to a real service; the console tests i
 | `/` | GET | none | redirect | ✅ |
 | `/incidents` | GET | any session | `/incidents` | ✅ `incidents.html` |
 | `/incidents/{id}` | GET | any session | `/incidents/{id}` | ✅ `incident.html` |
-| `/login` | GET | none | `login.html` | ✅ |
 | `/static/{file}` | GET | none | `console.css`, embedded | ✅ |
 
+**`/login` is not in this table because it does not exist.** The console has no
+sign-in route, no session and no template: `login.html` was deleted, and
+`GET /login` answers 404, which `TestTheConsoleHasNoSignInForm` asserts. The
+rows above say "any session" because the table was written when there was one;
+the truth is that the console's authorisation is the CONFIGURED principal, and
+the boundary that decides who reaches it is D-16, which is unsigned.
+
 **M1 console work that adds no new route** — the disposition form posts to
-`/v1/incidents/{id}/dispositions` from a server-rendered form with the session's
-CSRF token, and every other screen is a template plus a GET. The reason §4.2
-gives for why that is a constraint rather than a limitation.
+`/incidents/{id}/disposition` from a server-rendered form, and every other
+screen is a template plus a GET. The form carries no token: the console has no
+session to mint one from, and an empty token field is worse than none, because
+a reader auditing the markup would conclude the console refuses a cross-site
+POST and it does not. The reason §4.2 gives for why this is a constraint
+rather than a limitation.
 
 ### 2.4 Where M2–M7 add routes
 

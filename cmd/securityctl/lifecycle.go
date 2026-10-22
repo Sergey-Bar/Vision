@@ -21,7 +21,8 @@ import (
 func installCommand() *command.Command {
 	var (
 		archive, manifestPath, programDir, trustedHex string
-		dryRun                                        bool
+		appliance, dryRun                             bool
+		recordingRoot, cameraList                     string
 	)
 	c := &command.Command{
 		Name:    "install",
@@ -33,6 +34,12 @@ expand/contract discipline before extracting a byte. Extraction re-checks every
 archive entry independently, because the manifest and the tar are two separate
 claims and only the second one names where bytes land.
 
+--appliance installs the RECORDER as well as the core, on this machine. The
+recorder is a separate service on purpose: it opens sockets to cameras and
+writes to a disk, and a camera that stops answering must not take the console
+down with it. The two together are the appliance: one box, one recording root,
+one camera list.
+
 --dry-run prints the plan and changes nothing, which is what to run first.`,
 	}
 	c.Flags = func(fs *flag.FlagSet) {
@@ -42,6 +49,12 @@ claims and only the second one names where bytes land.
 			"Program directory. Separate from data, config, evidence, logs and secrets.")
 		fs.StringVar(&trustedHex, "trusted-key", os.Getenv("SP_RELEASE_KEY"),
 			"Trusted Ed25519 public key. Get it out of band with `securityctl release-key`.")
+		fs.BoolVar(&appliance, "appliance", false,
+			"Install the recorder too, as a second service on this machine.")
+		fs.StringVar(&recordingRoot, "recording-root", envOr("SP_RECORDING_ROOT", "/var/lib/security-platform/recordings"),
+			"Where the recorder writes the recorded segments. Absolute.")
+		fs.StringVar(&cameraList, "camera-list", envOr("SP_RECORDER_SOURCES", "/etc/security-platform/cameras.json"),
+			"The recorder's camera list. A path, because the list holds camera credentials.")
 		fs.BoolVar(&dryRun, "dry-run", false, "Print the plan and change nothing.")
 	}
 	c.Run = func(_ context.Context, env *command.Env, args []string) error {
@@ -123,6 +136,12 @@ claims and only the second one names where bytes land.
 				AIProgramDir: envOr("SP_AI_PROGRAM_DIR", ""),
 				User:         envOr("SP_SERVICE_USER", ""),
 				Group:        envOr("SP_SERVICE_GROUP", ""),
+				// The appliance's own half: the recorder is a second
+				// service, and it writes to the recording root and
+				// to nothing else.
+				Appliance:     appliance,
+				RecordingRoot: recordingRoot,
+				CameraList:    cameraList,
 			})
 			if err != nil {
 				return command.Refuse("the binaries are installed but the units could not "+
@@ -132,11 +151,25 @@ claims and only the second one names where bytes land.
 				fmt.Fprintf(env.Stdout, "  wrote %s\n", u.Path)
 			}
 			fmt.Fprintln(env.Stdout, "  next: systemctl daemon-reload && systemctl enable --now security-core")
+			if appliance {
+				fmt.Fprintln(env.Stdout, "  next: systemctl enable --now security-recorder")
+			}
 		} else {
 			fmt.Fprintln(env.Stdout, "  this host has no systemd; the units were not written")
 			fmt.Fprintln(env.Stdout, "  run `securityctl install --unit-dir <dir>` to write them anyway")
 		}
 		fmt.Fprintln(env.Stdout, "  next: security-migrate up")
+		if appliance {
+			fmt.Fprintln(env.Stdout, "")
+			fmt.Fprintln(env.Stdout, "  This is an APPLIANCE install: the recorder is a second service on this machine.")
+			fmt.Fprintf(env.Stdout, "  It writes the recorded segments to %s\n", recordingRoot)
+			fmt.Fprintf(env.Stdout, "  and reads its camera list from %s\n", cameraList)
+			fmt.Fprintln(env.Stdout, "  The camera list is a file YOU own and it holds camera credentials;")
+			fmt.Fprintln(env.Stdout, "  the product never writes it and never reads the credentials out of it")
+			fmt.Fprintln(env.Stdout, "  except to open the stream.")
+			fmt.Fprintln(env.Stdout, "")
+			fmt.Fprintln(env.Stdout, "  next: write the camera list, then start the recorder")
+		}
 		return nil
 	}
 	return c

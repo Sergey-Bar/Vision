@@ -134,7 +134,13 @@ func (d DeadLetters) ReadWithCursor(ctx context.Context, tenant, site, kind, cur
 
 	default:
 		// Return both inbox and job dead letters (for kind="").
-		var out []DeadLetter
+		//
+		// The list is made, not declared, so the answer for a site with no
+		// dead letters is an EMPTY list and not a nil one. A nil slice
+		// marshals as `null`, and the published contract says `items` is an
+		// array — so a nil answer is a wire shape that does not match the
+		// document, on exactly the sites that are healthy.
+		out := []DeadLetter{}
 		if d.Inbox != nil {
 			items, _, err := d.ReadWithCursor(ctx, tenant, site, "inbox", "", limit)
 			if err != nil {
@@ -143,7 +149,19 @@ func (d DeadLetters) ReadWithCursor(ctx context.Context, tenant, site, kind, cur
 			out = append(out, items...)
 		}
 		if d.Jobs != nil {
-			items, _, err := d.ReadWithCursor(ctx, tenant, site, "jobs", "", limit)
+			// "job", NOT "jobs".
+			//
+			// The switch above has a case for "job" and none for "jobs", so
+			// a "jobs" call falls through to THIS branch and calls itself
+			// again with "jobs" — for ever. The coverage panel reads the
+			// dead letters with an empty kind, so it reached this and the
+			// daemon died with a stack overflow.
+			//
+			// It was hidden behind a second defect on the same route: the
+			// panel crashed on a nil clock before it got here, so the first
+			// bug hid the second. Fixing one uncovered the other, and both
+			// are only reachable when the panel has something to report.
+			items, _, err := d.ReadWithCursor(ctx, tenant, site, "job", "", limit)
 			if err != nil {
 				return nil, "", err
 			}

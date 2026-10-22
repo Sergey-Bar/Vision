@@ -33,32 +33,62 @@ Six. Each one is a decision we can be shown to have made, and each one has the
 reason it was made, because a pricing principle with no stated reason is a
 preference.
 
-### 1.1 Priced on the outcome, not on the camera count
+### 1.1 Priced on the site, the device tier and the outcome
 
-**Never per camera. Ever.** Three reasons, and the first is arithmetic:
+**This section was rewritten on 2026-10-21. It used to say "Never per camera.
+Ever."** The rule was correct for a layer and it is wrong for a VMS, and the
+reason it was correct is the reason it stopped being correct: it existed
+because a per-camera price punishes the buyer for their own success and
+because a layer's cost driver is *incidents*, not cameras.
 
-1. **A camera price punishes the buyer for their own success and rewards us for
-   nothing.** A customer who installs four more cameras to close a coverage gap
-   is doing exactly what we want them to do, and a per-camera price makes that
-   decision expensive. We would be charging them for evidence that the system is
-   working.
-2. **The cost driver is not the camera count either.** `12` §9.1: at M1's incident
-   volume, evidence retention is dominated by *how many incidents a site has*,
-   not how many cameras it has — the formula is
-   `evidence/day = incidents/day × items_per_incident × mean_item_size ×
-   retention_days`, and a site with 30 incidents/day on 30-day retention needs
-   ~73 GB against ~730 GB for 300 incidents/day (ESTIMATE). A per-camera price
-   charges for the wrong variable and a per-incident price charges for the right
-   one in a way that penalises a site with a genuine security problem.
-3. **It is the wrong unit for a layer.** We sell above a stack the customer owns.
-   A metric that counts their stack invites the question "why are you charging me
-   for a camera you already own and I already pay for".
+A VMS's cost driver is the device count. Thirty-two cameras are thirty-two
+streams to ingest, thirty-two pre-roll rings, thirty-two per-device-day chains
+to seal at day close, and thirty-two camera credentials in a vault. The old
+rule charged for the wrong variable and charged nothing for the variable that
+costs us money.
 
-**What we price on instead, in priority order:** the site (the unit of
-deployment and the unit of autonomy), and above a declared threshold the volume
-of *verified incidents handled* (the unit of the outcome we actually produce). The
-second is metered, capped in the contract, and reconciled monthly — §5 explains
-why it needs a cap to exist at all.
+**What we price on now, in priority order:**
+
+1. **The site.** The unit of deployment, the unit of autonomy, and the unit the
+   customer already thinks in.
+2. **A device tier** — a declared band of camera count per site. The count is
+   what costs us ingest, storage and sealing, so pricing it is honest in a way
+   a per-camera price is not. It is a *tier* and not a per-camera line
+   precisely so that the old objection still holds where it should: a customer
+   who closes a coverage gap with four more cameras crosses a step, and is not
+   billed for four cameras.
+3. **Above a declared threshold, the volume of *verified incidents handled*** —
+   the unit of the outcome we actually produce. Metered, capped in the contract,
+   reconciled monthly; §5 explains why it needs a cap to exist at all.
+4. **A separately priced 24/7 support line.** Not bundled. Staffing it is a
+   cost, and burying it inside a site fee is how a support line quietly stops
+   being staffed.
+
+**What became of each of the old three reasons.** The old rule is not deleted
+silently: a rule replaced without a record of why is a rule the next person
+who finds it odd will re-litigate.
+
+| Old reason | Standing on 2026-10-21 |
+|---|---|
+| 1. A camera price punishes the buyer for their own success | **Still true**, and it is *why* the device count is a tier rather than a per-camera line. A customer who adds four cameras to close a gap crosses a step, not a bill |
+| 2. The cost driver is not the camera count either | **True of a layer, false of a VMS.** At M1's incident volume a site's evidence retention is dominated by `incidents/day`, not `cameras/day` — ~73 GB against ~730 GB across the 30→300 incidents/day range (ESTIMATE). The formula is unchanged; the conclusion drawn from it is not, because the product under it changed: at 32–300 devices the ingest, the pre-roll, the chain sealing and the storage are all driven by the device count |
+| 3. It is the wrong unit for a layer | **Superseded.** We are no longer only a layer. Where a customer keeps their VMS and we only read it, the site fee covers the platform and the device tier is **not** charged for devices we do not record |
+
+**One rule survives all of it, and it is the load-bearing one: the device tier
+counts devices *we record*, and a customer who moves from their incumbent VMS
+onto our camera path does not pay twice.** The site fee is paid once, the tier
+covers the devices we are responsible for, and the platform layer — the
+intelligence, the rules, the evidence — is in the site fee at every tier. A
+customer may therefore keep their VMS, stay on the site fee alone, and that is
+a legitimate purchase rather than a downgrade. It is also the reason D1 keeps
+the adapter alive: the adapter is the cheap way for a customer to buy the
+product without migrating their recording.
+
+**Status: PROPOSED and unsigned.** The pricing model change is on the human
+sign-off list in
+[`../milestones/m2-ai-vms-execution-plan.md`](../milestones/m2-ai-vms-execution-plan.md) §11.
+Until it is signed, the product's behaviour is unchanged and only this document
+has moved.
 
 ### 1.2 Local-first means the value proof lives on the customer's site
 
@@ -377,7 +407,7 @@ revenue *(PROPOSED)*, `04` §7.3.
 | Component | PROPOSED | What it is | Why it is separate |
 |---|---|---|---|
 | **Certified-partner platform licence** | $25,000/yr (T1) to $60,000/yr (T3), **or** 20–30% off list for the partner's own customers, whichever the partner prefers | The right to ship our layer inside their product, with the certification suite in their CI, the SDK, and the support tier below | The partner's own engineering and support cost is not our cost, and pricing it as if it were makes us look expensive and them look cheap |
-| **Per-deployment royalty** | **15% of list, per site per year, paid by the partner on our behalf** | The per-site economics of the product, so that the partner's incentive is to sell sites rather than to sell a contract once | Without a royalty, a partner's incentive is to close one big deal and let the renewal sit. With it, our revenue and theirs are the same thing |
+| **Per-deployment royalty** | **15% of list, per site per year, paid by the partner on our behalf** | The per-site economics of the product — the site fee, the device tier and the outcome component, as three separate lines — so that the partner's incentive is to sell sites rather than to sell a contract once | Without a royalty, a partner's incentive is to close one big deal and let the renewal sit. With it, our revenue and theirs are the same thing |
 | **White-label fee** | One-time **$15,000** setup + **5% uplift** on the white-label variant | Deployment, documentation and console under their brand | It is real work and it is a one-off cost we carry |
 | **Certification fee** | **$2,500 per adapter**, waived for the first two adapters from a partner who also commits to a marketing plan | Running our public certification suite against their adapter, and the review of the result | It is the same service we run internally (`01` M4's gate requires it be run by someone outside the company) and it is a real cost |
 | **Support** | Tiers: L1 (partner's own desk, we supply runbooks and a second-line escalation) to L3 (we are the named human, at the `12` §7.3 SLIs) | Whichever the partner needs and can staff | The partner's customers' SLAs are the partner's contractual problem, and the only question is who actually answers. Getting this wrong is the most common real failure in the pilot stage (`04` §7.3) |
@@ -421,6 +451,34 @@ and the control-to-test map are, and we send them.
 | **Source access** | They will ask to see the core | The public SDK, the public contracts, the conformance suite, and the threat model. The core source is not available and this will not change |
 | **A revenue share on the *first* year rather than a royalty** | Occasionally | Yes, on the first year, at a lower percentage. It costs us a year of the recurring number in exchange for a signed deal, and at a channel stage with a 15–30 month payback, that is a good trade |
 | **Perpetual licence terms for their customers** | They will ask | A contractual commitment to the customer that the licence is perpetual and that the product will not be disabled for non-payment (`12` §3.3) — **is** available, and it is a *better* thing to give them than enforcement |
+
+### 4.4 What changed on 2026-10-21, and what did not
+
+**The clauses are unchanged. The context around them is not.** All of §4.1–§4.3
+stands: the partner licence, the 15% per-deployment royalty, the white-label
+fee, the certification fee, the support tiers, the marketplace take rate, the
+**no-fork** clause and the **attribution** clause. The no-fork clause is the
+one that got more load-bearing, and the attribution clause is the one that got
+more necessary.
+
+**What changed, and why each change was forced.**
+
+| Change | Why it was forced |
+|---|---|
+| The royalty's base is now three lines rather than one (§4.1) | §1.1 introduced a device tier, and a royalty on "15% of list" is ambiguous the moment list has three components. It has to be named or it becomes the first thing a partner's finance function disputes |
+| A VMS OEM is now also a **competitor**, and the SDK scope grew to include device adapters | D1 keeps the adapter alive, and an adapter that reads a vendor's VMS is a thing a vendor has a reason to block. The certification suite (§4.1) stops being a nicety and becomes the thing that makes the adapter route the *only* route. This is the strongest reason the no-fork clause matters more, not less |
+| The attribution clause now names the **recording** as well as the decision | A white-labelled console in a partner's building now shows a recording the partner's own brand made. "White-label in deployment, documentation and console: yes. White-label in provenance: no" had to extend from the decision record to the segment chain, because the chain is now the thing an auditor asks about first |
+| The certification fee's value proposition changed, not its price | It used to certify an *adapter* against a contract. It now certifies a *device adapter and an analytics profile* against a **measured** capability manifest, and a certified claim is one the partner's own customer can rely on. That is worth more than $2,500 to the partner, and the number is not the point |
+
+**What did not change and must not.** The partner does not get a fork, ever.
+Provenance is never white-labelled, ever. The licence is perpetual and never
+gates operation (`12` §6, option E). And the product still never hosts video
+for a partner's customer, which means the partner's cloud story is still their
+cloud story and not ours.
+
+**Status: PROPOSED and unsigned.** §1.1 and §4.4 are on the human sign-off
+list in
+[`../milestones/m2-ai-vms-execution-plan.md`](../milestones/m2-ai-vms-execution-plan.md) §11.
 
 ---
 

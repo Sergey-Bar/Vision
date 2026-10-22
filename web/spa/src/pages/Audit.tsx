@@ -19,19 +19,19 @@ export function AuditPage() {
       <PageHeader title="Audit Log" subtitle="Append-only, hash-chained ledger" />
       <div className="space-y-10">
         {isError ? (
-          <div className="rounded-2xl p-8 bg-danger/10 border border-danger/30 text-danger text-sm font-medium">
+          <div className="rounded-lg p-8 bg-bad-ink/10 border border-bad-ink/40 text-bad-ink text-sm font-medium">
             The ledger is not answering. The console cannot show it, and it will not invent it.
           </div>
         ) : (
-          <div className="border border-white/10 rounded-3xl bg-black/30 backdrop-blur-sm overflow-hidden shadow-2xl">
+          <div className="border border-line rounded-lg bg-bg-panel overflow-hidden">
             <table className="w-full text-left text-sm">
-              <thead className="bg-black/40 text-text-dim text-[10px] font-black uppercase tracking-[0.12em] sticky top-0 z-20">
+            <thead className="bg-bg-panel text-text-dim text-[10px] font-semibold uppercase tracking-[0.12em] sticky top-0 z-20">
                 <tr>
-                  <th className="px-8 py-5 font-black">Time</th>
-                  <th className="px-8 py-5 font-black">Actor</th>
-                  <th className="px-8 py-5 font-black">Action</th>
-                  <th className="px-8 py-5 font-black">Target</th>
-                  <th className="px-8 py-5 font-black text-right">Hash</th>
+                  <th className="px-8 py-5 font-semibold">Time</th>
+                <th className="px-8 py-5 font-semibold">Actor</th>
+                <th className="px-8 py-5 font-semibold">Action</th>
+                <th className="px-8 py-5 font-semibold">Target</th>
+                <th className="px-8 py-5 font-semibold text-right">Hash</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/10">
@@ -50,23 +50,23 @@ export function AuditPage() {
                   return (
                     <tr
                       key={e.sequence ?? i}
-                      className="hover:bg-white/5 transition-all duration-300 group border-b border-white/5 last:border-0"
+                      className="hover:bg-bg-elevated transition-colors duration-2 group border-b border-line last:border-0"
                     >
                       <td className="px-8 py-5 text-text-dim">
-                        {e.ts ? new Date(e.ts).toLocaleString() : '—'}
+                      {e.ts ? new Date(e.ts).toLocaleString() : '—'}
                       </td>
                       <td className="px-8 py-5 text-text-dim">
-                        {e.actor ?? '—'}
+                      {e.actor ?? '—'}
                         {e.actorType ? (
-                          <span className="ml-2 text-[10px] font-black text-text-dim/70">{e.actorType}</span>
+                          <span className="ml-2 text-[10px] font-semibold text-text-dim/70">{e.actorType}</span>
                         ) : null}
                       </td>
                       <td className="px-8 py-5 text-text">{e.action ?? '—'}</td>
                       <td className="px-8 py-5 text-text-dim">
-                        {e.targetId ?? e.targetType ?? '—'}
+                      {e.targetId ?? e.targetType ?? '—'}
                       </td>
                       <td className="px-8 py-5 text-text-dim text-right font-mono text-xs">
-                        {e.resultStateHash ? `${e.resultStateHash.slice(0, 8)}…` : '—'}
+                      {e.resultStateHash ? `${e.resultStateHash.slice(0, 8)}…` : '—'}
                       </td>
                     </tr>
                   )
@@ -83,7 +83,7 @@ export function AuditPage() {
             </table>
           </div>
         )}
-        <div className="px-8 py-5 border-t border-white/10 bg-black/20 text-[11px] font-black text-text-dim">
+        <div className="px-8 py-5 border-t border-line bg-bg-elevated text-[11px] font-semibold text-text-dim">
           Entries are append-only and hash-chained. Editing any row fails checkpoint verification.
         </div>
       </div>

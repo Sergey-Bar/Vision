@@ -1,0 +1,818 @@
+{
+  "contractVersion": "security.io/calibration-corpus/v1",
+  "provenance": "FIXTURE. Twenty-six cases with the shape the product's labelled history has: a presence anomaly, its zone, its severity, how many devices saw it and how long it lasted, and the operator's answer about it. These are not any particular site's real incidents and nothing here should be read as a claim about a real installation. The priors are LEAVE-ONE-OUT: each case carries the site's smoothed precision computed from the OTHER cases for the same (site, rule), so a prior never contains the label of the case it scores, and the arithmetic therefore differs slightly between a case and its neighbours. Regenerate a corpus from a site's own labelled history with `go test ./internal/calibration -update` against a database.",
+  "cases": [
+    {
+      "caseId": "A01",
+      "site": "site-north-dock",
+      "rule": "rule-dock-door",
+      "label": "true_positive",
+      "features": {
+        "anomalyType": "presence",
+        "zoneType": "restricted",
+        "severity": "high",
+        "devices": 1,
+        "presentSeconds": 3,
+        "thresholdSeconds": 3
+      },
+      "prior": {
+        "rate": 0.9230769230769231,
+        "known": true
+      }
+    },
+    {
+      "caseId": "A02",
+      "site": "site-north-dock",
+      "rule": "rule-dock-door",
+      "label": "true_positive",
+      "features": {
+        "anomalyType": "presence",
+        "zoneType": "restricted",
+        "severity": "high",
+        "devices": 2,
+        "presentSeconds": 6,
+        "thresholdSeconds": 3
+      },
+      "prior": {
+        "rate": 0.9230769230769231,
+        "known": true
+      }
+    },
+    {
+      "caseId": "A03",
+      "site": "site-north-dock",
+      "rule": "rule-dock-door",
+      "label": "true_positive",
+      "features": {
+        "anomalyType": "presence",
+        "zoneType": "restricted",
+        "severity": "high",
+        "devices": 3,
+        "presentSeconds": 6,
+        "thresholdSeconds": 3
+      },
+      "prior": {
+        "rate": 0.9230769230769231,
+        "known": true
+      }
+    },
+    {
+      "caseId": "A04",
+      "site": "site-north-dock",
+      "rule": "rule-dock-door",
+      "label": "true_positive",
+      "features": {
+        "anomalyType": "presence",
+        "zoneType": "restricted",
+        "severity": "high",
+        "devices": 3,
+        "presentSeconds": 15,
+        "thresholdSeconds": 3
+      },
+      "prior": {
+        "rate": 0.9230769230769231,
+        "known": true
+      }
+    },
+    {
+      "caseId": "A05",
+      "site": "site-north-dock",
+      "rule": "rule-dock-door",
+      "label": "true_positive",
+      "features": {
+        "anomalyType": "presence",
+        "zoneType": "choke",
+        "severity": "medium",
+        "devices": 1,
+        "presentSeconds": 3,
+        "thresholdSeconds": 3
+      },
+      "prior": {
+        "rate": 0.9230769230769231,
+        "known": true
+      }
+    },
+    {
+      "caseId": "A06",
+      "site": "site-north-dock",
+      "rule": "rule-dock-door",
+      "label": "true_positive",
+      "features": {
+        "anomalyType": "presence",
+        "zoneType": "choke",
+        "severity": "medium",
+        "devices": 2,
+        "presentSeconds": 6,
+        "thresholdSeconds": 3
+      },
+      "prior": {
+        "rate": 0.9230769230769231,
+        "known": true
+      }
+    },
+    {
+      "caseId": "A07",
+      "site": "site-north-dock",
+      "rule": "rule-dock-door",
+      "label": "true_positive",
+      "features": {
+        "anomalyType": "presence",
+        "zoneType": "choke",
+        "severity": "medium",
+        "devices": 3,
+        "presentSeconds": 6,
+        "thresholdSeconds": 3
+      },
+      "prior": {
+        "rate": 0.9230769230769231,
+        "known": true
+      }
+    },
+    {
+      "caseId": "A08",
+      "site": "site-north-dock",
+      "rule": "rule-dock-door",
+      "label": "true_positive",
+      "features": {
+        "anomalyType": "presence",
+        "zoneType": "choke",
+        "severity": "medium",
+        "devices": 3,
+        "presentSeconds": 15,
+        "thresholdSeconds": 3
+      },
+      "prior": {
+        "rate": 0.9230769230769231,
+        "known": true
+      }
+    },
+    {
+      "caseId": "A09",
+      "site": "site-north-dock",
+      "rule": "rule-dock-door",
+      "label": "true_positive",
+      "features": {
+        "anomalyType": "presence",
+        "zoneType": "monitor",
+        "severity": "medium",
+        "devices": 3,
+        "presentSeconds": 15,
+        "thresholdSeconds": 3
+      },
+      "prior": {
+        "rate": 0.9230769230769231,
+        "known": true
+      }
+    },
+    {
+      "caseId": "A10",
+      "site": "site-north-dock",
+      "rule": "rule-dock-door",
+      "label": "true_positive",
+      "features": {
+        "anomalyType": "presence",
+        "zoneType": "monitor",
+        "severity": "medium",
+        "devices": 3,
+        "presentSeconds": 6,
+        "thresholdSeconds": 3
+      },
+      "prior": {
+        "rate": 0.9230769230769231,
+        "known": true
+      }
+    },
+    {
+      "caseId": "A11",
+      "site": "site-north-dock",
+      "rule": "rule-dock-door",
+      "label": "true_positive",
+      "features": {
+        "anomalyType": "presence",
+        "zoneType": "monitor",
+        "severity": "low",
+        "devices": 3,
+        "presentSeconds": 6,
+        "thresholdSeconds": 3
+      },
+      "prior": {
+        "rate": 0.9230769230769231,
+        "known": true
+      }
+    },
+    {
+      "caseId": "B01",
+      "site": "site-south-bay",
+      "rule": "rule-loading-bay",
+      "label": "false_positive",
+      "features": {
+        "anomalyType": "presence",
+        "zoneType": "restricted",
+        "severity": "high",
+        "devices": 1,
+        "presentSeconds": 3,
+        "thresholdSeconds": 3
+      },
+      "prior": {
+        "rate": 0.14285714285714285,
+        "known": true
+      }
+    },
+    {
+      "caseId": "B02",
+      "site": "site-south-bay",
+      "rule": "rule-loading-bay",
+      "label": "false_positive",
+      "features": {
+        "anomalyType": "presence",
+        "zoneType": "restricted",
+        "severity": "high",
+        "devices": 3,
+        "presentSeconds": 15,
+        "thresholdSeconds": 3
+      },
+      "prior": {
+        "rate": 0.14285714285714285,
+        "known": true
+      }
+    },
+    {
+      "caseId": "B03",
+      "site": "site-south-bay",
+      "rule": "rule-loading-bay",
+      "label": "false_positive",
+      "features": {
+        "anomalyType": "presence",
+        "zoneType": "choke",
+        "severity": "medium",
+        "devices": 1,
+        "presentSeconds": 3,
+        "thresholdSeconds": 3
+      },
+      "prior": {
+        "rate": 0.14285714285714285,
+        "known": true
+      }
+    },
+    {
+      "caseId": "B04",
+      "site": "site-south-bay",
+      "rule": "rule-loading-bay",
+      "label": "false_positive",
+      "features": {
+        "anomalyType": "presence",
+        "zoneType": "choke",
+        "severity": "medium",
+        "devices": 3,
+        "presentSeconds": 6,
+        "thresholdSeconds": 3
+      },
+      "prior": {
+        "rate": 0.14285714285714285,
+        "known": true
+      }
+    },
+    {
+      "caseId": "B05",
+      "site": "site-south-bay",
+      "rule": "rule-loading-bay",
+      "label": "false_positive",
+      "features": {
+        "anomalyType": "presence",
+        "zoneType": "monitor",
+        "severity": "medium",
+        "devices": 1,
+        "presentSeconds": 3,
+        "thresholdSeconds": 3
+      },
+      "prior": {
+        "rate": 0.14285714285714285,
+        "known": true
+      }
+    },
+    {
+      "caseId": "B06",
+      "site": "site-south-bay",
+      "rule": "rule-loading-bay",
+      "label": "false_positive",
+      "features": {
+        "anomalyType": "presence",
+        "zoneType": "monitor",
+        "severity": "low",
+        "devices": 1,
+        "presentSeconds": 3,
+        "thresholdSeconds": 3
+      },
+      "prior": {
+        "rate": 0.14285714285714285,
+        "known": true
+      }
+    },
+    {
+      "caseId": "C01",
+      "site": "site-east-corridor",
+      "rule": "rule-corridor",
+      "label": "true_positive",
+      "features": {
+        "anomalyType": "presence",
+        "zoneType": "restricted",
+        "severity": "high",
+        "devices": 2,
+        "presentSeconds": 6,
+        "thresholdSeconds": 3
+      },
+      "prior": {
+        "rate": 0.4444444444444444,
+        "known": true
+      }
+    },
+    {
+      "caseId": "C02",
+      "site": "site-east-corridor",
+      "rule": "rule-corridor",
+      "label": "true_positive",
+      "features": {
+        "anomalyType": "presence",
+        "zoneType": "choke",
+        "severity": "medium",
+        "devices": 2,
+        "presentSeconds": 6,
+        "thresholdSeconds": 3
+      },
+      "prior": {
+        "rate": 0.4444444444444444,
+        "known": true
+      }
+    },
+    {
+      "caseId": "C03",
+      "site": "site-east-corridor",
+      "rule": "rule-corridor",
+      "label": "true_positive",
+      "features": {
+        "anomalyType": "presence",
+        "zoneType": "monitor",
+        "severity": "medium",
+        "devices": 3,
+        "presentSeconds": 6,
+        "thresholdSeconds": 3
+      },
+      "prior": {
+        "rate": 0.4444444444444444,
+        "known": true
+      }
+    },
+    {
+      "caseId": "C04",
+      "site": "site-east-corridor",
+      "rule": "rule-corridor",
+      "label": "true_positive",
+      "features": {
+        "anomalyType": "presence",
+        "zoneType": "monitor",
+        "severity": "medium",
+        "devices": 1,
+        "presentSeconds": 3,
+        "thresholdSeconds": 3
+      },
+      "prior": {
+        "rate": 0.4444444444444444,
+        "known": true
+      }
+    },
+    {
+      "caseId": "C05",
+      "site": "site-east-corridor",
+      "rule": "rule-corridor",
+      "label": "false_positive",
+      "features": {
+        "anomalyType": "presence",
+        "zoneType": "monitor",
+        "severity": "low",
+        "devices": 1,
+        "presentSeconds": 3,
+        "thresholdSeconds": 3
+      },
+      "prior": {
+        "rate": 0.5555555555555556,
+        "known": true
+      }
+    },
+    {
+      "caseId": "C06",
+      "site": "site-east-corridor",
+      "rule": "rule-corridor",
+      "label": "false_positive",
+      "features": {
+        "anomalyType": "presence",
+        "zoneType": "monitor",
+        "severity": "low",
+        "devices": 2,
+        "presentSeconds": 6,
+        "thresholdSeconds": 3
+      },
+      "prior": {
+        "rate": 0.5555555555555556,
+        "known": true
+      }
+    },
+    {
+      "caseId": "C07",
+      "site": "site-east-corridor",
+      "rule": "rule-corridor",
+      "label": "false_positive",
+      "features": {
+        "anomalyType": "presence",
+        "zoneType": "monitor",
+        "severity": "low",
+        "devices": 3,
+        "presentSeconds": 6,
+        "thresholdSeconds": 3
+      },
+      "prior": {
+        "rate": 0.5555555555555556,
+        "known": true
+      }
+    },
+    {
+      "caseId": "C08",
+      "site": "site-east-corridor",
+      "rule": "rule-corridor",
+      "label": "false_positive",
+      "features": {
+        "anomalyType": "presence",
+        "zoneType": "monitor",
+        "severity": "medium",
+        "devices": 2,
+        "presentSeconds": 6,
+        "thresholdSeconds": 3
+      },
+      "prior": {
+        "rate": 0.5555555555555556,
+        "known": true
+      }
+    },
+    {
+      "caseId": "D01",
+      "site": "site-west-annex",
+      "rule": "rule-annex",
+      "label": "true_positive",
+      "features": {
+        "anomalyType": "presence",
+        "zoneType": "monitor",
+        "severity": "medium",
+        "devices": 1,
+        "presentSeconds": 3,
+        "thresholdSeconds": 3
+      },
+      "prior": {
+        "rate": 0,
+        "known": false
+      }
+    },
+    {
+      "caseId": "A12",
+      "site": "site-north-dock",
+      "rule": "rule-dock-door",
+      "label": "true_positive",
+      "features": {
+        "anomalyType": "presence",
+        "zoneType": "monitor",
+        "severity": "low",
+        "devices": 3,
+        "presentSeconds": 15,
+        "thresholdSeconds": 3
+      },
+      "prior": {
+        "rate": 0.9230769230769231,
+        "known": true
+      }
+    }
+  ],
+  "expectations": {
+    "A01": {
+      "legacy": {
+        "score": 54,
+        "action": "OBSERVE"
+      },
+      "calibrated": {
+        "score": 40,
+        "action": "HOLD",
+        "severity": "critical",
+        "likelihood": "low"
+      }
+    },
+    "A02": {
+      "legacy": {
+        "score": 64,
+        "action": "VERIFY"
+      },
+      "calibrated": {
+        "score": 52,
+        "action": "VERIFY",
+        "severity": "critical",
+        "likelihood": "medium"
+      }
+    },
+    "A03": {
+      "legacy": {
+        "score": 64,
+        "action": "VERIFY"
+      },
+      "calibrated": {
+        "score": 57,
+        "action": "ESCALATE",
+        "severity": "critical",
+        "likelihood": "high"
+      }
+    },
+    "A04": {
+      "legacy": {
+        "score": 64,
+        "action": "VERIFY"
+      },
+      "calibrated": {
+        "score": 68,
+        "action": "ESCALATE",
+        "severity": "critical",
+        "likelihood": "very_high"
+      }
+    },
+    "A05": {
+      "legacy": {
+        "score": 27,
+        "action": "OBSERVE"
+      },
+      "calibrated": {
+        "score": 23,
+        "action": "HOLD",
+        "severity": "high",
+        "likelihood": "low"
+      }
+    },
+    "A06": {
+      "legacy": {
+        "score": 37,
+        "action": "OBSERVE"
+      },
+      "calibrated": {
+        "score": 37,
+        "action": "VERIFY",
+        "severity": "high",
+        "likelihood": "medium"
+      }
+    },
+    "A07": {
+      "legacy": {
+        "score": 37,
+        "action": "OBSERVE"
+      },
+      "calibrated": {
+        "score": 44,
+        "action": "VERIFY",
+        "severity": "high",
+        "likelihood": "high"
+      }
+    },
+    "A08": {
+      "legacy": {
+        "score": 37,
+        "action": "OBSERVE"
+      },
+      "calibrated": {
+        "score": 58,
+        "action": "ESCALATE",
+        "severity": "high",
+        "likelihood": "very_high"
+      }
+    },
+    "A09": {
+      "legacy": {
+        "score": 28,
+        "action": "OBSERVE"
+      },
+      "calibrated": {
+        "score": 54,
+        "action": "VERIFY",
+        "severity": "medium",
+        "likelihood": "very_high"
+      }
+    },
+    "A10": {
+      "legacy": {
+        "score": 28,
+        "action": "OBSERVE"
+      },
+      "calibrated": {
+        "score": 39,
+        "action": "VERIFY",
+        "severity": "medium",
+        "likelihood": "high"
+      }
+    },
+    "A11": {
+      "legacy": {
+        "score": 19,
+        "action": "OBSERVE"
+      },
+      "calibrated": {
+        "score": 34,
+        "action": "OBSERVE",
+        "severity": "low",
+        "likelihood": "high"
+      }
+    },
+    "A12": {
+      "legacy": {
+        "score": 19,
+        "action": "OBSERVE"
+      },
+      "calibrated": {
+        "score": 50,
+        "action": "VERIFY",
+        "severity": "low",
+        "likelihood": "very_high"
+      }
+    },
+    "B01": {
+      "legacy": {
+        "score": 54,
+        "action": "OBSERVE"
+      },
+      "calibrated": {
+        "score": 23,
+        "action": "HOLD",
+        "severity": "critical",
+        "likelihood": "low"
+      }
+    },
+    "B02": {
+      "legacy": {
+        "score": 64,
+        "action": "VERIFY"
+      },
+      "calibrated": {
+        "score": 44,
+        "action": "HOLD",
+        "severity": "critical",
+        "likelihood": "low"
+      }
+    },
+    "B03": {
+      "legacy": {
+        "score": 27,
+        "action": "OBSERVE"
+      },
+      "calibrated": {
+        "score": 12,
+        "action": "HOLD",
+        "severity": "high",
+        "likelihood": "low"
+      }
+    },
+    "B04": {
+      "legacy": {
+        "score": 37,
+        "action": "OBSERVE"
+      },
+      "calibrated": {
+        "score": 26,
+        "action": "VERIFY",
+        "severity": "high",
+        "likelihood": "high"
+      }
+    },
+    "B05": {
+      "legacy": {
+        "score": 18,
+        "action": "OBSERVE"
+      },
+      "calibrated": {
+        "score": 8,
+        "action": "OBSERVE",
+        "severity": "medium",
+        "likelihood": "low"
+      }
+    },
+    "B06": {
+      "legacy": {
+        "score": 9,
+        "action": "OBSERVE"
+      },
+      "calibrated": {
+        "score": 4,
+        "action": "OBSERVE",
+        "severity": "low",
+        "likelihood": "low"
+      }
+    },
+    "C01": {
+      "legacy": {
+        "score": 64,
+        "action": "VERIFY"
+      },
+      "calibrated": {
+        "score": 40,
+        "action": "VERIFY",
+        "severity": "critical",
+        "likelihood": "medium"
+      }
+    },
+    "C02": {
+      "legacy": {
+        "score": 37,
+        "action": "OBSERVE"
+      },
+      "calibrated": {
+        "score": 28,
+        "action": "VERIFY",
+        "severity": "high",
+        "likelihood": "medium"
+      }
+    },
+    "C03": {
+      "legacy": {
+        "score": 28,
+        "action": "OBSERVE"
+      },
+      "calibrated": {
+        "score": 29,
+        "action": "VERIFY",
+        "severity": "medium",
+        "likelihood": "high"
+      }
+    },
+    "C04": {
+      "legacy": {
+        "score": 18,
+        "action": "OBSERVE"
+      },
+      "calibrated": {
+        "score": 11,
+        "action": "OBSERVE",
+        "severity": "medium",
+        "likelihood": "low"
+      }
+    },
+    "C05": {
+      "legacy": {
+        "score": 9,
+        "action": "OBSERVE"
+      },
+      "calibrated": {
+        "score": 6,
+        "action": "OBSERVE",
+        "severity": "low",
+        "likelihood": "low"
+      }
+    },
+    "C06": {
+      "legacy": {
+        "score": 19,
+        "action": "OBSERVE"
+      },
+      "calibrated": {
+        "score": 20,
+        "action": "OBSERVE",
+        "severity": "low",
+        "likelihood": "medium"
+      }
+    },
+    "C07": {
+      "legacy": {
+        "score": 19,
+        "action": "OBSERVE"
+      },
+      "calibrated": {
+        "score": 27,
+        "action": "OBSERVE",
+        "severity": "low",
+        "likelihood": "high"
+      }
+    },
+    "C08": {
+      "legacy": {
+        "score": 28,
+        "action": "OBSERVE"
+      },
+      "calibrated": {
+        "score": 25,
+        "action": "OBSERVE",
+        "severity": "medium",
+        "likelihood": "medium"
+      }
+    },
+    "D01": {
+      "legacy": {
+        "score": 18,
+        "action": "OBSERVE"
+      },
+      "calibrated": {
+        "score": 16,
+        "action": "OBSERVE",
+        "severity": "medium",
+        "likelihood": "low"
+      }
+    }
+  }
+}

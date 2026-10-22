@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -38,6 +39,24 @@ type Service struct {
 	// SecretStore wraps TOTP secrets. It is an interface because the key lives
 	// in a file only the installer reads, and this package must never hold one.
 	SecretStore SecretStore
+	// LoginRateLimitPerMinute is how many authentication attempts one source
+	// may make per minute.
+	//
+	// It is the site configuration's `console.loginRateLimitPerMinute`
+	// (contracts/json-schema/site-config.schema.json), under the name the
+	// configuration publishes it under, because a control that is tuned under
+	// one name and documented under another is a control nobody can tune. Zero
+	// means the published default, DefaultLoginRateLimitPerMinute.
+	LoginRateLimitPerMinute int
+	// limiterMu and limiter hold the per-source rate limiter's state.
+	//
+	// The limiter is built on first use rather than in a constructor, because
+	// the service is constructed as a struct literal in several places. The
+	// mutex is here for the same reason a lock is here and not inside the
+	// limiter: the limiter is a value the service owns, and a service that can
+	// be built without a constructor cannot also demand that one be called.
+	limiterMu sync.Mutex
+	limiter   *sourceLimiter
 }
 
 // auditEntryFor builds an admin-scoped ledger entry.
@@ -136,6 +155,14 @@ type userRow struct {
 // returns a challenge instead of a session.
 func (s *Service) PasswordStep(ctx context.Context, tenant, username, password, sourceIP string) (LoginResult, error) {
 	var result LoginResult
+
+	// The per-source rate limit is checked before the account is even read.
+	// The password hash is Argon2id on purpose, and a limiter that runs after
+	// the hash has been computed bounds nothing: it refuses the session after
+	// the attacker has already had the expensive part.
+	if err := s.allowLoginAttempt(ctx, tenant, username, attemptKindPassword, sourceIP); err != nil {
+		return result, err
+	}
 
 	var user userRow
 	err := s.Pool.InTenant(ctx, dbx.TenantContext{TenantID: tenant, ActorID: "auth"},
@@ -285,6 +312,14 @@ func (s *Service) issueChallenge(ctx context.Context, tenant string, user userRo
 func (s *Service) CompleteChallenge(ctx context.Context, tenant, challengeID, method, code, sourceIP string) (Session, error) {
 	var sess Session
 	now := s.now()
+
+	// The second-factor verification has its own per-source budget, for the
+	// same reason the password step has one: guessing a code is the expensive
+	// part, and it is expensive in a different route with a different budget in
+	// the published API.
+	if err := s.allowLoginAttempt(ctx, tenant, "", attemptKindFactor, sourceIP); err != nil {
+		return sess, err
+	}
 
 	var userID, tokenHash, ip, agent string
 	var mfaVerified bool

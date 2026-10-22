@@ -8,8 +8,10 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/Sergey-Bar/vision/internal/command"
+	"github.com/Sergey-Bar/vision/internal/operatormetrics"
 	"github.com/Sergey-Bar/vision/migrations"
 )
 
@@ -203,6 +205,22 @@ requiring the AI plane to be up.`,
 			fmt.Fprintln(env.Stdout)
 			fmt.Fprintf(env.Stdout, "  backlog, drift, dead letters and checkpoint age: see the\n")
 			fmt.Fprintf(env.Stdout, "  /v1/ops endpoints and the metrics scrape endpoint.\n")
+			// The rollup's freshness, because a stale report is not a wrong
+			// report and the difference is worth a line. The database may be
+			// unreachable -- the schema check above already said so -- and then
+			// the freshness is unknown, which is said.
+			fmt.Fprintln(env.Stdout)
+			if pool, err := openPool(ctx); err == nil {
+				defer pool.Close()
+				reader := &operatormetrics.Reader{Pool: pool}
+				freshest, err := reader.Freshest(ctx, configuredTenant())
+				if err != nil {
+					fmt.Fprintf(env.Stdout, "  rollup      : unknown (%v)\n", err)
+				} else {
+					fmt.Fprintf(env.Stdout, "  rollup      : %s\n",
+						analyticsDoctorLine(freshest, time.Now().UTC()))
+				}
+			}
 			return nil
 		},
 	}

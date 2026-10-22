@@ -23,6 +23,11 @@
   ],
   "declared": [
     {
+      "test": "internal/recorder.TestACameraListNobodyElseMayReadIsRefusedWhereTheModeDecides",
+      "when": "windows,plan9",
+      "why": "Entirely a mode assertion, and the same shape as internal/lifecycle's two POSIX-mode controls above. Windows has a read-only flag and nothing else: os.Chmod cannot express 0600 and os.Stat reports a synthesised mode, so running this on Windows would be testing NTFS. The control is that a camera list -- which holds camera CREDENTIALS -- is not readable by anyone but its owner, and that is a POSIX permission bit. It runs on Linux, where the mode is the mechanism."
+    },
+    {
       "test": "internal/evidence.TestSymlinkEscapeIsRefused",
       "when": "windows",
       "why": "creating a symlink on Windows needs SeCreateSymbolicLinkPrivilege, which a test must not assume. This is the strongest evidence-path control in the repository -- a symlink planted inside the evidence root is the escape a path-string validator cannot catch -- so the gate does not pretend a Windows run covered it. It runs on Linux, which is the only platform the product installs on."
@@ -60,6 +65,10 @@
     {
       "test": "internal/rlsrole.TestAWriteWithTheRightScopeIsAccepted/sites",
       "why": "sites table defines the scope that site_isolation references; it cannot be protected by that policy without circular dependency (login needs a site before it can have one)."
+    },
+    {
+      "test": "internal/qamatrix.TestWriteDocs",
+      "why": "This is not a test; it is the QA matrix's DOCUMENT GENERATOR, and it is a Test function only so it can reuse the test binary rather than being a second program. It is gated on an environment variable so an ordinary run writes nothing, and it appears in every run's skip list. The check that matters runs in every ordinary run -- that docs/qa-matrix.md matches the registry -- and this one only writes the file that check reads"
     }
   ]
 }

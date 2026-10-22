@@ -17,7 +17,7 @@ import (
 	"io/fs"
 )
 
-//go:embed rule-bundle.schema.json site-config.schema.json bundle-manifest.schema.json investigation-template.schema.json ai-observations/*.schema.json
+//go:embed rule-bundle.schema.json site-config.schema.json bundle-manifest.schema.json investigation-template.schema.json metrics-report.schema.json capability-manifest.schema.json ai-observations/*.schema.json
 var embedded embed.FS
 
 // Published is the published path of each schema, relative to the repository
@@ -27,6 +27,8 @@ var Published = map[string]string{
 	"contracts/json-schema/site-config.schema.json":                        "site-config.schema.json",
 	"contracts/json-schema/bundle-manifest.schema.json":                    "bundle-manifest.schema.json",
 	"contracts/json-schema/investigation-template.schema.json":             "investigation-template.schema.json",
+	"contracts/json-schema/metrics-report.schema.json":                     "metrics-report.schema.json",
+	"contracts/json-schema/capability-manifest.schema.json":                "capability-manifest.schema.json",
 	"contracts/json-schema/ai-observations/door-forced.schema.json":        "ai-observations/door-forced.schema.json",
 	"contracts/json-schema/ai-observations/restricted-person.schema.json":  "ai-observations/restricted-person.schema.json",
 	"contracts/json-schema/ai-observations/general-monitoring.schema.json": "ai-observations/general-monitoring.schema.json",

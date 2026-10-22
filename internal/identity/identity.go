@@ -257,6 +257,21 @@ const (
 	CapDeadLetterRead      Capability = "dead_letter.read"
 	CapDeadLetterReplay    Capability = "dead_letter.replay"
 	CapVideoUpload         Capability = "video.upload"
+	// CapAnalyticsRead gates the durable analytics: the North Star, its four
+	// companions, the series behind them and the drill-down.
+	//
+	// It is a SEPARATE capability from `audit.read`, and it is separate for a
+	// reason that is about the reader rather than the writer: a metrics scrape
+	// is not a ledger read. Somebody who may see the ledger may see every
+	// operator's disposition; somebody who may see the ATTENTION MINUTES --
+	// the aggregated number about how long a shift took to clear a site -- is
+	// being told something about people rather than about records, and the two
+	// are not the same permission.
+	//
+	// It replaces `audit.read` on the analytics routes, and the metrics scrape
+	// at `/v1/metrics` keeps `audit.read` because it is a Prometheus exposition
+	// and the exposition is the same shape the ledger reader gets.
+	CapAnalyticsRead Capability = "analytics.read"
 )
 
 // AllCapabilities returns the closed set of capabilities this build declares.
@@ -276,6 +291,7 @@ func AllCapabilities() []Capability {
 		CapIdentityManage, CapSiteConfigure,
 		CapDeadLetterRead, CapDeadLetterReplay,
 		CapVideoUpload,
+		CapAnalyticsRead,
 	}
 }
 
@@ -294,12 +310,14 @@ var roleCapabilities = map[Role][]Capability{
 		CapIdentityManage, CapSiteConfigure,
 		CapDeadLetterRead, CapDeadLetterReplay,
 		CapVideoUpload,
+		CapAnalyticsRead,
 	},
 	RoleSecurityManager: {
 		CapIncidentRead, CapIncidentDisposition, CapIncidentEscalate,
 		CapEvidenceRead, CapEvidenceFetch,
 		CapAuditRead, CapRulesRead, CapDeadLetterRead, CapDeadLetterReplay,
 		CapVideoUpload,
+		CapAnalyticsRead,
 	},
 	RoleOperator: {
 		CapIncidentRead, CapIncidentDisposition, CapEvidenceRead, CapEvidenceFetch,
@@ -359,7 +377,14 @@ func (p Principal) Can(c Capability) bool {
 
 // CanSeeSite reports whether the principal's scope includes a site.
 //
-// Open access: every site is visible to every request.
+// A principal with an EMPTY scope sees no site at all. That is the safe
+// direction and it is deliberate: a misconfigured assignment denies rather
+// than opens. The empty scope is not "everything" -- the two readings are
+// indistinguishable from the outside until somebody asks for a site they
+// should not have, and then only one of them is defensible.
+//
+// The scope is assigned where the principal is built, from configuration. It
+// is never widened by anything the caller sends.
 func (p Principal) CanSeeSite(siteID string) bool {
 	for _, scope := range p.SiteScope {
 		if scope == siteID {

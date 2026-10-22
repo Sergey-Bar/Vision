@@ -32,13 +32,34 @@ import (
 //
 // It returns false when junctions are unavailable, so the caller can skip with
 // the reason rather than fail.
+//
+// The shell is named by COMSPEC and not by PATH, and that is not a detail.
+//
+// `exec.Command("cmd", ...)` finds `cmd` through PATH, and the verification
+// script runs the suite with a PATH it has built for the toolchain. That
+// PATH does not always carry `C:\Windows\System32`, and a `cmd` that cannot
+// be found is a junction that cannot be created — so the test SKIPPED on the
+// platform the junction exists for, and the skip-audit gate reported it as
+// an undeclared skip.
+//
+// The control was therefore not running where it matters, and it was failing
+// to run for a reason that had nothing to do with the code under test.
+//
+// COMSPEC is where Windows records its own command processor, and it is an
+// ABSOLUTE path. Naming it directly is the same reasoning as naming an
+// absolute path for a tool in a unit test: the tool is part of the platform,
+// not part of the environment.
 func junction(t *testing.T, link, target string) bool {
 	t.Helper()
 	if runtime.GOOS != "windows" {
 		return false
 	}
+	shell := os.Getenv("COMSPEC")
+	if strings.TrimSpace(shell) == "" {
+		shell = filepath.Join(os.Getenv("SystemRoot"), "System32", "cmd.exe")
+	}
 	//nolint:gosec // a fixed Windows tool with arguments this test builds
-	cmd := exec.CommandContext(t.Context(), "cmd", "/c", "mklink", "/J", link, target)
+	cmd := exec.CommandContext(t.Context(), shell, "/c", "mklink", "/J", link, target)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Logf("mklink /J unavailable: %v\n%s", err, out)

@@ -12,20 +12,20 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
   <title>VISION — Live Analytics</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232563eb'/%3E%3Cpath d='M16 7l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10v-4z' fill='none' stroke='%23ffffff' stroke-width='2'/%3E%3C/svg%3E">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/app.css">
   <link rel="stylesheet" href="/static/ui.css">
 </head>
 <body>
   <div class="ui-shell">
-    <header class="ui-topbar">
-      <a class="ui-brand" href="/">
-        <span class="mark"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#2563eb"/><path d="M16 7l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10v-4z" fill="none" stroke="#ffffff" stroke-width="2"/></svg></span>
-        VISION
+    <header class="nav">
+      <a class="brand" href="/">
+        <svg class="mark" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 2.5 20 6.6v6.2c0 4.9-3.3 8.3-8 9.7-4.7-1.4-8-4.8-8-9.7V6.6z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M7.7 10.4h8.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="12" cy="15.1" r="1.5" fill="currentColor"/></svg>
+        <span class="brand-text">
+          <span class="brand-name">VISION</span>
+          <span class="brand-statement">The system that says what it does not know.</span>
+        </span>
       </a>
-      <nav class="ui-nav">
+      <nav class="links">
         <a href="/">Showcase</a>
         <a href="/console">Console</a>
         <a href="/ask">Ask</a>
@@ -45,20 +45,20 @@
         <h1 class="ui-title">See what the camera sees.</h1>
         <p class="ui-subtitle">Object categorization, no-zone alerts, and grounded video knowledge. Driven by the Python detector in <code>tools/</code>. Every frame is analyzed live; missing evidence is reported as unavailable, never guessed.</p>
         <div class="ui-actions">
-          <input id="youtubeUrl" type="text" value="https://www.youtube.com/watch?v=JQ_jwk_7OVE" placeholder="YouTube live URL" style="flex:1;max-width:420px;background:rgba(0,0,0,0.35);border:1px solid var(--line);color:var(--ink);border-radius:var(--radius-lg);padding:10px 14px;font:inherit;font-size:14px;outline:none;">
-          <input id="search" type="text" placeholder="red car, person, taxi, no-zone" style="max-width:260px;background:rgba(0,0,0,0.35);border:1px solid var(--line);color:var(--ink);border-radius:var(--radius-lg);padding:10px 14px;font:inherit;font-size:14px;outline:none;">
-          <label style="margin:0 8px;display:flex;align-items:center;gap:6px;color:var(--ink-soft);font-family:var(--font-mono);font-size:11px;">
-            <input id="profile" type="radio" value="maximum" checked style="accent-color:var(--accent);"> Maximum accuracy &middot; 1920
+          <input id="youtubeUrl" type="text" value="https://www.youtube.com/watch?v=JQ_jwk_7OVE" placeholder="YouTube live URL" class="chat-input">
+          <input id="search" type="text" placeholder="red car, person, taxi, no-zone" class="search-input">
+          <label class="radio-label">
+            <input id="profile" type="radio" value="maximum" checked class="accent-input"> Maximum accuracy &middot; 1920
           </label>
-          <label style="margin:0;display:flex;align-items:center;gap:6px;color:var(--ink-soft);font-family:var(--font-mono);font-size:11px;">
-            <input type="radio" value="realtime" style="accent-color:var(--accent);"> Maximum realtime &middot; 1280
+          <label class="radio-label-tight">
+            <input type="radio" value="realtime" class="accent-input"> Maximum realtime &middot; 1280
           </label>
         </div>
       </header>
 
       <div class="ui-grid">
-        <section class="ui-stage-wrap" style="flex:1;">
-          <div class="ui-stage-label">CAM-01 &bull; North Gate</div>
+        <section class="ui-stage-wrap grow">
+          <div class="ui-stage-label" id="stageLabel">Source not connected</div>
           <div class="ui-stage">
             <div class="ui-stage-placeholder" id="playerPlaceholder">Source not connected</div>
             <iframe id="player" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
@@ -67,10 +67,10 @@
             <div class="ui-stage-badge"><span class="light"></span>LIVE</div>
             <div class="ui-hud">
               <div class="ui-cam">
-                <span class="ui-cam-name">North Gate</span>
-                <span class="ui-cam-meta" id="camMeta">— &bull; — &bull; —</span>
+                <span class="ui-cam-name" id="camName">Not connected</span>
+                <span class="ui-cam-meta" id="camMeta">&mdash; &bull; &mdash; &bull; &mdash;</span>
               </div>
-              <div id="uiHudMeta" style="font-family:var(--font-mono);font-size:11px;color:rgba(255,255,255,0.7);">—</div>
+              <div id="uiHudMeta" class="hud-meta">—</div>
             </div>
           </div>
           <div class="ui-status">
@@ -93,8 +93,8 @@
             <div class="ui-metric"><span class="name">Other</span><span class="big" id="other">0</span></div>
             <div class="ui-metric"><span class="name">Unique tracks</span><span class="big subtle" id="uniqueTracks">0</span></div>
             <div class="ui-metric"><span class="name">In no-zone</span><span class="big" id="restrictedCount">0</span></div>
-            <div class="ui-metric"><span class="name">Avg confidence</span><span class="big subtle" id="averageConfidence">0%</span></div>
-            <div class="ui-metric"><span class="name">Frame occupancy</span><span class="big subtle" id="occupancy">0%</span></div>
+            <div class="ui-metric"><span class="name">Avg confidence</span><span class="big subtle" id="averageConfidence">—</span></div>
+            <div class="ui-metric"><span class="name">Frame occupancy</span><span class="big subtle" id="occupancy">—</span></div>
           </div>
 
           <div class="ui-card">
@@ -132,7 +132,7 @@
               <input id="chatQuestion" placeholder="Which red vehicles entered the restricted zone?">
               <button class="ui-cta primary" id="chatSend">Ask</button>
             </div>
-            <div id="chatAnswer" style="min-height:58px;white-space:pre-wrap;font-family:var(--font-mono);font-size:13px;color:var(--ink-soft);border-top:1px solid var(--line);margin-top:12px;padding-top:10px;">No question asked yet.</div>
+            <div id="chatAnswer" class="chat-answer">No question asked yet.</div>
           </div>
 
           <div class="ui-card">
@@ -147,6 +147,6 @@
   </div>
 
   <script src="/static/live.js?v=7"></script>
-  <script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("/static/sw.js").catch(function(){});});}</script>
+  <script src="/static/register-sw.js" defer></script>
 </body>
 </html>

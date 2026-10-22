@@ -4,32 +4,39 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/Sergey-Bar/vision/internal/aichain"
 	"github.com/Sergey-Bar/vision/internal/audit"
 	"github.com/Sergey-Bar/vision/internal/bundles"
+	"github.com/Sergey-Bar/vision/internal/chief"
+	"github.com/Sergey-Bar/vision/internal/dbx"
+	"github.com/Sergey-Bar/vision/internal/device"
 	"github.com/Sergey-Bar/vision/internal/dispatch"
 	"github.com/Sergey-Bar/vision/internal/eventsearch"
 	"github.com/Sergey-Bar/vision/internal/evidence"
+	"github.com/Sergey-Bar/vision/internal/export"
 	"github.com/Sergey-Bar/vision/internal/identity"
 	"github.com/Sergey-Bar/vision/internal/inbox"
 	"github.com/Sergey-Bar/vision/internal/incidents"
 	"github.com/Sergey-Bar/vision/internal/jobs"
 	"github.com/Sergey-Bar/vision/internal/nlp"
 	"github.com/Sergey-Bar/vision/internal/observability"
+	"github.com/Sergey-Bar/vision/internal/recording"
 	"github.com/Sergey-Bar/vision/internal/rules"
 	"github.com/Sergey-Bar/vision/internal/simulate"
 	"github.com/Sergey-Bar/vision/internal/sitemodel"
+	"github.com/Sergey-Bar/vision/internal/threat"
 	"github.com/gorilla/websocket"
 	"github.com/jackc/pgx/v5"
 )
@@ -58,6 +65,48 @@ type Deps struct {
 	// page says the artifact is not configured rather than rendering an empty
 	// hand-over, which would read as "nothing happened".
 	Handover HandoverReader
+	// ChiefNarrator is the AI plane's voice over the Chief's facts.
+	//
+	// Nil means the Chief speaks deterministically, which is a SUPPORTED
+	// mode and not a degraded one: the facts, the delta and the attention
+	// queue are the record, and the narration is an enhancement over it.
+	//
+	// It is declared here rather than taken as a concrete type so that a
+	// missing dependency is a nil interface: a typed nil pointer behind an
+	// interface is not nil, and the check would not fire.
+	ChiefNarrator chief.Narrator
+	// ChiefPrior answers whether a site has a labelled history, which is what
+	// the autonomy dial asks before it lets the Chief dispose of anything by
+	// itself.
+	//
+	// Nil means the answer is NO: the site has not earned the level, and a
+	// missing reader must never be the reason a site is given more autonomy
+	// than it has earned.
+	ChiefPrior ChiefPrior
+	// ChiefAutonomy is the site's CONFIGURED autonomy level.
+	//
+	// It comes from the site's own configuration, never from a request, for
+	// the reason every other scope in this product comes from
+	// configuration: a level a caller can raise is a level the caller has.
+	//
+	// The empty string means A0 — report and nothing else — because the
+	// conservative level is the one that only reports.
+	ChiefAutonomy chief.Autonomy
+	// Devices is the device registry: what a device IS, what was MEASURED
+	// about it, and where its credential lives.
+	//
+	// Nil means this install has no registry, and the routes say so by name
+	// rather than answering with an empty list -- an empty list and a
+	// missing registry look identical to a reader, and only one of them is
+	// true.
+	Devices *device.Service
+	// DeviceProber measures a device and records what it established.
+	//
+	// Nil means nothing can be measured, and the probe route says so. A
+	// registry whose devices can never be probed holds claims and no
+	// measurements, which is the state the whole device package was written
+	// to end.
+	DeviceProber device.Prober
 	// InboxCounts backs the SLO alert thresholds.
 	InboxCounts func() (Backlog, error)
 	// Metrics is the observability registry. Nil means the route says the
@@ -82,6 +131,83 @@ type Deps struct {
 	// them is true: a map with no zones says the site has no zones, and a site
 	// with no model says nobody has drawn the site yet.
 	Site *sitemodel.Site
+	// SiteTimezone reads the site's own timezone, so the console renders every
+	// time in the site's zone rather than the browser's or the host's.
+	//
+	// Nil means this install cannot say what the site's clock is, and the
+	// responses that carry it omit the field instead of answering UTC: a
+	// guessed zone is a wrong clock, and a wrong clock is read as a fact.
+	SiteTimezone SiteTimezoneReader
+	// Identities verifies a second factor and spends a step-up proof.
+	//
+	// The two sensitive disposition outcomes need a fresh factor, and the
+	// factor is verified by the identity package: the API does not know what a
+	// TOTP step is, only that one was checked. Nil means this install has no
+	// identity service, and the sensitive outcomes are then refused with the
+	// same 403 an operator with no enrolled factor gets -- a refusal that
+	// names the reason, rather than a route that quietly records an
+	// escalation nobody proved.
+	Identities StepUpVerifier
+	// AnalyticsPool is the database handle the durable analytics read
+	// through.
+	//
+	// It is a POOL and not a service, because the reader needs the PRINCIPAL's
+	// site scope bound onto the connection: the rollup's `site_isolation`
+	// policy is RESTRICTIVE, so a reader that named only its tenant would see
+	// every site's aggregate or none of them. The site filter in a query is a
+	// filter; the scope is the grant.
+	//
+	// Nil means the routes answer "not configured" rather than an empty
+	// report, because an empty report reads as "the site had no activity".
+	AnalyticsPool *dbx.Pool
+	// Recordings is the recording index: what was recorded, where the holes
+	// in it are, and whether the chain that proves it still verifies.
+	//
+	// Nil means the routes answer "not configured" rather than an empty
+	// timeline, because an empty timeline and a camera that was never asked
+	// to record look identical, and only one of them is true.
+	Recordings *recording.Service
+	// Export builds a CLIP out of the recording: the segments covering a
+	// window, and the pre-roll before it.
+	//
+	// Nil means the clip route answers "not configured" rather than an
+	// empty clip, because a clip with no segments reads as "nothing
+	// happened" and the truth is "this install cannot export".
+	Export *export.Service
+	// AIChain is the site's provider chain: which models may answer, in
+	// what order, and what has left the site when they did.
+	//
+	// Nil means the route answers "not configured" rather than an empty
+	// chain, because "this site has no brain" and "this site's brain is
+	// empty" are different facts.
+	AIChain *aichain.Service
+	// SchemaVersion is the schema version THIS BUILD ships.
+	//
+	// The setup path compares it with the database's, because a site
+	// running an older schema is a site whose product refuses work and the
+	// refusal is far easier to fix when it is named.
+	SchemaVersion int
+	// RecorderConfigured says whether a recorder has a root and a camera
+	// list.
+	//
+	// It is a FUNCTION and not a value because the recorder is a separate
+	// binary with its own environment: the core cannot see it, and the
+	// core is what the operator asks.
+	RecorderConfigured func() bool
+}
+
+// StepUpVerifier is the identity service's second-factor check, as the API
+// needs it.
+//
+// Declared here rather than taken as a concrete type so that a missing
+// dependency is a nil interface. A typed nil pointer behind an interface is
+// not nil, and the check that refuses a missing verifier would not fire: the
+// route would call a method on a nil service and take the process down.
+type StepUpVerifier interface {
+	// StepUp re-verifies a factor and returns a short-lived proof.
+	StepUp(ctx context.Context, tenant, userID, method, code, action, target string) (string, error)
+	// ConsumeStepUp spends a proof. Single use.
+	ConsumeStepUp(ctx context.Context, tenant, userID, proof string) error
 }
 
 // DeadLetterReader is the dead-letter surface.
@@ -158,8 +284,6 @@ func siteOfIncident(d Deps) func(*http.Request, identity.Principal) string {
 // somewhere else is a route nobody re-checks when the model changes.
 func (s *Server) RegisterRoutes(d Deps) func(*http.ServeMux) {
 	return func(mux *http.ServeMux) {
-		s.Log.Info("RegisterRoutes called")
-		fmt.Fprintln(os.Stderr, "REGISTER_ROUTES_CALLED")
 		// Incidents.
 		//
 		// The list route is the one that means "every site I may see", so it filters
@@ -179,7 +303,7 @@ func (s *Server) RegisterRoutes(d Deps) func(*http.ServeMux) {
 		// for a surface that says what the install may do.
 		mux.Handle("GET /v1/principal",
 			s.requireCapability(identity.CapIdentityManage, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
-				s.handlePrincipal(w, r, p)
+				s.handlePrincipal(w, r, p, d)
 			}))
 
 		mux.Handle("GET /v1/incidents",
@@ -196,12 +320,173 @@ func (s *Server) RegisterRoutes(d Deps) func(*http.ServeMux) {
 				s.handleAttention(w, r, p, d)
 			}))
 
+		// The Chief: what changed since the operator last looked, what needs
+		// them now, and what the system does not know.
+		//
+		// It reads the SAME two readers the attention queue and the hand-over
+		// read -- `d.Incidents.ListAttention` and `d.Handover.Read` -- so the
+		// Chief and the two surfaces beside it cannot disagree about the same
+		// site. A third reader for one set of tables would be a third
+		// opinion about it.
+		//
+		// The cursor is a QUERY PARAMETER, not stored anywhere. It is durable
+		// (a bookmark survives it), it survives a reload, and it leaves when
+		// the operator closes the tab, which is the right lifetime for "where
+		// I was".
+		mux.Handle("GET /v1/chief",
+			s.requireCapability(identity.CapIncidentRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleChief(w, r, p, d)
+			}))
+
+		// The device registry.
+		//
+		// The two READS are gated on the incident capability, because an
+		// operator needs to see the estate they are responsible for. The two
+		// WRITES are gated on the site-configuration capability, because
+		// registering a device and measuring one are both acts of
+		// configuration, and `site.configure` had no route to gate until
+		// this one.
+		mux.Handle("GET /v1/devices",
+			s.requireCapability(identity.CapIncidentRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleDeviceList(w, r, p, d)
+			}))
+
+		mux.Handle("GET /v1/devices/{id}/capabilities",
+			s.requireCapability(identity.CapIncidentRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleDeviceCapabilities(w, r, p, d)
+			}))
+
+		// The discovery scan. It is the FIRST step of adding a camera, and it
+		// is a READ of the network rather than a read of the record, so it is
+		// gated on the incident capability: an operator needs to see the
+		// estate they are responsible for.
+		mux.Handle("GET /v1/devices/discover",
+			s.requireCapability(identity.CapIncidentRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleDeviceDiscover(w, r, p, d)
+			}))
+
+		// The credential INVENTORY: which purposes we hold a credential for,
+		// and when each was last verified against the device. The references
+		// and never the secrets.
+		mux.Handle("GET /v1/devices/{id}/credentials",
+			s.requireCapability(identity.CapIncidentRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleDeviceCredentials(w, r, p, d)
+			}))
+
+		mux.Handle("POST /v1/devices/{id}/credentials",
+			s.requireCapability(identity.CapSiteConfigure, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleDeviceCredentialEnrol(w, r, p, d)
+			}))
+
+		// The recording index: what was recorded, where the holes in it are,
+		// and whether the chain that proves it still verifies.
+		//
+		// The READS are gated on the EVIDENCE capability rather than the
+		// incident one, because a recording is not an incident: an operator
+		// who may look at footage without being able to triage incidents is
+		// the ordinary case, and the recording is what they look at first.
+		mux.Handle("GET /v1/recordings",
+			s.requireCapability(identity.CapEvidenceRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleRecordings(w, r, p, d)
+			}))
+
+		mux.Handle("GET /v1/recordings/timeline",
+			s.requireCapability(identity.CapEvidenceRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleRecordingTimeline(w, r, p, d)
+			}))
+
+		mux.Handle("GET /v1/recordings/gaps",
+			s.requireCapability(identity.CapEvidenceRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleRecordingGaps(w, r, p, d)
+			}))
+
+		mux.Handle("GET /v1/recordings/chain",
+			s.requireCapability(identity.CapEvidenceRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleRecordingChain(w, r, p, d)
+			}))
+
+		// A segment's BYTES. They live on the customer's own disk, under
+		// the recording root, and the path is checked by the shared guard.
+		mux.Handle("GET /v1/recordings/{segmentId}/content",
+			s.requireCapability(identity.CapEvidenceFetch, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleRecordingContent(w, r, p, d)
+			}))
+
+		// The CLIP for a window: the segments covering it, and the
+		// pre-roll before it -- the seconds before the moment, which is
+		// where the lead-in lives.
+		mux.Handle("GET /v1/recordings/clip",
+			s.requireCapability(identity.CapEvidenceFetch, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleRecordingClip(w, r, p, d)
+			}))
+
+		// The provider chain: which models may answer, in what order, and
+		// what has left the site when they did.
+		//
+		// The order IS the policy -- it says what may leave the site -- and
+		// the egress log is the record of what did. An operator who cannot
+		// see either cannot answer "why did nothing happen today" or "what
+		// did we send away".
+		mux.Handle("GET /v1/ai/chain",
+			s.requireCapability(identity.CapEvidenceRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleAIChain(w, r, p, d)
+			}))
+
+		// The setup path: what is left to do before this site records
+		// anything.
+		//
+		// It is the "plug and play" promise made checkable. Each step is
+		// answered by the PRODUCT and each unfinished step names the one
+		// action that would finish it, so an operator is never left with a
+		// status and no way to act on it.
+		mux.Handle("GET /v1/setup",
+			s.requireCapability(identity.CapIncidentRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleSetup(w, r, p, d)
+			}))
+
+		// One evidence row's METADATA: its kind, when it was captured, its
+		// digest and its size.
+		//
+		// The content route streams the BYTES and the incident's evidence list
+		// names the row, but the detail page had nowhere to read the row
+		// itself from and rendered a dash for every field. A dash is a dash
+		// and not a measurement of nothing — but a page that shows four
+		// dashes is a page that shows nothing.
+		mux.Handle("GET /v1/evidence/{evidenceId}",
+			s.requireCapability(identity.CapEvidenceRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleEvidenceMetadata(w, r, p, d)
+			}))
+
+		mux.Handle("POST /v1/devices",
+			s.requireCapability(identity.CapSiteConfigure, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleDeviceRegister(w, r, p, d)
+			}))
+
+		mux.Handle("POST /v1/devices/{id}/probe",
+			s.requireCapability(identity.CapSiteConfigure, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleDeviceProbe(w, r, p, d)
+			}))
+
 		// The site's own model: the zones, the cameras and the routes the
 		// operator declared. The console draws it, and the live state comes
 		// from the VMS.
 		mux.Handle("GET /v1/site",
 			s.requireCapability(identity.CapIncidentRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
 				s.handleSite(w, r, p, d)
+			}))
+		// The coverage panel and the shift hand-over, as JSON.
+		//
+		// The server-rendered pages (`/coverage`, `/handover`) render the same
+		// facts through the same readers; these are their JSON form, for a
+		// client that is not a browser. Two readers for one set of tables
+		// would drift, so there is one reader and two renderings.
+		mux.Handle("GET /v1/coverage",
+			s.requireCapability(identity.CapIncidentRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleCoverage(w, r, p, d)
+			}))
+		mux.Handle("GET /v1/handover",
+			s.requireCapability(identity.CapIncidentRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleHandover(w, r, p, d)
 			}))
 		mux.Handle("GET /v1/incidents/{id}",
 			s.requireCapabilityAtSite(identity.CapIncidentRead, siteOfIncident(d),
@@ -332,11 +617,47 @@ func (s *Server) RegisterRoutes(d Deps) func(*http.ServeMux) {
 				s.handleMetrics(w, r, p, d)
 			}))
 
-		// Legacy /api/* aliases for the console frontend.
-		mux.Handle("GET /api/cameras",
-			s.requireCapability(identity.CapIncidentRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
-				s.handleCameras(w, r, p)
+		// The durable analytics: the North Star, its four companions, the series
+		// behind them, the trend against the window before, and a drill-down
+		// that re-derives a number from the raw rows.
+		//
+		// `analytics.read`, and NOT `audit.read`. The exposition at /v1/metrics
+		// reuses audit.read because it is a Prometheus scrape; these routes are a
+		// report about PEOPLE -- how long a shift took to clear a site -- and
+		// somebody who may read every operator's disposition row is not
+		// automatically somebody who may read the aggregate of them.
+		mux.Handle("GET /v1/analytics/summary",
+			s.requireCapability(identity.CapAnalyticsRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleAnalyticsSummary(w, r, p, d)
 			}))
+		mux.Handle("GET /v1/analytics/series",
+			s.requireCapability(identity.CapAnalyticsRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleAnalyticsSeries(w, r, p, d)
+			}))
+		mux.Handle("GET /v1/analytics/trend",
+			s.requireCapability(identity.CapAnalyticsRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleAnalyticsTrend(w, r, p, d)
+			}))
+		mux.Handle("GET /v1/analytics/drilldown",
+			s.requireCapability(identity.CapAnalyticsRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleAnalyticsDrilldown(w, r, p, d)
+			}))
+		// M1 gate 5's ratio: incidents raised per 1,000 canonical events, per
+		// camera. The number a release note quotes.
+		mux.Handle("GET /v1/analytics/incident-rate",
+			s.requireCapability(identity.CapAnalyticsRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
+				s.handleAnalyticsIncidentRate(w, r, p, d)
+			}))
+
+		// Legacy /api/* aliases for the console frontend.
+		//
+		// There is no camera alias here, and the reason is worth stating: the
+		// product does not hold a camera inventory. The live state belongs to
+		// the VMS, which is the device that has it, and the platform's own
+		// record of what it has heard of is the `cameras` table. This route
+		// used to answer with eight invented cameras at three invented sites,
+		// and an invented camera list is the worst kind of answer: it looks
+		// like a real one, and a reader would take it as the inventory.
 		mux.Handle("GET /api/critical",
 			s.requireCapability(identity.CapIncidentRead, func(w http.ResponseWriter, r *http.Request, p identity.Principal) {
 				s.handleCritical(w, r, p, d)
@@ -540,9 +861,14 @@ func splitScope(scope string) []string {
 // a console that says what the install is allowed to do, which is the honest
 // thing for an operator to see and the reason the API's checks are real.
 //
+// It carries the site's timezone as well, because the site's clock is the only
+// clock that means anything: the rendering law is that dates cross the site
+// timezone and never the host's, and a console that renders times in the
+// browser's zone shows the same record in a different moment on two machines.
+//
 // It is not gated on a capability: every caller may read its own identity, and
 // a route that refuses to tell you who you are is not a capability check.
-func (s *Server) handlePrincipal(w http.ResponseWriter, _ *http.Request, p identity.Principal) {
+func (s *Server) handlePrincipal(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
 	roles := make([]string, 0, len(p.Roles))
 	for _, role := range p.Roles {
 		roles = append(roles, string(role))
@@ -554,7 +880,7 @@ func (s *Server) handlePrincipal(w http.ResponseWriter, _ *http.Request, p ident
 		}
 	}
 	sort.Strings(caps)
-	WriteJSON(w, http.StatusOK, map[string]any{
+	body := map[string]any{
 		"tenantId":     p.TenantID,
 		"roles":        roles,
 		"siteScope":    p.SiteScope,
@@ -562,7 +888,45 @@ func (s *Server) handlePrincipal(w http.ResponseWriter, _ *http.Request, p ident
 		// The console must never imply a person did something, so it says
 		// plainly that this is not a person.
 		"serviceAccount": p.ServiceAccount,
-	})
+	}
+	// The site's clock, when this install can read it.
+	//
+	// The field is absent rather than empty when it cannot: an empty zone and
+	// a missing zone read the same to a client that does not check, and a
+	// client that renders "" as UTC has been told a zone it was never given.
+	if zone := s.siteTimezone(r, p, d, primarySiteOf(p)); zone != "" {
+		body["timezone"] = zone
+	}
+	WriteJSON(w, http.StatusOK, body)
+}
+
+// siteTimezone reads the site's clock for a principal.
+//
+// The site is named by the caller: the site view reads the clock of the site
+// it is drawing, and the identity read reads the clock of the principal's own
+// site. A principal with no scope has no site and therefore no clock.
+//
+// A read that fails does not fail the route it is attached to — the identity
+// read and the site view are both true without a clock — but it is not silent
+// either: the failure is logged, so a console showing UTC because the clock
+// could not be read has a line in the log that says why.
+func (s *Server) siteTimezone(r *http.Request, p identity.Principal, d Deps, siteID string) string {
+	if d.SiteTimezone == nil || siteID == "" {
+		return ""
+	}
+	zone, err := d.SiteTimezone.Timezone(r.Context(), p.TenantID, siteID)
+	if err != nil {
+		if s.Log != nil {
+			s.Log.Warn("the site's timezone could not be read",
+				"tenant_id", p.TenantID,
+				"site_id", siteID,
+				"request_id", requestID(r),
+				"error", err.Error(),
+			)
+		}
+		return ""
+	}
+	return zone
 }
 
 // handleIncidentList answers the incident feed.
@@ -658,12 +1022,22 @@ func (s *Server) handleSite(w http.ResponseWriter, r *http.Request, p identity.P
 			"id": rt.ID, "points": points, "allowedDirection": rt.AllowedDirection,
 		})
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{
+	body := map[string]any{
 		"siteId":  d.Site.ID,
 		"zones":   zones,
 		"cameras": cameras,
 		"routes":  routes,
-	})
+	}
+	// The site's clock, read from the site's row.
+	//
+	// The rendering law is that dates cross the site timezone and never the
+	// host's, and a site view that does not say which zone the site is in is
+	// how one console ends up with two clocks. The field is absent rather than
+	// empty when the row cannot be read: a guessed zone is a wrong clock.
+	if zone := s.siteTimezone(r, p, d, d.Site.ID); zone != "" {
+		body["timezone"] = zone
+	}
+	WriteJSON(w, http.StatusOK, body)
 }
 
 // handleAttention answers the queue: what needs the operator, in what order,
@@ -694,6 +1068,16 @@ func (s *Server) handleAttention(w http.ResponseWriter, r *http.Request, p ident
 	// The queue's order is the product's: the threat score first, the recency
 	// inside it. The feed's order is the record's, and the two are different
 	// orders on purpose.
+	// The queue's order is the PRODUCT's.
+	//
+	// It used not to be. This handler re-sorted the queue by severity after
+	// the product had ordered it by threat score, so the queue an operator
+	// read was a severity list with the product's judgement thrown away —
+	// and the product's judgement is the only thing that had ever been
+	// measured. The severity sort is gone, and the order is the one
+	// `ListAttention` returns: the threat score, the recency inside it, and
+	// under the calibrated engine the severity as a tie-break within the
+	// score.
 	items, err := d.Incidents.ListAttention(r.Context(), p.TenantID, scope, limit)
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, "list_failed", err.Error(), requestID(r))
@@ -720,6 +1104,9 @@ func (s *Server) handleAttention(w http.ResponseWriter, r *http.Request, p ident
 			// first" is answered by the steps, not by the number.
 			"threatScore":       item.ThreatScore,
 			"threatReasonChain": item.ThreatReasonChain,
+			// The score the queue is ORDERED by, which is the decayed score
+			// under the calibrated engine. It is not the stored score.
+			"queueScore": item.QueueScore,
 		}
 		if item.Degraded {
 			entry["degradedReasons"] = item.DegradedReasons
@@ -742,11 +1129,33 @@ func (s *Server) handleAttention(w http.ResponseWriter, r *http.Request, p ident
 		}
 		queue = append(queue, entry)
 	}
-	// The severity order, then the recency. The list arrives newest-first, and
-	// a stable sort keeps that order inside a severity.
+	// The queue's order is the PRODUCT's.
+	//
+	// It used not to be. This handler re-sorted the queue by severity after
+	// the product had ordered it by threat score, so the queue an operator
+	// read was a severity list with the product's judgement thrown away —
+	// and the product's judgement is the only thing that had ever been
+	// measured.
+	//
+	// The order is the queue's SCORE, and the severity is a tie-break inside
+	// it. Two incidents the product scored alike are not equally urgent, and
+	// the rule's own severity is the best available answer to which is
+	// which; but the severity does not get to overrule the score.
+	//
+	// The sort is stable, so the recency the query ordered by survives
+	// inside a pair of incidents that agree on both keys.
 	sort.SliceStable(queue, func(i, j int) bool {
+		si, _ := queue[i]["queueScore"].(int)
+		sj, _ := queue[j]["queueScore"].(int)
+		if si != sj {
+			return si > sj
+		}
 		return severityRank(queue[i]["severity"]) > severityRank(queue[j]["severity"])
 	})
+	// The rank is the position in the product's order. It is assigned here
+	// and not in the query because it is the ORDER's property and not the
+	// row's: the first row of the queue is rank 1 whichever query produced
+	// it.
 	for i, entry := range queue {
 		entry["rank"] = i + 1
 	}
@@ -911,6 +1320,15 @@ type dispositionRequest struct {
 	ReasonCode string `json:"reasonCode"`
 	Notes      string `json:"notes"`
 	Agreement  string `json:"agreement"`
+	// SecondFactor is the operator's second factor, presented as the code
+	// their authenticator is showing.
+	//
+	// It is the FACTOR and not a proof, because the console's form asks for
+	// the six digits the operator can read off their phone. A proof is
+	// something the server mints and spends inside one request; a code is
+	// something the operator has. The two are different things, and the API
+	// takes the one an operator can actually supply.
+	SecondFactor string `json:"secondFactor"`
 }
 
 func (s *Server) handleDisposition(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
@@ -927,11 +1345,45 @@ func (s *Server) handleDisposition(w http.ResponseWriter, r *http.Request, p ide
 		return
 	}
 
+	// The agreement is required rather than defaulted.
+	//
+	// It used to be defaulted to "unsure", and the default was a way of
+	// losing the one piece of evaluation data this product exists to
+	// produce. A disposition that says nothing about whether the operator
+	// agreed with the model is not a training signal, and "unsure" is a claim
+	// about the operator rather than a record of what the operator said. The
+	// four values are the ones the database's CHECK admits, and one of them
+	// is what the operator meant.
+	agreement := strings.TrimSpace(req.Agreement)
+	if agreement == "" {
+		WriteError(w, http.StatusBadRequest, "bad_request",
+			"An agreement is required: agreed, disagreed, unsure or no_ai_observation.", requestID(r))
+		return
+	}
+
+	// The two sensitive outcomes need a fresh second factor, obtained and spent
+	// here rather than by the caller. Before this, no route obtained one, so
+	// `escalated` and `dismissed` were unreachable: `Record` refuses them
+	// without a step-up, and nothing could supply one.
+	stepUpVerified := false
+	if incidents.OutcomeNeedsStepUp(req.Outcome) {
+		if err := s.stepUpForDisposition(r.Context(), p, d, id, req.SecondFactor); err != nil {
+			WriteError(w, http.StatusForbidden, "step_up_required", err.Error(), requestID(r))
+			return
+		}
+		stepUpVerified = true
+	}
+
 	if _, err := d.Incidents.Record(r.Context(), incidents.Disposition{
 		TenantID: p.TenantID, IncidentID: id, Outcome: req.Outcome,
-		ReasonCode: req.ReasonCode, Notes: req.Notes, Agreement: req.Agreement,
+		ReasonCode: req.ReasonCode, Notes: req.Notes, Agreement: agreement,
 		ActorID: p.UserID, ActorRoles: roleStrings(p), SiteScope: p.SiteScope,
 		SessionID: p.SessionID,
+		// The flag is the record that a factor was checked, and it is set only
+		// when one was: the branch above returns on any failure, so a
+		// disposition that reaches `Record` with this false was never a
+		// sensitive outcome and needed no factor.
+		StepUpVerified: stepUpVerified,
 	}); err != nil {
 		if strings.Contains(err.Error(), "step-up") {
 			WriteError(w, http.StatusForbidden, "step_up_required", err.Error(), requestID(r))
@@ -1501,18 +1953,76 @@ func (s *Server) handleAuditLedger(w http.ResponseWriter, r *http.Request, p ide
 	var out []ledgerEntry
 	for rows.Next() {
 		var e ledgerEntry
+		// The two state hashes are NULLABLE, and most rows leave them NULL: an
+		// action that changed nothing has neither a prior state nor a result
+		// state. Scanning a NULL into a plain string is an error, and the error
+		// took the whole page down -- so the ledger route answered 500 for any
+		// tenant with a single audited row in it, which is every tenant that has
+		// ever had an operator open an incident.
+		//
+		// The rendered value is the empty string, which is what the column's
+		// NOT NULL siblings already use for "this field does not apply". A null
+		// in the JSON would say the same thing in a way a client has to know
+		// about.
+		var prevStateHash, resultStateHash sql.NullString
 		if err := rows.Scan(&e.Sequence, &e.TS, &e.Actor, &e.ActorType, &e.Action,
-			&e.TargetType, &e.TargetID, &e.PrevStateHash, &e.ResultStateHash,
+			&e.TargetType, &e.TargetID, &prevStateHash, &resultStateHash,
 			&e.Reason, &e.RequestID, &e.SessionID, &e.SiteScope); err != nil {
 			WriteError(w, http.StatusInternalServerError, "scan_failed", err.Error(), requestID(r))
 			return
 		}
+		e.PrevStateHash = prevStateHash.String
+		e.ResultStateHash = resultStateHash.String
 		out = append(out, e)
 	}
 	if out == nil {
 		out = []ledgerEntry{}
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"items": out})
+	// The chain is RECOMPUTED here, not asserted.
+	//
+	// A page of rows that merely looks intact is a screenshot of a ledger, and
+	// an auditor who has been shown one cannot tell it from a ledger that
+	// verifies. The invariant is that editing any row breaks the chain, and the
+	// only way a reader learns whether it holds is for somebody to recompute it
+	// and say so.
+	//
+	// A failure to recompute is reported as `chainValid: false` rather than as
+	// a 500: the rows themselves are readable, and an auditor needs them MORE
+	// when the chain does not verify.
+	chainValid, chainBrokenAt := s.verifyLedgerChain(r, p)
+	body := map[string]any{"items": out, "chainValid": chainValid}
+	if !chainValid && chainBrokenAt > 0 {
+		body["chainBrokenAt"] = chainBrokenAt
+	}
+	WriteJSON(w, http.StatusOK, body)
+}
+
+// verifyLedgerChain recomputes the tenant's hash chain from the genesis row.
+//
+// It returns false and the sequence the chain breaks at when the recomputation
+// fails or says the chain is broken. It never returns an error to the caller:
+// the question "does the chain hold" has an answer of "no" and the question
+// "could we find out" has an answer of "no" too, and both of them mean the
+// same thing to a reader.
+func (s *Server) verifyLedgerChain(r *http.Request, p identity.Principal) (bool, int64) {
+	if s.Audit == nil || s.Pool == nil {
+		return false, 0
+	}
+	var valid bool
+	var brokenAt int64
+	err := s.Pool.InSystemTenant(r.Context(), func(tx pgx.Tx) error {
+		v, err := s.Audit.Verify(r.Context(), tx, p.TenantID, 0)
+		if err != nil {
+			return err
+		}
+		valid = v.Valid
+		brokenAt = v.BrokenAt
+		return nil
+	})
+	if err != nil {
+		return false, 0
+	}
+	return valid, brokenAt
 }
 
 // handleAuditCheckpoints reads the audit checkpoint seal records.
@@ -1599,11 +2109,42 @@ func (s *Server) handleRuleStore(w http.ResponseWriter, r *http.Request, p ident
 		WriteError(w, http.StatusInternalServerError, "store_failed", err.Error(), requestID(r))
 		return
 	}
+	// A bundle with an error-level problem was NOT stored. `Store` refuses it.
+	//
+	// The route used to answer 201 Created for it anyway, with the problems in
+	// the body and `compiled: false` beside them -- which tells a client the
+	// bundle is in the store when it is not, and a client that believes it is
+	// will activate it. A 201 is a claim that something was created.
+	if hasErrorLevel(problems) {
+		WriteJSON(w, http.StatusBadRequest, map[string]any{
+			"code":      "bundle_does_not_compile",
+			"message":   "The bundle did not compile and was not stored.",
+			"requestId": requestID(r),
+			"problems":  problems,
+			"compiled":  false,
+		})
+		return
+	}
 	WriteJSON(w, http.StatusCreated, map[string]any{
 		"meta":     meta,
 		"problems": problems,
-		"compiled": len(problems) == 0,
+		"compiled": true,
 	})
+}
+
+// hasErrorLevel reports whether any problem is an error rather than a warning.
+//
+// The distinction matters because a bundle with warnings IS stored and a bundle
+// with errors is not, and a response that says "compiled: false" for a bundle
+// that was stored with warnings is telling the reader the wrong thing about
+// their own store.
+func hasErrorLevel(problems []rules.Problem) bool {
+	for _, p := range problems {
+		if p.Severity == rules.SeverityError {
+			return true
+		}
+	}
+	return false
 }
 
 // handleRuleLint lints a rule bundle without storing it.
@@ -1699,7 +2240,10 @@ func (s *Server) handleRuleRollback(w http.ResponseWriter, r *http.Request, p id
 // handleDeadLetters lists terminal failures from every queue.
 func (s *Server) handleDeadLetters(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
 	if d.DeadLetters == nil {
-		WriteError(w, http.StatusServiceUnavailable, "not_configured", "the dead-letter reader is not configured", requestID(r))
+		WriteError(w, http.StatusServiceUnavailable, "not_configured",
+			"the dead-letter reader is not configured, so this is not an empty list: "+
+				"an empty list and a broken reader look the same to an operator, and "+
+				"only one of them is true", requestID(r))
 		return
 	}
 	site := r.URL.Query().Get("siteId")
@@ -1784,13 +2328,29 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request, _ identit
 		_, _ = w.Write([]byte("# the metrics registry is not configured\n"))
 		return
 	}
+	// A scrape is a point-in-time read. A cached scrape is a collector showing
+	// a number that was true when the cache filled, and the cache is a
+	// middlebox nobody asked for.
+	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(d.Metrics.Render()))
 }
 
 // auditEvidenceFetched records that evidence was fetched for an incident.
-func (s *Server) auditEvidenceFetched(r *http.Request, p identity.Principal, evidenceID string, _ string, _ evidence.Object) error {
+//
+// The row names the DIGEST of the bytes that were released, not the digest of
+// the row that pointed at them.
+//
+// It used to name neither: the evidence object arrived at this function and
+// was discarded, so the ledger said "evidence was released" and not WHICH
+// bytes. A release of evidence is the one row an incident responder asks about
+// afterwards, and a row that cannot name the bytes is a record of an
+// intention. The digest the route already verified on the way out is the
+// digest that belongs in the row, and it is the same value the response
+// publishes in `X-Content-SHA256` -- so a reader can join the row to the bytes
+// without trusting either one on its own.
+func (s *Server) auditEvidenceFetched(r *http.Request, p identity.Principal, evidenceID string, _ string, obj evidence.Object) error {
 	if s.Audit == nil || s.Pool == nil {
 		return nil
 	}
@@ -1798,43 +2358,21 @@ func (s *Server) auditEvidenceFetched(r *http.Request, p identity.Principal, evi
 		_, err := s.Audit.Append(r.Context(), tx, audit.Entry{
 			TenantID: p.TenantID, Actor: p.Username, ActorType: audit.ActorOperator,
 			Action: audit.ActionEvidenceFetched, TargetType: "evidence", TargetID: evidenceID,
-			RequestID: requestID(r), SessionID: p.SessionID, SiteScope: p.SiteScope,
+			ResultStateHash: obj.SHA256,
+			RequestID:       requestID(r), SessionID: p.SessionID, SiteScope: p.SiteScope,
 			Reason: "evidence fetched for instant replay",
 		})
 		return err
 	})
 }
 
-// Demo cameras for the /api/cameras endpoint when no real camera registry exists.
-var demoCameras = []map[string]any{
-	{"id": "cam-1", "name": "Entrance North", "siteId": "North Campus", "status": "online", "rtsp": ""},
-	{"id": "cam-2", "name": "Entrance South", "siteId": "North Campus", "status": "online", "rtsp": ""},
-	{"id": "cam-3", "name": "Aisle 4", "siteId": "West Warehouse", "status": "online", "rtsp": ""},
-	{"id": "cam-4", "name": "Aisle 7", "siteId": "West Warehouse", "status": "degraded", "rtsp": ""},
-	{"id": "cam-5", "name": "Loading Dock", "siteId": "Downtown Hub", "status": "offline", "rtsp": ""},
-	{"id": "cam-6", "name": "Parking A", "siteId": "Downtown Hub", "status": "online", "rtsp": ""},
-	{"id": "cam-7", "name": "Parking B", "siteId": "Downtown Hub", "status": "online", "rtsp": ""},
-	{"id": "cam-8", "name": "Back Office", "siteId": "North Campus", "status": "offline", "rtsp": ""},
-}
-
-// handleCameras answers the camera inventory.
+// handleCritical answers the legacy critical-streams alias.
 //
-// The list is filtered by the principal's site scope, because a camera is a
-// fact about a place and a principal that is not assigned to a place does not
-// get to read its camera list. An unscoped principal -- the configured
-// principal of a single-site install -- sees every camera, which is the same
-// answer it had before the check and the right one for that install.
-func (s *Server) handleCameras(w http.ResponseWriter, _ *http.Request, p identity.Principal) {
-	out := make([]map[string]any, 0, len(demoCameras))
-	for _, cam := range demoCameras {
-		if !p.CanSeeSite(cam["siteId"].(string)) {
-			continue
-		}
-		out = append(out, cam)
-	}
-	WriteJSON(w, http.StatusOK, map[string]any{"cameras": out})
-}
-
+// The score is the incident's OWN threat score and the reasons are its OWN
+// reason chain -- the numbers the autonomy layer computed and the chain that
+// produced them. This route used to answer with a score of zero and no
+// reasons, which is the shape of a number nobody computed; a reader who saw
+// "0" next to a critical incident would read it as a measurement.
 func (s *Server) handleCritical(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
 	if d.Incidents == nil {
 		WriteJSON(w, http.StatusOK, map[string]any{"streams": []any{}})
@@ -1847,9 +2385,8 @@ func (s *Server) handleCritical(w http.ResponseWriter, r *http.Request, p identi
 	}
 	type critStream struct {
 		IncidentID string   `json:"incidentId"`
-		VideoID    string   `json:"videoId"`
 		SiteID     string   `json:"siteId"`
-		Score      float64  `json:"score"`
+		Score      int      `json:"score"`
 		Reasons    []string `json:"reasons"`
 		State      string   `json:"state"`
 		Severity   string   `json:"severity"`
@@ -1862,10 +2399,9 @@ func (s *Server) handleCritical(w http.ResponseWriter, r *http.Request, p identi
 	for _, inc := range streams {
 		out = append(out, critStream{
 			IncidentID: inc.IncidentID,
-			VideoID:    "",
 			SiteID:     inc.SiteID,
-			Score:      0,
-			Reasons:    nil,
+			Score:      inc.ThreatScore,
+			Reasons:    reasonStrings(inc.ThreatReasonChain),
 			State:      inc.State,
 			Severity:   inc.Severity,
 			Title:      inc.Title,
@@ -1875,6 +2411,34 @@ func (s *Server) handleCritical(w http.ResponseWriter, r *http.Request, p identi
 		})
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"streams": out})
+}
+
+// reasonStrings renders a threat reason chain as the short strings the legacy
+// alias carried.
+//
+// The chain is a list of steps, and a step is a factor with a rule and an
+// evidence reference. It is rendered as "rule: factor" so a reader sees WHICH
+// rule moved the score, which is the point of carrying a chain at all: a score
+// without the chain that produced it is a number nobody can check.
+func reasonStrings(chain []threat.ReasonStep) []string {
+	if len(chain) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(chain))
+	for _, step := range chain {
+		switch {
+		case step.Rule != "" && step.Factor != 0:
+			out = append(out, fmt.Sprintf("%s: %d", step.Rule, step.Factor))
+		case step.Rule != "":
+			out = append(out, step.Rule)
+		case step.Key != "":
+			out = append(out, step.Key)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // handleClips answers the clip list.

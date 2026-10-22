@@ -12,7 +12,10 @@
     "",
     "`internal/roadmapcheck` was added on 2026-10-12 from the Windows measurement, not from a Linux run: the package is platform-neutral — no build-tagged files and no platform-skipped tests — so the statement set and the number are the same on both. A Linux run will prove it or correct it, which is what the margin is for.",
     "",
-    "`internal/sitemodel`'s 82 carries the same provenance. The C3 adjacency tests are platform-neutral and the package has no build-tagged files, so the Windows measurement of 82.1 is the Linux number too; recorded on 2026-10-13 because leaving the old floor below the new measurement is the failure mode the margin exists to catch."
+    "`internal/sitemodel`'s 82 carries the same provenance. The C3 adjacency tests are platform-neutral and the package has no build-tagged files, so the Windows measurement of 82.1 is the Linux number too; recorded on 2026-10-13 because leaving the old floor below the new measurement is the failure mode the margin exists to catch.",
+    "`internal/audit` carries the same provenance as `internal/roadmapcheck`: its floor is the Windows measurement of 2026-10-21, not from a Linux run. The package is platform-neutral -- no build-tagged files and no platform-skipped tests -- so the statement set and the number are the same on both. A Linux run will prove it or correct it, which is what the margin is for. `internal/truthcheck`, `internal/migrationreadme` and `internal/operatormetrics` carry the same provenance: their floors are the Windows measurement of 2026-10-21, not from a Linux run. Both packages are platform-neutral -- no build-tagged files and no platform-skipped tests -- so the statement set and the number are the same on both. A Linux run will prove it or correct it, which is what the margin is for.",
+    "Fourteen entries were carried across from the WINDOWS measurement on 2026-10-21: internal/aistate, internal/calibration, internal/classify, internal/embedaudit, internal/embeddings, internal/emulator, internal/eventsearch, internal/investigate, internal/nlp, internal/ortdetect, internal/policy, internal/proposal and internal/sidecar and internal/youtube were not in this file at all, and a package that is not in the floors is a package the gate cannot measure, which it reports as RuleUnknown.",
+    "They are the WINDOW numbers, and they are marked as such rather than left to look like a Linux measurement. Re-measure them on Linux and the numbers will move."
   ],
   "package": "github.com/Sergey-Bar/vision",
   "mode": "atomic",
@@ -21,6 +24,10 @@
     "internal/airuntime": {
       "percent": 33.2,
       "measured": "2026-10-11"
+    },
+    "internal/aistate": {
+      "percent": 88.9,
+      "measured": "2026-10-21"
     },
     "internal/anomaly": {
       "percent": 80.7,
@@ -31,7 +38,7 @@
       "measured": "2026-10-11"
     },
     "internal/audit": {
-      "percent": 15.5,
+      "percent": 81.2,
       "measured": "2026-10-11"
     },
     "internal/brief": {
@@ -41,6 +48,10 @@
     "internal/bundles": {
       "percent": 56.5,
       "measured": "2026-10-11"
+    },
+    "internal/calibration": {
+      "percent": 74.5,
+      "measured": "2026-10-21"
     },
     "internal/camerahealth": {
       "percent": 100,
@@ -53,6 +64,10 @@
     "internal/checkpoint": {
       "percent": 49.5,
       "measured": "2026-10-11"
+    },
+    "internal/classify": {
+      "percent": 94.4,
+      "measured": "2026-10-21"
     },
     "internal/clock": {
       "percent": 95.3,
@@ -110,9 +125,25 @@
       "percent": 83.5,
       "measured": "2026-10-11"
     },
+    "internal/embedaudit": {
+      "percent": 80.6,
+      "measured": "2026-10-21"
+    },
+    "internal/embeddings": {
+      "percent": 78.8,
+      "measured": "2026-10-21"
+    },
+    "internal/emulator": {
+      "percent": 50.0,
+      "measured": "2026-10-21"
+    },
     "internal/evaluation": {
       "percent": 94.3,
       "measured": "2026-10-11"
+    },
+    "internal/eventsearch": {
+      "percent": 69.1,
+      "measured": "2026-10-21"
     },
     "internal/evidence": {
       "percent": 78.5,
@@ -146,6 +177,10 @@
       "percent": 70.3,
       "measured": "2026-10-11"
     },
+    "internal/investigate": {
+      "percent": 87.9,
+      "measured": "2026-10-21"
+    },
     "internal/jobs": {
       "percent": 36.2,
       "measured": "2026-10-11"
@@ -159,6 +194,10 @@
       "measured": "2026-10-11",
       "margin": 5.0
     },
+    "internal/migrationreadme": {
+      "percent": 83.0,
+      "measured": "2026-10-21"
+    },
     "internal/milestone": {
       "percent": 68.5,
       "measured": "2026-10-11"
@@ -166,6 +205,14 @@
     "internal/mp4": {
       "percent": 81.4,
       "measured": "2026-10-11"
+    },
+    "internal/mutation": {
+      "percent": 77.0,
+      "measured": "2026-10-21"
+    },
+    "internal/nlp": {
+      "percent": 97.3,
+      "measured": "2026-10-21"
     },
     "internal/normalize": {
       "percent": 69.9,
@@ -179,6 +226,14 @@
       "percent": 83.2,
       "measured": "2026-10-11"
     },
+    "internal/operatormetrics": {
+      "percent": 78.5,
+      "measured": "2026-10-21"
+    },
+    "internal/ortdetect": {
+      "percent": 54.4,
+      "measured": "2026-10-21"
+    },
     "internal/outbox": {
       "percent": 74.8,
       "measured": "2026-10-11"
@@ -187,21 +242,37 @@
       "percent": 51.8,
       "measured": "2026-10-11"
     },
+    "internal/policy": {
+      "percent": 96.3,
+      "measured": "2026-10-21"
+    },
     "internal/predicatecov": {
       "percent": 88.7,
       "measured": "2026-10-11"
+    },
+    "internal/proposal": {
+      "percent": 71.4,
+      "measured": "2026-10-21"
+    },
+    "internal/qamatrix": {
+      "percent": 88.0,
+      "measured": "2026-10-21"
     },
     "internal/release": {
       "percent": 69.8,
       "measured": "2026-10-11"
     },
-    "internal/rtsp": {
-      "percent": 80.7,
-      "measured": "2026-10-11"
+    "internal/replayaudit": {
+      "percent": 92.2,
+      "measured": "2026-10-21"
     },
     "internal/roadmapcheck": {
       "percent": 78,
       "measured": "2026-10-12"
+    },
+    "internal/rtsp": {
+      "percent": 80.7,
+      "measured": "2026-10-11"
     },
     "internal/rules": {
       "percent": 73.3,
@@ -210,6 +281,10 @@
     "internal/safename": {
       "percent": 100,
       "measured": "2026-10-11"
+    },
+    "internal/sidecar": {
+      "percent": 89.2,
+      "measured": "2026-10-21"
     },
     "internal/simulate": {
       "percent": 59.8,
@@ -255,9 +330,13 @@
       "percent": 98.4,
       "measured": "2026-10-11"
     },
+    "internal/truthcheck": {
+      "percent": 79.4,
+      "measured": "2026-10-21"
+    },
     "internal/youtube": {
-      "percent": 0,
-      "measured": "2026-10-11"
+      "percent": 98.0,
+      "measured": "2026-10-21"
     },
     "migrations": {
       "percent": 77,
@@ -284,7 +363,7 @@
       "measured": "2026-10-11"
     },
     "web": {
-      "percent": 0,
+      "percent": 44.0,
       "measured": "2026-10-11"
     }
   },
@@ -298,4 +377,3 @@
     "race"
   ]
 }
-

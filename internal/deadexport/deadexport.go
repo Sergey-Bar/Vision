@@ -188,6 +188,16 @@ type Repo struct {
 	// packageNames is every package name declared under the scanned trees, which is
 	// what tells a package qualifier from a variable.
 	packageNames map[string]bool
+	// bare maps a package key to the BARE identifiers its files use.
+	//
+	// It is separate from `reads` because `reads` also holds the name part of
+	// every selector, and a selector's name is ambiguous: `s.CheckCSRF` is a
+	// method on some other type, and counting it as a use of the package-level
+	// `CheckCSRF` would make a symbol that nothing calls look called. The two
+	// names collide often enough to matter -- a package-level function and a
+	// service method of the same name is a shape this repository has more than
+	// once.
+	bare map[string]map[string]bool
 	// methods maps a method's bare name to whether it appears as a selector
 	// anywhere in the tree. A method is only ever reached through a receiver, so
 	// this is the whole question for a method, and it is asked tree-wide rather
@@ -326,6 +336,7 @@ func loadDir(root string, dirs, readerDirs []string) *Repo {
 		reads:             map[string]map[string]bool{},
 		qualified:         map[string]map[string]bool{},
 		packageNames:      map[string]bool{},
+		bare:              map[string]map[string]bool{},
 		methods:           map[string]bool{},
 		conventionMethods: map[string]bool{},
 	}
@@ -507,7 +518,7 @@ func (r *Repo) loadFile(root, path, dir string, declare bool) {
 		if declare {
 			r.addSelectors(f, r.methods)
 		}
-		addIdents(r, f, set, qual)
+		addIdents(r, f, pkgKey, set, qual)
 		r.mains++
 		return
 	}
@@ -533,7 +544,7 @@ func (r *Repo) loadFile(root, path, dir string, declare bool) {
 	if !isTest && declare {
 		r.addSelectors(f, r.methods)
 	}
-	addIdents(r, f, set, qual)
+	addIdents(r, f, pkgKey, set, qual)
 
 	// A test declares nothing, so only the reads above matter for it.
 	if isTest {
@@ -593,7 +604,7 @@ func (r *Repo) loadFile(root, path, dir string, declare bool) {
 // information, and this gate wants no type information. A position is exact, needs
 // no resolution, and cannot be confused by two identifiers in one file that happen
 // to share an object in a parser's approximation.
-func addIdents(r *Repo, f *ast.File, into, qualified map[string]bool) {
+func addIdents(r *Repo, f *ast.File, pkgKey string, into, qualified map[string]bool) {
 	own := map[token.Pos]bool{}
 	mark := func(id *ast.Ident) {
 		if id != nil {
@@ -636,12 +647,27 @@ func addIdents(r *Repo, f *ast.File, into, qualified map[string]bool) {
 		into[id.Name] = true
 	}
 
+	// A BARE identifier is the one that can only be a call within this package:
+	// a cross-package reference arrives as a SelectorExpr, and the selector's
+	// name is recorded separately for exactly that reason.
+	//
+	// It is kept apart because a selector's name is ambiguous: `s.CheckCSRF` is
+	// a method on some other type, and recording it as a use of the
+	// package-level `CheckCSRF` would make a symbol that nothing calls look
+	// called. The two names collide often enough to matter -- a package-level
+	// function and a service method of the same name is a shape this
+	// repository has more than once.
+	bare := map[string]bool{}
+
 	ast.Inspect(f, func(n ast.Node) bool {
 		switch x := n.(type) {
 		case *ast.Ident:
 			// A bare identifier, which is a call within this package or a use of a
 			// name in scope. Cross-package references arrive as a SelectorExpr.
 			add(x)
+			if !own[x.Pos()] {
+				bare[x.Name] = true
+			}
 		case *ast.SelectorExpr:
 			// `pkg.Symbol`: the identifier that matters is the selector, not the
 			// package qualifier. This is how a reader in another package is seen,
@@ -657,6 +683,15 @@ func addIdents(r *Repo, f *ast.File, into, qualified map[string]bool) {
 		}
 		return true
 	})
+
+	for name := range bare {
+		set := r.bare[pkgKey]
+		if set == nil {
+			set = map[string]bool{}
+			r.bare[pkgKey] = set
+		}
+		set[name] = true
+	}
 }
 
 // qualifierName returns the package qualifier of a selector, when the qualifier
@@ -989,6 +1024,79 @@ func (r *Repo) HasReader(key string) bool {
 		}
 	}
 	return false
+}
+
+// InPackageReader reports whether the package that DECLARES a symbol uses it
+// itself.
+//
+// It exists because the gate's rule is "a reader is a use outside the declaring
+// package", and that rule makes a whole class of symbol look dead when it is
+// working: a helper called by its own package, exported because a caller
+// outside it was always going to need it. The gate is right that nothing
+// outside can reach it today, and the allow-list entry is then asked to say
+// why -- and a reason that says "nothing calls it" is false, because the
+// package calls it.
+//
+// A ledger that says "nothing calls it" for a symbol its own package calls is
+// a ledger that has to be corrected by hand, every time, and the correction is
+// invisible. This function makes the claim checkable: the allow-list's two
+// sections can be told apart by a fact about the tree rather than by a
+// judgement about the code.
+//
+// The check is by NAME within the declaring package, which is the same
+// looseness the method rule has and for the same reason: a local variable
+// that happens to share a name counts as a use. The consequence is a symbol
+// that looks in-package-read when it is not, which puts a symbol in the
+// "in-package" section that belongs in the "nothing calls it" one. It is the
+// safe direction, because the section it lands in is the one that claims less.
+func (r *Repo) InPackageReader(key string) bool {
+	dot := strings.LastIndex(key, ".")
+	if dot < 0 {
+		return false
+	}
+	dir := packageKey(key[:dot])
+	name := key[dot+1:]
+
+	// A method is reached through a receiver, so the declaring package's own
+	// use of the name says nothing about it: the method rule asks whether the
+	// name appears as a selector ANYWHERE in the tree, and a method that is in
+	// the ledger is one that appears nowhere. A method in the ledger is
+	// therefore not called by its own package either, and saying otherwise
+	// would be a false claim about a class of symbol the check cannot see.
+	if declKey, ok := r.declKeyFor(dir, name); ok {
+		if r.decls[declKey].kind == "method" {
+			return false
+		}
+	}
+	for pkgKey, names := range r.bare {
+		if packageKey(pkgKey) != dir {
+			continue
+		}
+		if names[name] {
+			return true
+		}
+	}
+	return false
+}
+
+// declKeyFor finds the tree's own key for a `dir.Symbol` pair.
+//
+// The tree keys declarations by `dir|package.Symbol` and the allow-list by
+// `dir.Symbol`, so a lookup from the ledger has to bridge the two. The
+// package name is not part of the identity: `internal/api|api.DecodeJSON` and
+// `internal/api|other.DecodeJSON` are the same declaration, because a
+// directory holds one package.
+func (r *Repo) declKeyFor(dir, name string) (string, bool) {
+	for k := range r.decls {
+		dot := strings.LastIndex(k, ".")
+		if dot < 0 {
+			continue
+		}
+		if packageKey(k[:dot]) == dir && k[dot+1:] == name {
+			return k, true
+		}
+	}
+	return "", false
 }
 
 // packageKey is the display form of a package key: the directory, which is what a

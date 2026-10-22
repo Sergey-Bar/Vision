@@ -43,7 +43,7 @@ function render(b) {
   ]));
 
   const card = h("section", { class: "card ask-answer" });
-  card.appendChild(h("h2", { class: "ask-headline", style: "font-size:22px", text: b.read }));
+  card.appendChild(h("h2", { class: "ask-headline chief-read", text: b.read }));
   card.appendChild(h("p", { class: "sub", text: b.headline }));
 
   const srow = h("div", { class: "split" });

@@ -28,6 +28,20 @@ type UnitOptions struct {
 	User string
 	// Group is the service group.
 	Group string
+	// Appliance says this is a ONE-BOX install: the core AND the recorder,
+	// on this machine, writing to one recording root.
+	//
+	// It is a separate flag and not an inference from the archive's contents,
+	// because the choice is the OPERATOR's: a site with a separate recorder
+	// machine does not want a recorder unit on the core's host, and a
+	// single-box site does.
+	Appliance bool
+	// RecordingRoot is where the recorder writes the segments. Absolute.
+	RecordingRoot string
+	// CameraList is the recorder's camera list: a PATH, because the list holds
+	// camera credentials and a credential in a file the operator owns is not a
+	// credential in the product's database.
+	CameraList string
 }
 
 // ErrUnsafePath is returned when a configured path would let a unit file escape
@@ -120,6 +134,20 @@ func WriteUnits(opts UnitOptions) ([]WrittenUnit, error) {
 	targets := []target{
 		{path: filepath.Join(unitDir, "security-core.service"), content: coreUnit(opts), mode: 0o644},
 		{path: envFile, content: coreEnvTemplate(opts), keepExisting: true, mode: 0o640},
+	}
+	if opts.Appliance {
+		// The RECORDER's unit, and it is its own unit on purpose.
+		//
+		// The recorder opens sockets to cameras and writes to a disk. The core
+		// does neither. Giving them one unit would mean a camera that stops
+		// answering can take the console down with it, and the console is what
+		// the operator needs when a camera stops answering.
+		//
+		// It is also the unit that makes the appliance an appliance: one box, two
+		// services, one recording root.
+		targets = append(targets,
+			target{path: filepath.Join(unitDir, "security-recorder.service"),
+				content: recorderUnit(opts), mode: 0o644})
 	}
 	if opts.AIProgramDir != "" {
 		targets = append(targets,
@@ -286,6 +314,63 @@ AmbientCapabilities=
 	return b.String()
 }
 
+// recorderUnit renders the recorder service unit.
+//
+// The hardening is the CORE's, plus one thing the core does not need: the
+// recorder WRITES, to the recording root and to nothing else.
+//
+// `ReadWritePaths` is the recording root and the recording root ONLY. A
+// recorder that can write anywhere the service account can write is a
+// recorder that can overwrite the evidence.
+func recorderUnit(opts UnitOptions) string {
+	var b strings.Builder
+	b.WriteString(`[Unit]
+Description=VISION Security Recorder
+Documentation=https://contracts.aicaptain.dev
+After=network-online.target security-core.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+`)
+	if opts.User != "" {
+		fmt.Fprintf(&b, "User=%s\n", opts.User)
+		if opts.Group != "" {
+			fmt.Fprintf(&b, "Group=%s\n", opts.Group)
+		}
+	}
+	// The "-" prefix makes a missing env file a warning rather than a boot
+	// failure. The recorder then refuses to start for a named reason, which
+	// is a better failure than systemd's.
+	fmt.Fprintf(&b, "EnvironmentFile=-%s\\n", unitPath(opts.EnvFile))
+	fmt.Fprintf(&b, "ExecStart=%s\\n", unitPath(filepath.Join(opts.ProgramDir, "security-recorder")))
+	b.WriteString(`Restart=on-failure
+RestartSec=10s
+TimeoutStopSec=60s
+KillSignal=SIGTERM
+
+# Hardening. The same set the core keeps, and one more: the recorder WRITES,
+# and it writes to the recording root and to nothing else.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+`)
+	if opts.RecordingRoot != "" {
+		fmt.Fprintf(&b, "ReadWritePaths=%s\\n", unitPath(opts.RecordingRoot))
+	}
+	b.WriteString(`MemoryDenyWriteExecute=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+`)
+	return b.String()
+}
+
 // coreEnvTemplate renders the core's environment file.
 //
 // Every required variable is present and empty except the ones with a safe
@@ -363,6 +448,20 @@ SP_AI_ALLOW_REMOTE=false
 # --- Milestone. -----------------------------------------------------------------
 
 SP_MILESTONE_BASE_URL=http://127.0.0.1:8000/api
+
+# --- Recording. The recorder's own configuration. --------------------------------
+#
+# These are the recorder's variables and not the core's: the recorder is a
+# separate service with its own environment, and the core reads the recording
+# ROOT so that it can serve the recorded bytes back. The core does not record.
+#
+# The camera list is a PATH and never its contents. The list holds camera
+# CREDENTIALS, and a credential in a file the operator owns is not a
+# credential in the product's database.
+
+SP_RECORDING_ROOT=/var/lib/security-platform/recordings
+SP_RECORDER_SOURCES=/etc/security-platform/cameras.json
+SP_RECORDER_SEGMENT_SECONDS=10
 
 # --- Secrets. -------------------------------------------------------------------
 #

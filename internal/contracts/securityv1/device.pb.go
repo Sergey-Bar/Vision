@@ -23,6 +23,70 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// What a probe established about one device.
+//
+// The state is the whole point. A camera names the profiles it supports; a
+// camera is routinely wrong about that, and a product that believes a device's
+// own claims is a product whose capability report is fiction.
+type CapabilityState int32
+
+const (
+	CapabilityState_CAPABILITY_STATE_UNSPECIFIED CapabilityState = 0
+	// Claimed by the device, never checked.
+	CapabilityState_CAPABILITY_STATE_UNVERIFIED CapabilityState = 1
+	// A probe established it. The only state that counts as a capability.
+	CapabilityState_CAPABILITY_STATE_VERIFIED CapabilityState = 2
+	// A probe established that the device does NOT have it, whatever it says.
+	CapabilityState_CAPABILITY_STATE_CONTRADICTED CapabilityState = 3
+	// A probe established that the device does not have it and does not claim it.
+	CapabilityState_CAPABILITY_STATE_UNSUPPORTED CapabilityState = 4
+)
+
+// Enum value maps for CapabilityState.
+var (
+	CapabilityState_name = map[int32]string{
+		0: "CAPABILITY_STATE_UNSPECIFIED",
+		1: "CAPABILITY_STATE_UNVERIFIED",
+		2: "CAPABILITY_STATE_VERIFIED",
+		3: "CAPABILITY_STATE_CONTRADICTED",
+		4: "CAPABILITY_STATE_UNSUPPORTED",
+	}
+	CapabilityState_value = map[string]int32{
+		"CAPABILITY_STATE_UNSPECIFIED":  0,
+		"CAPABILITY_STATE_UNVERIFIED":   1,
+		"CAPABILITY_STATE_VERIFIED":     2,
+		"CAPABILITY_STATE_CONTRADICTED": 3,
+		"CAPABILITY_STATE_UNSUPPORTED":  4,
+	}
+)
+
+func (x CapabilityState) Enum() *CapabilityState {
+	p := new(CapabilityState)
+	*p = x
+	return p
+}
+
+func (x CapabilityState) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (CapabilityState) Descriptor() protoreflect.EnumDescriptor {
+	return file_security_v1_device_proto_enumTypes[0].Descriptor()
+}
+
+func (CapabilityState) Type() protoreflect.EnumType {
+	return &file_security_v1_device_proto_enumTypes[0]
+}
+
+func (x CapabilityState) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use CapabilityState.Descriptor instead.
+func (CapabilityState) EnumDescriptor() ([]byte, []int) {
+	return file_security_v1_device_proto_rawDescGZIP(), []int{0}
+}
+
 type DeviceKind int32
 
 const (
@@ -71,11 +135,11 @@ func (x DeviceKind) String() string {
 }
 
 func (DeviceKind) Descriptor() protoreflect.EnumDescriptor {
-	return file_security_v1_device_proto_enumTypes[0].Descriptor()
+	return file_security_v1_device_proto_enumTypes[1].Descriptor()
 }
 
 func (DeviceKind) Type() protoreflect.EnumType {
-	return &file_security_v1_device_proto_enumTypes[0]
+	return &file_security_v1_device_proto_enumTypes[1]
 }
 
 func (x DeviceKind) Number() protoreflect.EnumNumber {
@@ -84,7 +148,7 @@ func (x DeviceKind) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use DeviceKind.Descriptor instead.
 func (DeviceKind) EnumDescriptor() ([]byte, []int) {
-	return file_security_v1_device_proto_rawDescGZIP(), []int{0}
+	return file_security_v1_device_proto_rawDescGZIP(), []int{1}
 }
 
 type ClockSourceState int32
@@ -126,11 +190,11 @@ func (x ClockSourceState) String() string {
 }
 
 func (ClockSourceState) Descriptor() protoreflect.EnumDescriptor {
-	return file_security_v1_device_proto_enumTypes[1].Descriptor()
+	return file_security_v1_device_proto_enumTypes[2].Descriptor()
 }
 
 func (ClockSourceState) Type() protoreflect.EnumType {
-	return &file_security_v1_device_proto_enumTypes[1]
+	return &file_security_v1_device_proto_enumTypes[2]
 }
 
 func (x ClockSourceState) Number() protoreflect.EnumNumber {
@@ -139,7 +203,7 @@ func (x ClockSourceState) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ClockSourceState.Descriptor instead.
 func (ClockSourceState) EnumDescriptor() ([]byte, []int) {
-	return file_security_v1_device_proto_rawDescGZIP(), []int{1}
+	return file_security_v1_device_proto_rawDescGZIP(), []int{2}
 }
 
 type DriftBand int32
@@ -178,11 +242,11 @@ func (x DriftBand) String() string {
 }
 
 func (DriftBand) Descriptor() protoreflect.EnumDescriptor {
-	return file_security_v1_device_proto_enumTypes[2].Descriptor()
+	return file_security_v1_device_proto_enumTypes[3].Descriptor()
 }
 
 func (DriftBand) Type() protoreflect.EnumType {
-	return &file_security_v1_device_proto_enumTypes[2]
+	return &file_security_v1_device_proto_enumTypes[3]
 }
 
 func (x DriftBand) Number() protoreflect.EnumNumber {
@@ -191,7 +255,7 @@ func (x DriftBand) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use DriftBand.Descriptor instead.
 func (DriftBand) EnumDescriptor() ([]byte, []int) {
-	return file_security_v1_device_proto_rawDescGZIP(), []int{2}
+	return file_security_v1_device_proto_rawDescGZIP(), []int{3}
 }
 
 // Physical or logical device in the Security Graph. M1 has no person model:
@@ -208,8 +272,26 @@ type Device struct {
 	DisplayName    string                 `protobuf:"bytes,8,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
 	Enabled        bool                   `protobuf:"varint,9,opt,name=enabled,proto3" json:"enabled,omitempty"`
 	// Free-form topology placement for the graph projection.
-	Attributes    map[string]string      `protobuf:"bytes,10,rep,name=attributes,proto3" json:"attributes,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	RegisteredAt  *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=registered_at,json=registeredAt,proto3" json:"registered_at,omitempty"`
+	Attributes   map[string]string      `protobuf:"bytes,10,rep,name=attributes,proto3" json:"attributes,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	RegisteredAt *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=registered_at,json=registeredAt,proto3" json:"registered_at,omitempty"`
+	// What the device says it is. Never a capability claim: a model name is not
+	// a measurement, and the manifest below is where measurements live.
+	Make     string `protobuf:"bytes,12,opt,name=make,proto3" json:"make,omitempty"`
+	Model    string `protobuf:"bytes,13,opt,name=model,proto3" json:"model,omitempty"`
+	Firmware string `protobuf:"bytes,14,opt,name=firmware,proto3" json:"firmware,omitempty"`
+	// The device's own identifier, as it reports it. Not a tenant-scoped key.
+	OnvifDeviceId string `protobuf:"bytes,15,opt,name=onvif_device_id,json=onvifDeviceId,proto3" json:"onvif_device_id,omitempty"`
+	// A reference to the device's stream, held in configuration. It carries no
+	// credential: the credential is a separate reference into the keystore.
+	RtspRef string `protobuf:"bytes,16,opt,name=rtsp_ref,json=rtspRef,proto3" json:"rtsp_ref,omitempty"`
+	// A reference into the keystore. A pointer, never a secret. The secret
+	// itself is never in this contract, in the database, or in a log.
+	CredentialRef string `protobuf:"bytes,17,opt,name=credential_ref,json=credentialRef,proto3" json:"credential_ref,omitempty"`
+	// The substream the recorder should use, when the device has more than one.
+	SubstreamProfile string `protobuf:"bytes,18,opt,name=substream_profile,json=substreamProfile,proto3" json:"substream_profile,omitempty"`
+	// What was MEASURED about this device. A capability that is not verified
+	// here is not a capability, and the console draws nothing for it.
+	Manifest      *DeviceManifest `protobuf:"bytes,19,opt,name=manifest,proto3" json:"manifest,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -321,6 +403,264 @@ func (x *Device) GetRegisteredAt() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *Device) GetMake() string {
+	if x != nil {
+		return x.Make
+	}
+	return ""
+}
+
+func (x *Device) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
+func (x *Device) GetFirmware() string {
+	if x != nil {
+		return x.Firmware
+	}
+	return ""
+}
+
+func (x *Device) GetOnvifDeviceId() string {
+	if x != nil {
+		return x.OnvifDeviceId
+	}
+	return ""
+}
+
+func (x *Device) GetRtspRef() string {
+	if x != nil {
+		return x.RtspRef
+	}
+	return ""
+}
+
+func (x *Device) GetCredentialRef() string {
+	if x != nil {
+		return x.CredentialRef
+	}
+	return ""
+}
+
+func (x *Device) GetSubstreamProfile() string {
+	if x != nil {
+		return x.SubstreamProfile
+	}
+	return ""
+}
+
+func (x *Device) GetManifest() *DeviceManifest {
+	if x != nil {
+		return x.Manifest
+	}
+	return nil
+}
+
+// One capability of one device, and the probe that decided it.
+type DeviceCapability struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The capability's name, in the `namespace.verb` form the manifest
+	// publishes: `onvif.profile_m`, `rtsp.tcp_interleaved`, `ptz.absolute`.
+	Name  string          `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	State CapabilityState `protobuf:"varint,2,opt,name=state,proto3,enum=security.v1.CapabilityState" json:"state,omitempty"`
+	// What established the state. A verified capability with no probe is a
+	// claim, and the manifest refuses to publish it.
+	Probe      string                 `protobuf:"bytes,3,opt,name=probe,proto3" json:"probe,omitempty"`
+	ObservedAt *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=observed_at,json=observedAt,proto3" json:"observed_at,omitempty"`
+	// The probe's own words: the token, the status, the reason.
+	Detail        string `protobuf:"bytes,5,opt,name=detail,proto3" json:"detail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeviceCapability) Reset() {
+	*x = DeviceCapability{}
+	mi := &file_security_v1_device_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeviceCapability) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeviceCapability) ProtoMessage() {}
+
+func (x *DeviceCapability) ProtoReflect() protoreflect.Message {
+	mi := &file_security_v1_device_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeviceCapability.ProtoReflect.Descriptor instead.
+func (*DeviceCapability) Descriptor() ([]byte, []int) {
+	return file_security_v1_device_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *DeviceCapability) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *DeviceCapability) GetState() CapabilityState {
+	if x != nil {
+		return x.State
+	}
+	return CapabilityState_CAPABILITY_STATE_UNSPECIFIED
+}
+
+func (x *DeviceCapability) GetProbe() string {
+	if x != nil {
+		return x.Probe
+	}
+	return ""
+}
+
+func (x *DeviceCapability) GetObservedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ObservedAt
+	}
+	return nil
+}
+
+func (x *DeviceCapability) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
+// The measured capability set of one device, and the probe that produced it.
+type DeviceManifest struct {
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	TenantId string                 `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	SiteId   string                 `protobuf:"bytes,2,opt,name=site_id,json=siteId,proto3" json:"site_id,omitempty"`
+	DeviceId string                 `protobuf:"bytes,3,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
+	// The probe run that produced this manifest. It is what a reader checks
+	// the capabilities against.
+	ProbeId      string                 `protobuf:"bytes,4,opt,name=probe_id,json=probeId,proto3" json:"probe_id,omitempty"`
+	ProbedAt     *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=probed_at,json=probedAt,proto3" json:"probed_at,omitempty"`
+	Capabilities []*DeviceCapability    `protobuf:"bytes,6,rep,name=capabilities,proto3" json:"capabilities,omitempty"`
+	// The device's own identity, as the probe read it.
+	Make          string `protobuf:"bytes,7,opt,name=make,proto3" json:"make,omitempty"`
+	Model         string `protobuf:"bytes,8,opt,name=model,proto3" json:"model,omitempty"`
+	Firmware      string `protobuf:"bytes,9,opt,name=firmware,proto3" json:"firmware,omitempty"`
+	OnvifDeviceId string `protobuf:"bytes,10,opt,name=onvif_device_id,json=onvifDeviceId,proto3" json:"onvif_device_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeviceManifest) Reset() {
+	*x = DeviceManifest{}
+	mi := &file_security_v1_device_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeviceManifest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeviceManifest) ProtoMessage() {}
+
+func (x *DeviceManifest) ProtoReflect() protoreflect.Message {
+	mi := &file_security_v1_device_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeviceManifest.ProtoReflect.Descriptor instead.
+func (*DeviceManifest) Descriptor() ([]byte, []int) {
+	return file_security_v1_device_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *DeviceManifest) GetTenantId() string {
+	if x != nil {
+		return x.TenantId
+	}
+	return ""
+}
+
+func (x *DeviceManifest) GetSiteId() string {
+	if x != nil {
+		return x.SiteId
+	}
+	return ""
+}
+
+func (x *DeviceManifest) GetDeviceId() string {
+	if x != nil {
+		return x.DeviceId
+	}
+	return ""
+}
+
+func (x *DeviceManifest) GetProbeId() string {
+	if x != nil {
+		return x.ProbeId
+	}
+	return ""
+}
+
+func (x *DeviceManifest) GetProbedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ProbedAt
+	}
+	return nil
+}
+
+func (x *DeviceManifest) GetCapabilities() []*DeviceCapability {
+	if x != nil {
+		return x.Capabilities
+	}
+	return nil
+}
+
+func (x *DeviceManifest) GetMake() string {
+	if x != nil {
+		return x.Make
+	}
+	return ""
+}
+
+func (x *DeviceManifest) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
+func (x *DeviceManifest) GetFirmware() string {
+	if x != nil {
+		return x.Firmware
+	}
+	return ""
+}
+
+func (x *DeviceManifest) GetOnvifDeviceId() string {
+	if x != nil {
+		return x.OnvifDeviceId
+	}
+	return ""
+}
+
 // Per-device clock state maintained by the time subsystem.
 type DeviceClock struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -338,7 +678,7 @@ type DeviceClock struct {
 
 func (x *DeviceClock) Reset() {
 	*x = DeviceClock{}
-	mi := &file_security_v1_device_proto_msgTypes[1]
+	mi := &file_security_v1_device_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -350,7 +690,7 @@ func (x *DeviceClock) String() string {
 func (*DeviceClock) ProtoMessage() {}
 
 func (x *DeviceClock) ProtoReflect() protoreflect.Message {
-	mi := &file_security_v1_device_proto_msgTypes[1]
+	mi := &file_security_v1_device_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -363,7 +703,7 @@ func (x *DeviceClock) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeviceClock.ProtoReflect.Descriptor instead.
 func (*DeviceClock) Descriptor() ([]byte, []int) {
-	return file_security_v1_device_proto_rawDescGZIP(), []int{1}
+	return file_security_v1_device_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *DeviceClock) GetDeviceId() string {
@@ -426,7 +766,7 @@ var File_security_v1_device_proto protoreflect.FileDescriptor
 
 const file_security_v1_device_proto_rawDesc = "" +
 	"\n" +
-	"\x18security/v1/device.proto\x12\vsecurity.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xf4\x03\n" +
+	"\x18security/v1/device.proto\x12\vsecurity.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x8a\x06\n" +
 	"\x06Device\x12\x1b\n" +
 	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12\x1b\n" +
 	"\ttenant_id\x18\x02 \x01(\tR\btenantId\x12\x17\n" +
@@ -441,10 +781,37 @@ const file_security_v1_device_proto_rawDesc = "" +
 	"attributes\x18\n" +
 	" \x03(\v2#.security.v1.Device.AttributesEntryR\n" +
 	"attributes\x12?\n" +
-	"\rregistered_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\fregisteredAt\x1a=\n" +
+	"\rregistered_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\fregisteredAt\x12\x12\n" +
+	"\x04make\x18\f \x01(\tR\x04make\x12\x14\n" +
+	"\x05model\x18\r \x01(\tR\x05model\x12\x1a\n" +
+	"\bfirmware\x18\x0e \x01(\tR\bfirmware\x12&\n" +
+	"\x0fonvif_device_id\x18\x0f \x01(\tR\ronvifDeviceId\x12\x19\n" +
+	"\brtsp_ref\x18\x10 \x01(\tR\artspRef\x12%\n" +
+	"\x0ecredential_ref\x18\x11 \x01(\tR\rcredentialRef\x12+\n" +
+	"\x11substream_profile\x18\x12 \x01(\tR\x10substreamProfile\x127\n" +
+	"\bmanifest\x18\x13 \x01(\v2\x1b.security.v1.DeviceManifestR\bmanifest\x1a=\n" +
 	"\x0fAttributesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xc9\x02\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xc5\x01\n" +
+	"\x10DeviceCapability\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x122\n" +
+	"\x05state\x18\x02 \x01(\x0e2\x1c.security.v1.CapabilityStateR\x05state\x12\x14\n" +
+	"\x05probe\x18\x03 \x01(\tR\x05probe\x12;\n" +
+	"\vobserved_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"observedAt\x12\x16\n" +
+	"\x06detail\x18\x05 \x01(\tR\x06detail\"\xe8\x02\n" +
+	"\x0eDeviceManifest\x12\x1b\n" +
+	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12\x17\n" +
+	"\asite_id\x18\x02 \x01(\tR\x06siteId\x12\x1b\n" +
+	"\tdevice_id\x18\x03 \x01(\tR\bdeviceId\x12\x19\n" +
+	"\bprobe_id\x18\x04 \x01(\tR\aprobeId\x127\n" +
+	"\tprobed_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\bprobedAt\x12A\n" +
+	"\fcapabilities\x18\x06 \x03(\v2\x1d.security.v1.DeviceCapabilityR\fcapabilities\x12\x12\n" +
+	"\x04make\x18\a \x01(\tR\x04make\x12\x14\n" +
+	"\x05model\x18\b \x01(\tR\x05model\x12\x1a\n" +
+	"\bfirmware\x18\t \x01(\tR\bfirmware\x12&\n" +
+	"\x0fonvif_device_id\x18\n" +
+	" \x01(\tR\ronvifDeviceId\"\xc9\x02\n" +
 	"\vDeviceClock\x12\x1b\n" +
 	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12\x1b\n" +
 	"\ttenant_id\x18\x02 \x01(\tR\btenantId\x12\x17\n" +
@@ -454,7 +821,13 @@ const file_security_v1_device_proto_rawDesc = "" +
 	"\x04band\x18\x06 \x01(\x0e2\x16.security.v1.DriftBandR\x04band\x12;\n" +
 	"\vmeasured_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"measuredAt\x12!\n" +
-	"\freference_id\x18\b \x01(\tR\vreferenceId*\xd8\x01\n" +
+	"\freference_id\x18\b \x01(\tR\vreferenceId*\xb8\x01\n" +
+	"\x0fCapabilityState\x12 \n" +
+	"\x1cCAPABILITY_STATE_UNSPECIFIED\x10\x00\x12\x1f\n" +
+	"\x1bCAPABILITY_STATE_UNVERIFIED\x10\x01\x12\x1d\n" +
+	"\x19CAPABILITY_STATE_VERIFIED\x10\x02\x12!\n" +
+	"\x1dCAPABILITY_STATE_CONTRADICTED\x10\x03\x12 \n" +
+	"\x1cCAPABILITY_STATE_UNSUPPORTED\x10\x04*\xd8\x01\n" +
 	"\n" +
 	"DeviceKind\x12\x1b\n" +
 	"\x17DEVICE_KIND_UNSPECIFIED\x10\x00\x12\x16\n" +
@@ -489,29 +862,37 @@ func file_security_v1_device_proto_rawDescGZIP() []byte {
 	return file_security_v1_device_proto_rawDescData
 }
 
-var file_security_v1_device_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_security_v1_device_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_security_v1_device_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
+var file_security_v1_device_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_security_v1_device_proto_goTypes = []any{
-	(DeviceKind)(0),               // 0: security.v1.DeviceKind
-	(ClockSourceState)(0),         // 1: security.v1.ClockSourceState
-	(DriftBand)(0),                // 2: security.v1.DriftBand
-	(*Device)(nil),                // 3: security.v1.Device
-	(*DeviceClock)(nil),           // 4: security.v1.DeviceClock
-	nil,                           // 5: security.v1.Device.AttributesEntry
-	(*timestamppb.Timestamp)(nil), // 6: google.protobuf.Timestamp
+	(CapabilityState)(0),          // 0: security.v1.CapabilityState
+	(DeviceKind)(0),               // 1: security.v1.DeviceKind
+	(ClockSourceState)(0),         // 2: security.v1.ClockSourceState
+	(DriftBand)(0),                // 3: security.v1.DriftBand
+	(*Device)(nil),                // 4: security.v1.Device
+	(*DeviceCapability)(nil),      // 5: security.v1.DeviceCapability
+	(*DeviceManifest)(nil),        // 6: security.v1.DeviceManifest
+	(*DeviceClock)(nil),           // 7: security.v1.DeviceClock
+	nil,                           // 8: security.v1.Device.AttributesEntry
+	(*timestamppb.Timestamp)(nil), // 9: google.protobuf.Timestamp
 }
 var file_security_v1_device_proto_depIdxs = []int32{
-	0, // 0: security.v1.Device.kind:type_name -> security.v1.DeviceKind
-	5, // 1: security.v1.Device.attributes:type_name -> security.v1.Device.AttributesEntry
-	6, // 2: security.v1.Device.registered_at:type_name -> google.protobuf.Timestamp
-	1, // 3: security.v1.DeviceClock.clock_source:type_name -> security.v1.ClockSourceState
-	2, // 4: security.v1.DeviceClock.band:type_name -> security.v1.DriftBand
-	6, // 5: security.v1.DeviceClock.measured_at:type_name -> google.protobuf.Timestamp
-	6, // [6:6] is the sub-list for method output_type
-	6, // [6:6] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	1,  // 0: security.v1.Device.kind:type_name -> security.v1.DeviceKind
+	8,  // 1: security.v1.Device.attributes:type_name -> security.v1.Device.AttributesEntry
+	9,  // 2: security.v1.Device.registered_at:type_name -> google.protobuf.Timestamp
+	6,  // 3: security.v1.Device.manifest:type_name -> security.v1.DeviceManifest
+	0,  // 4: security.v1.DeviceCapability.state:type_name -> security.v1.CapabilityState
+	9,  // 5: security.v1.DeviceCapability.observed_at:type_name -> google.protobuf.Timestamp
+	9,  // 6: security.v1.DeviceManifest.probed_at:type_name -> google.protobuf.Timestamp
+	5,  // 7: security.v1.DeviceManifest.capabilities:type_name -> security.v1.DeviceCapability
+	2,  // 8: security.v1.DeviceClock.clock_source:type_name -> security.v1.ClockSourceState
+	3,  // 9: security.v1.DeviceClock.band:type_name -> security.v1.DriftBand
+	9,  // 10: security.v1.DeviceClock.measured_at:type_name -> google.protobuf.Timestamp
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_security_v1_device_proto_init() }
@@ -524,8 +905,8 @@ func file_security_v1_device_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_security_v1_device_proto_rawDesc), len(file_security_v1_device_proto_rawDesc)),
-			NumEnums:      3,
-			NumMessages:   3,
+			NumEnums:      4,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -236,6 +236,35 @@ is not a claim about productivity. M2 adds a session heartbeat so active time ca
 be separated from queue time; until then, both the capped and the uncapped number
 ship with that caveat in the footnote.
 
+#### 2.2.2 Two HAM-per-1000 numbers, and which one is the product's
+
+**There were two, and a reader could have picked either.** `internal/telemetry/ham.go`
+computed HAM-per-1000 as `(escalations × 5min + overrides × 10min) ÷ (detections ÷
+1000)` — an **ESTIMATE** with magic constants, counted in process. The
+roadmap's HAM-per-1000 is `attention_minutes ÷ 1000 canonical_events`, a
+**MEASUREMENT** from Postgres, and it is the North Star.
+
+**The resolution: the product's is the durable one, and the other is the POC's.**
+
+- The product's HAM-per-1000 is the North Star, computed by
+  `internal/operatormetrics` from the durable rollup, and reported with its
+  window, its N and its interval. It is `metric_rollups.attention_minutes_capped`
+  over `metric_rollups.canonical_events`.
+- `internal/telemetry` is the POC's collector. It counts in process, it restarts
+  with the process, and its only importer is `internal/calibration`, which uses
+  the calculator's arithmetic. `HAMCalculator` stays — a second implementation
+  of the same estimate would be worse than one — and the package doc says
+  plainly that its number is an estimate and not the North Star.
+- `LiveTelemetry`'s comment used to say it was "the shape `GET
+  /api/telemetry/live` returns". **That route does not exist**, and the product
+  has no telemetry endpoint. The comment now says the route does not exist and
+  where the product's live numbers actually come from.
+
+**Why it matters that this is written down.** Two numbers with the same name and
+different meanings, in one repository, is a reader's choice and a coin flip. The
+one that gets quoted is the one that was easier to find, and the one that was
+easier to find was the in-process estimate.
+
 ### 2.3 AI effectiveness
 
 The AI / operator / final-outcome triple is recorded today, from three real
@@ -252,6 +281,38 @@ columns. The construction, the disqualifications, and the minimum-N problem are 
 | **`ai_degraded_decision_rate`** | Verification decisions that ran on an absent AI signal | `count(*) FROM verification_results WHERE ai_degradation <> 'none' ÷ count(*)`; breakdown over `none`/`model_unavailable`/`no_runtime`/`timeout`/`error`/`absent` | `verification_results.ai_degradation` | Invariant 3, measured. A missing AI observation is never a negative observation, and this is the number that proves the difference was honoured rather than asserted | E2 daily, E1 monthly |
 | `vlm_median_latency_ms` | The cost the pipeline pays | Already implemented as `ProfileReport.MedianLatencyMS` *(real — `evaluation.go:236`)*; durable source `ai_observations.latency_ms` | `ai_observations.latency_ms`, `.hardware` | Gate: `MaxMedianLatencyMS: 8000`. The harness's comment is the reason: "the AI plane is not on the availability path, but it is on the p95 incident-visibility path" | E2 per profile and hardware |
 | `labelled_cases` / `undispositioned_cases` | How much evidence the rates are computed from | Already implemented as `ProfileReport.Labeled` and `.Undispositioned` *(real)* | `evaluation` harness output | **Reported before every rate, always.** `undispositioned` is counted separately and *never* folded into a denominator — "a case nobody judged is not evidence, and counting it as anything is how a harness makes a profile look better than it is" *(real — `evaluation.go:29-35`)* | E2, always |
+
+#### 2.3.1 `ai_false_escalation_rate` — the definition this repository now uses
+
+**The metric.** The share of the model's **ESCALATIONS** that the operator later
+called false. The escalations are the model's restricted verdicts — the model
+saying something is here. The false ones are those the operator dispositioned
+`false_positive`.
+
+**The denominators, and each one is a refusal.**
+
+| the denominator | why not the other thing |
+|---|---|
+| the escalations the operator **JUDGED** | an escalation nobody judged is neither a true escalation nor a false one, and folding it in either way is how a profile looks better than it is |
+| NOT the observations | a degraded observation and an insufficient-evidence one carry no verdict, so they are not escalations and not a denominator either |
+| NOT the dispositions | a disposition with no observation behind it is an operator's answer about something the model did not say |
+
+**The model's verdict** is the **profile's own score field**, read through the
+profile registry (`observations.ProfileScoreField`) and not a hard-coded name. A
+hard-coded field name would score every profile against one profile's claim —
+which is the mistake `internal/evaluation` already made and already fixed, and
+the reason the field is a registry lookup here too.
+
+**Where it is computed.** From `ai_observations` and `dispositions`, over the
+window, with the N and a Wilson interval. `internal/evaluation` computes the
+same shape from a committed JSON corpus, and that corpus stays as the FIXTURE
+that proves the arithmetic; this is the production path.
+
+**What is still missing.** `evidence_completeness` needs the evidence store's
+own retention state (a clip that was swept is not a clip that was never
+fetched, and the two read the same in the table), and `missed_incident_rate`
+needs the replay corpus. Both are reported as **not measured** until they are
+computable, with a ledger saying what would close each.
 
 ### 2.4 Automation
 

@@ -148,8 +148,18 @@ type Camera struct {
 	Width           int32 `protobuf:"varint,10,opt,name=width,proto3" json:"width,omitempty"`
 	Height          int32 `protobuf:"varint,11,opt,name=height,proto3" json:"height,omitempty"`
 	LowLightCapable bool  `protobuf:"varint,12,opt,name=low_light_capable,json=lowLightCapable,proto3" json:"low_light_capable,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// The stream this camera is recorded from. It carries no credential: the
+	// credential is a separate reference into the keystore, and a URL with a
+	// password in it is a password in a log.
+	RtspUrl string `protobuf:"bytes,13,opt,name=rtsp_url,json=rtspUrl,proto3" json:"rtsp_url,omitempty"`
+	// A reference into the keystore. A pointer, never a secret.
+	CredentialRef string `protobuf:"bytes,14,opt,name=credential_ref,json=credentialRef,proto3" json:"credential_ref,omitempty"`
+	// The substream the recorder should use, when the device has more than one.
+	SubstreamProfile string `protobuf:"bytes,15,opt,name=substream_profile,json=substreamProfile,proto3" json:"substream_profile,omitempty"`
+	// The device's own identifier, as it reports it.
+	OnvifDeviceId string `protobuf:"bytes,16,opt,name=onvif_device_id,json=onvifDeviceId,proto3" json:"onvif_device_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Camera) Reset() {
@@ -266,11 +276,39 @@ func (x *Camera) GetLowLightCapable() bool {
 	return false
 }
 
+func (x *Camera) GetRtspUrl() string {
+	if x != nil {
+		return x.RtspUrl
+	}
+	return ""
+}
+
+func (x *Camera) GetCredentialRef() string {
+	if x != nil {
+		return x.CredentialRef
+	}
+	return ""
+}
+
+func (x *Camera) GetSubstreamProfile() string {
+	if x != nil {
+		return x.SubstreamProfile
+	}
+	return ""
+}
+
+func (x *Camera) GetOnvifDeviceId() string {
+	if x != nil {
+		return x.OnvifDeviceId
+	}
+	return ""
+}
+
 var File_security_v1_camera_proto protoreflect.FileDescriptor
 
 const file_security_v1_camera_proto_rawDesc = "" +
 	"\n" +
-	"\x18security/v1/camera.proto\x12\vsecurity.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xd3\x03\n" +
+	"\x18security/v1/camera.proto\x12\vsecurity.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xea\x04\n" +
 	"\x06Camera\x12\x1b\n" +
 	"\tcamera_id\x18\x01 \x01(\tR\bcameraId\x12\x1b\n" +
 	"\tdevice_id\x18\x02 \x01(\tR\bdeviceId\x12\x1b\n" +
@@ -285,7 +323,11 @@ const file_security_v1_camera_proto_rawDesc = "" +
 	"\x05width\x18\n" +
 	" \x01(\x05R\x05width\x12\x16\n" +
 	"\x06height\x18\v \x01(\x05R\x06height\x12*\n" +
-	"\x11low_light_capable\x18\f \x01(\bR\x0flowLightCapable*\x96\x01\n" +
+	"\x11low_light_capable\x18\f \x01(\bR\x0flowLightCapable\x12\x19\n" +
+	"\brtsp_url\x18\r \x01(\tR\artspUrl\x12%\n" +
+	"\x0ecredential_ref\x18\x0e \x01(\tR\rcredentialRef\x12+\n" +
+	"\x11substream_profile\x18\x0f \x01(\tR\x10substreamProfile\x12&\n" +
+	"\x0fonvif_device_id\x18\x10 \x01(\tR\ronvifDeviceId*\x96\x01\n" +
 	"\vCameraState\x12\x1c\n" +
 	"\x18CAMERA_STATE_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13CAMERA_STATE_ONLINE\x10\x01\x12\x18\n" +

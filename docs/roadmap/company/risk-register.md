@@ -167,9 +167,15 @@ November review.
 
 ## 2. The register
 
-54 rows. Categories: **T**echnical · **P**roduct/Market · **C**ommercial ·
+64 rows. Categories: **T**echnical · **P**roduct/Market · **C**ommercial ·
 **S**ecurity · **L**egal/Compliance · **H**uman/People · **F**inancial ·
 **O**perational · **A**I-specific · **D**ependency.
+
+> **The count was stale and was corrected on 2026-10-21.** The header said 54
+> while the tables held 56: two rows had been added without the count
+> following them. A register that cannot say how many rows it has cannot be
+> reviewed, because the review asks about *every* row. The eight rows the AI
+> VMS strategy added are T-09, T-10, P-07, P-08, C-07, O-07, A-07 and D-05.
 
 State key: `O` Open · `M` Mitigating · `A` Accepted · `T` Transferred ·
 `V` Avoided.
@@ -186,6 +192,8 @@ State key: `O` Open · `M` Mitigating · `A` Accepted · `T` Transferred ·
 | **T-06** | The Python VLM runtime is not written, so M1 exit gate 4 is unsignable and the milestone cannot complete | 5 | 4 | **20** | Any M1 review where the runtime has fewer than 50% of its stories started, with 60 days to the gate | E2 | **Gate 4 is not negotiable and `01`'s reduced scope does not make it skippable.** The real mitigations are: (a) start it now, (b) accept a *smaller* model on *smaller* hardware so the integration is the only variable, (c) if the 14-day shadow run cannot start by 2027-02-01, **say publicly that M1 will not complete on date and move the date** — a slipped date with an honest reason is survivable; a gate signed on a synthetic demo is the end of the company | 2026-10-31 | O |
 | **T-07** | A path-handling defect in the evidence store or the archive extractor reaches a customer | 3 | 5 | **15** | Any diff touching a path without the four negatives in its own diff; `TestSymlinkEscapeIsRefused` still skipping on Windows | E2 | `AGENTS.md`'s review rule and `07` §6.4's diff checklist, enforced at review. Q-6 (the Windows skip) is a **M1 deliverable** — a site on a supported platform must not have an unverified escape protection | 2026-11-30 | O |
 | **T-08** | A capability leak in the console: a surface renders data its caller is not authorised to read (Q-5, `requirePrincipal` where the API uses `requireCapability`) | 4 | 4 | **16** | Any new console route registered with `requirePrincipal`; a capability test missing for a new screen | E2 | Fix Q-5. Then: **every new surface gets a capability test, not a principal test**, and the rule is written into the ticket template so it is not a memory | 2026-10-31 | O |
+| **T-09** | **Camera compatibility is a swamp.** A device claims a capability it was never probed for, or a probe result is trusted for a device it was not measured on | 4 | 4 | **16** | A capability-manifest entry with no probe result behind it; the same model and firmware reported with two different capability sets; a device added to a site with an empty capability set and the console still drawing a live tile for it | E2 | **The manifest is measured per device, and a claim without a probe result is not a capability** — the same discipline as `internal/milestone`'s `Unverified` flag. `device-capability-manifest` is a gate: it fails when a capability is asserted with no probe result behind it. **The bottleneck is the probe, not the adapter code**: with unlimited AI writing device code, the thing that runs out is somebody holding a camera in a lab, so the probe infrastructure and the camera-lab procurement are P0 items and the probe is built in P1 rather than after | 2027-03-31 | O |
+| **T-10** | **Recording continuity is the product's promise and its hardest property.** A device shows a gap in a 24-hour run, and the product's central claim is falsified by its own data | 4 | 5 | **20** | `recording_continuity_gap_seconds` above zero on any device; a segment recorded as `state='partial'`; a chain head that does not verify at day close | E2 | **The gap is measured and published, not hidden**, and that is the design rather than a mitigation: the device moves to a visible degraded state, the chain records the boundary, and the gap is *provable* rather than invisible. A partially written segment is recorded as `state='partial'` with its true boundary and is never a silent hole. `media-continuity` is a gate, and a `kill -9` at the segment-write stage is a fault-injection test rather than a nice-to-have | 2027-03-31 | O |
 
 ### 2.2 PRODUCT / MARKET
 
@@ -197,6 +205,8 @@ State key: `O` Open · `M` Mitigating · `A` Accepted · `T` Transferred ·
 | **P-04** | The evidence-intelligence feature (M2) is six months of work that customers describe as "nice" rather than as the thing they needed | 3 | 4 | **12** | M2's MTTI study shows a statistically significant but commercially unimpressive improvement | E1 | M2's exit gate sets "meaningful" **before** the trial, per class, and records it (`01` M2). If the improvement is unimpressive, the finding is that the *class* was wrong, not that the feature was — re-pick the incident classes, do not re-pick the metric | 2027-06-30 | O |
 | **P-05** | The exception-queue UX (M7) is worse than the alert list it replaced, and operators route around the product | 3 | 4 | **12** | Operator override rate rising while automation rate rises; "can we go back to the list" in a support request | E1 | `01` M7's reduced scope already has the right answer: "**the exception queue UX before autonomous resolution** — if we ship autonomy with a worse surface than the alert list we replaced, operators will route around us." Autonomy is cut before the surface is | 2030-06-30 | O |
 | **P-06** | M6's compounding claim fails — a new customer costs less to onboard than an existing one costs to keep | 3 | 4 | **12** | M3 review data shows onboarding converging to configuration cost with no site-specific asset built | E1 | This is `01` M6's exit gate and it is **falsifiable by design**: "If it does not, the data moat did not materialise and M7–M8 are re-planned as automation on top of search." The pre-agreed response is to **re-plan, not to re-market.** Doing M7 as automation on a search product is a smaller, honest company | 2030-03-31 | O |
+| **P-07** | **The sales motion changes from a pilot to an appliance sale.** A VMS is bought like a VMS — off a price list, with an installer, a hardware list and a renewal cycle — and the company has never sold one | 3 | 4 | **12** | A design-partner conversation that turns on the price list rather than on the pilot; a "who does the install" question we cannot answer; a lost deal attributed to procurement rather than to the product | E1 | **The exit gate is unchanged and it is a product gate rather than a sales gate**: the recording continues when the cloud, the network and the model are gone, and every exported evidence item verifies offline. The commercial answer is the *appliance* shape (the control mode in P7, the edge profile in P8) and the pricing model in `pricing-and-packaging.md` §1.1, which is unsigned until a human signs it. **A VMS two people cannot install is not a product, and C-03 already says so** | 2027-06-30 | O |
+| **P-08** | **"The product is a VMS" is heard as "the product is a replacement", and the installed base stops buying** | 3 | 4 | **12** | A prospect asking whether we rip and replace; a reseller declining to introduce us because we are a competitor to the VMS they sell; the second adapter slipping because the first customer's own vendor felt replaced | E1 | **Both sources are first-class and the price says so**: a customer who keeps their VMS and reads it through the adapter pays the site fee and no device tier, and the adapter is the cheapest way to buy the product without migrating their recording. The demo shows the adapter working against a live VMS rather than a mock-up of one. D1's reopen trigger is *never*, so this is a response to be executed rather than a question to be re-opened | 2027-06-30 | O |
 
 ### 2.3 COMMERCIAL
 
@@ -208,6 +218,7 @@ State key: `O` Open · `M` Mitigating · `A` Accepted · `T` Transferred ·
 | **C-04** | A risk is treated as Transferred to a customer or an insurer who has not agreed to carry it | 3 | 4 | **12** | Any register row moving to T with a counterparty not named in a signed document | E1 | **The §1.5 rule: a transferred risk with a party who has not said yes is still Open.** The only rows permitted to be T are those naming a signed document. In practice today **no row is T** | 2026-11-30 | V |
 | **C-05** | A reseller or OEM requires a private-label build, and it forks the product | 2 | 4 | **8** | A reseller asks for a modified console, a rebrand, or a custom bundle | E1 | Vertical packs carry domain intelligence **as rules, profiles and playbooks, not as a fork** (`01` M8). A private label is configuration and a signed bundle, never a branch. If a reseller will only move with a fork, the answer is no, and the reason is the fork's maintenance cost with two people | 2028-06-30 | O |
 | **C-06** | Pricing is wrong and we discover it at the M2 pricing experiment, with three customers already on the wrong price | 3 | 3 | **9** | The M2 pricing experiment produces a conversion rate that does not match the model | E1 | `01` M2: "the pricing experiment runs here, not before." Design-partner deals are free and explicitly marked as not being the price. If the experiment says we are 2× out, we re-price for the next five and honour the first three in writing — retroactively re-pricing a design partner is a reference-destroying move | 2027-06-30 | O |
+| **C-07** | **The OEM / reseller channel acquires a reason to block us.** An adapter that reads a vendor's VMS and a recorder that competes with it are now a threat to a channel that used to see us as a complement | 3 | 4 | **12** | A reseller asking for exclusivity terms we did not offer in 2026; a vendor's roadmap naming "third-party recorder" as a competitive category; a certification request that arrives with a deadline attached | E1 | **The certification suite is the answer, and it is built before the channel needs it.** A certified adapter is a thing a vendor's own customer can rely on, and a certification requirement is a moat a vendor cannot ship in a release note. The no-fork clause and the attribution clause are unchanged, and they are what make the SDK safe to publish at all. C-01's pre-agreed response stands unchanged: the forecast never counted on the channel, so a channel that blocks us costs a forecast that was already zero | 2028-06-30 | O |
 
 ### 2.4 SECURITY
 
@@ -259,6 +270,7 @@ State key: `O` Open · `M` Mitigating · `A` Accepted · `T` Transferred ·
 | **O-04** | An upgrade reaches a site half-applied and cannot be rolled back | 2 | 5 | **10** | Any release bundling an expand and a contract migration; a rollback path that requires a restore; `securityctl upgrade` refusing without a verified backup | E2 | `12` §1.1 and §2.3.2: a patch never contains a contract migration; step 3 refuses to proceed without a verified backup taken since the last release; rollback is a pointer flip, and a release that cannot roll back is a major. `TestContractStepAlongsideExpandIsRefused` is the automated half | 2026-12-31 | O |
 | **O-05** | A dead-letter storm or a poison message blocks the queue and the site stops seeing incidents | 3 | 4 | **12** | `dead_letter_count` rising; `job_queue_depth` growing with no progress; an operator reporting "nothing is coming through" | E2 | `RUNBOOK-dead-letters.md`, the refusal-not-drop design (a dead letter is an accepted event the platform could not process, and the reason is on it), `TestOutboxIsolatesAPoisonMessage`, and Q-2's honesty fix: the SLO must measure what it claims to measure or be restated to what it does | 2027-01-31 | O |
 | **O-06** | **[INCOMPLETE — no early-warning signal]** A runbook step names a command that does not exist, and an operator loses time at the worst moment | 4 | 3 | **12** | — | E2 | **To be written at the November review.** The provisional position: `TestDrillRunbookNamesRealCommands` exists because this happens, and it must be **generated from the command tree rather than hand-maintained**, or it cannot catch the case it exists for — which is exactly how Q-4 (`securityctl adapter probe`, referenced five times, does not exist) survived | 2026-11-30 | O |
+| **O-07** | **The recorder stops recording and nobody notices for a shift.** A crashed recorder, a full disk, a lost lease or a poisoned device degrades the recording path quietly, and the product keeps serving the index of a recording that stopped | 3 | 5 | **15** | `recording_continuity_gap_seconds` non-zero for a whole shift; the recorder's own health signal not scraped by anything; a device's segment sequence that stops advancing | E2 | **The recorder is a separate process with its own failure domain, and it is monitored as one.** A recorder crash must not stop event ingest, and an ingest crash must not stop recording, so the two health signals are separate and both are published. `disk-full` is a gate: the recorder degrades *visibly* rather than corrupting the index. The recorder cannot write the schema — `recorder-schema-isolated` is a gate — so a corrupt index is a query failure rather than a migration | 2027-03-31 | O |
 
 ### 2.9 AI-SPECIFIC
 
@@ -270,6 +282,7 @@ State key: `O` Open · `M` Mitigating · `A` Accepted · `T` Transferred ·
 | **A-04** | A model bundle on a site disk is swapped or tampered with | 3 | 4 | **12** | A bundle whose signature does not verify at install; an observation whose `ModelBundleSignature` does not match the installed bundle | E2 | A tampered bundle is rejected before any inference (`docs/threat-model.md` A4.3). What is **not yet built** is the installer, and it is a gate on the Python runtime's delivery date, not a follow-up (`13` §3.7). In the meantime the compensating control is the **grant**: the AI runtime's role can insert observations and read evidence and *nothing else*, so a lying model degrades verification rather than forging it | 2026-12-31 | O |
 | **A-05** | The AI plane takes a site off the availability path — a readiness probe, a dependency, or a resource grab | 2 | 5 | **10** | Any readiness check that fails because of the AI runtime; a `security-core` restart caused by GPU-host pressure; a degraded incident count that is a *dropped* incident rather than an unverified one | E2 | The grant-level and code-level controls already exist: `/v1/health` excludes the AI plane by name, `/v1/health/ready` exempts a check called `aiRuntime`, and `TestBuiltInBundleRunsWithNoAIObservationAtAll` is the test. **The residual is a manual run with the model stopped at every milestone gate**, because a test suite cannot prove that no other code path consults the model on the availability path | 2026-11-30 | O |
 | **A-06** | The AI governance record stays incomplete — no approved use cases, no known limitations, no deployment history — and the trust story is unverifiable at exactly the moment it is needed | 5 | 4 | **20** | The model/profile registry table does not exist by 2027-03-31; an observation with attribution but no evaluation report reference; a customer asking "what are this model's known limitations?" and the answer requiring an email | E1 | `13` §4.1's table: the first five attribution rows are implemented and enforced; **the last four are the gap and they are the four a regulator, a customer's risk committee and the M8 marketplace all require.** Approved use cases must be a **closed vocabulary of incident classes**, not free text, because a free-text use-case field becomes a marketing sentence. This is the trust story's load-bearing wall and it is currently unbuilt | 2027-03-31 | O |
+| **A-07** | **Cloud egress becomes the default by accident.** A site configured `local_only` sends a frame, a credential or a plate to a hosted provider, and the posture the whole product is sold on is gone in one request | 3 | 5 | **15** | Any row in `ai_egress_log` on a `local_only` site; a provider adapter reachable from a site whose policy names no provider; a new outbound destination in the AI runtime that no policy names | E2 | **`local_only` forbids all outbound traffic at the runtime, not only in policy**, and `ai-egress-policy` is a gate that fails the build on a single offending row. The egress table is append-only and audited, and every egress records the digest of exactly what left the site. The same shape as the embedding prohibition: `internal/embedaudit` is extended to the egress record, so person, plate, face-crop and credential regions cannot leave even if a policy says they may | 2027-03-31 | O |
 
 ### 2.10 DEPENDENCY
 
@@ -279,15 +292,21 @@ State key: `O` Open · `M` Mitigating · `A` Accepted · `T` Transferred ·
 | **D-02** | A dependency breaks a six-month-old isolated install — the exact regression `00` §6 names | 3 | 5 | **15** | Any proposed dependency that needs a registry, a proxy, a runtime download, or a licence check; an install rehearsal that needs the internet | E2 | The rule, and it is the whole test: **does a six-month-old release still install on an isolated network?** The measurable control is a **quarterly install rehearsal from a release artefact on a machine with no network**, which is also the DR drill we already owe (`12` §6.4) | 2027-01-31 | O |
 | **D-03** | The floating toolchain makes the build non-reproducible, so a rebuilt release is not the release we shipped | 5 | 3 | **15** | `protoc-gen-go@latest`, golangci-lint `version: latest`, a floating `postgres:16` tag, or the three-way Go version conflict (T-02) | E2 | CI-4, CI-5, CI-6 and T-02, all week 1–2. And `13` §3.5: define "reproducible" as the same inputs producing the same **file set and hashes**, and publish a content digest over the signed payload excluding timestamps, so two sites can compare "did you get the same product I did" | 2026-10-31 | O |
 | **D-04** | The Python VLM runtime's dependency tree is a supply-chain hole at every customer site | 4 | 4 | **16** | The runtime design does not state how its dependencies are vendored and pinned; any `pip install` at start time | E2 | `13` §4.5: dependencies pinned, **vendored into a signed model bundle**, and covered by the SBOM. **A runtime that pip-installs at start is a runtime an air-gapped site cannot run, and a hole at every site at once.** It is a design requirement on the runtime's first day, not a hardening item afterwards | 2026-12-31 | O |
+| **D-05** | **ONVIF is the first new protocol family since the stack was fixed**, the camera lab is not procured, and the conformance tool is not in the gate | 4 | 4 | **16** | A device adapter written against a published document rather than against a device; no camera in the building; ONVIF membership not applied for; a conformance run that is manual and unrepeatable | E2 | **ONVIF membership with their conformance tool in CI is the answer, and it is procurement rather than engineering** — it has the longest lead time in the plan and it starts in P0. In the meantime the discipline is the `Unverified` one: a route is `Unverified` until a probe says otherwise, and the probe infrastructure is built in P1 rather than after. "Certified, not compatible" is a P9 claim and it is not claimed before the tool runs | 2027-03-31 | O |
 
 ---
 
-## 3. Top ten by expected damage
+## 3. Top risks by expected damage
 
 Ordered by **expected damage** — score × how much of the company it takes with it
 — not by score alone. A score-15 risk that costs a fortnight is below a
 score-12 risk that costs the company its reference in a regulated market. This
 ordering is a judgement and it is labelled as one.
+
+> The list held ten entries until 2026-10-21 and holds eleven now, because the
+> AI VMS strategy added a row that belongs in it rather than beside it. A
+> "top ten" with a forced eleventh is a top eleven with a misleading heading,
+> so the heading says what the list is.
 
 ---
 
@@ -408,7 +427,31 @@ fifty unreviewed uploads" — is the correct medicine.
 
 ---
 
-**7 · P-02 — A VMS vendor ships a competing AI feature.** *L3 × I5 = 15*
+**7 · T-10 — Recording continuity is the product's promise and its hardest property.** *L4 × I5 = 20, Critical*
+
+This row exists because of the 2026-10-21 strategy change, and it is the
+sharpest new risk in the register: **the thing that differentiates the product
+is the thing most likely to be visibly wrong.** Every other risk on this list
+is about the intelligence being wrong; this one is about the *record* being
+wrong, and the record is what the customer buys when they buy a VMS. A buyer
+who finds a gap in our recording on their own site does not ask for a root
+cause, they ask why they bought this instead of the one their installer
+recommended — and unlike a missed alarm, a gap in the recording is not
+arguable, because we published it ourselves in
+`recording_continuity_gap_seconds`. The design answer is not "never have a
+gap", which is a promise nobody can keep across a power cut and a disk; it is
+that **the gap is measured, published, chained and bounded, so the question a
+buyer asks is answered by a number we produced rather than by an excuse we
+invent.** That only works if the measurement is honest, which is why
+`media-continuity` is a gate rather than a metric, why a partially written
+segment is recorded as `state='partial'` with its true boundary rather than
+discarded, and why a `kill -9` at the segment-write stage is a test rather
+than a hope. A VMS that hides a gap is a VMS nobody trusts with the one thing
+they bought it for.
+
+---
+
+**8 · P-02 — A VMS vendor ships a competing AI feature.** *L3 × I5 = 15*
 
 They have distribution we will not have, they have the camera relationship, and
 the feature lands free in a licence the customer already pays for. The strategic
@@ -425,7 +468,7 @@ faster, they can bundle, and we can be right for longer.
 
 ---
 
-**8 · T-01 — The live Milestone endpoint surface does not match our assumptions, discovered late.** *L4 × I4 = 16*
+**9 · T-01 — The live Milestone endpoint surface does not match our assumptions, discovered late.** *L4 × I4 = 16*
 
 Every route in `internal/milestone/routes.go` is marked `Unverified`, no
 Milestone server has ever been reachable, and the fixtures are synthetic. The
@@ -442,7 +485,7 @@ first thing to run on a real install". Writing it is a week.
 
 ---
 
-**9 · A-01 — The model's false-negative rate in the field is worse than the evaluation.** *L3 × I5 = 15*
+**10 · A-01 — The model's false-negative rate in the field is worse than the evaluation.** *L3 × I5 = 15*
 
 The evaluation measures a dataset; the field is a different dataset, and the
 difference is where a missed intrusion lives. A profile evaluated at 0.70 recall
@@ -462,7 +505,7 @@ wrong company.
 
 ---
 
-**10 · F-01 — The founders' runway expires before GA.** *L3 × I5 = 15, Critical by §1.1's safety-and-data rule*
+**11 · F-01 — The founders' runway expires before GA.** *L3 × I5 = 15, Critical by §1.1's safety-and-data rule*
 
 The plan runs to M3 GA on 2028-03-31 and the first paying cohort is M2. Funding
 runs out on a date that is somebody's private knowledge. The failure mode is
@@ -494,6 +537,60 @@ date        risk ID  movement      why it moved                        decision
                                    code. Two rows incomplete (F-05,
                                    O-06); both repaired at the Nov
                                    review.
+
+2026-10-21  T-09    new           The AI VMS strategy puts a camera      the capability
+              T-10                 behind every claim the product       manifest is
+              P-07                 makes, and no row covered either      measured, never
+              P-08                 the compatibility swamp or the        assumed
+              C-07                 recording's continuity. Eight rows     → T-09, and
+              O-07                 added, not edits: §1.3 gives an        media-continuity
+              A-07                 agent the right to add and not the    is a gate
+              D-05                 right to change an owner's            → T-10, and
+                                   response, so the three rows the       camera-lab
+                                   strategy touches (P-02, P-03, C-01)   procurement
+                                   keep the responses their owners       starts in P0
+                                   wrote, and the new risk each of       → D-05
+                                   creates gets its own row.             the pricing
+                                                                       model change
+                                                                       is unsigned
+                                                                       → P-07
+                                                                       the adapter
+                                                                       and the camera
+                                                                       path are both
+                                                                       first-class
+                                                                       → P-08
+                                                                       a vendor is
+                                                                       also a channel
+                                                                       → C-07
+                                                                       the recorder
+                                                                       is monitored as
+                                                                       its own failure
+                                                                       domain
+                                                                       → O-07
+                                                                       local_only is
+                                                                       enforced at the
+                                                                       runtime
+                                                                       → A-07
+
+2026-10-21  P-02    (no change)   The AI VMS strategy makes this risk     nothing to do
+              P-03                 larger, not different, and the
+              C-01                 register's rule forbids an agent
+                                   from rewriting an owner's response.
+                                   **The three rows were reviewed and
+                                   their responses stand**: P-02's
+                                   "bundle that cannot do this" now
+                                   has a second answer ("and neither
+                                   can it prove the recording"), P-03's
+                                   "the demo never shows a VMS feature"
+                                   is now the wrong instruction
+                                   because the product IS one, and
+                                   C-01's "the forecast never counted
+                                   on the channel" is unchanged and is
+                                   why C-07 costs a forecast that was
+                                   already zero. → **action: E1 to
+                                   re-word P-02, P-03 and C-01 at the
+                                   November review, by the owner and
+                                   not by an agent, date 2026-11-30.**
 
   template   RISK-##  new / ↑ / ↓  the *signal* that moved it, not     the action, the
              / →       / accepted   a re-derivation of the score. A      owner, and the

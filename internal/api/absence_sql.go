@@ -130,6 +130,12 @@ func (r sqlAbsenceReader) DegradedObservations(ctx context.Context, tenantID, si
 // IS the threshold: it is computed by `clock.Policy` from the site's SLO and stored.
 // A second threshold would be a second answer to the same question and would disagree
 // the day somebody changed the policy.
+//
+// The column is `measured_at`. It was `sampled_at`, which is a column that has
+// never existed on `device_clocks`, and the statement failed on every read —
+// behind a panic on the same route, and behind a stack overflow behind that.
+// Three defects stacked on one route, each hiding the next, and the route is
+// only reachable when the panel has something to report.
 func (r sqlAbsenceReader) DriftedDevices(ctx context.Context, tenantID, siteID string) (int, string, time.Time, error) {
 	var (
 		n      int
@@ -139,7 +145,7 @@ func (r sqlAbsenceReader) DriftedDevices(ctx context.Context, tenantID, siteID s
 	err := r.scoped(ctx, siteID).QueryRow(ctx, `
 		SELECT count(*),
 		       (array_agg(band ORDER BY abs(drift_ms) DESC))[1],
-		       coalesce(min(sampled_at), 'epoch'::timestamptz)
+		       coalesce(min(measured_at), 'epoch'::timestamptz)
 		  FROM device_clocks
 		 WHERE tenant_id = $1 AND site_id = $2 AND band <> 'ok'`,
 		tenantID, siteID).Scan(&n, &worst, &oldest)

@@ -3,7 +3,10 @@
    Dark hero, glass panels, Inter/SF typography, smooth motion.
    ========================================================================== */
 
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap");
+/* The typefaces used to come from Google Fonts, which meant the live page
+   fetched its own typography from the internet before it had shown anything.
+   They are served from this machine now: web/static/fonts, declared in
+   app.css, which every page loads. */
 
 :root {
   /* palette */
@@ -508,3 +511,24 @@ body {
 .ui-pill.vehicle, .pill.vehicle { color: #5ac8fa; border-color: rgba(90,200,250,0.25); }
 .ui-pill.biological, .pill.biological { color: var(--good); border-color: rgba(48,209,88,0.25); }
 .ui-pill.other, .pill.other { color: var(--warn); border-color: rgba(255,206,0,0.25); }
+
+/* ---------- the camera block in the HUD ------------------------------------------
+   Three classes the page used and no stylesheet defined, which is why the
+   name and the metadata ran together on one line with no hierarchy. */
+
+.ui-cam {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ui-cam-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, .92);
+}
+
+.ui-cam-meta {
+  font-size: 11px;
+  color: rgba(255, 255, 255, .7);
+}

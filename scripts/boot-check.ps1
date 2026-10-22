@@ -143,14 +143,27 @@ destinations:
     }
     if (-not $ok) { Fail "the core never answered /v1/health with 200. Its log:`n$(Get-Content "$root\core.err" -Raw -ErrorAction SilentlyContinue)" }
 
-    # 8. The endpoints the plan names. Both must be SERVED, not 5xx. An
-    #    unauthenticated probe is correctly refused with 401, which is the proof
-    #    the route exists and the CSRF/auth guard is in front of it.
+    # 8. The endpoints the plan names. Both must be SERVED, not 5xx.
+    #
+    #    It used to require a 401. The refusal was the proof the route existed
+    #    AND that an auth guard was in front of it, because a 404 is what an
+    #    unregistered route answers too, and the two were indistinguishable.
+    #
+    #    Login and MFA are removed: the API answers every request under the
+    #    CONFIGURED principal, and there is no auth guard in front of it to
+    #    refuse one. A 200 is now the proof the route is served, and a STRONGER
+    #    one than the refusal was -- it separates a served route from an
+    #    unregistered one, which the 401 never did.
+    #
+    #    What it no longer proves is the auth guard, because there is not one.
+    #    That is a finding, not a footnote: the CSRF control on the state-
+    #    changing methods went with the login, and it is recorded as a gap in
+    #    `docs/threat-model.md` under A3.2 and in `docs/status.md`.
     $ready = & curl.exe -sk "https://127.0.0.1:8898/v1/health/ready" -o NUL -w '%{http_code}'
     if ($ready -ne '200') { Fail "/v1/health/ready returned $ready, want 200" }
     foreach ($path in '/v1/incidents', '/v1/evidence') {
         $code = & curl.exe -sk "https://127.0.0.1:8898$path" -o NUL -w '%{http_code}'
-        if ($code -ne '401') { Fail "$path returned $code, want 401 (served, auth-gated); a 5xx would be the route broken" }
+        if ($code -ne '200') { Fail "$path returned $code, want 200 (served under the configured principal); a 5xx would be the route broken" }
     }
     Done "core served /v1/health, /v1/health/ready, /v1/incidents, /v1/evidence on a seeded tenant"
 

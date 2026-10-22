@@ -127,7 +127,7 @@
     function showRun(host, res) {
         var head = el("div", "out-head");
         head.appendChild(el("code", null, res.command));
-        var exit = el("span", "chip " + (res.exit === 0 ? "live" : "recorded"),
+        var exit = el("span", "chip " + (res.exit === 0 ? "ok" : "bad"),
             "exit " + res.exit);
         head.appendChild(exit);
         if (res.dataRoot) {

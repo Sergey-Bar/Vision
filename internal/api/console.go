@@ -6,7 +6,6 @@ import (
 	"html/template"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
@@ -66,13 +65,19 @@ func (s *Server) Static() http.Handler {
 
 // consoleData is what every template receives.
 //
-// RequestID, Principal and CSRF are on every page rather than passed per
-// template, because a form that forgets the CSRF field is a form that accepts a
-// cross-site POST, and forgetting one is how that happens.
+// RequestID and Principal are on every page rather than passed per template,
+// because a page that forgets the request id is a page whose operator cannot
+// join what they are reading to the audit row it produced.
+//
+// There is no CSRF field, and there is not a token to put in one. The console
+// has no session: the operator's identity comes from the boundary in front of
+// it, not from a cookie this server issues. A form carrying an empty
+// `csrf_token` would be worse than a form carrying none, because a reader
+// auditing the markup would conclude the console had a protection it does not
+// have.
 type consoleData struct {
 	Title       string
 	Principal   identity.Principal
-	CSRF        string
 	RequestID   string
 	Now         time.Time
 	Incident    *incidents.Detail
@@ -91,6 +96,10 @@ type consoleData struct {
 	DutyLog    *DutyLogState
 	DutyLogErr string
 	SiteID     string
+	// Location is the site's own zone, and the times on this surface are
+	// rendered in it. Nil means the site has no zone that could be read, and
+	// the times are rendered in UTC with the offset saying so.
+	Location *time.Location
 	// Search is the structured search page: the query the operator typed, the
 	// page it answered, and the reason an answer was not available. All three
 	// are always present, because a search page that renders a blank result set
@@ -109,6 +118,16 @@ type consoleData struct {
 // Every rendered time carries an explicit offset. A security operator comparing
 // an incident timeline with a guard's account of the same minute is doing
 // arithmetic, and a timestamp without an offset makes that arithmetic a guess.
+//
+// The zone is the SITE's, read from the site's own row, and it used not to be
+// read at all: every time on this surface was rendered in UTC, which is right
+// for a site in UTC and wrong for every other site. The SPA renders the same
+// record in the site's zone, so the two halves of the console were showing
+// the same incident at two different times.
+//
+// A site whose zone cannot be loaded is rendered in UTC, and the offset says
+// so. A zone that is guessed is a wrong clock, and a wrong clock reads as a
+// fact.
 func (d consoleData) Time(t time.Time) string {
 	if t.IsZero() {
 		// An em dash, written as an escape. The literal was once a raw U+2014 in
@@ -117,7 +136,11 @@ func (d consoleData) Time(t time.Time) string {
 		// corrupted by whatever touches the file next.
 		return "\u2014"
 	}
-	return t.UTC().Format("2006-01-02 15:04:05Z")
+	loc := d.Location
+	if loc == nil {
+		loc = time.UTC
+	}
+	return t.In(loc).Format("2006-01-02 15:04:05Z07:00")
 }
 
 func (s *Server) render(w http.ResponseWriter, status int, name string, data consoleData) {
@@ -138,15 +161,42 @@ func (s *Server) render(w http.ResponseWriter, status int, name string, data con
 	_, _ = w.Write(buf.Bytes())
 }
 
-func (s *Server) consoleData(r *http.Request, p identity.Principal, title string) consoleData {
+func (s *Server) consoleData(r *http.Request, p identity.Principal, title string, d Deps) consoleData {
 	return consoleData{
 		Title:     title,
 		Principal: p,
-		CSRF:      p.CSRFToken,
 		RequestID: requestID(r),
 		Now:       time.Now().UTC(),
 		SiteID:    firstSite(p),
+		Location:  s.siteLocation(r, p, d),
 	}
+}
+
+// siteLocation reads the site's own zone.
+//
+// It is a separate function because it is the one thing in this file that
+// touches the database, and a page that cannot read the site's zone still
+// renders: the times are in UTC and the offset says so.
+func (s *Server) siteLocation(r *http.Request, p identity.Principal, d Deps) *time.Location {
+	if d.SiteTimezone == nil {
+		return nil
+	}
+	site := firstSite(p)
+	if site == "" {
+		return nil
+	}
+	zone, err := d.SiteTimezone.Timezone(r.Context(), p.TenantID, site)
+	if err != nil || zone == "" {
+		return nil
+	}
+	loc, err := time.LoadLocation(zone)
+	if err != nil {
+		if s.Log != nil {
+			s.Log.Warn("the site timezone could not be loaded", "site", site, "zone", zone, "error", err)
+		}
+		return nil
+	}
+	return loc
 }
 
 func firstSite(p identity.Principal) string {
@@ -187,16 +237,14 @@ func (s *Server) handleConsoleRoot(w http.ResponseWriter, r *http.Request) {
 // the page rather than discovered at submit time, because "your second factor is not
 // enrolled" is a configuration fact the operator can fix and a 403 they cannot.
 //
-// # Why a successful sensitive disposition rotates the CSRF token
+// # Why a sensitive disposition asks for the factor again
 //
-// `identity.RotateCSRF` existed, unwired, with the reason written on it: a token
-// minted before an escalation is not usable after one. An escalation IS the
-// privilege-relevant moment — the incident stops being a review queue item and
-// becomes somebody else's problem — and the operator's console is still open with
-// the pre-escalation token in every form on the page. Rotating here means the next
-// state-changing request from this console has to carry the new one.
+// `escalated` and `dismissed` require a step-up, and the step-up is spent on the
+// transaction that needs it. The console's own pages carry no token of their
+// own, so there is nothing to rotate between one privileged action and the
+// next: the second factor is re-presented for the action that requires it.
 func (s *Server) handleConsoleDisposition(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
-	data := s.consoleData(r, p, "Incident")
+	data := s.consoleData(r, p, "Incident", d)
 	id := r.PathValue("id")
 
 	detail, err := d.Incidents.Get(r.Context(), p.TenantID, id)
@@ -227,17 +275,62 @@ func (s *Server) handleConsoleDisposition(w http.ResponseWriter, r *http.Request
 		s.render(w, http.StatusBadRequest, "incident.html", data)
 		return
 	}
+	// The agreement is REQUIRED.
+	//
+	// It used to default to "unsure", which is the console inventing an
+	// answer about what the operator thought. The JSON route refuses an
+	// empty agreement with a 400, and the console refusing it the same way is
+	// the point: the two routes are one product and they must not disagree
+	// about what a disposition has to say.
 	if agreement == "" {
-		agreement = "unsure"
+		data.Error = "Say whether you agreed with the decision: the record asks, and a blank is not an answer."
+		s.render(w, http.StatusBadRequest, "incident.html", data)
+		return
+	}
+
+	// The step-up, for the two sensitive outcomes.
+	//
+	// The factor is the six-digit code, not a proof: the proof is minted and
+	// spent inside this one call and never reaches the browser. See
+	// internal/api/stepup.go for the interstitial and the wording.
+	stepUpVerified := false
+	if incidents.OutcomeNeedsStepUp(outcome) {
+		factor := strings.TrimSpace(r.PostFormValue("factor"))
+		form := StepUpForm{
+			IncidentID: id, Outcome: outcome, ReasonCode: reasonCode,
+			Notes: notes, Agreement: agreement,
+		}
+		if factor == "" {
+			s.renderStepUpPrompt(w, r, data, form)
+			return
+		}
+		if err := s.stepUpForDisposition(r.Context(), p, d, id, factor); err != nil {
+			data.Error = err.Error()
+			s.renderStepUpPrompt(w, r, data, form)
+			return
+		}
+		stepUpVerified = true
 	}
 
 	if _, err := d.Incidents.Record(r.Context(), incidents.Disposition{
 		TenantID: p.TenantID, IncidentID: id, Outcome: outcome,
 		ReasonCode: reasonCode, Notes: notes, Agreement: agreement,
 		ActorID: p.UserID, ActorRoles: roleStrings(p), SiteScope: p.SiteScope,
-		SessionID: p.SessionID,
+		SessionID: p.SessionID, StepUpVerified: stepUpVerified,
 	}); err != nil {
 		data.Error = "The disposition was not recorded: " + err.Error()
+		// A step-up that is missing is a 403, not a 400.
+		//
+		// The two sensitive outcomes need a fresh second factor, and an
+		// operator who has not enrolled one is being told their account cannot
+		// do this -- which is a permission, not a malformed request. The JSON
+		// route already says 403 for the same refusal, and a page that answers
+		// 400 for a permission and 403 for the same permission on the other
+		// route is a page an operator has to learn two things about.
+		if strings.Contains(err.Error(), "step-up") {
+			s.render(w, http.StatusForbidden, "incident.html", data)
+			return
+		}
 		s.render(w, http.StatusBadRequest, "incident.html", data)
 		return
 	}
@@ -248,35 +341,28 @@ func (s *Server) handleConsoleDisposition(w http.ResponseWriter, r *http.Request
 // severityClass maps a severity to a CSS class.
 
 func (s *Server) handleConsoleIncidents(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
-	s.Log.Info("HANDLE_START")
-	data := s.consoleData(r, p, "Incidents")
+	data := s.consoleData(r, p, "Incidents", d)
 
 	limit := parseLimit(r.URL.Query().Get("limit"), 50, 200)
 	state := r.URL.Query().Get("state")
 	degraded := r.URL.Query().Get("degraded")
 
-	// Ensure principal has site scope from environment if empty (console open access)
-	if len(p.SiteScope) == 0 {
-		if site := os.Getenv("SP_SITE_ID"); site != "" {
-			s.Log.Info("SETTING SITE SCOPE", "site", site)
-			p.SiteScope = []string{site}
-		}
-	}
+	// The principal's scope is decided where the principal is built
+	// (`openPrincipal`), from the install's configuration. This handler used to
+	// decide it for itself from an environment variable, which is how the
+	// JSON API and the HTML console came to disagree about the same site.
 	siteID := ""
 	if len(p.SiteScope) > 0 {
 		siteID = p.SiteScope[0]
 	}
 
 	// Incidents list
-	startIncidents := time.Now()
 	items, err := d.Incidents.List(r.Context(), p.TenantID, siteID, limit)
-	durationIncidents := time.Since(startIncidents)
 	if err != nil {
 		data.Error = "The incident list could not be read: " + err.Error()
 		s.render(w, http.StatusInternalServerError, "incidents.html", data)
 		return
 	}
-	s.Log.Info("Incidents list duration", "duration", durationIncidents)
 
 	// The site filter is applied here rather than in the query, so a principal
 	// with several assignments and a principal with one behave identically.
@@ -296,20 +382,14 @@ func (s *Server) handleConsoleIncidents(w http.ResponseWriter, r *http.Request, 
 	data.Incidents = filtered
 
 	if d.ClockDrift != nil {
-		startClockDrift := time.Now()
 		if drift, err := d.ClockDrift.List(r.Context(), p.TenantID, 20); err == nil {
 			data.Drift = drift
 		}
-		durationClockDrift := time.Since(startClockDrift)
-		s.Log.Info("ClockDrift list duration", "duration", durationClockDrift)
 	}
 	if d.DeadLetters != nil {
-		startDeadLetters := time.Now()
 		if letters, err := d.DeadLetters.Read(r.Context(), p.TenantID, primarySiteOf(p), "", 1); err == nil {
 			data.DeadLetters = letters
 		}
-		durationDeadLetters := time.Since(startDeadLetters)
-		s.Log.Info("DeadLetters read duration", "duration", durationDeadLetters)
 	}
 
 	s.render(w, http.StatusOK, "incidents.html", data)
@@ -323,7 +403,7 @@ func (s *Server) handleConsoleIncidents(w http.ResponseWriter, r *http.Request, 
 // that answered an empty query on arrival would render "no results" before the
 // operator had asked a question — the same class of empty that reads as a fact.
 func (s *Server) handleConsoleSearch(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
-	data := s.consoleData(r, p, "Search")
+	data := s.consoleData(r, p, "Search", d)
 	q := r.URL.Query()
 	asked := false
 	for _, key := range []string{"siteId", "eventType", "deviceId", "zoneId", "correlationId", "incidentId", "from", "to"} {
@@ -380,7 +460,7 @@ func (s *Server) handleConsoleSearch(w http.ResponseWriter, r *http.Request, p i
 }
 
 func (s *Server) handleConsoleIncident(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
-	data := s.consoleData(r, p, "Incident")
+	data := s.consoleData(r, p, "Incident", d)
 	id := r.PathValue("id")
 
 	detail, err := d.Incidents.Get(r.Context(), p.TenantID, id)

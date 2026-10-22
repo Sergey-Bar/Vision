@@ -35,6 +35,17 @@ func dbPool(t *testing.T) *dbx.Pool {
 	if os.Getenv(testutil.DatabaseURLEnv) == "" {
 		t.Skip("no SP_TEST_DATABASE_URL: the database-backed tests skip rather than fail")
 	}
+	// The harness points `SP_TEST_DATABASE_URL` at THIS PACKAGE's database when
+	// its own pool is first built, and the variable is the only thing that says
+	// where this package is. So the harness pool is built FIRST, and the pool
+	// below is opened against the retargeted variable.
+	//
+	// It used to be the other way round, and the symptom was `relation
+	// "tenants" does not exist`: the migrations ran against the per-package
+	// database and the rows went into the BASE one, which has no schema at
+	// all. Two databases, one test, and a failure that read as a product
+	// defect rather than as a harness pointing at the wrong one.
+	testutil.Pool(t)
 	dbPoolOnce.Do(func() {
 		cfg := dbx.DefaultConfig()
 		if err := cfg.ApplyDSN(os.Getenv(testutil.DatabaseURLEnv)); err != nil {
@@ -49,7 +60,7 @@ func dbPool(t *testing.T) *dbx.Pool {
 	return dbPoolDB
 }
 
-func seedChatData(t *testing.T, pool *dbx.Pool) string {
+func seedChatData(t *testing.T, pool *dbx.Pool) (string, string) {
 	t.Helper()
 	ctx := context.Background()
 	raw := testutil.Pool(t)
@@ -133,14 +144,28 @@ func seedChatData(t *testing.T, pool *dbx.Pool) string {
 	if err != nil {
 		t.Fatalf("seed evidence: %v", err)
 	}
-	return tenant
+	return tenant, site
+}
+
+// seededScope is the console's scope for a seeded tenant.
+//
+// The console server does not read the tenant out of a request any more: the
+// scope is configured, and a header is an instruction rather than an
+// authorisation. So a test that seeds a tenant must SCOPE the handler to that
+// tenant, and the `X-Tenant-ID` header the tests still set is there to prove
+// it is not what decides: the handler is given the scope and the header
+// points at the same tenant, so a handler that read the header would pass
+// this test too, and the one that proves the header is not read is
+// `TestTheConsoleNeverReadsATenantFromAHeader`.
+func seededScope(tenant, site string) scope {
+	return scope{tenant: tenant, sites: []string{site}, sitesDeclared: true}
 }
 
 func TestDBSearchFreeRanksAndResolves(t *testing.T) {
 	pool := dbPool(t)
-	tenant := seedChatData(t, pool)
+	tenant, site := seedChatData(t, pool)
 
-	h := handleSearchFree(pool)
+	h := handleSearchFree(pool, seededScope(tenant, site))
 	body := `{"q":"red car","limit":10}`
 	req := httptest.NewRequest(http.MethodPost, "/api/search/free", strings.NewReader(body))
 	req.Header.Set("X-Tenant-ID", tenant)
@@ -174,7 +199,7 @@ func TestDBSearchFreeRanksAndResolves(t *testing.T) {
 
 func TestDBSearchFreeRespectsSiteScope(t *testing.T) {
 	pool := dbPool(t)
-	tenant := seedChatData(t, pool)
+	tenant, site := seedChatData(t, pool)
 
 	// A second site in the same tenant, committed so the FK holds.
 	otherSite := "s-other"
@@ -182,7 +207,7 @@ func TestDBSearchFreeRespectsSiteScope(t *testing.T) {
 		t.Fatalf("insert other site: %v", err)
 	}
 
-	h := handleSearchFree(pool)
+	h := handleSearchFree(pool, seededScope(tenant, site))
 	body := `{"q":"red car","limit":10,"siteId":"` + otherSite + `"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/search/free", strings.NewReader(body))
 	req.Header.Set("X-Tenant-ID", tenant)
@@ -206,9 +231,9 @@ func TestDBSearchFreeRespectsSiteScope(t *testing.T) {
 
 func TestDBChatReturnsGroundedAnswer(t *testing.T) {
 	pool := dbPool(t)
-	tenant := seedChatData(t, pool)
+	tenant, site := seedChatData(t, pool)
 
-	h := handleChat(pool)
+	h := handleChat(pool, seededScope(tenant, site))
 	body := `{"question":"red car","videoId":"vid-1"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/chat", strings.NewReader(body))
 	req.Header.Set("X-Tenant-ID", tenant)
@@ -239,9 +264,9 @@ func TestDBChatReturnsGroundedAnswer(t *testing.T) {
 
 func TestDBChatUnavailableWhenNothingStored(t *testing.T) {
 	pool := dbPool(t)
-	tenant := seedChatData(t, pool)
+	tenant, site := seedChatData(t, pool)
 
-	h := handleChat(pool)
+	h := handleChat(pool, seededScope(tenant, site))
 	body := `{"question":"nothing at all matches this impossible phrase xyzzy"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/chat", strings.NewReader(body))
 	req.Header.Set("X-Tenant-ID", tenant)
@@ -264,9 +289,9 @@ func TestDBChatUnavailableWhenNothingStored(t *testing.T) {
 
 func TestDBClipsListsStoredClips(t *testing.T) {
 	pool := dbPool(t)
-	tenant := seedChatData(t, pool)
+	tenant, site := seedChatData(t, pool)
 
-	h := handleClips(pool)
+	h := handleClips(pool, seededScope(tenant, site))
 	req := httptest.NewRequest(http.MethodGet, "/api/clips", nil)
 	req.Header.Set("X-Tenant-ID", tenant)
 	rec := httptest.NewRecorder()
@@ -289,9 +314,9 @@ func TestDBClipsListsStoredClips(t *testing.T) {
 
 func TestDBCriticalListsOpenIncidents(t *testing.T) {
 	pool := dbPool(t)
-	tenant := seedChatData(t, pool)
+	tenant, site := seedChatData(t, pool)
 
-	h := handleCritical(pool)
+	h := handleCritical(pool, seededScope(tenant, site))
 	req := httptest.NewRequest(http.MethodGet, "/api/critical?limit=5", nil)
 	req.Header.Set("X-Tenant-ID", tenant)
 	rec := httptest.NewRecorder()

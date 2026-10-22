@@ -38,6 +38,17 @@ func TestEnsurePartitionsCreatesOnATableWithNoPartitions(t *testing.T) {
 
 	// Drop every existing partition so the runner starts from nothing. The
 	// parent tables survive, and so does the migration ledger.
+	//
+	// The two EVENT tables are dropped and `recording_segments` is not, and
+	// that is deliberate rather than an oversight. The test's claim is that
+	// the DDL executes, and two tables prove it; dropping the recording
+	// index's sixty partitions as well costs the cluster a minute of DDL
+	// churn while every other package is trying to drop its own database,
+	// and a harness that spends its whole budget on one package's setup is a
+	// harness that fails at random.
+	//
+	// The recording index's partitions are covered by the two tests below,
+	// which assert that they exist and that they carry their policies.
 	for _, table := range []string{"inbox_events", "canonical_events"} {
 		testutil.Exec(t, pool, fmt.Sprintf(`
 			DO $$
@@ -76,7 +87,7 @@ func TestEnsurePartitionsCreatesOnATableWithNoPartitions(t *testing.T) {
 			"signature of that bug.")
 	}
 
-	for _, table := range []string{"inbox_events", "canonical_events"} {
+	for _, table := range []string{"inbox_events", "canonical_events", "recording_segments"} {
 		var after int
 		if err := pool.QueryRow(ctx, `
 			SELECT count(*) FROM pg_class c
@@ -108,7 +119,7 @@ func TestEnsurePartitionsCoversTheDeclaredTables(t *testing.T) {
 		t.Fatalf("EnsurePartitions(ctx, 3): %v", err)
 	}
 
-	for _, table := range []string{"inbox_events", "canonical_events"} {
+	for _, table := range []string{"inbox_events", "canonical_events", "recording_segments"} {
 		var partitions int
 		err := pool.QueryRow(ctx, `
 			SELECT count(*) FROM pg_class c
@@ -199,7 +210,7 @@ func TestEnsurePartitionsClampsTheYearsAheadArgument(t *testing.T) {
 
 	// Whatever the argument, the window it promised must be covered: a table
 	// with no future partition is a table that starts refusing writes.
-	for _, table := range []string{"inbox_events", "canonical_events"} {
+	for _, table := range []string{"inbox_events", "canonical_events", "recording_segments"} {
 		var partitions int
 		if err := pool.QueryRow(ctx, `
 			SELECT count(*) FROM pg_class c

@@ -1,16 +1,22 @@
-# Physical Security Intelligence Layer — one page
+# VISION — a VMS that proves — one page
 
-**Turns a camera's bytes into a durable, hash-chained, replayable finding, and
-refuses to guess when the evidence is not there.**
+**Records the cameras it is given, reads the VMSes a customer already runs as a
+first-class source, turns raw signals into verified, evidenced incidents, and
+then handles the routine work under policy so that humans receive exceptions
+instead of alerts.**
+
+**Every frame, every decision and every exported evidence item is verifiable
+offline. Recording continues when the cloud, the network and the model are
+gone. The system states what it does *not* know.**
 
 ```sh
 docker compose up        # console on https://localhost:8443
 make demo                # end to end, and dist/demo/transcript.md
-make verify-container    # 25 checks, in a container, on Linux
+make verify-container    # the gate, in a container, on Linux
 ```
 
-**Status: 9 of 13 acceptance criteria pass. 4 are `NOT RUN`** and need a live
-camera, a second site, or a model key. `NOT RUN` is a distinct verdict from `pass`
+**Status: 10 of 13 acceptance criteria pass. 3 are `NOT RUN`** and need a live
+camera, a soak, or a second site. `NOT RUN` is a distinct verdict from `pass`
 on purpose.
 
 ---
@@ -26,10 +32,16 @@ there* — is routinely recorded as *the model said no*.
 
 ## The product
 
-One pipeline. Canonical events → graph → correlate → deterministic rules → incident,
-with a vendor adapter at the boundary and a human reviewer at the end.
+**The Chief of Security.** One screen, one calm canvas. The Chief tells you
+what changed while you were away, what needs you now, and what the system does
+not know — and it is the same answer for every operator, because it is the
+product's answer and not the console's.
 
-Three things it does that most do not:
+Behind it, one pipeline. Canonical events → graph → correlate → deterministic
+rules → incident, with a device adapter at the boundary and a human reviewer at
+the end.
+
+Four things it does that most do not:
 
 **1. The explanation is recomputed, never stored.**
 An incident's reasoning is derived from the stored facts and the stored AI
@@ -43,7 +55,13 @@ product refuses to collapse them. Every rule consuming a model signal declares
 visible: 1 healthy observation, 7 explicitly degraded, 1 reviewer who disagreed with
 the model in writing.
 
-**3. Losing the vendor does not lose the evidence.**
+**3. A capability that was not measured is not a capability.**
+A camera names the profiles it supports and is routinely wrong about it. The
+registry records what a *probe* established, and only the `verified` entries
+count — a `contradicted` one is a finding about the camera, and a camera nobody
+probed says so by name rather than rendering an empty capability list.
+
+**4. Losing the vendor does not lose the evidence.**
 No package outside `internal/milestone` may name a vendor — three tests enforce it.
 Every vendor route carries an `Unverified` flag that **no code path can clear except
 a probe against a real device**, so the demo's scripted endpoint cannot promote its
@@ -53,11 +71,10 @@ own homework.
 
 ## What backs the claims
 
-- **25 gates**, one script, the same one on Windows and in a Linux container.
-- **Every control has been watched failing.** `scripts/force-red.ps1` removes each
-  one, requires the suite to go red, restores it, and requires it to go green again.
-  A non-zero exit is not accepted as proof — it has to produce a record naming that
-  gate.
+- **43 gates**, one script, the same one on Windows and in a Linux container.
+- **57 red-check controls**, each of which has been **watched failing**. A
+  non-zero exit is not accepted as proof — it has to produce a record naming
+  that control.
 - **Running the gate on Linux for the first time found five defects** nobody had
   seen, including a Linux-only test that had been failing since it was written
   because it was skipped on the only platform the product installs on.
@@ -82,7 +99,7 @@ No camera, no VMS and no model behind any row. The RTSP server is a camera
 **substitute** and prints that it is one. The console certificate is self-signed and
 the seed prints its fingerprint. Model-dependent criteria are checked against a stub
 provider, so a pass there is a pass for the plumbing and nothing else. Criteria 06,
-07, 08 and 10 are `NOT RUN`.
+07 and 08 are `NOT RUN`.
 
 Full detail: [`COMPETE.md`](../COMPETE.md) · [`docs/status.md`](status.md) ·
 [`docs/threat-model.md`](threat-model.md) §4 · [`AGENTS.md`](../../AGENTS.md)

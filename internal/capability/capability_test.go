@@ -100,8 +100,7 @@ type refusal struct {
 //   - Queues. Three of the four declared queues have no producer at all. These are scope
 //     decisions, not defects waiting to be fixed by the next person to look:
 //     `rule_bulk` when bulk compile is scheduled, `checkpoint_seal` when sealing becomes incremental.
-//   - Contract. Declared routes nothing implements, and one implemented route the contract
-//     does not declare.
+//   - Contract. One implemented route the contract does not declare.
 var refusals = []refusal{
 	// --- QueueEndpoints.
 	{table: "QueueEndpoints", item: "rule_bulk",
@@ -122,10 +121,22 @@ var refusals = []refusal{
 	{table: "CapabilityEnforcement", item: "CapIncidentEscalate",
 		why: "no route gates an escalation, so the capability is declared and granted and " +
 			"nothing reads it"},
-	{table: "CapabilityEnforcement", item: "CapSiteConfigure",
-		why: "site configuration has no surface yet and no route names this capability"},
+	// CapSiteConfigure is NOT on this list any more, and that is a fact rather
+	// than an opinion: the device registry's two write routes -- registering a
+	// device and MEASURING one -- gate on it. Registering a device and
+	// measuring one are both acts of site configuration, and that is what the
+	// capability was declared for. A capability that is enforced is not debt.
 
-	// --- ContractRouting: declared-and-absent, then present-and-undeclared.
+	// --- ContractRouting: present-and-undeclared.
+	//
+	// The declared-and-absent refusals are GONE. The document used to declare
+	// `/v1/auth/login`, `/v1/auth/mfa/verify` and `/v1/auth/session` -- the
+	// login, the MFA challenge and the session -- and the code had none of
+	// them, because there is no login: the API runs as a CONFIGURED principal.
+	// The document was the thing that was wrong, and it was fixed there rather
+	// than here: a refusal for an item the derivation no longer reports is a
+	// refusal for a defect that does not exist, and the gate treats one as a
+	// failure.
 	//
 	// `GET /v1/health` and `GET /v1/health/ready` are NOT refusals even though the
 	// document declares them and the mux registers them method-less. Go's mux treats a
@@ -135,18 +146,6 @@ var refusals = []refusal{
 	{table: "ContractRouting", item: "GET /v1/metrics",
 		why: "the route is implemented and undeclared, so nothing a client generates from " +
 			"the contract can reach it. The fix is a document change, not code"},
-	{table: "ContractRouting", item: "DELETE /v1/auth/session",
-		why: "login and MFA are removed; the session endpoint is not implemented and " +
-			"every request runs under open access"},
-	{table: "ContractRouting", item: "GET /v1/auth/session",
-		why: "login and MFA are removed; the session endpoint is not implemented and " +
-			"every request runs under open access"},
-	{table: "ContractRouting", item: "POST /v1/auth/login",
-		why: "login and MFA are removed; the login endpoint is not implemented and " +
-			"every request runs under open access"},
-	{table: "ContractRouting", item: "POST /v1/auth/mfa/verify",
-		why: "login and MFA are removed; the second-factor endpoint is not implemented " +
-			"and every request runs under open access"},
 
 	// --- SiteScopedWriteCanaries.
 	//

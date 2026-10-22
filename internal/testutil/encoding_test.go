@@ -25,10 +25,13 @@ package testutil
 // checked in both directions, so they cannot grow and cannot be forgotten.
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // repoRoot is the module root, from this package's directory.
@@ -146,67 +149,86 @@ func TestTheLedgerIsNotEmpty(t *testing.T) {
 	}
 }
 
-// walkSourceText visits every tracked text file outside the module's one excluded
-// tree, and hands the callback a repository-relative slash path.
+// walkSourceText visits every text file a reader of this repository would see,
+// and hands the callback a repository-relative slash path.
+//
+// It asks GIT which files those are, rather than walking the filesystem.
+//
+// The comment on this function used to say "every TRACKED text file" while the
+// code walked the filesystem, and the difference is not a wording slip: the
+// filesystem holds the build output, the virtualenv, the model weights and the
+// footage, and one of them is a JSON file the size of a database dump. The
+// scan read it, and the gate that exists to catch a stray byte in the source
+// spent ten minutes in `strings.Count` on a build artefact and timed out --
+// which is a gate that has stopped running, reported as a failure of the
+// thing it was scanning.
+//
+// `git ls-files --cached --others --exclude-standard` is exactly the right
+// set: the files the index knows about, and the new ones that are not ignored
+// yet, so a file nobody has staged is still scanned. What it leaves out is
+// what no reader of the repository would see.
 func walkSourceText(t *testing.T, visit func(rel, path string, raw []byte)) {
 	t.Helper()
-	err := filepath.Walk(repoRoot, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() {
-			if skipDir(info.Name()) {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !trackedText(path) {
-			return nil
-		}
+	for _, rel := range repositoryTextFiles(t) {
+		path := filepath.Join(repoRoot, filepath.FromSlash(rel))
 		raw, err := os.ReadFile(path)
 		if err != nil {
-			return err
-		}
-		rel, relErr := filepath.Rel(repoRoot, path)
-		if relErr != nil {
-			rel = path
+			t.Fatalf("read %s: %v", rel, err)
 		}
 		visit(filepath.ToSlash(rel), path, raw)
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("walk the repository: %v", err)
 	}
 }
 
-// skipDir keeps the walk off what is not source and is large. `poc` is the other
-// module's tree; `.kilo` holds Agent Manager worktrees, which are other checkouts
-// of this same repository and would otherwise be scanned once per worktree.
-//
-// This comment used to say `poc` "has its own gate". It does not: there is no
-// equivalent ledger or scan under `poc/active-monitoring`, and the one U+FFFD the
-// other module carried was repaired with nothing checking it either way. Nothing
-// here walks that tree, so the honest position is that it is uncovered, not that
-// it is covered elsewhere.
-//
-// A virtualenv is skipped by prefix rather than by exact name. The list used to
-// name `.venv` and nothing else, and this machine's environment is `.venv-poc`,
-// so six third-party Python files inside an untracked directory were read as
-// repository source and reported as ledger debt. Third-party bytes that were
-// never committed are not this repository's debt, and the alternative — adding
-// them to `replacementCharSites` — would record somebody else's files as a
-// decision this repository made.
-func skipDir(name string) bool {
-	switch {
-	case name == ".git" || name == ".kilo" || name == "node_modules",
-		name == "__pycache__" || name == "poc" || name == "graphify-out",
-		name == "coverage":
-		return true
-	case strings.HasPrefix(name, ".venv"):
-		return true
+// repositoryTextFiles is the list of text files git knows about, filtered to
+// the extensions where a stray byte changes what a reader believes.
+func repositoryTextFiles(t *testing.T) []string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "ls-files", "-z", "--cached", "--others", "--exclude-standard")
+	cmd.Dir = repoRoot
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("ask git which files the repository has: %v", err)
 	}
-	return false
+	var files []string
+	for _, name := range strings.Split(string(out), "\x00") {
+		if name == "" {
+			continue
+		}
+		if !trackedText(filepath.FromSlash(name)) {
+			continue
+		}
+		files = append(files, name)
+	}
+	if len(files) == 0 {
+		t.Fatal("git reported no text files at all, so this scan is asserting nothing")
+	}
+	return files
 }
+
+// skipDir is gone.
+//
+// It kept a filesystem walk off `poc`, `.kilo`, the virtualenv and the build
+// output, and the walk it guarded is gone: the scan asks git for the files
+// instead, and git already knows what is source.
+//
+// The `poc` exclusion was the one with a story attached. It was skipped
+// because it is the other module's tree, and this comment used to claim "it
+// has its own gate". It does not: there is no equivalent ledger or scan under
+// `poc/active-monitoring`, and the one U+FFFD the other module carried was
+// repaired with nothing checking it either way. Nothing here walks that tree,
+// so the honest position is that it is uncovered, not that it is covered
+// elsewhere -- and the position is unchanged by the walk being replaced.
+//
+// A virtualenv was skipped by prefix rather than by exact name, because this
+// machine's environment is `.venv-poc`. Third-party bytes that were never
+// committed are not this repository's debt, and the alternative -- adding them
+// to `replacementCharSites` -- would record somebody else's files as a
+// decision this repository made.
+//
+// The gate that is left is the one that matters: it scans what a reader of the
+// repository would see, and it finishes.
 
 // trackedText is the set of files where a stray byte changes what a reader believes.
 func trackedText(path string) bool {

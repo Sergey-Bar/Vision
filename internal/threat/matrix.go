@@ -51,17 +51,41 @@ type Matrix struct {
 }
 
 // DefaultMatrix returns the default severity × likelihood → action matrix.
+//
+// # The shape of the table
+//
+// The severity axis is the CLAIM: how bad it would be if the incident were
+// real. The likelihood axis is the EVIDENCE: how likely it is to be real.
+// They are two different facts about two different things, and the table is
+// over both of them.
+//
+// The legacy engine derived BOTH axes from one score with the same
+// thresholds, which made twelve of the sixteen cells unreachable and left
+// `ActionHold` in no cell at all. The calibrated engine computes the two
+// axes from different facts, so every cell is reachable.
+//
+// # What HOLD means
+//
+// HOLD is the corner where the claim is serious and the evidence here is
+// thin. There are two ways the likelihood gets to the bottom of the scale:
+// the evidence was thin, or the rule is noise AT THIS SITE and the site's
+// own base rate caps it there. In both cases the answer is the same — do not
+// spend a human on it, do not escalate it, keep it in the queue and watch
+// it.
+//
+// It is the one action that is a decision a human can flip: HOLD says "this
+// rule is noise here", and a site that disagrees can say so.
 func DefaultMatrix() *Matrix {
 	return &Matrix{
 		entries: []MatrixEntry{
 			{SeverityCritical, LikelihoodVeryHigh, ActionEscalate},
 			{SeverityCritical, LikelihoodHigh, ActionEscalate},
 			{SeverityCritical, LikelihoodMedium, ActionVerify},
-			{SeverityCritical, LikelihoodLow, ActionVerify},
+			{SeverityCritical, LikelihoodLow, ActionHold},
 			{SeverityHigh, LikelihoodVeryHigh, ActionEscalate},
 			{SeverityHigh, LikelihoodHigh, ActionVerify},
 			{SeverityHigh, LikelihoodMedium, ActionVerify},
-			{SeverityHigh, LikelihoodLow, ActionObserve},
+			{SeverityHigh, LikelihoodLow, ActionHold},
 			{SeverityMedium, LikelihoodVeryHigh, ActionVerify},
 			{SeverityMedium, LikelihoodHigh, ActionVerify},
 			{SeverityMedium, LikelihoodMedium, ActionObserve},
@@ -113,6 +137,13 @@ func scoreToLikelihood(score int) LikelihoodLevel {
 }
 
 // DecideFromScore returns the action based on a threat score.
+//
+// It is the LEGACY path: one number in, one action out, with both axes
+// derived from the same thresholds. It cannot reach `ActionHold`, because a
+// score carries no evidence axis and HOLD is the cell where the claim is
+// serious and the evidence here is thin — a claim the score cannot make.
+//
+// The calibrated engine computes the two axes separately and calls `Decide`.
 func (m *Matrix) DecideFromScore(score int) Action {
 	severity := scoreToSeverity(score)
 	likelihood := scoreToLikelihood(score)

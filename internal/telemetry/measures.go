@@ -1,4 +1,3 @@
-// Package telemetry provides live KPIs for the autonomy layer.
 package telemetry
 
 import (

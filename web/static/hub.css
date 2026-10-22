@@ -1,0 +1,222 @@
+/* ==========================================================================
+   The front door.
+
+   One accent, hairline borders, no shadows, no glow. The page is a claim and
+   three facts, so the CSS has three jobs and no fourth: set the claim, hold
+   the facts in a row, and list the five minutes.
+
+   The facts are the reason this file exists as its own thing. They are read
+   from the machine when the page loads, they name their source file, and
+   when the machine cannot answer one it says NOT RUN in those words. There
+   is no state in which a fact is a plausible-looking number.
+   ========================================================================== */
+
+.hub-body {
+  background: var(--bg);
+  color: var(--ink-1);
+  overflow: auto;
+  height: auto;
+  min-height: 100vh;
+}
+
+.hub {
+  max-width: 68rem;
+  margin: 0 auto;
+  padding: 3.5rem 2.5rem 4rem;
+}
+
+/* ---------- the claim ----------------------------------------------------- */
+
+.claim {
+  max-width: 54rem;
+  margin-bottom: 3.5rem;
+}
+
+/* The claim is the page's HEAD, and the page head has ONE scale.
+ *
+ * The console's h1 is 34 pixels with a tracking of -0.025em, and the hub's
+ * claim was 30 pixels with a tracking of -0.02em: two page heads, two sizes
+ * and two trackings, for the same word. The size is the token, so the two
+ * surfaces cannot drift apart again, and the tracking is written out because
+ * a token that carried a tracking would be a token nobody could set a
+ * different tracking with. */
+.claim-text {
+  margin: 0;
+  font-size: var(--fs-title);
+  line-height: 1.18;
+  font-weight: 500;
+  letter-spacing: -.025em;
+  color: var(--ink-1);
+}
+
+/* ---------- the three facts ----------------------------------------------- */
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: 3.5rem;
+}
+
+.facts-loading {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 1.5rem;
+  background: var(--bg-panel);
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.fact {
+  background: var(--bg-panel);
+  padding: 1.25rem 1.4rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: .55rem;
+  min-width: 0;
+}
+
+.fact-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.fact-value {
+  font-size: 19px;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -.01em;
+  color: var(--ink-1);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.fact-value.is-absent { color: var(--ink-2); }
+
+.fact-source {
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--ink-3);
+  overflow-wrap: anywhere;
+}
+
+.fact-source b { color: var(--ink-2); font-weight: 500; }
+
+/* ---------- the five minutes ---------------------------------------------- */
+
+.acts { margin-bottom: 3.5rem; }
+
+.act-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--line);
+}
+
+.act {
+  display: grid;
+  grid-template-columns: 3rem 1fr auto;
+  align-items: baseline;
+  gap: 1.25rem;
+  padding: 1.1rem .25rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.act-no {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.act-body {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+  min-width: 0;
+}
+
+.act-title {
+  display: block;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -.005em;
+  color: var(--ink-1);
+}
+
+.act-body:hover .act-title { color: var(--accent-strong); }
+
+.act-text {
+  display: block;
+  margin-top: 3px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink-2);
+  max-width: 46rem;
+}
+
+.act-time {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.act-here .act-title { color: var(--ink-2); }
+
+/* ---------- the foot -------------------------------------------------------- */
+
+.hub-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.foot-line {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.foot-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+}
+
+.foot-links a {
+  color: var(--ink-2);
+  text-decoration: none;
+  font-size: 12px;
+  border-bottom: 1px solid transparent;
+  transition: color var(--fast) ease, border-color var(--fast) ease;
+}
+
+.foot-links a:hover {
+  color: var(--accent-strong);
+  border-bottom-color: var(--accent-strong);
+}
+
+/* ---------- narrow screens -------------------------------------------------- */
+
+@media (max-width: 640px) {
+  .hub { padding: 3rem 1.25rem 3rem; }
+  .claim-text { font-size: 23px; }
+  .act { grid-template-columns: 2.25rem 1fr; }
+  .act-time { grid-column: 2; }
+}

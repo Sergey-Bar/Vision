@@ -42,6 +42,7 @@ set to navigate. Every document states what it decides and what it defers to.
 | Document | What it decides |
 |---|---|
 | [`milestones/m1-trust-spine-execution-plan.md`](milestones/m1-trust-spine-execution-plan.md) | The plan running right now: workstreams, 65 task IDs, a 26-week calendar with the 40% tax weeks marked, the critical path with float, M1 risks, and the exit gate as a signed checklist with the artefact each line requires. |
+| [`milestones/m2-ai-vms-execution-plan.md`](milestones/m2-ai-vms-execution-plan.md) | M2 after the 2026-10-21 strategy change: the ten locked decisions, the fifteen root fixes and the gate that proves each, the target architecture and the record path specified line by line, the ten phases with their exit gates, the sixteen new gates, the commercial spine, and the eight risks the programme adds. |
 
 ## Engineering tracks
 

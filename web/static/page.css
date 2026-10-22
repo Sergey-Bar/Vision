@@ -1,0 +1,990 @@
+/* ==========================================================================
+   The showcase's shared page chrome.
+
+   This file exists because it was missing.
+
+   Nine of the eleven pages of the demo used a vocabulary of class names -
+   .nav, .wrap, .card, .tbl, .page-head, .foot, .bottom-tabs, .panel, .tabs -
+   that NO stylesheet in this repository defined. Every one of them rendered
+   as an unstyled document: the census, the page whose grades are the whole
+   argument, was a wall of Times New Roman with blue underlined links.
+
+   The pages were written; the stylesheet they were written against was not.
+   That is the same class of defect as the dead route table and the chips that
+   rendered grey: something that reads as "the demo works" until a human
+   looks at the screen.
+
+   So this file defines the vocabulary the pages actually use, out of the
+   tokens in app.css. One accent. Hairline borders. No shadows.
+
+   The pages it styles are the demo; the console has its own.
+   ========================================================================== */
+
+/* ---------- the top nav -----------------------------------------------------
+   It is the console's top bar, in the same place and the same height, with
+   the same mark and the same wordmark.
+   
+   The showcase and the console are two surfaces of ONE product, and the demo
+   is the surface a judge lands on. If the two had different chrome, the
+   console would look like a different product with a different name, and
+   the claim that they are the same system would be a claim the pixels
+   contradict. */
+
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 0 28px;
+  height: 56px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.nav .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  color: var(--ink-1);
+  flex: none;
+}
+
+.nav .brand .mark {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  color: var(--accent);
+}
+
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+  min-width: 0;
+}
+
+.brand-name {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: .16em;
+}
+
+.brand-statement {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.nav .links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  margin-left: auto;
+}
+
+.nav .links a {
+  color: var(--ink-2);
+  text-decoration: none;
+  font-size: 12.5px;
+  padding: 4px 0;
+  border-bottom: 1px solid transparent;
+  transition: color var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out);
+}
+
+.nav .links a:hover {
+  color: var(--ink-1);
+}
+
+.nav .links a[aria-current="page"] {
+  color: var(--ink-1);
+  border-bottom-color: var(--accent);
+}
+
+/* ---------- the in-page jump -----------------------------------------------
+   The replacement for a row of tabs.
+
+   A tab hides the other answers; a link moves the eye to one that is already
+   on the page. The operations page has three questions, and all three
+   answers are visible at once. */
+
+.jump {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 4px;
+  margin-bottom: 24px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel);
+  width: fit-content;
+}
+
+.jump a {
+  padding: 7px 14px;
+  border-radius: var(--radius);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-2);
+  text-decoration: none;
+  transition: color var(--dur-1) var(--ease-out), background-color var(--dur-1) var(--ease-out);
+}
+
+.jump a:hover {
+  color: var(--ink-1);
+  background: var(--bg-elevated);
+}
+
+.jump-target {
+  scroll-margin-top: 76px;
+}
+
+.jump-target:focus {
+  outline: none;
+}
+
+/* ---------- the column -------------------------------------------------------- */
+
+.wrap {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 44px 28px 96px;
+}
+
+/* ---------- the page head ------------------------------------------------------ */
+
+.page-head {
+  margin-bottom: 30px;
+  max-width: 82ch;
+}
+
+.page-head h1 {
+  margin: 0 0 12px;
+  font-size: 32px;
+  line-height: 1.16;
+  font-weight: 600;
+  letter-spacing: -.02em;
+}
+
+.page-head p {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.65;
+  color: var(--ink-2);
+}
+
+.page-head b { color: var(--ink-1); font-weight: 600; }
+
+/* ---------- cards ---------------------------------------------------------------- */
+
+.card {
+  background: var(--bg-panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 20px 22px;
+  margin-bottom: 18px;
+  min-width: 0;
+}
+
+.card h2 {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -.005em;
+}
+
+.card h3 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.card > p.sub { margin: 0 0 14px; }
+
+/* ---------- tables ---------------------------------------------------------------- */
+
+.tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.tbl th {
+  text-align: left;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  padding: 0 12px 9px 0;
+  border-bottom: 1px solid var(--line-strong);
+  vertical-align: bottom;
+}
+
+.tbl td {
+  padding: 11px 12px 11px 0;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+  color: var(--ink-2);
+}
+
+.tbl tr:last-child td { border-bottom: none; }
+.tbl td b { color: var(--ink-1); font-weight: 600; }
+.tbl td.num { font-variant-numeric: tabular-nums; color: var(--ink-1); white-space: nowrap; }
+
+.tbl code,
+.card code {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--accent-ink);
+}
+
+/* The census table's columns are sized on purpose.
+ *
+ * The automatic layout gave the narrowest column to the longest text - the
+ * capability, which is a sentence - and wrapped it into thirty lines while
+ * the grade chip, which is four characters, sat in a wide one. The first
+ * column is a sentence, the second is a command, the third is a path, the
+ * fourth is a link and the fifth is a chip. */
+#census-table { table-layout: fixed; }
+
+#census-table th:nth-child(1), #census-table td:nth-child(1) { width: 34%; }
+#census-table th:nth-child(2), #census-table td:nth-child(2) { width: 21%; }
+#census-table th:nth-child(3), #census-table td:nth-child(3) { width: 21%; }
+#census-table th:nth-child(4), #census-table td:nth-child(4) { width: 10%; }
+#census-table th:nth-child(5), #census-table td:nth-child(5) { width: 14%; }
+
+/* ---------- type helpers ----------------------------------------------------------- */
+
+.mono {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-1);
+  background: rgb(255 255 255 / 4%);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 1px 5px;
+}
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.lead {
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--ink-2);
+  max-width: 76ch;
+}
+
+.why {
+  display: block;
+  margin-top: 5px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--ink-3);
+  white-space: normal;
+}
+
+.sub {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ink-2);
+}
+
+.foot {
+  margin-top: 30px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--ink-2);
+  max-width: 92ch;
+}
+
+.foot b { color: var(--ink-1); font-weight: 600; }
+
+/* ---------- sections ------------------------------------------------------------------ */
+
+.split {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 18px;
+  align-items: start;
+}
+
+.split > .card { margin-bottom: 0; }
+
+.section-title {
+  margin: 34px 0 14px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+/* ---------- the incident picker (the pipeline page) ------------------------------------- */
+
+.pick {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.pick button {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  text-align: left;
+  padding: 11px 13px;
+  background: var(--bg-elevated);
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  transition: background var(--fast) ease;
+}
+
+.pick button:hover { background: var(--bg-hover); }
+
+.pick button[aria-current="true"] {
+  background: var(--bg-hover);
+  box-shadow: inset 2px 0 0 var(--accent-strong);
+}
+
+.pick .t {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-1);
+}
+
+.pick .d {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+/* ---------- the lab tiles ---------------------------------------------------------------- */
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(272px, 1fr));
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.tile {
+  background: var(--bg-panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tile .glyph {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tile .glyph svg {
+  width: 16px;
+  height: 16px;
+  stroke: var(--accent-strong);
+  fill: none;
+  stroke-width: 1.7;
+}
+
+.tile p {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink-2);
+  flex: 1;
+}
+
+.tile .row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+}
+
+.tile .go {
+  color: var(--ink-3);
+  font-size: 11px;
+}
+
+/* ---------- the ask page --------------------------------------------------------------------- */
+
+.ask-wrap { max-width: 940px; }
+
+.hero { margin-bottom: 30px; }
+
+.ask-hero { margin-bottom: 34px; }
+
+.hero h1 {
+  margin: 10px 0 12px;
+  font-size: 30px;
+  line-height: 1.18;
+  font-weight: 600;
+  letter-spacing: -.02em;
+  max-width: 26ch;
+}
+
+.ask-card { padding: 20px 22px; }
+
+.ask-form {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.ask-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  color: var(--ink-1);
+  font: inherit;
+  font-size: 14px;
+  padding: 11px 13px;
+  transition: border-color var(--fast) ease;
+}
+
+.ask-input:focus {
+  outline: none;
+  border-color: var(--accent-strong);
+}
+
+.ask-examples { font-size: 12px; line-height: 2.1; }
+
+.ask-examples span[data-q] {
+  cursor: pointer;
+  color: var(--accent-ink);
+  border-bottom: 1px dotted var(--accent-dim);
+}
+
+.ask-examples span[data-q]:hover { color: var(--accent-strong); }
+
+.ask-status {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-3);
+  min-height: 18px;
+}
+
+.ask-result {
+  margin-top: 18px;
+}
+
+/* ---------- the console-shaped pages (operations, and the dev page) ------------------------- */
+
+.shell {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 26px 28px 96px;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding-bottom: 18px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.topbar .mark { width: 30px; height: 30px; flex: none; }
+
+.title {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: .16em;
+  line-height: 1.2;
+}
+
+.subtitle {
+  margin-top: 2px;
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+
+.tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 22px;
+  overflow-x: auto;
+}
+
+.tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 13px;
+  padding: 10px 14px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color var(--fast) ease, border-color var(--fast) ease;
+}
+
+.tab:hover { color: var(--ink-1); }
+
+.tab[aria-selected="true"] {
+  color: var(--ink-1);
+  border-bottom-color: var(--accent-strong);
+}
+
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+.panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 20px 22px;
+  margin-bottom: 16px;
+}
+
+.panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 10px;
+}
+
+.panel-head h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.hint {
+  margin: 0 0 16px;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--ink-2);
+  max-width: 86ch;
+}
+
+.hint code,
+.legend code {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--accent-ink);
+}
+
+.row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.grow { flex: 1; min-width: 200px; }
+
+.field {
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  color: var(--ink-1);
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 10px;
+  width: 100%;
+}
+
+/* A native select on Windows draws its own light button face, and a light
+   rectangle in the middle of a dark page is the sort of thing a judge
+   notices before they read a word. The control is drawn here instead, and
+   the arrow is the muted ink rather than the system one. */
+select.field {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 30px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6' fill='none' stroke='%237a8494' stroke-width='1.5' stroke-linecap='round'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 10px 6px;
+  cursor: pointer;
+}
+
+.field:focus { outline: none; border-color: var(--accent); }
+
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  font-size: 12px;
+  color: var(--ink-2);
+  margin-bottom: 12px;
+}
+
+.key {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 14px 0 4px;
+}
+
+/* ---------- the dev page -------------------------------------------------------------------- */
+
+.output {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.65;
+  color: var(--ink-2);
+  max-height: 420px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.json-key { color: var(--accent-ink); }
+.json-string { color: var(--ok-ink); }
+.json-number { color: var(--warn-ink); }
+.json-bool { color: #a78bfa; }
+
+.loading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 12px;
+  color: var(--ink-2);
+  margin: 12px 0;
+}
+
+.spinner {
+  width: 13px;
+  height: 13px;
+  border: 2px solid var(--line-strong);
+  border-top-color: var(--accent-strong);
+  border-radius: 50%;
+  animation: spin .8s linear infinite;
+  flex: none;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin-bottom: 16px;
+}
+
+.radio-option {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.status-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-elevated);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
+.status-badge.status-ok {
+  color: var(--ok-ink);
+  border-color: rgb(74 222 128 / 35%);
+  background: rgb(34 197 94 / 12%);
+}
+
+/* ---------- the bottom tabs (narrow screens only) --------------------------------------------- */
+
+.bottom-tabs {
+  display: none;
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--line);
+  z-index: 30;
+}
+
+.bottom-tabs a {
+  flex: 1;
+  text-align: center;
+  padding: 11px 0;
+  text-decoration: none;
+  color: var(--ink-3);
+  font-size: 11px;
+}
+
+.bottom-tabs a[aria-current="page"] { color: var(--accent-strong); }
+
+/* ---------- the gate's own key/value pairs -------------------------------------- */
+
+.kv {
+  display: grid;
+  grid-template-columns: 108px 1fr;
+  gap: 5px 16px;
+  margin: 14px 0 18px;
+  font-size: 12.5px;
+}
+
+.kv dt {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  padding-top: 2px;
+}
+
+.kv dd {
+  margin: 0;
+  color: var(--ink-1);
+  line-height: 1.55;
+}
+
+/* ---------- the KPI grid (the operations page) ------------------------------------- */
+
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+
+.kpi {
+  background: var(--bg-elevated);
+  padding: 14px 16px;
+}
+
+.kpi .label {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.kpi .value {
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -.015em;
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-1);
+}
+
+.kpi .sub {
+  font-size: 11.5px;
+  color: var(--ink-3);
+  margin-top: 3px;
+  line-height: 1.5;
+}
+
+/* ---------- a share, drawn as a bar ------------------------------------------------ */
+
+.track {
+  position: relative;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  overflow: hidden;
+  min-width: 80px;
+}
+
+.track .fill {
+  height: 100%;
+  background: var(--accent-strong);
+}
+
+.site {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-1);
+  white-space: nowrap;
+}
+
+/* ---------- the head of a command's output ------------------------------------------ */
+
+.out-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.out-head code {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-1);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 3px 8px;
+}
+
+/* ---------- the classes that replaced the inline styles ---------------------
+   The console server's Content Security Policy has `style-src 'self'` and no
+   `unsafe-inline`, and an inline style ATTRIBUTE is blocked by it: the
+   browser drops the declaration and the page comes out wrong. Seventeen
+   inline styles became seventeen classes.
+
+   The alternative was `unsafe-inline`, which lets any injected markup style
+   the page, and a policy with that hole in it is a policy nobody has to
+   think about twice. */
+
+.measure { max-width: 78ch; }
+.mb-3 { margin: 0 0 12px; }
+.mb-5 { margin-bottom: 20px; }
+.mt-3 { margin-top: 14px; }
+.mt-5 { margin-top: 20px; }
+.grow { flex: 1; }
+.push-right { margin-left: auto; display: flex; gap: 8px; }
+.row-wrap { display: flex; gap: 12px; flex-wrap: wrap; }
+.dev-note { color: var(--ink-2); font-size: 13px; margin-bottom: 16px; }
+.accent-input { accent-color: var(--accent); }
+
+/* The live page's own controls, moved out of the markup with the rest. */
+.chat-input {
+  flex: 1;
+  max-width: 420px;
+  background: rgb(0 0 0 / 35%);
+  border: 1px solid var(--line);
+  color: var(--ink-1);
+  border-radius: var(--radius-lg);
+  padding: 10px 14px;
+  font: inherit;
+  font-size: 14px;
+  outline: none;
+}
+
+.search-input {
+  max-width: 260px;
+  background: rgb(0 0 0 / 35%);
+  border: 1px solid var(--line);
+  color: var(--ink-1);
+  border-radius: var(--radius-lg);
+  padding: 10px 14px;
+  font: inherit;
+  font-size: 14px;
+  outline: none;
+}
+
+.hud-meta {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: rgb(255 255 255 / 70%);
+}
+
+.radio-label {
+  margin: 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.radio-label-tight {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.chat-answer {
+  min-height: 58px;
+  white-space: pre-wrap;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--ink-2);
+  border-top: 1px solid var(--line);
+  margin-top: 12px;
+  padding-top: 10px;
+}
+
+/* ---------- narrow screens --------------------------------------------------------------------- */
+
+@media (max-width: 760px) {
+  .nav { padding: 0 16px; gap: 14px; overflow-x: auto; }
+  .nav .links { gap: 14px; }
+  .wrap { padding: 30px 16px 96px; }
+  .shell { padding: 20px 16px 96px; }
+  .page-head h1 { font-size: 25px; }
+  .hero h1 { font-size: 24px; }
+  .claim-text { font-size: 23px; }
+  .bottom-tabs { display: flex; }
+}
+
+/* ---------- the classes the scripts render -----------------------------------
+   The operations page builds its rows in JavaScript, and a style attribute
+   in a string is an inline style: the Content Security Policy drops it. The
+   measurement that is left - the width of a bar - is set through the CSSOM
+   after the rows are in the DOM, which the policy does not govern. */
+
+.section-label { margin: 22px 0 8px; }
+.kpi-spaced { margin-top: 16px; }
+.kpi-gap { margin-bottom: 18px; }
+.chief-read { font-size: 22px; }

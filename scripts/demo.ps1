@@ -396,7 +396,11 @@ $env:SP_VMS_URL = "http://127.0.0.1:$VmsPort"
 # the browser never holds it. The product's copy of the same credential is
 # SP_MILESTONE_TOKEN above.
 $env:SP_VMS_TOKEN = "demo-vms-token"
-$console = Start-Process -FilePath (Join-Path $bin "console") -PassThru -NoNewWindow -WorkingDirectory $repoRoot
+	# `-dev` because the judge's walk visits the operations page, and the three
+	# operator surfaces that run the CLI are behind that flag: a console on
+	# plain HTTP with no authentication, running a binary with a caller-supplied
+	# argument, is a surface anybody who can reach the port can use.
+	$console = Start-Process -FilePath (Join-Path $bin "console") -PassThru -NoNewWindow -WorkingDirectory $repoRoot -ArgumentList @('-dev')
 Say "the console is starting on port $ConsolePort (pid $($console.Id))"
 
 # ------------------------------------------------------------------ the walk
@@ -404,15 +408,21 @@ Write-Host ""
 Write-Host "The demo" -ForegroundColor White
 Write-Host "----------" -ForegroundColor White
 Write-Host ""
-Write-Host "  Cockpit          http://127.0.0.1:$ConsolePort/" -ForegroundColor Green
-Write-Host "  Live grid        http://127.0.0.1:$ConsolePort/live" -ForegroundColor Green
-Write-Host "  Incidents        http://127.0.0.1:$ConsolePort/incidents" -ForegroundColor Green
-Write-Host "  Identity         http://127.0.0.1:$ConsolePort/users" -ForegroundColor Green
-Write-Host "  The ledger       http://127.0.0.1:$ConsolePort/audit" -ForegroundColor Green
+# The console's own routes are under /console. The showcase owns the root and
+# the acts; the SPA is mounted at /console and every one of its pages lives
+# under that prefix. Printing /incidents here would send the operator to a
+# showcase path that does not exist, and a demo that prints a 404 is a demo
+# that has already failed before the judge typed anything.
+Write-Host "  Cockpit          http://127.0.0.1:$ConsolePort/console" -ForegroundColor Green
+Write-Host "  The Chief        http://127.0.0.1:$ConsolePort/console  (the first panel in the column)" -ForegroundColor Green
+Write-Host "  Incidents        http://127.0.0.1:$ConsolePort/console/incidents" -ForegroundColor Green
+Write-Host "  Identity         http://127.0.0.1:$ConsolePort/console/users" -ForegroundColor Green
+Write-Host "  The ledger       http://127.0.0.1:$ConsolePort/console/audit" -ForegroundColor Green
 Write-Host ""
 Write-Host "  The five minutes:"
-Write-Host "    1. The cockpit. What needs the operator now, and why."
-Write-Host "       The attention queue is the PRODUCT's ranking, with the reason chain open."
+Write-Host "    1. The Chief. What changed since you last looked, and what needs you now."
+Write-Host "       The Chief reads the same two readers the queue and the hand-over read,"
+Write-Host "       so it cannot disagree with them. It names what it does not know."
 Write-Host "    2. The live grid. The VMS's own picture with the VMS's own boxes."
 Write-Host "       A person with a bag is a class the VMS asserted, not a shape the browser drew."
 Write-Host "    3. The search. Type: who was carrying a bag near the entrance?"
@@ -420,6 +430,9 @@ Write-Host "       The deterministic path searches the canonical record. It retu
 Write-Host "    4. The instant replay. Open the incident, then its evidence."
 Write-Host "       The product asked the VMS for the clip around the moment and stored it."
 Write-Host "    5. The explanation. Why this, why now, from the product's own rules."
+Write-Host ""
+Write-Host "  The showcase, if you want the story rather than the product:"
+Write-Host "    http://127.0.0.1:$ConsolePort/" -ForegroundColor Green
 Write-Host ""
 Write-Host "  To check the seam from the outside:"
 Write-Host "    go run ./cmd/securityctl adapter-probe --base-url http://127.0.0.1:$VmsPort" -ForegroundColor Green

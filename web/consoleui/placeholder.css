@@ -1,0 +1,68 @@
+/* The console's placeholder page.
+ *
+ * It is committed, so it cannot be a build artefact, and it is served by the
+ * same binary that serves the real bundle. It therefore has to be plain CSS
+ * with no external reference of any kind: the console server's Content
+ * Security Policy allows 'self' and nothing else.
+ */
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background: #0a0c0f;
+  color: #e8ecf1;
+  font: 15px/1.6 "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+main {
+  max-width: 46rem;
+  padding: 3rem;
+}
+
+.eyebrow {
+  margin: 0 0 0.75rem;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #4a5568;
+}
+
+h1 {
+  margin: 0 0 1rem;
+  font-size: 30px;
+  line-height: 1.2;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.lede {
+  margin: 0 0 1.5rem;
+  color: #8b95a5;
+}
+
+pre {
+  margin: 0 0 1.5rem;
+  padding: 1rem 1.25rem;
+  background: #11151b;
+  border: 1px solid #1e2530;
+  border-radius: 6px;
+  color: #e8ecf1;
+  font: 14px/1.6 "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+code {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: #8b95a5;
+}
+
+.foot {
+  margin: 0 0 0.75rem;
+  font-size: 14px;
+  color: #4a5568;
+}
+
+a {
+  color: #4c9be8;
+}

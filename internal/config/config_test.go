@@ -325,6 +325,49 @@ func TestUnsetAIEndpointIsSupportedAndNotInvented(t *testing.T) {
 	}
 }
 
+// TestTheThreatEngineDefaultsToTheBehaviourItReplaces
+//
+// The threat engine is `legacy` unless the configuration says otherwise.
+//
+// The default is the old behaviour because a change to what an operator sees
+// is a decision a human signs (docs/decisions.md D-15), and a flag that
+// defaulted to the new behaviour would make the decision by default.
+func TestTheThreatEngineDefaultsToTheBehaviourItReplaces(t *testing.T) {
+	c := mustLoad(t, valid())
+	if c.ThreatEngine != config.ThreatEngineLegacy {
+		t.Errorf("the threat engine defaulted to %q, want %q: the default is the behaviour "+
+			"the product shipped with", c.ThreatEngine, config.ThreatEngineLegacy)
+	}
+	if c.ThreatHalfLife != config.DefaultThreatHalfLife {
+		t.Errorf("the queue's half-life defaulted to %v, want %v", c.ThreatHalfLife, config.DefaultThreatHalfLife)
+	}
+}
+
+// TestAnUnknownThreatEngineIsRefused
+//
+// The vocabulary is closed.
+//
+// A typo in an environment file must not silently select a third behaviour:
+// an engine nobody has read the code of is an engine nobody knows what it
+// does.
+func TestAnUnknownThreatEngineIsRefused(t *testing.T) {
+	pairs := valid()
+	pairs["SP_THREAT_ENGINE"] = "calibratd"
+	_, err := load(t, pairs)
+	if err == nil {
+		t.Fatal("a misspelled SP_THREAT_ENGINE was accepted")
+	}
+	if !strings.Contains(err.Error(), "SP_THREAT_ENGINE") {
+		t.Errorf("the refusal does not name the variable: %v", err)
+	}
+
+	pairs["SP_THREAT_ENGINE"] = config.ThreatEngineCalibrated
+	c := mustLoad(t, pairs)
+	if c.ThreatEngine != config.ThreatEngineCalibrated {
+		t.Errorf("the threat engine is %q, want %q", c.ThreatEngine, config.ThreatEngineCalibrated)
+	}
+}
+
 func TestDefaultsAreApplied(t *testing.T) {
 	c := mustLoad(t, valid())
 
@@ -339,6 +382,18 @@ func TestDefaultsAreApplied(t *testing.T) {
 		{"lease duration", c.LeaseDuration, config.DefaultLeaseDuration},
 		{"AI deadline", c.AIDeadline, config.DefaultAIDeadline},
 		{"log level", c.LogLevel, config.DefaultLogLevel},
+		// The rollup is on by default, because an install with it off has an
+		// analytics report that says "not measured" and an install with it on
+		// has one that says a number. Both are honest; the second is useful,
+		// and the default has to be the useful one.
+		{"rollup interval", c.RollupInterval, config.DefaultRollupInterval},
+		// The report interval, the event retention and the partition sweep: the
+		// three knobs the durable analytics and the retention horizon are built
+		// from, and their defaults are what an install that configured nothing
+		// gets.
+		{"report interval", c.ReportInterval, config.DefaultReportInterval},
+		{"event retention", c.EventRetention, config.DefaultEventRetention},
+		{"partition sweep interval", c.PartitionSweepInterval, config.DefaultPartitionSweepInterval},
 	} {
 		if tc.got != tc.want {
 			t.Errorf("%s defaulted to %v, want %v", tc.name, tc.got, tc.want)
@@ -410,5 +465,159 @@ func TestRedactedCarriesNoPassword(t *testing.T) {
 	rendered := c.Redacted()
 	if rendered["tenant_id"] != "tenant-local" || rendered["site_id"] != "site-1" {
 		t.Errorf("Redacted() omits the tenant and site: %v", rendered)
+	}
+}
+
+// The proxy's identity header is only believed from the proxy, and the
+// configuration is where that is said out loud.
+//
+// Three refusals and one acceptance, and each one names the variable and the
+// consequence, because a refusal that says "invalid configuration" is what
+// makes somebody stop reading them.
+func TestTheProxyIdentityHeaderIsRefusedWithoutATrustedProxy(t *testing.T) {
+	pairs := valid()
+	pairs["SP_LISTEN_ADDR"] = "127.0.0.1:8443"
+	pairs["SP_TRUST_PROXY_AUTH_HEADER"] = "X-Auth-Request-User"
+
+	// The header without the proxy it is supposed to come from.
+	_, err := load(t, pairs)
+	if err == nil {
+		t.Fatal("SP_TRUST_PROXY_AUTH_HEADER without SP_BEHIND_PROXY was accepted. The header " +
+			"would be believed from any peer, which makes it a way in")
+	}
+	for _, want := range []string{"SP_TRUST_PROXY_AUTH_HEADER", "SP_BEHIND_PROXY"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal %q does not mention %s", err, want)
+		}
+	}
+
+	// The header with the proxy but with no list of trusted peers.
+	pairs["SP_BEHIND_PROXY"] = "true"
+	_, err = load(t, pairs)
+	if err == nil {
+		t.Fatal("SP_TRUST_PROXY_AUTH_HEADER with no SP_TRUSTED_PROXY_CIDRS was accepted")
+	}
+	for _, want := range []string{"SP_TRUSTED_PROXY_CIDRS"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal %q does not mention %s", err, want)
+		}
+	}
+
+	// All three, and the configuration is accepted.
+	pairs["SP_TRUSTED_PROXY_CIDRS"] = "10.0.0.0/8"
+	c, err := load(t, pairs)
+	if err != nil {
+		t.Fatalf("the proxy posture was refused: %v", err)
+	}
+	if c.TrustProxyAuthHeader != "X-Auth-Request-User" {
+		t.Errorf("the identity header is %q, want the configured one", c.TrustProxyAuthHeader)
+	}
+	if !c.BehindProxy {
+		t.Error("SP_BEHIND_PROXY did not read as true")
+	}
+}
+
+// A console on a routable address with no proxy serves every operator who can
+// reach the port as the SAME principal, and the audit ledger cannot tell them
+// apart. That is refused at startup rather than warned about.
+func TestAConsoleOnARoutableAddressNeedsAProxy(t *testing.T) {
+	pairs := valid()
+	pairs["SP_LISTEN_ADDR"] = "0.0.0.0:8443"
+
+	_, err := load(t, pairs)
+	if err == nil {
+		t.Fatal("a console bound to 0.0.0.0 with no authenticating proxy was accepted")
+	}
+	for _, want := range []string{"SP_LISTEN_ADDR", "SP_TRUST_PROXY_AUTH_HEADER"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal %q does not mention %s", err, want)
+		}
+	}
+
+	// On loopback it is the appliance the product shipped with.
+	pairs["SP_LISTEN_ADDR"] = "127.0.0.1:8443"
+	if _, err := load(t, pairs); err != nil {
+		t.Fatalf("a console on loopback with no proxy was refused: %v", err)
+	}
+}
+
+// The identity header is configuration, and the startup log prints the
+// configuration. A header name is not a secret, and a reader of the log who
+// cannot see it cannot tell whether the proxy is authenticating at all.
+func TestTheIdentityHeaderIsInTheRedactedConfiguration(t *testing.T) {
+	pairs := valid()
+	pairs["SP_BEHIND_PROXY"] = "true"
+	pairs["SP_TRUSTED_PROXY_CIDRS"] = "10.0.0.0/8"
+	pairs["SP_TRUST_PROXY_AUTH_HEADER"] = "X-Auth-Request-User"
+	c := mustLoad(t, pairs)
+
+	rendered := c.Redacted()
+	if rendered["trust_proxy_auth_header"] != "X-Auth-Request-User" {
+		t.Errorf("Redacted() does not carry the identity header: %v", rendered)
+	}
+}
+
+// The startup log has to say whether the AI plane is configured and whether the
+// audit ledger is being sealed, and the "unset" wording is what a reader sees
+// on an install that has neither.
+func TestTheRedactedConfigurationNamesWhatIsSet(t *testing.T) {
+	pairs := valid()
+	pairs["SP_AI_ENDPOINT"] = "http://127.0.0.1:8800"
+	pairs["SP_CHECKPOINT_DIR"] = "/var/lib/security-platform/checkpoints"
+	c := mustLoad(t, pairs)
+
+	rendered := c.Redacted()
+	if rendered["ai_endpoint"] != "http://127.0.0.1:8800" {
+		t.Errorf("the redacted AI endpoint is %v, want the configured one", rendered["ai_endpoint"])
+	}
+	if rendered["checkpoints"] != "/var/lib/security-platform/checkpoints" {
+		t.Errorf("the redacted checkpoint directory is %v, want the configured one",
+			rendered["checkpoints"])
+	}
+
+	// And the unset wording. "unset" and a directory that looks like a path
+	// are different answers, and the second one is a lie.
+	unset := mustLoad(t, valid()).Redacted()
+	if s, ok := unset["ai_endpoint"].(string); !ok || !strings.Contains(s, "unset") {
+		t.Errorf("the redacted AI endpoint of an unconfigured install is %v, want the word unset",
+			unset["ai_endpoint"])
+	}
+	if s, ok := unset["checkpoints"].(string); !ok || !strings.Contains(s, "unset") {
+		t.Errorf("the redacted checkpoint directory of an unconfigured install is %v, want the word unset",
+			unset["checkpoints"])
+	}
+}
+
+// The retention horizon and the sweep interval are refusals, not warnings.
+//
+// A negative retention is a horizon in the FUTURE, and the sweep drops
+// everything before it, which is everything.
+func TestTheRetentionAndTheSweepIntervalAreRefusedWhenTheyAreNonsense(t *testing.T) {
+	for _, tc := range []struct {
+		key  string
+		want string
+	}{
+		{"SP_EVENT_RETENTION", "SP_EVENT_RETENTION"},
+		{"SP_PARTITION_SWEEP_INTERVAL", "SP_PARTITION_SWEEP_INTERVAL"},
+		{"SP_REPORT_INTERVAL", "SP_REPORT_INTERVAL"},
+	} {
+		t.Run(tc.key, func(t *testing.T) {
+			pairs := valid()
+			pairs[tc.key] = "-1h"
+			_, err := load(t, pairs)
+			if err == nil {
+				t.Fatalf("%s=-1h was accepted", tc.key)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("the refusal %q does not mention %s", err, tc.want)
+			}
+		})
+	}
+
+	// And a value that is not a duration at all.
+	pairs := valid()
+	pairs["SP_EVENT_RETENTION"] = "three months"
+	if _, err := load(t, pairs); err == nil {
+		t.Error("SP_EVENT_RETENTION=three months was accepted")
 	}
 }

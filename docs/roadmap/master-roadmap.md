@@ -25,13 +25,25 @@ on. Each milestone has:
 | # | Milestone | Window | Exit gate summary | Commercial state | Moat |
 |---|---|---|---|---|---|
 | M1 | Trust Spine | 2026-09-28 → 2027-03-31 | One real XProtect site, one real AI-assisted incident class, end to end, replayable, audited | Design partner, technical pilot | Trust |
-| M2 | AI Investigator | 2027-04-01 → 2027-09-30 | Operators investigate supported incident classes measurably faster than with the VMS alone | Paid pilot | Investigation |
+| M2 | AI VMS | 2027-04-01 → 2027-09-30 | The camera path is ours and provable: a recorded continuous run on real devices, every segment's chain verifying, `recording_continuity_gap_seconds` published, and the M1 incident class plus two more investigated measurably faster than with the VMS alone | Paid pilot | Recording + Investigation |
 | M3 | AI Operator Copilot | 2027-10-01 → 2028-03-31 | Incident classes resolved under playbook without operator action, at a quality that does not regress | **First production GA on 2028-03-31** | Workflow |
 | M4 | Universal Security Layer | 2028-04-01 → 2028-12-22 | A second full VMS adapter works with zero changes outside the adapter; Adapter SDK v1 is public | Platform expansion; first OEM talks | Integration |
 | M5 | Enterprise Command Platform | 2029-01-04 → 2029-09-28 | Multi-site, HA, OIDC/SCIM, and a site that keeps operating with the control plane disconnected | **Enterprise GA** | Enterprise |
 | M6 | Site Intelligence | 2029-10-01 → 2030-06-28 | Baselines, site memory and drift detection live; a proposed rule shows a historical impact diff before approval | Intelligence premium tier | Context |
 | M7 | Autonomous Security Operations | 2030-07-01 → 2031-06-30 | A4 sites run routine operations on policy; the exception queue is the operator's primary surface | Autonomous operations | Autonomy |
 | M8 | Physical Security OS | 2031-07-01 → 2032-12-31 | Third-party adapters, rule packs and model bundles install from a signed marketplace | Platform / marketplace | Ecosystem |
+
+> **M2 changed on 2026-10-21 and the table says so.** M2 was "AI Investigator"
+> and its exit gate was a speed comparison against the customer's own VMS. It
+> is now "AI VMS", and the gate is the union of that comparison and the
+> recording promise: the camera path is ours, the recording is provable, and
+> the investigation is faster than the incumbent's. The reason is in
+> [`strategy-and-north-star.md`](strategy-and-north-star.md) §1 and §9, and the
+> execution plan is
+> [`milestones/m2-ai-vms-execution-plan.md`](milestones/m2-ai-vms-execution-plan.md).
+> M2's *dates* did not move, which is a claim about a plan rather than about a
+> build, and the first thing the M2 review must do is check it.
+
 
 Windows are given in full dates because the capacity law in
 [the strategy document](strategy-and-north-star.md) §6 makes a quarter a real
@@ -47,8 +59,8 @@ deliberate holiday buffer and carries no work.
 installation, with one AI-assisted operator workflow that a real operator
 actually prefers to the VMS workflow.
 
-State today: the deterministic spine is built and green — 103 Go packages,
-28 forward-only migrations, 14 contracts, a hash-chained audit
+State today: the deterministic spine is built and green — 118 Go packages,
+33 forward-only migrations, 14 contracts, a hash-chained audit
 ledger, a fixture-driven replay path, a content-addressed evidence store, a
 rule engine with no shell, SQL, network, dynamic code or regex in the language,
 an evaluation harness for AI observation profiles, a working
@@ -151,10 +163,55 @@ no self-serve.
 is the asset that makes every later milestone sellable, and it is the reason a
 cheaper but unprovable competitor loses.
 
-### M2 — AI Investigator · 2027-04-01 → 2027-09-30
+### M2 — AI VMS · 2027-04-01 → 2027-09-30
 
-**Mission.** Move from "AI helps verify one alarm" to "AI investigates security
-incidents."
+**Mission.** Own the camera path and prove it, then investigate security
+incidents faster than the VMS alone.
+
+**Re-baselined 2026-10-21. M2 was "AI Investigator"; it is now "AI VMS".** The
+strategy change in [`strategy-and-north-star.md`](strategy-and-north-star.md)
+§1 and §9 turns the camera path from a thing we read into a thing we own, and
+M2 is where that lands. The full execution plan is
+[`milestones/m2-ai-vms-execution-plan.md`](milestones/m2-ai-vms-execution-plan.md);
+this section states what changed and what it cost.
+
+**The ten phases and their gates.** Each phase ends in a gate, and a phase with
+a red gate is not done. P0, P1, P4 and P6 are independent and start
+immediately; P2 → P3 is the hard sequence; P5 needs P2 and P4; P7 needs P1 and
+P3; P8 needs P2; P9 needs P3 and P5.
+
+| Phase | Goal | Exit gate |
+|---|---|---|
+| **P0** ⟂ | Strategy and contract baseline (human-signed) | `statuscheck`, `roadmapcheck` green |
+| **P1** ⟂ | Device registry + ONVIF, capability manifest measured per device | `device-capability-manifest`, `credential-redaction` |
+| **P2** | The media plane: ingest, remux, pre-roll, segment writer, chain | `media-continuity`, `pre-roll`, `disk-full`, kill-9 at the segment write, `recorder-schema-isolated` |
+| **P3** | Index, retention, playback, export | `recording-chain`, `retention`, `export-fidelity` |
+| **P4** ⟂ | The AI plane: provider registry, routing, egress policy | `ai-egress-policy`, `ai-attribution`, `provider-parity`, `ai-regression-shadow` |
+| **P5** | Intelligence integration: camera analytics → events → rules → incidents | `securityctl acceptance` with **zero `NOT RUN`** |
+| **P6** ⟂ | The Tesla command deck | `console_honesty`, `e2e/command-deck`, `a11y` |
+| **P7** | Fleet / control plane | `fleet-config-drift`, `oidc-scim`, `control-plane-failover` |
+| **P8** ⟂ | The edge appliance | `edge-store-forward`, `edge-reconcile-no-duplicates`, `airgap-install` |
+| **P9** | Ecosystem, certification, commercial | `sdk-conformance`, `contractcheck`, `no-fork` |
+
+**The sixteen new gates and the three new fuzz targets** join the existing
+forty-one. The red-check table grows from forty-five to about sixty-one, and
+**a new entry is not counted until it has been watched going red by hand** —
+the rule that makes the table worth reading.
+
+**What M2 now costs, and what it does not.** The capacity law in the strategy
+document §6 is overridden for this programme by the founder, because P0, P1, P4
+and P6 are each a precondition for a different downstream phase and the
+external lead times — camera lab, model providers, ONVIF membership — cannot be
+serialised. The law's other two clauses survive: scope reduction is the only
+response to a slip, and no new runtime, datastore or protocol family without
+an ADR. **The media plane is a second Go binary, not a second language**, and
+it introduces exactly one new protocol family, ONVIF, which is an ADR.
+
+**The reduced-scope ladder for M2, decided in advance.** In order: the
+transcode pool (H.265 playback) is cut first, then the bounded live-stream
+egress, then the edge appliance's reconciliation, then the second device
+profile. **The recording path is never cut** — a VMS that does not record is
+not a VMS, and a cut in the media plane is a milestone that did not happen.
 
 **Re-baselined 2026-10-02, on an E1 signature.** The scope below was originally
 ~46 engineer-weeks against a capacity law of ~31 (26 weeks × 2 engineers × 60%),
@@ -210,15 +267,29 @@ already the design.
 
 **Exit gate.** The M1 incident class plus two more, with:
 
+- **The recording, proved.** A recorded continuous run on real devices, every
+  segment's per-device-day chain verifying, and
+  `recording_continuity_gap_seconds` **published** for every device — not
+  zero, *published*. A gate that requires zero gaps is a gate that is signed
+  by a site that had no power cut, and it measures the site rather than the
+  product. What the gate requires is that every gap in the measured window is
+  **known, bounded, chained and visible to the operator**.
 - Mean Time To Investigate reduced by a **statistically meaningful margin** on
   supported classes, measured per operator against their own VMS-only baseline.
   "Meaningful" is set before the trial, per class, and recorded.
 - Every search result and every summary carries resolvable evidence references.
 - A replayed incident reproduces its summary from stored facts and the stored
   observation, with no model call. A test asserts this.
+- **`securityctl acceptance` with zero `NOT RUN`.** The four criteria that
+  cannot run today — 06 (a real event produces a clip containing the cause),
+  07 (false-positive rate over a soak), 08 (a second site needs no new code),
+  10 (a vision model costs $0.15/event) — become runnable because there are
+  real cameras. A milestone whose gate has four "not runnable" clauses in it
+  is a milestone whose gate is not a gate.
 
-The gate is **unchanged**, and two of its three classes are now cheap because
-`analyticData` made them deterministic rather than modelled.
+The gate is **unchanged** in its investigation half, and two of its three
+classes are now cheap because `analyticData` made them deterministic rather
+than modelled.
 
 **Pre-declared cuts, in order, if the float is spent.** Incident summaries, then
 VLM profiles 2–10. **The evidence engine is the last thing to cut**, and that is

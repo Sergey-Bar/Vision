@@ -159,113 +159,50 @@ var InvestigatorProfileSchema = map[string]any{
 	"required": []any{"answer", "citations"},
 }
 
-// ObjectDetectionProfileSchema declares the output field set for object
-// detection: a list of detections, each with a label, bounding box, and
-// confidence.
-var ObjectDetectionProfileSchema = map[string]any{
-	"properties": map[string]any{
-		"detections": map[string]any{
-			"type": "array",
-			"items": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"label":      map[string]any{"type": "string"},
-					"confidence": map[string]any{"type": "number"},
-					"bbox": map[string]any{
-						"type":  "array",
-						"items": map[string]any{"type": "number"},
-					},
-				},
-				"required": []any{"label", "confidence", "bbox"},
-			},
-		},
-	},
-	"required": []any{"detections"},
-}
-
-// ObjectDetectionProfile is the profile ID used for object detection.
-const ObjectDetectionProfile = "object-detection/v1"
-
-// Detection is one object detected in a frame.
-type Detection struct {
-	Label      string    `json:"label"`
-	Confidence float64   `json:"confidence"`
-	BBox       []float64 `json:"bbox"`
-}
-
-// DetectObjects sends an image frame to the runtime for object detection.
+// The object-detection path is gone.
 //
-// Evidence must contain exactly one item: the image bytes with a SHA-256
-// hash. On a degraded response (model unavailable, no runtime, etc.), the
-// returned slice is nil and the Degraded field carries the reason.
-func (c *Client) DetectObjects(ctx context.Context, observationID string, evidence []Evidence) ([]Detection, *Result, error) {
-	if len(evidence) != 1 {
-		return nil, nil, errors.New("airuntime: DetectObjects requires exactly one evidence item")
-	}
-	if evidence[0].SHA256 == "" {
-		return nil, nil, errors.New("airuntime: evidence item must carry a SHA-256 hash")
-	}
-
-	result, err := c.Do(ctx, Request{
-		ObservationID: observationID,
-		ProfileID:     ObjectDetectionProfile,
-		Evidence:      evidence,
-		ProfileSchema: ObjectDetectionProfileSchema,
-	})
-	if err != nil {
-		// Do returns a degraded result on transport failure, with err set.
-		if result.Degraded {
-			return nil, &result, nil
-		}
-		return nil, &result, err
-	}
-	if result.Degraded {
-		return nil, &result, nil
-	}
-
-	raw, ok := result.Structured["detections"]
-	if !ok {
-		return nil, &result, nil
-	}
-	arr, ok := raw.([]any)
-	if !ok {
-		return nil, &result, nil
-	}
-	out := make([]Detection, 0, len(arr))
-	for _, item := range arr {
-		m, ok := item.(map[string]any)
-		if !ok {
-			continue
-		}
-		d := Detection{}
-		if label, ok := m["label"].(string); ok {
-			d.Label = label
-		}
-		if conf, ok := m["confidence"].(float64); ok {
-			d.Confidence = conf
-		}
-		if bbox, ok := m["bbox"].([]any); ok {
-			for _, v := range bbox {
-				if f, ok := v.(float64); ok {
-					d.BBox = append(d.BBox, f)
-				}
-			}
-		}
-		out = append(out, d)
-	}
-	return out, &result, nil
-}
+// It was `DetectObjects`, the `object-detection/v1` profile and the schema
+// that profile's answers were validated against. None of them had a reader:
+// the exemption that kept them alive said the operator console called
+// `DetectObjects`, and that was false -- the console's live view reads the
+// VMS's OWN boxes, which is the right source for live video, because the VMS
+// is the device that has the video.
+//
+// The rules that named the profile have been rekeyed onto the canonical
+// analytics event types the platform refines the VMS's classes into
+// (`analytics.person_with_bag`, `analytics.vehicle`, `analytics.animal`), so
+// the profile is not referenced from the rule language either.
+//
+// The AI runtime is a NARRATOR: it answers a question over stored facts and
+// cites them. Giving it a detector as well would mean shipping a second model
+// beside the first, and a detection the platform makes itself is a
+// deterministic one: a geometric test on a typed event, with no GPU and no
+// eight-second inference.
 
 // Request is one inference.
 type Request struct {
 	ObservationID string
 	ProfileID     string
-	Evidence      []Evidence
+	// TenantID and SiteID say whose inference this is.
+	//
+	// They are here because a provider chain is PER SITE and the chain
+	// records what left the site: without them the record of an egress has
+	// no site to be a record OF, and a log of what left that cannot be
+	// attributed is a log nobody can check.
+	TenantID string
+	SiteID   string
+	Evidence []Evidence
 	// ProfileSchema declares the output's field set. The runtime validates the
 	// answer against it and degrades the response if the answer names a field the
 	// schema does not declare - so sending it is what makes an undeclared field
 	// visible rather than silently stored.
 	ProfileSchema map[string]any
+	// Temperature is the sampling temperature for THIS inference.
+	//
+	// It is per CALL and not per chain, because the two uses want different
+	// things: a verification wants a deterministic answer and a narration
+	// wants a sentence a person reads. Zero means the adapter's default.
+	Temperature float64
 }
 
 // Result is what the runtime answered.
@@ -314,6 +251,14 @@ type Result struct {
 	// Temperature is the sampling temperature that was requested. It is part of
 	// attribution: an answer produced at 0.9 is not the answer produced at 0.01.
 	Temperature float64
+	// Provider is the ADAPTER that answered.
+	//
+	// It is not the model's name: the model is what the provider SAID it
+	// used, and the adapter is the thing that actually answered. A chain
+	// walks a list of adapters, and an attribution that named the model
+	// without naming the adapter would not say which link of the chain
+	// produced the answer.
+	Provider string
 }
 
 // wireRequest is the exact shape runtime.py decodes.
@@ -355,6 +300,12 @@ type wireResponse struct {
 	Hardware             string         `json:"hardware"`
 	OutputHash           string         `json:"outputHash"`
 }
+
+// Name identifies the runtime on a reading.
+//
+// It is what a Provider chain calls it, so that an observation says which
+// thing answered.
+func (c *Client) Name() string { return "local_runtime" }
 
 // Do performs one inference.
 //

@@ -677,7 +677,11 @@ func runBootstrapAdmin(ctx context.Context, env *command.Env, args []string) err
 			"sign in on a password alone. Enrol one now, before anything else: the login "+
 			"that used it is audited at the highest volume precisely so a site that "+
 			"leaves it open is visible.")
-	fmt.Fprintf(env.Stderr, "  securityctl identity enroll-mfa --user %s --method totp\n", userID)
+	// The command named here is the one that exists. It used to name
+	// `identity enroll-mfa --method totp`, which was never written: a hint that
+	// points at a command nobody can run is a hint the operator has to discover
+	// is wrong by typing it.
+	fmt.Fprintf(env.Stderr, "  securityctl mfa enrol --user %s\n", userID)
 	return nil
 }
 

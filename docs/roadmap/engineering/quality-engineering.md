@@ -394,20 +394,26 @@ request produces, against real services over a real database.
 
 **The twelve tests, and what each one is really asserting:**
 
+Seven of the original twelve names no longer exist, and the reason is the same
+for all of them: the surface they guarded was removed with the login. The
+console has no session, no cookie and no token, so
+`TestSessionCookieCarriesEveryAttribute` has nothing to assert, and
+`TestStateChangingRequestWithoutCSRFIsRefused` would be asserting the absence
+of a control, which is a thing `docs/threat-model.md` records and not a thing
+a test should quietly decide. The names that remain are the ones whose subject
+still exists, and three new ones took the removed ones' subjects over.
+
 | Test | What it protects |
 |---|---|
 | `TestSecurityHeadersArePresent` | `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `COOP: same-origin`, `X-Robots-Tag: noindex, nofollow, noarchive`, HSTS `max-age=31536000; includeSubDomains` |
 | `TestContentSecurityPolicyForbidsInlineScript` | `default-src 'none'`, `script-src 'self'`, `style-src 'self'`, `frame-ancestors 'none'`, `object-src 'none'`, `base-uri 'none'`, **and** that neither `unsafe-inline` nor `unsafe-eval` appears anywhere in the header |
 | `TestHealthExcludesTheAIPlane` | `/v1/health` returns `status: ok` **and** says something about the AI plane — "an operator reading it should be able to tell the AI plane was not consulted" |
-| `TestUnauthenticatedRequestsAreRefused` | 401 on `/v1/incidents`, `/v1/auth/session`, `/v1/audit/ledger`, `/v1/ops/dead-letters`, `/incidents` |
-| `TestStateChangingRequestWithoutCSRFIsRefused` | a disposition needs the token; and a *correct* token gets past CSRF and fails on the incident, not the token |
-| `TestCSRFTokenIsBoundToTheSession` | a foreign token is 403 |
-| `TestTenantHeaderMismatchIsRefused` | `X-Tenant-Id` is honoured only when it matches the session tenant |
+| `TestTheSearchRouteIsCapabilityGated` | the API's refusal is a CAPABILITY refusal, not a credential refusal. This is the replacement for `TestUnauthenticatedRequestsAreRefused`: there is no credential to present, so "unauthenticated" is not a state the product has |
+| `TestTheConsoleHasNoSignInForm` | the replacement for `TestLoginWithBadCredentialsIsRefused`: the console has no sign-in, so a form that offered one would send an operator somewhere they could not finish |
+| `TestTheAccessLogNamesTheConfiguredTenantAndNotAHeader` | the replacement for `TestTenantHeaderMismatchIsRefused`: the header is not read at all, so there is no mismatch to refuse. A forged `X-Tenant-Id` on the request does not change the tenant the log names |
+| `TestTheStepUpInterstitialSaysWhatCannotBeTakenBack` | the replacement for `TestSessionCookieCarriesEveryAttribute` and for the token half of `TestStateChangingRequestWithoutCSRFIsRefused`: the console's forms render NO token field, because an empty one is worse than none — a reader auditing the markup would conclude the console refuses a cross-site POST, and it does not |
 | `TestConsoleIsLeftToRight` | `dir="ltr"`, `lang="en"`, **no `<script` element anywhere**, **no `style=` attribute anywhere** — `AGENTS.md` |
 | `TestJSONIsNeverNegotiatedIntoHTML` | `Accept: text/html` on `/v1/incidents` still returns `application/json` |
-| `TestSessionCookieCarriesEveryAttribute` | `HttpOnly`, `Secure`, `SameSite=Strict` |
-| `TestLoginWithBadCredentialsIsRefused` | 401 **and zero cookies set** |
-| `TestBodySizeIsCapped` | a 2 MB body is refused |
 
 **Command.** `go test ./internal/api/...`, inside `make test-race`.
 **Frequency.** Per commit. **Owner.** E2.
@@ -1431,7 +1437,7 @@ to stop looking at the things that matter.
 |---|---|
 | **A line-coverage percentage, and any threshold on one** | Coverage measures which lines ran, not whether the assertion was meaningful. The existing `TestThresholdsAreDefinedAgainstRealNumbers`-style threshold is the thing we would be tempted to build, and the AI-generated tests that satisfy it are the reason the rule-differentiation is hard. We already have a coverage gate: `TestFixtureSetCoversEveryRequiredCase` asserts the *cases* exist, and every capability in `docs/status.md` marked `green` names a test that fails if it breaks. That is coverage. |
 | **A coverage dashboard nobody reads** | A dashboard is a thing that goes stale quietly. `TestEveryPlannedMetricExists` and the closed `knownMetrics` set in `internal/observability/metrics.go` are the right shape for observability: a typo fails a test. A coverage chart has no such property. |
-| **Exhaustive UI automation** | The console has no client JavaScript. A Playwright suite would be testing `httptest`. Twelve targeted tests on rendered HTML — CSP, security headers, `dir="ltr"`, no `<script>`, no `style=`, cookies, CSRF, body cap — cover the whole attack surface of a server-rendered page. A hundred more would cover a hundred things we do not have. |
+| **Exhaustive UI automation** | The console has no client JavaScript. A Playwright suite would be testing `httptest`. A dozen targeted tests on rendered HTML — CSP, security headers, `dir="ltr"`, no `<script>`, no `style=`, no token field, body cap — cover the whole attack surface of a server-rendered page. A hundred more would cover a hundred things we do not have. |
 | **Mock-everything end-to-end** | The opposite of what this repository does. `internal/api/api_test.go` wires real services over a real pool and the comment says why: "a nil service behind a route is exactly the shape of a defect the console would hit in production." A mocked E2E passes while the migration runner, the RLS policy and the trigger are all fiction. |
 | **Mutation testing as a gate** | Mutants are the tool (§11.2), not the scoreboard. A mutation score on a codebase with a database is noisy and slow, and a person generating the ten mutations that matter beats a number over ten thousand. |
 | **A test for every branch** | The rule in `AGENTS.md` is a list of *areas*: rule compilation, semantic validation, time-window and skew logic, conflict precedence, the verification state machine, clock drift normalisation, tenant scoping, RLS, job lease/claim races. Covering those areas thoroughly beats covering every branch of every function, and the areas are the things that actually fail. |

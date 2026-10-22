@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/Sergey-Bar/vision/internal/anomaly"
+	"github.com/Sergey-Bar/vision/internal/config"
 	"github.com/Sergey-Bar/vision/internal/correlation"
 	"github.com/Sergey-Bar/vision/internal/correlator"
 	"github.com/Sergey-Bar/vision/internal/rules"
@@ -112,6 +113,30 @@ func (l *Loops) threatScore(
 	}
 	inc.Anomalies = anomalies
 
+	return l.scoreIncident(inc, decision.RuleID, at)
+}
+
+// scoreIncident scores the incident with the engine the install is
+// configured to use.
+//
+// The two engines are the same CLAIM and two different judgements about it.
+// The legacy engine adds the claim's weights and clips the sum at 100. The
+// calibrated engine keeps the claim's weights, adds the evidence the legacy
+// one threw away (how many devices saw it, how long past its threshold it
+// lasted), caps the sum on a curve rather than a clip, and calibrates the
+// result against the site's own labelled history.
+//
+// The choice is the install's, and it is a human's: see docs/decisions.md
+// D-15.
+func (l *Loops) scoreIncident(inc *correlation.CorrelatedIncident, ruleID string, at time.Time) (int, []threat.ReasonStep) {
+	if l.Deps.ThreatEngine == config.ThreatEngineCalibrated {
+		scorer := threat.NewCalibratedScorer(threat.DefaultCalibratedConfig(), l.Deps.Priors)
+		res := scorer.Score(inc, ruleID, at)
+		if res.Score < 0 {
+			res.Score = 0
+		}
+		return res.Score, res.Chain.Steps
+	}
 	scorer := threat.NewScorer(threat.DefaultScorerConfig())
 	score, chain := scorer.Score(inc)
 	if score < 0 {

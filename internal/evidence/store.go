@@ -29,15 +29,21 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/Sergey-Bar/vision/internal/pathguard"
 )
 
 // ErrPathRejected is returned for a reference that names something outside the
 // evidence root, whatever the reason.
-var ErrPathRejected = errors.New("evidence: storage reference rejected")
+//
+// It is the SHARED guard's sentinel, so that the recording index's guard and
+// this one are the same rule and not two rules that happen to agree today.
+// The guard lives in `internal/pathguard`, because the product writes to more
+// than one root and two copies of a security rule is one copy too many.
+var ErrPathRejected = pathguard.ErrRejected
 
 // ErrHashMismatch is returned when stored bytes no longer match their row.
 var ErrHashMismatch = errors.New("evidence: stored bytes do not match their recorded hash")
@@ -165,25 +171,13 @@ func (s *Store) Root() string { return s.root }
 
 // containedIn reports whether path is inside root, or is root itself.
 //
-// The root was resolved once in New, so this compares real paths rather than
-// names that could be repointed afterwards. The separator on the prefix is what
-// makes it a containment test rather than a string test: "/var/evidence-other"
-// does not start with "/var/evidence" as a path.
+// It is the SHARED guard's containment test, and the root was resolved once
+// in New, so it compares real paths rather than names that could be
+// repointed afterwards. The separator on the prefix is what makes it a
+// containment test rather than a string test: a sibling directory whose name
+// starts with the root's name does not start with it AS A PATH.
 func containedIn(root, path string) error {
-	rel, err := filepath.Rel(root, path)
-	if err != nil {
-		return fmt.Errorf("not under the evidence root: %w", err)
-	}
-	if rel == "." {
-		return nil
-	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return fmt.Errorf("resolves to %q, which is outside %q", path, root)
-	}
-	if filepath.IsAbs(rel) {
-		return fmt.Errorf("resolves to the absolute path %q", rel)
-	}
-	return nil
+	return pathguard.ContainedIn(root, path)
 }
 
 // Fsync reports whether writes are durable before acknowledgement. Exported so
@@ -197,50 +191,17 @@ func (s *Store) Fsync() bool { return s.fsync }
 // package rather than asserted only by the code that sets it.
 func (s *Store) VerifyHashOnRead() bool { return s.hashOnRead }
 
-// unsafeSegment matches a path segment that is a traversal, a drive, a UNC
-// prefix, or anything with a NUL in it.
-var unsafeSegment = regexp.MustCompile(`(?i)^(\.\.?|:|\\\\|//)`)
-
 // ValidateRef checks a storage reference without touching the filesystem.
 //
 // Exported because a caller may want to reject a reference at intake, before
 // any bytes are fetched, rather than at write time.
+//
+// It is the SHARED guard's shape check — the same one the recording index
+// uses, because the product writes to two roots and the rule is one. Two
+// copies of a security rule is one copy too many, and the copy nobody reads
+// is the one that lets a `..` through.
 func ValidateRef(ref string) error {
-	if ref == "" {
-		return fmt.Errorf("%w: empty reference", ErrPathRejected)
-	}
-	// A NUL truncates the path in every syscall that takes a C string. Go's
-	// own os package rejects it, but a reference reaches a database and an
-	// export tool as well, so it is refused here where the reason is explicit.
-	if strings.ContainsRune(ref, 0) {
-		return fmt.Errorf("%w: reference contains a NUL byte", ErrPathRejected)
-	}
-	if strings.ContainsRune(ref, '\\') {
-		return fmt.Errorf("%w: %q contains a backslash; references are forward-slashed and relative", ErrPathRejected, ref)
-	}
-	if strings.HasPrefix(ref, "/") {
-		return fmt.Errorf("%w: %q is absolute", ErrPathRejected, ref)
-	}
-	if filepath.IsAbs(ref) || filepath.VolumeName(ref) != "" {
-		return fmt.Errorf("%w: %q names a volume", ErrPathRejected, ref)
-	}
-	if len(ref) > 512 {
-		return fmt.Errorf("%w: reference is %d characters, at most 512", ErrPathRejected, len(ref))
-	}
-	for _, segment := range strings.Split(ref, "/") {
-		if segment == "" {
-			return fmt.Errorf("%w: %q has an empty path segment", ErrPathRejected, ref)
-		}
-		if unsafeSegment.MatchString(segment) {
-			return fmt.Errorf("%w: %q contains segment %q", ErrPathRejected, ref, segment)
-		}
-		// A segment that is only dots on some filesystem is a traversal even
-		// where it is not on this one.
-		if strings.Trim(segment, ".") == "" {
-			return fmt.Errorf("%w: %q contains segment %q", ErrPathRejected, ref, segment)
-		}
-	}
-	return nil
+	return pathguard.ValidateRef(ref)
 }
 
 // resolve turns a validated reference into an absolute path, and re-checks that

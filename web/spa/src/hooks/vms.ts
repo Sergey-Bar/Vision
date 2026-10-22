@@ -1,5 +1,5 @@
-import { useQuery } from '@tanstack/react-query'
-import { get } from '../lib/api'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { get, post } from '../lib/api'
 
 // The VMS's own view of its cameras.
 //
@@ -85,4 +85,31 @@ export function useVMSState(refetchMs = 5000) {
 // picture when the device has a new one and reuses the old one when it does not.
 export function vmsFrameUrl(camera: VMSCamera): string {
   return `/vms/cameras/${encodeURIComponent(camera.id)}/frame.png?v=${camera.frameCount}`
+}
+
+// The control surface: play, pause, seek and the frame rate.
+//
+// These are the four things an operator does to a camera, and they are the
+// DEVICE's to accept. The console does not keep a local "paused" flag and
+// draw a picture that has stopped moving -- it asks the device to pause, and
+// the device says whether it did.
+//
+// The console reaches the device through the web server's `/vms` proxy, which
+// keeps the device's credential on the server.
+export type VMSControl = 'play' | 'pause' | 'seek' | 'fps'
+
+export function useVMSControl() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, control, value }: { id: string; control: VMSControl; value?: string }) => {
+      const query = value === undefined ? '' : `?value=${encodeURIComponent(value)}`
+      const res = await post(`/vms/cameras/${encodeURIComponent(id)}/${control}${query}`, {})
+      return (await res.json()) as VMSCamera
+    },
+    onSuccess: () => {
+      // The device's own state is the truth about whether it is playing, so
+      // the camera list is refetched rather than patched in the browser.
+      void client.invalidateQueries({ queryKey: ['vms-cameras'] })
+    },
+  })
 }

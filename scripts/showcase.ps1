@@ -114,6 +114,47 @@ try {
         }
     }
 
+    # --- the console's bundle, without which /console is a placeholder -----
+    #
+    # The console is a React application and its bundle is build output, so a
+    # machine that has never run `npm run build` serves the committed
+    # placeholder at /console: a page that says what to run, instead of a 404
+    # with an empty body. The launcher builds it when it can and says so when
+    # it cannot, because "the console showed a page telling me to run npm"
+    # is a worse demo than "the console was not built on this machine".
+    $spaDir  = Join-Path $repo 'web\spa'
+    $spaOut  = Join-Path $repo 'web\consoleui\dist\index.html'
+    if (Test-Path $spaOut) {
+        Dim 'the console bundle is present; /console will serve it.'
+    } elseif ($NoBuild) {
+        Warn 'the console bundle is missing and -NoBuild was passed; /console will serve the placeholder that names the build command.'
+    } else {
+        $npmCmd = Get-Command npm -ErrorAction SilentlyContinue
+        if (-not $npmCmd) {
+            Warn 'npm is not on PATH, so the console bundle cannot be built; /console will serve the placeholder that names the build command.'
+            Warn 'Install Node, then: cd web/spa; npm ci; npm run build'
+        } else {
+            Say 'building the console bundle (web/spa)...'
+            if (-not (Test-Path (Join-Path $spaDir 'node_modules'))) {
+                Dim 'installing the console''s dependencies (once)...'
+                $ErrorActionPreference = 'Continue'
+                Push-Location $spaDir
+                try { & npm ci --no-audit --no-fund 2>&1 | Out-Null } finally { Pop-Location }
+                $ErrorActionPreference = 'Stop'
+            }
+            $ErrorActionPreference = 'Continue'
+            Push-Location $spaDir
+            try { & npm run build 2>&1 | Out-Null } finally { Pop-Location }
+            $code = $LASTEXITCODE
+            $ErrorActionPreference = 'Stop'
+            if ($code -ne 0 -or -not (Test-Path $spaOut)) {
+                Warn "the console bundle did not build (exit $code); /console will serve the placeholder that names the build command."
+            } else {
+                Dim 'the console bundle is built; /console will serve it.'
+            }
+        }
+    }
+
     # --- what this machine actually has, said before the browser opens ------
     Write-Host ''
     Write-Host '  What the pages will show on this machine, read from disk right now:' -ForegroundColor White
@@ -192,14 +233,60 @@ try {
 
     Write-Host ''
     Say 'starting the showcase hub on http://localhost:8080'
-    Dim 'pages: / (hub)  /live  /pipeline  /trust  /operations  /console  /lab  /census'
+    Dim 'pages: / (hub)  /live  /pipeline  /trust  /census  /operations  /lab  /ask  /chief  /console (the product)'
     Dim 'media pack: dist/showcase/site/ (static edition)  dist/showcase/media/ (video, screens, diagrams, PDF)'
     Dim 'Ctrl+C stops it.'
 
     $proc = $null
     try {
         $proc = Start-Process -FilePath $hub -WorkingDirectory $repo -PassThru -NoNewWindow
-        Start-Sleep -Seconds 1
+
+        # --- check every page before opening a browser -----------------------
+        #
+        # The pages were all there and all unreachable: the SPA's catch-all was
+        # registered last and shadowed every one of them. A launcher that
+        # prints a list of pages and then opens a browser to a 404 has taught
+        # everyone that the list is a decoration.
+        #
+        # So the launcher checks the list it prints, and says which one failed.
+        $pages = @('/', '/live', '/pipeline', '/trust', '/census', '/operations', '/lab', '/ask', '/chief', '/console')
+        $up = $false
+        for ($i = 0; $i -lt 40; $i++) {
+            Start-Sleep -Milliseconds 250
+            try {
+                Invoke-WebRequest -Uri 'http://localhost:8080/' -UseBasicParsing -TimeoutSec 2 | Out-Null
+                $up = $true
+                break
+            } catch { }
+        }
+        if (-not $up) {
+            Fail 'the hub never answered on http://localhost:8080'
+            exit 1
+        }
+
+        $bad = @()
+        foreach ($p in $pages) {
+            try {
+                $r = Invoke-WebRequest -Uri ("http://localhost:8080" + $p) -UseBasicParsing -TimeoutSec 15
+                $ok = ($r.StatusCode -eq 200 -and $r.Headers['Content-Type'] -like 'text/html*')
+                if ($ok) {
+                    Say ("{0,-12} 200, {1} bytes" -f $p, $r.RawContentLength)
+                } else {
+                    $bad += $p
+                    Fail ("{0,-12} {1} {2}" -f $p, $r.StatusCode, $r.Headers['Content-Type'])
+                }
+            } catch {
+                $status = $_.Exception.Response.StatusCode.value__
+                $bad += $p
+                Fail ("{0,-12} {1}" -f $p, $(if ($status) { $status } else { $_.Exception.Message }))
+            }
+        }
+        if ($bad.Count -gt 0) {
+            Fail ("{0} page(s) did not answer: {1}" -f $bad.Count, ($bad -join ' '))
+            Fail 'the browser is not opened. A demo that 404s is worse than no demo.'
+            exit 1
+        }
+
         if (-not $NoBrowser) { Start-Process 'http://localhost:8080' }
         Wait-Process -Id $proc.Id -ErrorAction SilentlyContinue
     } finally {

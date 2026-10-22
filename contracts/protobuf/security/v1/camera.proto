@@ -20,6 +20,16 @@ message Camera {
   int32 width = 10;
   int32 height = 11;
   bool low_light_capable = 12;
+  // The stream this camera is recorded from. It carries no credential: the
+  // credential is a separate reference into the keystore, and a URL with a
+  // password in it is a password in a log.
+  string rtsp_url = 13;
+  // A reference into the keystore. A pointer, never a secret.
+  string credential_ref = 14;
+  // The substream the recorder should use, when the device has more than one.
+  string substream_profile = 15;
+  // The device's own identifier, as it reports it.
+  string onvif_device_id = 16;
 }
 
 enum CameraState {

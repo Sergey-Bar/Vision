@@ -541,25 +541,10 @@ func TestFixtureSetCoversEveryRequiredCase(t *testing.T) {
 		t.Fatalf("LoadManifest: %v", err)
 	}
 
-	required := []string{
-		"motion", "analytics", "alarm.created", "alarm.acknowledged",
-		"device.camera_offline", "device.camera_online", "bookmark",
-		"recording.started", "metadata", "malformed", "duplicate",
-		"delayed", "out-of-order", "missing-camera", "reconnect",
-	}
-	covered := map[string]bool{}
-	for _, e := range manifest.Scenarios {
-		for _, c := range e.Covers {
-			covered[c] = true
-		}
-	}
-	var missing []string
-	for _, r := range required {
-		if !covered[r] {
-			missing = append(missing, r)
-		}
-	}
-	if len(missing) > 0 {
-		t.Errorf("the fixture set does not cover: %s", strings.Join(missing, ", "))
+	// The vocabulary is the PACKAGE's, not this test's: the replay audit needs
+	// the same list, and a package cannot read a test's local variable.
+	coverage := fixture.CoverageOf(manifest)
+	if !coverage.Complete {
+		t.Errorf("the fixture set does not cover: %s", strings.Join(coverage.Missing, ", "))
 	}
 }

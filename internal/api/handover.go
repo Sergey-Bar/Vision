@@ -79,7 +79,7 @@ type DutyLogState struct {
 // confirms the artifact exists.
 func (s *Server) handleConsoleHandover(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
 	if d.Handover == nil {
-		s.render(w, http.StatusOK, "handover.html", s.handoverPageData(r, p, "The hand-over artifact is not configured for this site."))
+		s.render(w, http.StatusOK, "handover.html", s.handoverPageData(r, p, "The hand-over artifact is not configured for this site.", d))
 		return
 	}
 	siteID := d.Handover.SiteID()
@@ -87,7 +87,7 @@ func (s *Server) handleConsoleHandover(w http.ResponseWriter, r *http.Request, p
 		WriteError(w, http.StatusNotFound, "not_found", "No such shift.", requestID(r))
 		return
 	}
-	data := s.handoverPageData(r, p, "")
+	data := s.handoverPageData(r, p, "", d)
 	// One read of the artifact for both halves of the page: the previous shape
 	// listed the target twice for context and then parsed the whole shift log
 	// twice more (four full passes, two of them re-hashing every line). One read
@@ -105,8 +105,63 @@ func (s *Server) handleConsoleHandover(w http.ResponseWriter, r *http.Request, p
 }
 
 // handoverPageData is the page's model with the head already filled.
-func (s *Server) handoverPageData(r *http.Request, p identity.Principal, dutyLogErr string) consoleData {
-	data := s.consoleData(r, p, "Shift hand-over")
+func (s *Server) handoverPageData(r *http.Request, p identity.Principal, dutyLogErr string, d Deps) consoleData {
+	data := s.consoleData(r, p, "Shift hand-over", d)
 	data.DutyLogErr = dutyLogErr
 	return data
+}
+
+// handleHandover is the same hand-over as JSON.
+//
+// The page above and this route read the SAME artifact through the SAME reader
+// -- `d.Handover` -- so the two cannot disagree about which shift this is or
+// whether it verified. A console that read the duty log itself would be a
+// second reader of a file the product hashes, and a second reader of a hashed
+// file is a second opinion about an integrity check.
+//
+// The site scope is checked against the site the reader actually reads, exactly
+// as the page checks it, and the 404 is for the same reason: a 403 confirms the
+// artifact exists.
+func (s *Server) handleHandover(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
+	if d.Handover == nil {
+		WriteJSON(w, http.StatusOK, map[string]any{
+			"siteId":      "",
+			"available":   false,
+			"unavailable": "The hand-over artifact is not configured for this site.",
+		})
+		return
+	}
+	siteID := d.Handover.SiteID()
+	if !p.CanSeeSite(siteID) {
+		WriteError(w, http.StatusNotFound, "not_found", "No such shift.", requestID(r))
+		return
+	}
+	view, err := d.Handover.Read(r.Context(), p.TenantID, siteID)
+	if err != nil {
+		// The artifact is missing or unreadable. That is a fact about the
+		// install, and the answer says which, rather than rendering a brief
+		// with no incidents in it and letting the reader conclude that the
+		// shift was quiet.
+		WriteJSON(w, http.StatusOK, map[string]any{
+			"siteId":      siteID,
+			"available":   false,
+			"unavailable": err.Error(),
+		})
+		return
+	}
+	out := map[string]any{"siteId": siteID, "available": true}
+	if view.Brief != nil {
+		out["brief"] = view.Brief
+	}
+	out["dutyLog"] = map[string]any{
+		"path":         view.State.Path,
+		"shift":        view.State.Shift,
+		"siteId":       view.State.SiteID,
+		"lines":        view.State.Lines,
+		"headHash":     view.State.HeadHash,
+		"verification": view.State.Verification,
+		"dump":         view.State.Dump,
+		"dumpNote":     view.State.DumpNote,
+	}
+	WriteJSON(w, http.StatusOK, out)
 }

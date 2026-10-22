@@ -387,14 +387,31 @@ func Check(pkgs []Package, b Baseline, build string) []Finding {
 //
 // Written from a measurement rather than rounded by hand, because the whole point
 // of the file is that nobody edits a number in it.
-func Derive(pkgs []Package, module, mode string, margin float64, measured, build string) Baseline {
+// Derive builds a baseline from a measured run.
+//
+// The excluded list is the CALLER's, and not a default written here.
+//
+// The default was the bug: this function used to name `cmd/`, `tools/` and
+// `migrations/` and nothing else, so writing the baseline replaced the
+// file's own exclusions with those three, and the next run floored
+// `scripts` and a directory inside `node_modules` — packages the file had
+// deliberately left out. A tool that silently widens the thing it is
+// measuring is a tool that makes the next run's numbers mean something
+// else.
+//
+// A nil list means the default three, which is what a first run with no
+// baseline to read wants.
+func Derive(pkgs []Package, module, mode string, margin float64, measured, build string, excluded []string) Baseline {
+	if len(excluded) == 0 {
+		excluded = []string{"cmd/", "tools/", "migrations/"}
+	}
 	b := Baseline{
 		Package:  module,
 		Mode:     mode,
 		Margin:   margin,
 		Build:    []string{build},
 		Floors:   map[string]Floor{},
-		Excluded: []string{"cmd/", "tools/", "migrations/"},
+		Excluded: excluded,
 		Note: []string{
 			"The per-package coverage floors. Written by `tools/covercheck -write-baseline` from a " +
 				"real run, and read by the same tool as a gate.",

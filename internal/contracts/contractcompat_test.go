@@ -10,7 +10,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 // contractBaseline mirrors the on-disk structure produced by
@@ -79,6 +82,86 @@ func TestContractBaselineIsPresentAndNonEmpty(t *testing.T) {
 	if len(b.OpenAPI) == 0 {
 		t.Fatal("the contract baseline records no OpenAPI paths; the gate would pass vacuously")
 	}
+}
+
+// A path added to the OpenAPI document but not recorded in the baseline is a
+// contract no future run of contractcheck can protect.
+//
+// The comparison reads the baseline and the document, so a path in NEITHER is
+// invisible: removing a path the baseline does not hold looks like nothing
+// happened. Eight live paths were in exactly that state when this was written
+// -- published, served, and outside the baseline -- and nothing noticed.
+//
+// The document is parsed with a YAML parser rather than read line by line,
+// because a line reader cannot tell a path from a description that mentions
+// one, and a gate that counts the wrong thing is worse than no gate.
+func TestBaselineRecordsEveryPublishedOpenAPIPath(t *testing.T) {
+	root := repoRoot(t)
+	raw, err := os.ReadFile(filepath.Join(root, "contracts", "compat", "baseline.json"))
+	if err != nil {
+		t.Fatalf("read contract baseline: %v", err)
+	}
+	var b contractBaseline
+	if err := json.Unmarshal(raw, &b); err != nil {
+		t.Fatalf("parse contract baseline: %v", err)
+	}
+
+	docPath := filepath.Join(root, "contracts", "openapi", "v1", "openapi.yaml")
+	rawDoc, err := os.ReadFile(docPath)
+	if err != nil {
+		t.Fatalf("read the OpenAPI document: %v", err)
+	}
+	var doc struct {
+		Paths map[string]map[string]yaml.Node `yaml:"paths"`
+	}
+	if err := yaml.Unmarshal(rawDoc, &doc); err != nil {
+		t.Fatalf("parse the OpenAPI document: %v", err)
+	}
+	if len(doc.Paths) == 0 {
+		t.Fatal("the OpenAPI document declares no paths; the comparison would pass vacuously")
+	}
+
+	entry, ok := b.OpenAPI["v1/openapi.yaml"]
+	if !ok {
+		t.Fatal("the baseline records no OpenAPI document; run " +
+			"contractcheck -mode write -root contracts/openapi")
+	}
+	for path, item := range doc.Paths {
+		methods, recorded := entry.Paths[path]
+		if !recorded {
+			t.Errorf("the OpenAPI document publishes %s and the baseline does not record "+
+				"it. Removing it later would look like nothing happened.", path)
+			continue
+		}
+		for method := range item {
+			if !isPublishedMethod(method) {
+				continue
+			}
+			if !containsString(methods, method) {
+				t.Errorf("the OpenAPI document publishes %s %s and the baseline records "+
+					"only %v for that path", method, path, methods)
+			}
+		}
+	}
+}
+
+// isPublishedMethod reports whether a path-item key is an operation.
+func isPublishedMethod(key string) bool {
+	switch strings.ToLower(key) {
+	case "get", "put", "post", "delete", "options", "head", "patch", "trace":
+		return true
+	}
+	return false
+}
+
+// containsString reports whether a list holds a value.
+func containsString(list []string, want string) bool {
+	for _, v := range list {
+		if v == want {
+			return true
+		}
+	}
+	return false
 }
 
 // A schema added to contracts/json-schema but not recorded in the baseline is a

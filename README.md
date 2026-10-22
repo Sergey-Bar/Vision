@@ -1,16 +1,21 @@
 # security-platform
 
-Physical Security Intelligence Layer — Milestone 1.
+A VMS that proves — Milestone 1.
 
-One end-to-end operator workflow on a real XProtect installation:
+One end-to-end operator workflow on a real installation:
 
 ```
-XProtect event → canonical event → Security Graph → deterministic verification
+IP camera / other VMS → canonical event → Security Graph → deterministic verification
   → VLM observation → incident → operator disposition → audit
 ```
 
 with a complete offline install / upgrade / rollback story, and a deterministic
 core that is fully functional with the AI plane completely absent.
+
+The operator meets it through **the Chief of Security**: one screen that says
+what changed while they were away, what needs them now, and what the system
+does not know — and the same answer for every operator, because it is the
+product's answer and not the console's.
 
 ## The law
 
@@ -240,17 +245,20 @@ edition of the hub and a PDF) is written under `dist/showcase/` by the tools in
 
 ## What this is
 
-A physical-security intelligence layer. One vendor-agnostic pipeline that turns a
-camera's bytes into a durable, hash-chained, replayable finding, and refuses to
-guess when the evidence is not there.
+A VMS that proves. One vendor-agnostic pipeline that turns a camera's bytes
+into a durable, hash-chained, replayable finding, refuses to guess when the
+evidence is not there, and hands the operator a Chief that says what changed
+while they were away.
 
-Three claims, and what backs each:
+Four claims, and what backs each:
 
 - **The explanation is recomputed, never stored.** A replayed fixture produces the
   same incident and asks nothing of anyone.
 - **A missing AI observation is never a negative one.** `degraded`, `absent` and
   `insufficient_evidence` stay three different facts, and every degradation carries a
   reason.
+- **A capability that was not measured is not a capability.** The registry
+  records what a probe established, and only the `verified` entries count.
 - **Losing the vendor does not lose the evidence.** No package outside
   `internal/milestone` may name a vendor, and every vendor route carries an
   `Unverified` flag that no code path can clear except a probe against a real

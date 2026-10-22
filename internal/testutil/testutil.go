@@ -60,6 +60,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -352,7 +353,26 @@ func pool(t fatalTarget) *pgxpool.Pool {
 	cfg.MaxOpenConns = harnessMaxOpenConns
 	cfg.MaxIdleConns = harnessMaxIdleConns
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	// The setup budget, and why it is three minutes rather than one.
+	//
+	// The sixty seconds it used to be was sized for a schema that had two
+	// partitioned tables. Every package's database now carries sixty-one
+	// more of them, with a policy on each, and `DROP DATABASE ... WITH
+	// (FORCE)` has to clean every one of them up before the database can be
+	// recreated. Under the verification script's load -- the whole suite
+	// with the race detector, at `-p 8`, on a machine that is also running
+	// the rest of the gates -- the drop alone can take longer than a minute,
+	// and a package that loses that race reports a HARNESS failure for a
+	// tree that is perfectly fine.
+	//
+	// A budget that no longer fits the tree is a defect in the harness, and
+	// it produces failures at RANDOM, which is the worst kind: a run that
+	// is red for a reason nobody can reproduce is a run nobody trusts.
+	//
+	// Three minutes is still a bound. A database that cannot be dropped in
+	// three minutes is not a slow database, and the harness says so rather
+	// than waiting for ever.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
 	if err := ensureDatabase(ctx, cfg, pass, name); err != nil {
@@ -597,12 +617,33 @@ func isHarness(err error) bool {
 	return errors.As(err, &fault)
 }
 
+// tenantSeq disambiguates two tenants created inside one clock tick.
+//
+// It is the same defect the incident id had, in the harness: an id derived
+// from a clock that does not tick between every pair of calls repeats, and a
+// repeat is a primary-key collision.
+var tenantSeq atomic.Uint64
+
 // NewTenant creates a tenant, a site and a device, and returns their ids. Every
 // id is unique per call so tests can run in any order.
+//
+// The COUNTER is what makes "unique per call" true.
+//
+// The ids were derived from the wall clock alone, and the wall clock does not
+// tick between every pair of calls — its resolution is about a millisecond on
+// Windows. Two calls inside one tick therefore derived the SAME tenant id, and
+// the second INSERT failed with "duplicate key value violates unique
+// constraint tenants_pkey".
+//
+// A harness that cannot create two tenants is a harness that cannot test
+// TENANCY, which is precisely what `internal/schemalaws` and the cross-tenant
+// cases in `internal/api` exist to do. The failure looked like a product
+// defect — a duplicate key on a table nobody had written twice — and it was
+// the clock.
 func NewTenant(t *testing.T, pool *pgxpool.Pool) (tenant, site, device string) {
 	t.Helper()
 	ctx := context.Background()
-	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	suffix := fmt.Sprintf("%d-%d", time.Now().UnixNano(), tenantSeq.Add(1))
 	tenant = "t-" + suffix
 	site = "s-" + suffix
 	device = "d-" + suffix

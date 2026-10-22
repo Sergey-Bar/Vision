@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -24,13 +23,13 @@ import (
 //	back to keyword matching over the stored document text when no embedding
 //	model or pgvector is available. Every hit resolves through canonical_events
 //	and carries its incident id when there is one.
-func registerSearchRoutes(_ string, pool *dbx.Pool) {
-	http.HandleFunc("/api/search/free", handleSearchFree(pool))
+func registerSearchRoutes(_ string, pool *dbx.Pool, s scope) {
+	http.HandleFunc("/api/search/free", handleSearchFree(pool, s))
 }
 
 // handleSearchFree is the /api/search/free handler, extracted so tests can
 // call it directly without registering on the default mux.
-func handleSearchFree(pool *dbx.Pool) http.HandlerFunc {
+func handleSearchFree(pool *dbx.Pool, s scope) http.HandlerFunc {
 	svc := &eventsearch.Service{Pool: pool}
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
@@ -43,11 +42,6 @@ func handleSearchFree(pool *dbx.Pool) http.HandlerFunc {
 			http.Error(w, "POST only", http.StatusMethodNotAllowed)
 			return
 		}
-		tenant, sites, err := tenantAndSites(r, pool)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
 		var req struct {
 			Q      string `json:"q"`
 			From   string `json:"from,omitempty"`
@@ -57,6 +51,12 @@ func handleSearchFree(pool *dbx.Pool) http.HandlerFunc {
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		// The scope, last. See the chat handler for why.
+		tenant, sites, err := scopeFor(s, pool)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusServiceUnavailable)
 			return
 		}
 		q := eventsearch.Query{
@@ -102,12 +102,12 @@ func handleSearchFree(pool *dbx.Pool) http.HandlerFunc {
 //	resolves to a stored incident or evidence row, and answers "unavailable"
 //	when nothing supports an answer. The narrator is optional and never adds
 //	hits.
-func registerChatRoutes(_ string, pool *dbx.Pool) {
-	http.HandleFunc("/api/chat", handleChat(pool))
+func registerChatRoutes(_ string, pool *dbx.Pool, s scope) {
+	http.HandleFunc("/api/chat", handleChat(pool, s))
 }
 
 // handleChat is the /api/chat handler, extracted so tests can call it directly.
-func handleChat(pool *dbx.Pool) http.HandlerFunc {
+func handleChat(pool *dbx.Pool, s scope) http.HandlerFunc {
 	searchSvc := &eventsearch.Service{Pool: pool}
 	investSvc := &investigate.Service{
 		Search:   searchSvc,
@@ -124,11 +124,6 @@ func handleChat(pool *dbx.Pool) http.HandlerFunc {
 			http.Error(w, "POST only", http.StatusMethodNotAllowed)
 			return
 		}
-		tenant, sites, err := tenantAndSites(r, pool)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
 		var req struct {
 			Question string `json:"question"`
 			VideoID  string `json:"videoId,omitempty"`
@@ -140,6 +135,14 @@ func handleChat(pool *dbx.Pool) http.HandlerFunc {
 		question := strings.TrimSpace(req.Question)
 		if question == "" {
 			http.Error(w, "question required", http.StatusBadRequest)
+			return
+		}
+		// The scope, last. A malformed request is a client error whatever
+		// the server is configured for, and a server that is not configured
+		// cannot make a malformed request valid.
+		tenant, sites, err := scopeFor(s, pool)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusServiceUnavailable)
 			return
 		}
 		t := investigate.Template{
@@ -183,17 +186,17 @@ func handleChat(pool *dbx.Pool) http.HandlerFunc {
 //
 // /api/clips GET ?videoId=   stored alert clips, newest first
 // /api/critical GET ?limit=   highest-severity open streams
-func registerClipsAndCriticalRoutes(_ string, pool *dbx.Pool) {
-	http.HandleFunc("/api/clips", handleClips(pool))
-	http.HandleFunc("/api/critical", handleCritical(pool))
+func registerClipsAndCriticalRoutes(_ string, pool *dbx.Pool, s scope) {
+	http.HandleFunc("/api/clips", handleClips(pool, s))
+	http.HandleFunc("/api/critical", handleCritical(pool, s))
 }
 
 // registerCameraRoutes mounts the live camera inventory.
-func registerCameraRoutes(_ string, pool *dbx.Pool) {
-	http.HandleFunc("/api/cameras", handleCameras(pool))
+func registerCameraRoutes(_ string, pool *dbx.Pool, s scope) {
+	http.HandleFunc("/api/cameras", handleCameras(pool, s))
 }
 
-func handleCameras(pool *dbx.Pool) http.HandlerFunc {
+func handleCameras(pool *dbx.Pool, s scope) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if rec := recover(); rec != nil {
@@ -205,15 +208,16 @@ func handleCameras(pool *dbx.Pool) http.HandlerFunc {
 			http.Error(w, "GET only", http.StatusMethodNotAllowed)
 			return
 		}
-		tenant, sites, err := tenantAndSites(r, pool)
+		tenant, sites, err := scopeFor(s, pool)
 		if err != nil {
-			// No tenant is configured (no DB pool and no X-Tenant-ID header).
-			// Degrade gracefully with an empty camera list so the operator
-			// surface still loads without an error banner instead of showing
-			// "Unable to load cameras: no tenant: set X-Tenant-ID".
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			_ = json.NewEncoder(w).Encode(map[string]any{"cameras": []any{}})
+			// The console is not configured, or the database is not there.
+			//
+			// It used to answer an EMPTY camera list here, so the operator
+			// surface would load without an error banner. An empty list reads
+			// as "there are no cameras", and the console must not say that
+			// when it has not asked: an inventory it did not read is an
+			// unknown inventory, and the screen has a state for that.
+			http.Error(w, err.Error(), http.StatusServiceUnavailable)
 			return
 		}
 		rows, err := pool.WithSites(tenant, "cameras", sites).Query(context.Background(), `
@@ -254,7 +258,7 @@ func handleCameras(pool *dbx.Pool) http.HandlerFunc {
 }
 
 // handleClips is the /api/clips handler, extracted so tests can call it directly.
-func handleClips(pool *dbx.Pool) http.HandlerFunc {
+func handleClips(pool *dbx.Pool, s scope) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if rec := recover(); rec != nil {
@@ -266,9 +270,9 @@ func handleClips(pool *dbx.Pool) http.HandlerFunc {
 			http.Error(w, "GET only", http.StatusMethodNotAllowed)
 			return
 		}
-		tenant, sites, err := tenantAndSites(r, pool)
+		tenant, sites, err := scopeFor(s, pool)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			http.Error(w, err.Error(), http.StatusServiceUnavailable)
 			return
 		}
 		videoID := r.URL.Query().Get("videoId")
@@ -318,7 +322,7 @@ func handleClips(pool *dbx.Pool) http.HandlerFunc {
 }
 
 // handleCritical is the /api/critical handler, extracted so tests can call it directly.
-func handleCritical(pool *dbx.Pool) http.HandlerFunc {
+func handleCritical(pool *dbx.Pool, s scope) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if rec := recover(); rec != nil {
@@ -330,9 +334,9 @@ func handleCritical(pool *dbx.Pool) http.HandlerFunc {
 			http.Error(w, "GET only", http.StatusMethodNotAllowed)
 			return
 		}
-		tenant, sites, err := tenantAndSites(r, pool)
+		tenant, sites, err := scopeFor(s, pool)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			http.Error(w, err.Error(), http.StatusServiceUnavailable)
 			return
 		}
 		limit := 5
@@ -343,12 +347,14 @@ func handleCritical(pool *dbx.Pool) http.HandlerFunc {
 		}
 		rows, err := pool.WithSites(tenant, "critical", sites).Query(context.Background(), `
 		SELECT i.incident_id, i.primary_site_id, i.severity, i.title, i.state,
-		       i.first_event_at, i.last_event_at, i.rule_id
+		       i.first_event_at, i.last_event_at, i.rule_id,
+		       i.threat_score, i.threat_reason_chain
 		  FROM incidents i
 		 WHERE i.tenant_id = $1
 		   AND ($2::text[] IS NULL OR i.primary_site_id = ANY($2::text[]))
 		   AND i.state IN ('open', 'unverified')
 		 ORDER BY
+		       i.threat_score DESC,
 		       CASE i.severity WHEN 'critical' THEN 4 WHEN 'high' THEN 3
 		                        WHEN 'medium' THEN 2 WHEN 'low' THEN 1 ELSE 0 END DESC,
 		       i.first_event_at DESC
@@ -360,9 +366,8 @@ func handleCritical(pool *dbx.Pool) http.HandlerFunc {
 		defer rows.Close()
 		type stream struct {
 			IncidentID string    `json:"incidentId"`
-			VideoID    string    `json:"videoId"`
 			SiteID     string    `json:"siteId"`
-			Score      float64   `json:"score"`
+			Score      int       `json:"score"`
 			Reasons    []string  `json:"reasons"`
 			State      string    `json:"state"`
 			Severity   string    `json:"severity"`
@@ -372,20 +377,27 @@ func handleCritical(pool *dbx.Pool) http.HandlerFunc {
 			RuleID     string    `json:"ruleId,omitempty"`
 		}
 		var streams []stream
-		sevScore := map[string]float64{"critical": 90, "high": 70, "medium": 50, "low": 30, "info": 10}
 		for rows.Next() {
 			var s stream
 			var first, last time.Time
+			var score int
+			var chain []byte
 			if err := rows.Scan(&s.IncidentID, &s.SiteID, &s.Severity, &s.Title,
-				&s.State, &first, &last, &s.RuleID); err != nil {
+				&s.State, &first, &last, &s.RuleID, &score, &chain); err != nil {
 				http.Error(w, fmt.Sprintf("critical: scan: %v", err), http.StatusBadGateway)
 				return
 			}
 			s.FirstAt = first
 			s.LastAt = last
-			s.Score = sevScore[s.Severity]
-			s.VideoID = s.IncidentID
-			s.Reasons = []string{fmt.Sprintf("severity %s", s.Severity), s.RuleID}
+			// The score and the reasons are the PRODUCT's: the threat score the
+			// autonomy layer computed and the chain that produced it, both
+			// stored on the incident. This handler used to derive a score from
+			// the severity and write a reason string made of the severity and
+			// the rule id -- a number the console made up, wearing the word
+			// "score". A score with no chain behind it is a number nobody can
+			// check, and the chain is what makes it checkable.
+			s.Score = score
+			s.Reasons = chainReasons(chain)
 			streams = append(streams, s)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -393,37 +405,60 @@ func handleCritical(pool *dbx.Pool) http.HandlerFunc {
 	}
 }
 
-// tenantAndSites resolves the caller's tenant and site scope. The tenant comes
-// from the X-Tenant-ID header, never from the request body. When the header is
-// absent and a pool is configured, the first tenant in the sites table is used,
-// which keeps a local single-tenant console working without auth.
-func tenantAndSites(r *http.Request, pool *dbx.Pool) (string, []string, error) {
-	tenant := strings.TrimSpace(r.Header.Get("X-Tenant-ID"))
-	sites := strings.Fields(strings.TrimSpace(r.Header.Get("X-Site-IDs")))
-	if tenant == "" && pool != nil {
-		var t string
-		if err := pool.QueryRow(context.Background(), `SELECT tenant_id FROM sites LIMIT 1`).Scan(&t); err == nil {
-			tenant = t
+// chainReasons renders the stored reason chain as the short strings the
+// legacy alias carried.
+//
+// The chain is JSONB on the incident row, written by the autonomy layer when
+// the incident was raised. It is rendered as "rule: factor" so the reader sees
+// WHICH rule moved the score, which is the whole point of carrying a chain: a
+// score without its derivation is a number nobody can act on.
+//
+// A chain that does not parse is not an error here. The row is still an
+// incident with a real score; a missing chain means the reader gets the score
+// without its reasons, and the page says so rather than inventing reasons.
+func chainReasons(raw []byte) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	var steps []struct {
+		Key      string `json:"Key"`
+		Rule     string `json:"Rule"`
+		Factor   int    `json:"Factor"`
+		Evidence string `json:"Evidence"`
+	}
+	if err := json.Unmarshal(raw, &steps); err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(steps))
+	for _, step := range steps {
+		switch {
+		case step.Rule != "" && step.Factor != 0:
+			out = append(out, fmt.Sprintf("%s: %d", step.Rule, step.Factor))
+		case step.Rule != "":
+			out = append(out, step.Rule)
+		case step.Key != "":
+			out = append(out, step.Key)
 		}
 	}
-	if tenant == "" {
-		return "", nil, errors.New("no tenant: set X-Tenant-ID")
+	if len(out) == 0 {
+		return nil
 	}
-	if len(sites) == 0 && pool != nil {
-		var rows []string
-		rr, err := pool.WithSites(tenant, "tenantAndSites", nil).Query(context.Background(), `SELECT site_id FROM sites WHERE tenant_id = $1`, tenant)
-		if err == nil {
-			defer rr.Close()
-			for rr.Next() {
-				var s string
-				if err := rr.Scan(&s); err == nil {
-					rows = append(rows, s)
-				}
-			}
-		}
-		sites = rows
+	return out
+}
+
+// scopeFor resolves the tenant and the site scope a request is answered
+// under.
+//
+// The scope is CONFIGURED, not requested: see web/scope.go for why the
+// X-Tenant-ID header is not read, and what it was doing instead.
+//
+// A missing tenant or a missing database is a SERVER that is not configured,
+// and it answers 503: the request was fine, and 400 would say it was not.
+func scopeFor(s scope, pool *dbx.Pool) (string, []string, error) {
+	if pool == nil {
+		return "", nil, scopeError("the console server has no database configured: set SP_DATABASE_URL")
 	}
-	return tenant, sites, nil
+	return s.resolve(pool)
 }
 
 // chatAnswer turns an investigation run into a grounded answer and citations.

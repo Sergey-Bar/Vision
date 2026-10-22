@@ -45,13 +45,58 @@ func (s *stubAbsence) DriftedDevices(_ context.Context, _, _ string) (int, strin
 	return s.n["clock_drift"], s.worst["clock_drift"], s.since["clock_drift"], s.err
 }
 
+// The panel must not panic on a server with NO injected clock.
+//
+// This is the defect the live product had.
+//
+// The panel reached past the accessor and called the server's clock FIELD
+// directly. The field is nil unless `SetClock` was called, and the daemon
+// never calls it — the injectable clock is a test affordance. So the live
+// product answered 500 for every request the panel had something to report:
+// the panel crashed exactly when it found something, which is the one moment
+// it exists for.
+//
+// The test builds a server with NO clock, exactly as the daemon builds it, and
+// gives the panel a finding with a timestamp — because a finding with no
+// timestamp never reaches the line that reads the clock, and a test with no
+// finding passes against the broken code.
+func TestTheCoveragePanelDoesNotPanicWithoutAnInjectedClock(t *testing.T) {
+	srv := &Server{} // no clock: this is what the daemon builds
+	reader := &stubAbsence{
+		n:     map[string]int{"ai_plane": 3},
+		worst: map[string]string{"ai_plane": "model_unavailable"},
+		since: map[string]time.Time{"ai_plane": time.Date(2026, 10, 4, 11, 0, 0, 0, time.UTC)},
+	}
+
+	views, err := srv.Absence(context.Background(), reader, nil, "acme", []string{"north-gate"})
+	if err != nil {
+		t.Fatalf("read the panel: %v", err)
+	}
+	var plane *AbsenceView
+	for i := range views {
+		if views[i].Kind == "ai_plane" {
+			plane = &views[i]
+		}
+	}
+	if plane == nil {
+		t.Fatalf("the panel has no ai_plane row: %+v", views)
+	}
+	if plane.Count != 3 {
+		t.Errorf("the ai_plane row counts %d, want 3", plane.Count)
+	}
+	if plane.SinceAge <= 0 {
+		t.Errorf("the ai_plane row's age is %v, want a positive duration. The panel reports how "+
+			"long the absence has been, and a row with a count and no age is half a row", plane.SinceAge)
+	}
+}
+
 // A healthy site renders four rows, all zero.
 //
 // Not an empty table. A row that disappears when it is fine is a row that is only
 // interesting when it is broken, and a reader who has been trained by that stops
 // reading the table -- including on the day it is broken.
 func TestACoveragePanelAlwaysHasItsFourRows(t *testing.T) {
-	srv := &Server{now: func() time.Time { return time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC) }}
+	srv := &Server{clockFn: func() time.Time { return time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC) }}
 	reader := &stubAbsence{n: map[string]int{}, worst: map[string]string{}, since: map[string]time.Time{}}
 
 	views, err := srv.Absence(context.Background(), reader, nil, "acme", []string{"north-gate"})
@@ -88,7 +133,7 @@ func TestACoveragePanelAlwaysHasItsFourRows(t *testing.T) {
 // is a pass. A short-circuit on `count == 0` would make the second look like the
 // first.
 func TestACoveragePanelMeasuresEveryKindEvenWhenNothingIsWrong(t *testing.T) {
-	srv := &Server{now: time.Now}
+	srv := &Server{clockFn: time.Now}
 	reader := &stubAbsence{n: map[string]int{}, worst: map[string]string{}, since: map[string]time.Time{}}
 
 	if _, err := srv.Absence(context.Background(), reader, nil, "acme", []string{"north-gate"}); err != nil {
@@ -117,7 +162,7 @@ func TestACoveragePanelMeasuresEveryKindEvenWhenNothingIsWrong(t *testing.T) {
 // nothing anywhere produces a sentence about what was or was not seen.
 func TestADegradedModelIsRenderedAsACountAndAReasonAndNeverAsAnAbsence(t *testing.T) {
 	now := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
-	srv := &Server{now: func() time.Time { return now }}
+	srv := &Server{clockFn: func() time.Time { return now }}
 	reader := &stubAbsence{
 		n:     map[string]int{"ai_plane": 7},
 		worst: map[string]string{"ai_plane": "no AI runtime is configured for this install"},
@@ -175,7 +220,7 @@ func TestADegradedModelIsRenderedAsACountAndAReasonAndNeverAsAnAbsence(t *testin
 // page that 500s on a misconfiguration teaches an operator to avoid the page rather
 // than to fix the assignment.
 func TestAPrincipalWithNoSiteScopeGetsFourZeroRows(t *testing.T) {
-	srv := &Server{now: time.Now}
+	srv := &Server{clockFn: time.Now}
 	reader := &stubAbsence{
 		n:     map[string]int{"ai_plane": 99}, // would be alarming if it leaked
 		worst: map[string]string{"ai_plane": "would be alarming if it leaked"},
@@ -202,7 +247,7 @@ func TestAPrincipalWithNoSiteScopeGetsFourZeroRows(t *testing.T) {
 // database error and renders four zeroes says "nothing is wrong" when the truth is
 // "we could not find out", which is the exact confusion the panel exists to remove.
 func TestAFailedReadIsAnErrorAndNotFourZeroes(t *testing.T) {
-	srv := &Server{now: time.Now}
+	srv := &Server{clockFn: time.Now}
 	reader := &stubAbsence{
 		n:   map[string]int{},
 		err: errors.New("the database is unreachable"),
@@ -226,7 +271,7 @@ func TestAFailedReadIsAnErrorAndNotFourZeroes(t *testing.T) {
 // rather than a transient failure. It renders as zeroes and the console's own
 // capability handling is what tells the reader the page is unconfigured.
 func TestANilReaderIsFourZeroesRatherThanAPanic(t *testing.T) {
-	srv := &Server{now: time.Now}
+	srv := &Server{clockFn: time.Now}
 	views, err := srv.Absence(context.Background(), nil, nil, "acme", []string{"north-gate"})
 	if err != nil {
 		t.Fatalf("a nil reader was an error: %v. It is a build that does not measure this, "+

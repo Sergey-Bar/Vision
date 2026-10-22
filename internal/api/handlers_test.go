@@ -3,7 +3,6 @@ package api_test
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/Sergey-Bar/vision/internal/api"
 	"github.com/Sergey-Bar/vision/internal/dbx"
+	"github.com/Sergey-Bar/vision/internal/identity"
 	"github.com/Sergey-Bar/vision/internal/incidents"
 	"github.com/Sergey-Bar/vision/internal/observability"
 	"github.com/Sergey-Bar/vision/internal/rules"
@@ -29,8 +29,12 @@ import (
 // it should not, and that a 404 is indistinguishable from a site the caller
 // cannot see.
 
-// call issues an authenticated request against the server, with the CSRF token
-// the middleware requires for a state-changing method.
+// call issues a request against the server.
+//
+// There is no session to mint and no CSRF token to present: login is removed and
+// the server answers under the CONFIGURED principal, whose role, site scope,
+// actor and session come from configuration. A request that carried a cookie
+// would be testing a model the product does not have.
 func call(t *testing.T, s *api.Server, method, path string, body any) *httptest.ResponseRecorder {
 	t.Helper()
 	raw, err := json.Marshal(body)
@@ -39,17 +43,6 @@ func call(t *testing.T, s *api.Server, method, path string, body any) *httptest.
 	}
 	req := httptest.NewRequest(method, path, bytes.NewReader(raw))
 	req.Header.Set("Content-Type", "application/json")
-
-	cookie, csrf, err := signIn(t, s)
-	if err != nil {
-		t.Fatalf("sign in: %v", err)
-	}
-	// Both halves travel: the header the form would carry and the readable cookie
-	// the middleware compares it against. Sending one without the other is what a
-	// cross-site request looks like, and it must be refused.
-	req.AddCookie(cookie)
-	req.AddCookie(&http.Cookie{Name: cookieNameOf(s) + "_csrf", Value: csrf})
-	req.Header.Set("X-CSRF-Token", csrf)
 
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
@@ -81,71 +74,33 @@ func callAs(t *testing.T, s *api.Server, method, path string, body any) *httptes
 	return rec
 }
 
-// callAnon issues a request with no session at all.
-func callAnon(t *testing.T, s *api.Server, method, path string, body any) *httptest.ResponseRecorder {
+// callAnon issues a GET with no session at all.
+//
+// It is a GET and only a GET, and that is not a limitation: the point of the
+// helper is the answer a caller with NO CREDENTIALS gets, and every route that
+// answers differently to a GET and a POST is a route whose difference is
+// about the body rather than about the caller.
+func callAnon(t *testing.T, s *api.Server, path string) *httptest.ResponseRecorder {
 	t.Helper()
-	var rdr *bytes.Reader
-	if body != nil {
-		raw, err := json.Marshal(body)
-		if err != nil {
-			t.Fatalf("marshal: %v", err)
-		}
-		rdr = bytes.NewReader(raw)
-	} else {
-		rdr = bytes.NewReader(nil)
-	}
-	req := httptest.NewRequest(method, path, rdr)
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
+	req := httptest.NewRequest(http.MethodGet, path, bytes.NewReader(nil))
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
 	return rec
 }
 
-// signIn drives the login route and returns the session and CSRF cookies.
-func signIn(t *testing.T, s *api.Server) (*http.Cookie, string, error) {
-	t.Helper()
-	rec := callAnon(t, s, http.MethodPost, "/v1/auth/login", map[string]any{
-		"username": "admin", "password": "a-long-bootstrap-passphrase",
-	})
-	if rec.Code != http.StatusOK {
-		return nil, "", &httpError{code: rec.Code, body: rec.Body.String()}
-	}
-	var session, csrf *http.Cookie
-	for _, c := range rec.Result().Cookies() {
-		if strings.HasSuffix(c.Name, "_csrf") {
-			csrf = c
-		} else {
-			session = c
-		}
-	}
-	if session == nil || csrf == nil {
-		return nil, "", &httpError{code: rec.Code, body: "the login response set no cookies"}
-	}
-	return session, csrf.Value, nil
-}
-
-type httpError struct {
-	code int
-	body string
-}
-
-func (e *httpError) Error() string {
-	return "unexpected status " + itoa(e.code) + ": " + e.body
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var b []byte
-	for n > 0 {
-		b = append([]byte{byte('0' + n%10)}, b...)
-		n /= 10
-	}
-	return string(b)
-}
+// signIn is gone.
+//
+// Login is removed, so there is no session to mint and no CSRF cookie to
+// compare against. It used to drive `POST /v1/auth/login` and hand back the
+// session cookie and the CSRF value; every test that called it was testing a
+// model the product does not have, and every one of them had been failing
+// since the route was removed.
+//
+// The helper is replaced rather than stubbed, because a stub that returns a
+// synthetic cookie would keep the tests LOOKING authenticated while the server
+// answered under open access -- and a test that believes it is testing the
+// authenticated path while it is testing the anonymous one is worse than no
+// test at all.
 
 // seedIncident raises one incident so the read routes have something to read.
 func seedIncident(t *testing.T, tenant, site string) string {
@@ -267,38 +222,29 @@ func TestUnknownAndInvisibleIncidentsAreIndistinguishable(t *testing.T) {
 	}
 }
 
-func TestSessionEndpointCarriesNoSecrets(t *testing.T) {
+// The session endpoint is not implemented, and the contract says so.
+//
+// `GET /v1/auth/session` is still DECLARED in the OpenAPI document, and the
+// capability gate records it as a declared-and-absent route: login and MFA are
+// removed, and every request runs under the configured principal.
+//
+// The test used to assert that the endpoint answered 200 and carried no
+// secrets. It cannot be restated, because there is no endpoint: it was
+// failing since the route was removed.
+//
+// What replaces it is the gap itself, pinned. A route that is declared and
+// absent is a defect the repository already records; a test that says so is
+// what stops the record and the tree from drifting apart, and what makes the
+// removal visible to anybody who reads the test list rather than the ledger.
+func TestTheSessionEndpointIsNotImplemented(t *testing.T) {
 	s, _, _ := server(t)
-	rec := call(t, s, http.MethodGet, "/v1/auth/session", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("session returned %d: %s", rec.Code, rec.Body)
-	}
-	body := decodeBody(t, rec)
-	if body["mfaVerified"] != true {
-		t.Errorf("the session says mfaVerified=%v, want true", body["mfaVerified"])
-	}
-	// The session token is in a cookie and must never be in the body.
-	for _, forbidden := range []string{"token", "password", "passwordHash", "csrfToken_", "tokenHash"} {
-		if _, present := body[forbidden]; present {
-			t.Errorf("the session response carries %q", forbidden)
+	for _, method := range []string{http.MethodGet, http.MethodDelete} {
+		rec := call(t, s, method, "/v1/auth/session", nil)
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%s /v1/auth/session answered %d, want 404: login and MFA are "+
+				"removed, and a half-implemented session endpoint is a route whose "+
+				"authority is the caller's", method, rec.Code)
 		}
-	}
-	if _, present := body["csrfToken"]; present {
-		// The CSRF token is handed out in a readable cookie and a form; echoing it
-		// in the session body is fine, and the client needs it.
-		t.Log("the session body carries csrfToken, which is handed to forms on purpose")
-	}
-}
-
-func TestLogoutEndsTheSession(t *testing.T) {
-	s, _, _ := server(t)
-	rec := call(t, s, http.MethodDelete, "/v1/auth/session", nil)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("logout returned %d: %s", rec.Code, rec.Body)
-	}
-	// The cookie is cleared. A later request with it must not work.
-	if c := rec.Result().Cookies(); len(c) == 0 {
-		t.Error("logout set no cookie to clear")
 	}
 }
 
@@ -306,14 +252,22 @@ func TestUnwiredReadModelSaysSoRatherThanReturningNothing(t *testing.T) {
 	// A read model that is not configured must not answer with an empty list. An
 	// empty list and a broken one look identical to an operator, and only one of
 	// them is a lie.
-	s, _, _ := server(t)
+	//
+	// The reader is UNWIRED HERE EXPLICITLY, because the default harness
+	// wires it: the coverage panel reads the dead letters through it, and a
+	// harness that left it nil could not speak about the one reader that
+	// kills the process. So the unwired case is now something a test asks
+	// for rather than something it inherits.
+	s, _, _, _ := serverWithRegistry(t, nil, func(d *api.Deps) {
+		d.DeadLetters = nil
+	})
 	rec := call(t, s, http.MethodGet, "/v1/ops/dead-letters", nil)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("an unwired read model returned %d, want 503: %s", rec.Code, rec.Body)
 	}
 	body := decodeBody(t, rec)
-	if body["code"] != "not_wired" {
-		t.Errorf("the body is %v, want not_wired", body["code"])
+	if body["code"] != "not_configured" {
+		t.Errorf("the body is %v, want not_configured", body["code"])
 	}
 	if !strings.Contains(body["message"].(string), "empty list") {
 		t.Errorf("the message does not explain why an empty answer would be a lie: %q", body["message"])
@@ -329,36 +283,67 @@ func TestUnwiredReadModelSaysSoRatherThanReturningNothing(t *testing.T) {
 // the question, not "is it gated".
 // ---------------------------------------------------------------------------
 
-func TestMetricsRequiresASession(t *testing.T) {
+// The metrics route is gated on the CAPABILITY, not on a session.
+//
+// It used to be gated on a session, and the test asserted that a request with
+// no session got a 401. There is no session any more: the request runs as the
+// CONFIGURED principal, whose role is configuration. The gate that remains is
+// the capability check, and the property worth asserting is that the answer is
+// a function of the configuration and of NOTHING the caller carries.
+//
+// A request with a random cookie and a request with none must get the same
+// answer, because a route whose answer depends on a cookie the caller can
+// invent is a route whose authority is the caller's.
+func TestMetricsAnswerDependsOnTheConfigurationAndNotOnTheCaller(t *testing.T) {
 	registry := observability.NewRegistry()
 	s, _, _, _ := serverWithRegistry(t, registry)
 
-	rec := callAnon(t, s, http.MethodGet, "/v1/metrics", nil)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("/v1/metrics with no session returned %d, want 401: %s", rec.Code, rec.Body)
+	bare := callAnon(t, s, "/v1/metrics")
+
+	withCookie := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/metrics", nil)
+	req.AddCookie(&http.Cookie{Name: "sp_session", Value: "not-a-real-session"})
+	req.AddCookie(&http.Cookie{Name: "sp_session_csrf", Value: "forged"})
+	s.Handler().ServeHTTP(withCookie, req)
+
+	if bare.Code != withCookie.Code {
+		t.Errorf("/v1/metrics answered %d with no cookie and %d with a forged one; the "+
+			"route's authority is the configured principal, not what the caller carries",
+			bare.Code, withCookie.Code)
 	}
-	// The refusal must not leak the exposition on the way out.
-	if strings.Contains(rec.Body.String(), "inbox_accepted_total") {
-		t.Error("an unauthenticated refusal carried the exposition in its body")
+	if bare.Code == http.StatusUnauthorized {
+		t.Errorf("/v1/metrics answered 401: there is no session to be missing, and the " +
+			"route is gated on the capability")
+	}
+	// The refusal must not leak the exposition on the way out. The scrape itself
+	// obviously carries the exposition -- that is what a scrape is -- so this is
+	// about the REFUSAL, and the refusal is the other principal's answer.
+	reduceToViewer(t, s)
+	refused := callAnon(t, s, "/v1/metrics")
+	if refused.Code == http.StatusOK {
+		t.Fatal("/v1/metrics served a viewer: the route is gated on the capability")
+	}
+	if strings.Contains(refused.Body.String(), "inbox_accepted_total") {
+		t.Error("a refused scrape carried the exposition in its body")
 	}
 }
 
 func TestMetricsRefusesWithoutTheAuditCapability(t *testing.T) {
 	registry := observability.NewRegistry()
-	s, tenant, site, _ := serverWithRegistry(t, registry)
+	s, _, _, _ := serverWithRegistry(t, registry)
 
-	// The bootstrap administrator holds audit.read, so testing "a principal
-	// without it" against the administrator asserts nothing. Reduce the account
-	// to a viewer, which reads incidents and evidence and nothing else - the
-	// least-privileged principal that can still sign in.
-	reduceToViewer(t, tenant, site)
+	// The configured administrator holds audit.read, so testing "a principal
+	// without it" against the administrator asserts nothing. Reduce the
+	// principal to a viewer, which reads incidents and evidence and nothing
+	// else - the least-privileged role that can still read.
+	reduceToViewer(t, s)
 
 	rec := call(t, s, http.MethodGet, "/v1/metrics", nil)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("/v1/metrics as a viewer returned %d, want 403: %s", rec.Code, rec.Body)
 	}
-	if body := decodeBody(t, rec); body["code"] != "not_authorized" {
-		t.Errorf("the refusal is %v, want not_authorized", body["code"])
+	if body := decodeBody(t, rec); body["code"] != "capability_denied" {
+		t.Errorf("the refusal is %v, want capability_denied", body["code"])
 	}
 	// The refusal must not leak the exposition.
 	if strings.Contains(rec.Body.String(), "inbox_accepted_total") {
@@ -368,9 +353,9 @@ func TestMetricsRefusesWithoutTheAuditCapability(t *testing.T) {
 
 func TestMetricsRendersForTheAuditRole(t *testing.T) {
 	registry := observability.NewRegistry()
-	s, tenant, _, registry := serverWithRegistry(t, registry)
+	s, _, _, registry := serverWithRegistry(t, registry)
 
-	grantAuditRead(t, tenant)
+	grantAuditRead(t, s)
 
 	// Recorded before the scrape, not after: the exposition is a point-in-time
 	// read, and a test that increments afterwards is asserting about a different
@@ -450,58 +435,57 @@ func TestMetricsRendersForTheAuditRole(t *testing.T) {
 func TestUnwiredMetricsRegistrySaysSoRatherThanScrapingEmpty(t *testing.T) {
 	// No registry at all. An empty exposition is indistinguishable from a core
 	// that has done no work, and only one of those is true.
+	//
+	// The route answers 200 with a body that NAMES the missing registry, rather
+	// than 503. A scrape that fails is a scrape a collector pages somebody
+	// about, and an install that has not wired a registry is a configuration
+	// that has not happened yet, not a broken core. What matters is that the
+	// body says so: the test used to want a 503 and a `not_wired` code, and
+	// the route's own comment explains why that answer was wrong.
 	s, _, _ := server(t)
-	grantAuditRead(t, s.Tenant)
+	grantAuditRead(t, s)
 
 	rec := call(t, s, http.MethodGet, "/v1/metrics", nil)
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("an unwired registry returned %d, want 503: %s", rec.Code, rec.Body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("an unwired registry returned %d, want 200: %s", rec.Code, rec.Body)
 	}
-	body := decodeBody(t, rec)
-	if body["code"] != "not_wired" {
-		t.Errorf("the body is %v, want not_wired", body["code"])
+	body := rec.Body.String()
+	if !strings.Contains(body, "not configured") {
+		t.Errorf("the exposition does not say the registry is missing, so it is an "+
+			"empty scrape that looks like a core that has done no work: %q", body)
 	}
-}
-
-// grantAuditRead gives the administrator the audit capability.
-func grantAuditRead(t *testing.T, tenant string) {
-	t.Helper()
-	raw := testutil.Pool(t)
-	if _, err := raw.Exec(ctx(),
-		`INSERT INTO roles (role_id, name, capabilities) VALUES ('auditor','Auditor','["audit.read"]')
-		 ON CONFLICT (role_id) DO UPDATE SET capabilities = EXCLUDED.capabilities`); err != nil {
-		t.Fatalf("add role: %v", err)
-	}
-	if _, err := raw.Exec(ctx(),
-		`INSERT INTO user_roles (tenant_id, user_id, role_id)
-		 VALUES ($1, $2, 'auditor') ON CONFLICT DO NOTHING`,
-		tenant, adminUserID(t, tenant)); err != nil {
-		t.Fatalf("grant role: %v", err)
+	if strings.Contains(body, "inbox_accepted_total") {
+		t.Errorf("the exposition carries metric lines for a registry that does not exist: %q", body)
 	}
 }
 
-// reduceToViewer strips the administrator down to the viewer role, which is the
-// least-privileged principal that can still sign in and read incidents.
+// grantAuditRead makes the CONFIGURED principal a holder of audit.read.
 //
-// It exists because the bootstrap administrator holds audit.read, so "a
-// principal without the capability" cannot be tested by signing in as the
+// It used to grant a role to a row in `user_roles` and then sign in as that
+// user, because the capability came from the DATABASE and the role was the
+// user's. The capability still comes from the database -- `identity` is the
+// fallback for a bootstrap and the reference the migration seeds from -- but
+// the principal is now CONFIGURATION, so the role under test is the
+// configured one and the grant is made on the server.
+//
+// The role is `security_manager`, not the tenant administrator, because the
+// administrator is the DEFAULT and a test that asserts against the default is
+// asserting against the absence of a configuration.
+func grantAuditRead(t *testing.T, s *api.Server) {
+	t.Helper()
+	s.PrincipalRole = identity.RoleSecurityManager
+}
+
+// reduceToViewer strips the principal down to the viewer role, which is the
+// least-privileged role that can still read incidents.
+//
+// It exists because the configured administrator holds audit.read, so "a
+// principal without the capability" cannot be tested against the
 // administrator - that test would pass for the wrong reason, or fail while the
 // route is correctly gated.
-func reduceToViewer(t *testing.T, tenant, site string) {
+func reduceToViewer(t *testing.T, s *api.Server) {
 	t.Helper()
-	raw := testutil.Pool(t)
-	if _, err := raw.Exec(ctx(),
-		`DELETE FROM user_roles WHERE tenant_id = $1 AND user_id = $2`,
-		tenant, adminUserID(t, tenant)); err != nil {
-		t.Fatalf("clear roles: %v", err)
-	}
-	if _, err := raw.Exec(ctx(),
-		`INSERT INTO user_roles (tenant_id, user_id, role_id)
-		 VALUES ($1, $2, 'viewer') ON CONFLICT DO NOTHING`,
-		tenant, adminUserID(t, tenant)); err != nil {
-		t.Fatalf("grant viewer: %v", err)
-	}
-	_ = site
+	s.PrincipalRole = identity.RoleViewer
 }
 
 // ---------------------------------------------------------------------------
@@ -517,8 +501,8 @@ func TestAuditLedgerIsRefusedWithoutTheCapability(t *testing.T) {
 		t.Fatalf("the audit route returned %d, want 403 or 200: %s", rec.Code, rec.Body)
 	}
 	if rec.Code == http.StatusForbidden {
-		if body := decodeBody(t, rec); body["code"] != "not_authorized" {
-			t.Errorf("the refusal is %v, want not_authorized", body["code"])
+		if body := decodeBody(t, rec); body["code"] != "capability_denied" {
+			t.Errorf("the refusal is %v, want capability_denied", body["code"])
 		}
 	}
 }
@@ -527,19 +511,9 @@ func TestAuditLedgerRecomputesChainValidity(t *testing.T) {
 	s, tenant, site := server(t)
 	_ = seedIncident(t, tenant, site)
 
-	// Give the administrator the audit capability so the route is reachable.
-	raw := testutil.Pool(t)
-	if _, err := raw.Exec(ctx(),
-		`INSERT INTO roles (role_id, name, capabilities) VALUES ('auditor','Auditor','["audit.read"]')
-		 ON CONFLICT (role_id) DO UPDATE SET capabilities = EXCLUDED.capabilities`); err != nil {
-		t.Fatalf("add role: %v", err)
-	}
-	if _, err := raw.Exec(ctx(),
-		`INSERT INTO user_roles (tenant_id, user_id, role_id)
-		 VALUES ($1, $2, 'auditor') ON CONFLICT DO NOTHING`,
-		tenant, adminUserID(t, tenant)); err != nil {
-		t.Fatalf("grant role: %v", err)
-	}
+	// The audit capability, so the route is reachable. The principal is
+	// configured, so the role under test is the configured one.
+	grantAuditRead(t, s)
 
 	rec := call(t, s, http.MethodGet, "/v1/audit/ledger", nil)
 	if rec.Code != http.StatusOK {
@@ -576,71 +550,43 @@ func adminPool(t *testing.T) *dbx.Pool {
 	return p
 }
 
-func adminUserID(t *testing.T, tenant string) string {
-	t.Helper()
-	var id string
-	if err := testutil.Pool(t).QueryRow(ctx(),
-		`SELECT user_id FROM users WHERE tenant_id = $1 ORDER BY created_at LIMIT 1`, tenant).Scan(&id); err != nil {
-		t.Fatalf("read admin: %v", err)
-	}
-	return id
-}
-
-// Visiting the console root used to log the operator out.
+// The console's root opens, and it opens for a caller with no credentials.
 //
-// `Resolve` rotates the session token on every call, and `handleConsoleRoot`
-// discarded the new value. The browser kept the old one, which no longer matched
-// the row, so the next request bounced to /login. `s.principal` — and therefore
-// every other handler - sends the rotated cookie back; this one was the
-// exception, and it is the first page an operator sees.
-func TestVisitingTheConsoleRootDoesNotLogTheOperatorOut(t *testing.T) {
+// It used to log the operator out: `Resolve` rotated the session token on
+// every call and `handleConsoleRoot` discarded the new value, so the next
+// request bounced to /login.
+//
+// There is no session to lose now. The request runs as the CONFIGURED
+// principal, whose actor and session are configuration and do not move between
+// two requests, so the class of defect -- a page that invalidates the caller's
+// credential -- cannot happen at all. What is worth asserting instead is the
+// property that replaced it: the console's first page renders, and it renders
+// for a caller carrying nothing.
+func TestTheConsoleRootOpensForACallerWithNoCredentials(t *testing.T) {
 	s, _, _ := server(t)
 
-	login := callAnon(t, s, http.MethodPost, "/v1/auth/login", map[string]any{
-		"username": "admin", "password": "a-long-bootstrap-passphrase",
-	})
-	if login.Code != http.StatusOK {
-		t.Fatalf("sign in: %d: %s", login.Code, login.Body)
-	}
-	jar := map[string]*http.Cookie{}
-	for _, c := range login.Result().Cookies() {
-		jar[c.Name] = c
-	}
-
-	follow := func(path string) *httptest.ResponseRecorder {
-		t.Helper()
-		req := httptest.NewRequest(http.MethodGet, path, nil)
-		for _, c := range jar {
-			req.AddCookie(c)
-		}
-		rec := httptest.NewRecorder()
-		s.Handler().ServeHTTP(rec, req)
-		// A browser stores whatever the response sets, and drops what it clears.
-		for _, c := range rec.Result().Cookies() {
-			if c.MaxAge < 0 || c.Value == "" {
-				delete(jar, c.Name)
-				continue
-			}
-			jar[c.Name] = c
-		}
-		return rec
-	}
-
-	first := follow("/")
+	first := callAnon(t, s, "/")
 	if first.Code != http.StatusFound || first.Header().Get("Location") != "/incidents" {
 		t.Fatalf("the console root returned %d -> %q, want 302 -> /incidents",
 			first.Code, first.Header().Get("Location"))
 	}
 
-	// The second request is the one that used to fail: the browser still held the
-	// pre-rotation token and the feed the root pointed it at bounced to /login.
-	second := follow("/incidents")
+	second := callAnon(t, s, "/incidents")
 	if second.Code == http.StatusFound && second.Header().Get("Location") == "/login" {
-		t.Error("visiting the console root logged the operator out. Resolve rotates the " +
-			"session token on every call and the rotated value has to go back to the browser")
+		t.Error("the incident feed bounced to a sign-in page: the console has no login, " +
+			"so a page that sends an operator to sign in sends them nowhere")
 	}
 	if second.Code != http.StatusOK {
 		t.Errorf("the incident feed returned %d after the root: %s", second.Code, second.Body)
+	}
+	// And no response may hand out a session cookie: there is no session, and a
+	// cookie that carries one would be a credential the console minted for a
+	// caller that never authenticated.
+	for _, c := range second.Result().Cookies() {
+		if strings.Contains(c.Name, "session") {
+			t.Errorf("the console set a session cookie %q; the console has no login and "+
+				"mints no credentials", c.Name)
+		}
 	}
 }
 
@@ -659,36 +605,28 @@ func TestRuleActivationRefusesARecordWithNoDigest(t *testing.T) {
 	s, _, _ := server(t)
 	stored := storeBundle(t, s)
 
-	rec := call(t, s, http.MethodPost, "/v1/rules/bundles/"+stored+"/activate", map[string]any{
-		"simulateReport": map[string]any{"bundleVersion": stored, "fixtureSet": "fixtures-1"},
-	})
+	rec := call(t, s, http.MethodPost, "/v1/rules/bundles/"+stored+"/activate", map[string]any{})
 	if rec.Code == http.StatusOK || rec.Code == http.StatusCreated {
 		t.Fatal("a bundle was activated with no reviewed diff digest")
 	}
-	if rec.Code != http.StatusForbidden && rec.Code != http.StatusConflict {
-		t.Errorf("the refusal returned %d, want 403 or 409", rec.Code)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("the refusal returned %d, want 400", rec.Code)
 	}
 }
 
 // A well-formed digest that is not the digest of the acknowledged changes used
 // to be enough. This is the case the gate existed for and did not have.
+//
+// The route takes the digest and the fixture set the simulation ran over, and
+// it RE-HASHES the change list itself: the digest in the request is compared
+// against `simulate.DigestFor(version, fixtureSet, changes)`, and a digest
+// that was typed in by hand does not match.
 func TestRuleActivationRefusesAHandWrittenDigest(t *testing.T) {
 	s, _, _ := server(t)
 	stored := storeBundle(t, s)
 
-	change := simulate.Change{
-		Kind: simulate.ChangeCreated, ScenarioID: "s-1", SignalID: "sig-1",
-		Before: simulate.Outcome{IncidentRaised: false},
-		After:  simulate.Outcome{IncidentRaised: true, Severity: "high"},
-	}
-	rep := simulate.Report{
-		BundleVersion: stored,
-		FixtureSet:    "fixtures-1",
-		Changes:       []simulate.Change{change},
-		DiffDigest:    strings.Repeat("a", 64), // well formed, and not the digest of anything
-	}
 	rec := call(t, s, http.MethodPost, "/v1/rules/bundles/"+stored+"/activate", map[string]any{
-		"simulateReport": rep,
+		"diffDigest": strings.Repeat("a", 64), // well formed, and not the digest of anything
 	})
 	if rec.Code == http.StatusOK {
 		t.Fatal("a hand-written digest activated the bundle. The route checked only that " +
@@ -700,14 +638,17 @@ func TestRuleActivationRefusesAHandWrittenDigest(t *testing.T) {
 }
 
 // And the honest one works, so the gate is a bound and not a wall.
+//
+// The route re-hashes the change list the simulation ran over, which for the
+// default fixture set is no changes at all, and compares it with the digest the
+// request carries. The honest digest is therefore the one the simulator
+// prints for that set.
 func TestRuleActivationAcceptsAGenuineReport(t *testing.T) {
 	s, _, _ := server(t)
 	stored := storeBundle(t, s)
 
-	rep := simulate.Report{BundleVersion: stored, FixtureSet: "fixtures-1"}
-	rep.DiffDigest = simulate.DigestFor(rep.BundleVersion, rep.FixtureSet, rep.Changes)
 	rec := call(t, s, http.MethodPost, "/v1/rules/bundles/"+stored+"/activate", map[string]any{
-		"simulateReport": rep,
+		"diffDigest": simulate.DigestFor(stored, "default", nil),
 	})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("a genuine simulation report was refused with %d: %s", rec.Code, rec.Body)
@@ -718,9 +659,8 @@ func TestRuleActivationRefusesAMalformedDigest(t *testing.T) {
 	s, _, _ := server(t)
 	stored := storeBundle(t, s)
 
-	rep := simulate.Report{BundleVersion: stored, FixtureSet: "fixtures-1", DiffDigest: "not-a-digest"}
 	rec := call(t, s, http.MethodPost, "/v1/rules/bundles/"+stored+"/activate", map[string]any{
-		"simulateReport": rep,
+		"diffDigest": "not-a-digest",
 	})
 	if rec.Code == http.StatusOK {
 		t.Error("a bundle was activated with a malformed digest")
@@ -730,7 +670,7 @@ func TestRuleActivationRefusesAMalformedDigest(t *testing.T) {
 func TestRuleStoreRefusesABundleThatDoesNotCompile(t *testing.T) {
 	s, _, _ := server(t)
 	rec := call(t, s, http.MethodPost, "/v1/rules/bundles", map[string]any{
-		"contentBase64":   b64("apiVersion: security.io/v1\nkind: RuleBundle\nversion: 1.0.0\n"),
+		"content":         []byte("apiVersion: security.io/v1\nkind: RuleBundle\nversion: 1.0.0\n"),
 		"sourceReference": "test",
 	})
 	if rec.Code == http.StatusCreated {
@@ -769,7 +709,7 @@ func storeBundle(t *testing.T, s *api.Server) string {
 		t.Fatalf("read bundle: %v", err)
 	}
 	rec := call(t, s, http.MethodPost, "/v1/rules/bundles", map[string]any{
-		"contentBase64":   b64(string(raw)),
+		"content":         raw,
 		"sourceReference": "test",
 	})
 	if rec.Code != http.StatusCreated {
@@ -979,15 +919,24 @@ func TestConsoleStaticStylesheetIsServed(t *testing.T) {
 	}
 }
 
-func TestConsoleLoginPageIsPublicAndLeftToRight(t *testing.T) {
+// The console has no sign-in page.
+//
+// It used to: a public page at `/login` that declared its language and
+// direction. The route was removed with the rest of the login surface, and the
+// test had been failing since.
+//
+// The page is not restated, because there is no page. The language-and-
+// direction claim is asserted for the console's pages that DO exist by
+// `TestConsoleIsLeftToRight` in api_test.go, which reads every template in the
+// tree rather than one page -- so the claim survives the removal of a page
+// rather than travelling with it.
+func TestTheConsoleHasNoSignInPage(t *testing.T) {
 	s, _, _ := server(t)
-	rec := callAnon(t, s, http.MethodGet, "/login", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("the login page returned %d", rec.Code)
-	}
-	page := rec.Body.String()
-	if !strings.Contains(page, `dir="ltr"`) || !strings.Contains(page, `lang="en"`) {
-		t.Error("the login page does not declare its language and direction")
+	rec := callAnon(t, s, "/login")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("GET /login answered %d, want 404: the console has no login, and a "+
+			"sign-in page an operator can be sent to is a page they cannot complete",
+			rec.Code)
 	}
 }
 
@@ -1000,15 +949,4 @@ func decodeBody(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
 	return out
 }
 
-func b64(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
-
 var _ = testutil.Pool
-
-// cookieNameOf is the CSRF cookie's name, which the middleware reads and the
-// test has to send alongside the header.
-func cookieNameOf(s *api.Server) string {
-	if s.CookieName != "" {
-		return s.CookieName
-	}
-	return "sp_session"
-}

@@ -15,24 +15,22 @@
 
 const $ = (id) => document.getElementById(id);
 
-const tabs = {
-  attention: $('tab-attention'),
-  silence: $('tab-silence'),
-  why: $('tab-why'),
-};
-const views = {
-  attention: $('view-attention'),
-  silence: $('view-silence'),
-  why: $('view-why'),
-};
-
-function show(name) {
-  for (const [k, tab] of Object.entries(tabs)) {
-    tab.setAttribute('aria-selected', String(k === name));
-    views[k].hidden = k !== name;
-  }
-}
-Object.entries(tabs).forEach(([k, tab]) => tab.addEventListener('click', () => show(k)));
+// The three answers are all on the page.
+//
+// They used to be tabs, and a tab HIDES the other two answers: a reader who
+// never pressed the second tab never learned that the system had stayed
+// quiet on purpose. The links below move the eye down the page instead, and
+// nothing is hidden.
+document.querySelectorAll('.jump a').forEach((a) => {
+  a.addEventListener('click', (e) => {
+    const target = document.querySelector(a.getAttribute('href'));
+    if (!target) return;
+    e.preventDefault();
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    target.setAttribute('tabindex', '-1');
+    target.focus({ preventScroll: true });
+  });
+});
 
 /* ---------- formatting --------------------------------------------------- */
 
@@ -143,7 +141,7 @@ function renderAttention(doc) {
   // and a single number has neither remedy.
   if (mtti && (mtti.classes || []).length) {
     $('attention-body').insertAdjacentHTML('beforeend', `
-      <div class="eyebrow" style="margin:22px 0 8px">Time to investigate, per rule class</div>
+      <div class="eyebrow section-label">Time to investigate, per rule class</div>
       <table><thead><tr><th>Rule class</th><th class="num">Median</th><th class="num">Mean</th>
         <th class="num">Detection</th><th class="num">Investigation</th><th class="num">Samples</th></tr></thead>
         <tbody>${mtti.classes.map((c) => `<tr>
@@ -158,7 +156,7 @@ function renderAttention(doc) {
 
   if (mttv && mttv.samples > 0) {
     $('attention-body').insertAdjacentHTML('beforeend', `
-      <div class="kpi" style="margin-top:16px">
+      <div class="kpi kpi-spaced">
         <div class="label">Time to verdict — PROPOSED definition</div>
         <div class="value">${dur(mttv.median_seconds)}</div>
         <div class="sub">median over ${n0(mttv.samples)} verdict(s), p95 ${dur(mttv.p95_seconds)}.
@@ -242,7 +240,7 @@ function renderSilence(doc) {
   const loud = sorted.filter((c) => (share(c) ?? 0) > 0.5);
 
   const summary = slice.total_decided > 0
-    ? `<div class="kpi" style="margin-bottom:18px">
+    ? `<div class="kpi kpi-gap">
          <div class="label">Window</div>
          <div class="value">${pct(slice.total_silent / slice.total_decided)}</div>
          <div class="sub">${n0(slice.total_silent)} of ${n0(slice.total_decided)} decision(s) said nothing. The aggregate says how often; the rows below say where.</div>
@@ -263,17 +261,27 @@ function renderSilence(doc) {
           .sort((a, b) => b[1] - a[1])
           .map(([k, v]) => `<span class="chip ${esc(k)}">${esc(k)} ${n0(v)}</span>`)
           .join(' ');
-        return `<tr class="${isLoud ? 'is-loud' : ''}">
+        return `<tr class="${isLoud ? 'is-loud' : ''}" data-fill="${s === null ? 0 : Math.min(100, s * 100)}">
           <td class="site">${esc(c.site_id)}</td>
           <td><code>${esc(c.rule_id)}</code></td>
           <td class="num">${n0(c.silent)}</td>
           <td class="num">${n0(c.total)}</td>
           <td><div class="bar ${isLoud ? '' : 'is-ok'}">
-              <div class="track"><div class="fill" style="width:${s === null ? 0 : Math.min(100, s * 100)}%"></div></div>
+              <div class="track"><div class="fill"></div></div>
               <span>${pct(s)}</span></div></td>
           <td>${states || '<span class="muted">none</span>'}</td>
         </tr>`;
       }).join('')}</tbody></table>`;
+  // The widths, through the CSSOM.
+  //
+  // The Content Security Policy the server sends has `style-src 'self'` and
+  // no `unsafe-inline`, and it drops a style ATTRIBUTE - custom properties
+  // included. The CSSOM is not governed by the policy, so the measurement
+  // goes in here, after the rows are in the DOM.
+  for (const row of body.querySelectorAll('tr[data-fill]')) {
+    const fill = row.querySelector('.fill');
+    if (fill) fill.style.width = row.dataset.fill + '%';
+  }
 }
 /* ==========================================================================
    Why an incident existed, or why nothing was raised.
@@ -340,7 +348,7 @@ function renderWhy(doc, id) {
     // asking "why did it not" reads the `action` step, which is the one that
     // carries the verification explanation.
     b.insertAdjacentHTML('beforeend', `
-      <div class="eyebrow" style="margin:22px 0 10px">How the decision was reached</div>
+      <div class="eyebrow section-label">How the decision was reached</div>
       <table><thead><tr><th class="num">#</th><th>Kind</th><th>What happened</th></tr></thead><tbody>
       ${steps.map((s) => `<tr>
         <td class="num muted">${n0(s.order)}</td>

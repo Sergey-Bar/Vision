@@ -12,18 +12,19 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
     <title>VISION — Chief of Security</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232563eb'/%3E%3Cpath d='M16 7l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10v-4z' fill='none' stroke='%23ffffff' stroke-width='2'/%3E%3C/svg%3E">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/app.css">
     <link rel="stylesheet" href="/static/showcase.css">
+    <link rel="stylesheet" href="/static/page.css">
 </head>
 <body>
 
 <nav class="nav">
     <a class="brand" href="/">
-        <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#2563eb"/><path d="M16 7l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10v-4z" fill="none" stroke="#ffffff" stroke-width="2"/></svg>
-        VISION
+        <svg class="mark" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 2.5 20 6.6v6.2c0 4.9-3.3 8.3-8 9.7-4.7-1.4-8-4.8-8-9.7V6.6z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M7.7 10.4h8.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="12" cy="15.1" r="1.5" fill="currentColor"/></svg>
+        <span class="brand-text">
+          <span class="brand-name">VISION</span>
+          <span class="brand-statement">The system that says what it does not know.</span>
+        </span>
     </a>
     <div class="links">
         <a href="/">Home</a>
@@ -43,7 +44,7 @@
     <header class="hero ask-hero">
         <span class="eyebrow">insights / guidance / perimeter-aware suspicion</span>
         <h1>Chief of Security — what the two records add up to.</h1>
-        <p class="lead" style="max-width:78ch">
+        <p class="lead measure">
             The product's record and the lab's record are different machines reading different material;
             the chief reads both and refuses to say things they do not establish. Behaviour is judged
             against a baseline, and a baseline needs minutes of the same scene — one animal crossing on
@@ -61,10 +62,16 @@
     deterministic arithmetic on counts the two records already hold, with every claim carrying the line
     it came from. A suspicion is not an accusation: one animal is one animal, and one minute is one
     minute, until the record has more than one of them.
+    <br><br>
+    <b>This page is the LAB's chief.</b> The product has its own, and it is the one that runs a site:
+    <a href="/console">the console's Chief</a>, at <code>/v1/chief</code>. That one reads the
+    product's own record — the attention queue, the shift hand-over, and what changed since you last
+    looked — and it names what it does not know. This page reads the two lab records, and exists to
+    show the arithmetic before there is anything to judge.
 </footer>
 
 <script src="/static/chief.js"></script>
-<script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("/static/sw.js").catch(function(){});});}</script>
+<script src="/static/register-sw.js" defer></script>
 <nav class="bottom-tabs" aria-label="Primary">
     <a href="/"><span>Home</span></a>
     <a href="/ask"><span>Ask</span></a>

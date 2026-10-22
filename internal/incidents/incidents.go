@@ -23,12 +23,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Sergey-Bar/vision/internal/audit"
+	"github.com/Sergey-Bar/vision/internal/config"
 	"github.com/Sergey-Bar/vision/internal/dbx"
 	"github.com/Sergey-Bar/vision/internal/dispatch"
 	"github.com/Sergey-Bar/vision/internal/rules"
@@ -93,6 +96,32 @@ type Service struct {
 	// running system: a state change nobody audited is a state change nobody can
 	// be shown to have happened.
 	Audit *audit.Writer
+	// ThreatEngine is which engine's order the attention queue uses: `legacy`
+	// or `calibrated`. Empty means `legacy`.
+	//
+	// It is a field rather than a parameter because the queue's order is the
+	// INSTALL's order, and an install has one engine. A parameter would mean
+	// every caller could choose, and two callers choosing differently would
+	// mean two queues.
+	ThreatEngine string
+	// QueueHalfLife is the calibrated engine's recency decay. Zero disables
+	// it, which is what the legacy engine has.
+	QueueHalfLife time.Duration
+
+	// seq disambiguates two incidents raised within one clock tick.
+	//
+	// It is here because the WALL CLOCK does not tick between two calls on
+	// every platform: the resolution of `time.Now()` is about a millisecond on
+	// Windows and about a microsecond on Linux, and an incident id derived
+	// only from it repeats when two incidents of the same rule at the same
+	// site are raised inside one tick. The second INSERT then failed on the
+	// primary key, and the incident was LOST -- which is invariant 1, "zero
+	// accepted event loss", broken by a clock's resolution.
+	//
+	// The counter is per process and per service, and it is only ever a
+	// SUFFIX: the id stays time-ordered and site-prefixed, so an operator
+	// reading a list of ids still sees the order without a query.
+	seq atomic.Uint64
 }
 
 // CreateIncident raises an incident from a decision and returns its id.
@@ -342,7 +371,14 @@ func (s *Service) newID(tenant, site string, at time.Time) string {
 	}
 	// Time-ordered and prefixed, so an operator reading a list of ids sees the
 	// order without a query and two incidents cannot collide.
-	return fmt.Sprintf("inc_%s_%d", site, at.UnixNano())
+	//
+	// The COUNTER is what makes the second promise true. The wall clock does
+	// not tick between every pair of calls — its resolution is about a
+	// millisecond on Windows — so two incidents raised at one site inside one
+	// tick used to derive the SAME id, and the second INSERT failed on the
+	// primary key. The incident was then lost, which is invariant 1 broken
+	// by a clock.
+	return fmt.Sprintf("inc_%s_%d_%d", site, at.UnixNano(), s.seq.Add(1))
 }
 
 // Summary is a feed row.
@@ -370,6 +406,15 @@ type Summary struct {
 	// the number.
 	ThreatScore       int                 `json:"threatScore"`
 	ThreatReasonChain []threat.ReasonStep `json:"threatReasonChain,omitempty"`
+	// QueueScore is the score the attention queue ORDERS BY, which is not
+	// always the stored score: under the calibrated engine it is the stored
+	// score times the queue's recency factor.
+	//
+	// It is a property of the queue and not of the incident, and it is not
+	// written to the incident's row for that reason. The decay is applied on
+	// read because the queue's half-life is a configuration value and an
+	// incident's score is a fact.
+	QueueScore int `json:"queueScore"`
 }
 
 // List returns a tenant's incident feed, newest first.
@@ -380,15 +425,36 @@ func (s *Service) List(ctx context.Context, tenant, siteID string, limit int) ([
 // ListAttention returns the tenant's open incidents in the order the operator
 // should look at them.
 //
+// # The order is the product's judgement
+//
 // The order is the THREAT SCORE first and the recency inside it, and it is
 // different from the feed's order on purpose. The feed is a record: it is
-// newest first because that is what a record is for. The queue is a judgement:
-// an incident that scored 80 twenty minutes ago comes before one that scored 10
-// a second ago, because the score is the autonomy layer's answer to "which of
-// these needs a person" and recency is not that answer.
+// newest first because that is what a record is for. The queue is a
+// judgement: an incident that scored 80 twenty minutes ago comes before one
+// that scored 10 a second ago, because the score is the autonomy layer's
+// answer to "which of these needs a person" and recency is not that answer.
 //
 // A score of 0 is a legitimate rank: it says the autonomy layer found nothing
 // anomalous, and those incidents are ordered among themselves by recency.
+//
+// # The two engines order it differently
+//
+// The LEGACY engine's order is the raw score. That is the order the product
+// shipped with, and it is the product's own judgement, which is why the API
+// stopped re-sorting the queue by severity: the API's sort was a second
+// judgement, made in a place that had never measured anything.
+//
+// The CALIBRATED engine's order is the DECAYED score: the score an incident
+// carries in the queue is its raw score times a recency factor, so an
+// incident from this morning falls down the queue while one from a minute ago
+// rises. The decay is a property of the QUEUE. The incident's stored score
+// does not change, because an incident's score is a fact about the incident
+// and a queue's order is a judgement.
+//
+// The decay has to be in the SQL rather than in the handler, because the
+// query has a LIMIT: a page of the top twenty by RAW score would exclude the
+// very incidents the decay promotes, and the queue would be ordered by a
+// decay that had already thrown its winners away.
 func (s *Service) ListAttention(ctx context.Context, tenant, siteIDs string, limit int) ([]Summary, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
@@ -399,15 +465,50 @@ func (s *Service) ListAttention(ctx context.Context, tenant, siteIDs string, lim
 			sites = append(sites, site)
 		}
 	}
+
+	// The two queue scores.
+	//
+	// The severity is a TIE-BREAK inside the score and not a replacement
+	// for it. It used to be a replacement: the API re-sorted the whole queue
+	// by severity after the product had ordered it by score, so the queue an
+	// operator read was a severity list with the product's judgement thrown
+	// away. The severity still says something -- two incidents with the same
+	// score are not equally urgent -- and now it says it where the order is
+	// decided, as the second key.
+	//
+	// The calibrated engine's score is the DECAYED one: the score an
+	// incident carries in the queue is its raw score times a recency factor,
+	// so an incident from this morning falls down the queue while one from a
+	// minute ago rises. The decay is a property of the QUEUE. The incident's
+	// stored score does not change, because an incident's score is a fact
+	// about the incident and a queue's order is a judgement.
+	//
+	// The decay has to be in the SQL rather than in the handler, because the
+	// query has a LIMIT: a page of the top twenty by RAW score would exclude
+	// the very incidents the decay promotes, and the queue would be ordered
+	// by a decay that had already thrown its winners away.
+	queueScore := "threat_score"
+	if s.ThreatEngine == config.ThreatEngineCalibrated && s.QueueHalfLife > 0 {
+		// The product of an integer and `power()` is a NUMERIC, and the
+		// queue's score is an integer, so it is rounded and cast. Rounded and
+		// not truncated: a score of 5.6 is six, and a queue that rounds down
+		// every decayed score is a queue that quietly loses a point an
+		// incident earned.
+		queueScore = `(round(threat_score * power(0.5, GREATEST(0, extract(epoch FROM (now() - created_at))) / ` +
+			strconv.FormatInt(int64(s.QueueHalfLife.Seconds()), 10) + `)))::int`
+	}
+	order := queueScore + " DESC, created_at DESC"
+
 	rows, err := s.Pool.For(tenant, "incidents").Query(ctx, `
 		SELECT incident_id, primary_site_id, state, severity, title, rule_id,
 		       created_at, first_event_at, degraded, degraded_reasons,
-		       rule_bundle_version, policy_version, threat_score, threat_reason_chain
+		       rule_bundle_version, policy_version, threat_score, threat_reason_chain,
+		       `+queueScore+` AS queue_score
 		  FROM incidents
 		 WHERE tenant_id = $1
 		   AND state = 'open'
 		   AND ($2::text[] IS NULL OR primary_site_id = ANY($2::text[]))
-		 ORDER BY threat_score DESC, created_at DESC
+		 ORDER BY `+order+`
 		 LIMIT $3`, tenant, sites, limit)
 	if err != nil {
 		return nil, fmt.Errorf("incidents: list the attention queue: %w", err)
@@ -422,7 +523,7 @@ func (s *Service) ListAttention(ctx context.Context, tenant, siteIDs string, lim
 		if err := rows.Scan(&item.IncidentID, &item.SiteID, &item.State, &item.Severity,
 			&item.Title, &item.RuleID, &item.CreatedAt, &item.FirstEvent,
 			&item.Degraded, &reasons, &item.BundleVersion, &item.PolicyVersion,
-			&item.ThreatScore, &chain); err != nil {
+			&item.ThreatScore, &chain, &item.QueueScore); err != nil {
 			return nil, fmt.Errorf("incidents: scan: %w", err)
 		}
 		_ = json.Unmarshal(reasons, &item.DegradedReasons)
@@ -642,6 +743,47 @@ type EvidenceView struct {
 	StoredAt   time.Time `json:"storedAt"`
 	LegalHold  bool      `json:"legalHold"`
 }
+
+// Evidence reads ONE evidence row, scoped to the sites a principal may see.
+//
+// It is a reader of the same table the incident's evidence list reads, so the
+// detail page and the list cannot disagree about an evidence row's kind, its
+// digest or its size.
+//
+// The site scope is in the SQL as well as in the row-level-security policy.
+// The policy is the boundary; the filter is the query, and a query that
+// returns a row the policy would have refused is a row the reader did not ask
+// for.
+func (s *Service) Evidence(ctx context.Context, tenant, evidenceID string, sites []string) (EvidenceView, error) {
+	var v EvidenceView
+	err := s.Pool.InTenant(ctx, dbx.TenantContext{TenantID: tenant, ActorID: "console"},
+		func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `
+				SELECT evidence_id, kind, tier, storage_ref, sha256, size_bytes,
+				       captured_at, stored_at, legal_hold
+				  FROM evidence
+				 WHERE tenant_id = $1
+				   AND site_id = ANY($2)
+				   AND evidence_id = $3`,
+				tenant, sites, evidenceID).Scan(
+				&v.EvidenceID, &v.Kind, &v.Tier, &v.StorageRef, &v.SHA256, &v.SizeBytes,
+				&v.CapturedAt, &v.StoredAt, &v.LegalHold)
+		})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return EvidenceView{}, ErrNoSuchEvidence
+		}
+		return EvidenceView{}, fmt.Errorf("incidents: read the evidence %s: %w", evidenceID, err)
+	}
+	return v, nil
+}
+
+// ErrNoSuchEvidence is an evidence row the reader does not hold.
+//
+// It is one error for "there is no such evidence" and "it is at a site the
+// principal may not see", because the two are the same answer to a caller and
+// a different one is a disclosure.
+var ErrNoSuchEvidence = errors.New("incidents: no such evidence")
 
 // DispositionView is an operator's answer. It never overwrites the observation.
 type DispositionView struct {

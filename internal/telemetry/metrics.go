@@ -1,4 +1,21 @@
 // Package telemetry provides live KPIs for the autonomy layer.
+//
+// # This is the POC's collector, and the product's numbers are not these
+//
+// The product's live numbers are the Prometheus exposition at `/v1/metrics` and
+// the durable report at `/v1/analytics/summary`, and both of them are Postgres
+// computations over the tables the product already writes.
+//
+// This package counts in PROCESS: a counter in a struct, in a process that
+// restarts. Its HAM-per-1000 is an ESTIMATE with magic constants — see
+// `HAMCalculator` — and the product's HAM-per-1000 is the North Star, which is
+// a measurement. The two are not the same number, and
+// `docs/roadmap/engineering/metrics-and-analytics.md` records the resolution so
+// a reader does not find both and pick one.
+//
+// The only importer is `internal/calibration`, which uses the calculator's
+// arithmetic; the collector itself is here because the POC module's reports
+// were built against it.
 package telemetry
 
 import "time"
@@ -9,6 +26,8 @@ import "time"
 // they happen and reads the derived KPIs whenever a client asks. A collector
 // that ran its own ticker would be a second clock in a product whose whole
 // claim is that its numbers come from one pass over one set of facts.
+//
+// It is the POC's collector, not the product's: see the package comment.
 type MetricsCollector struct {
 	measures *Measures
 	calc     *HAMCalculator

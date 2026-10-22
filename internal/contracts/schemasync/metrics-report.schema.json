@@ -1,0 +1,184 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.aicaptain.dev/security/v1/metrics-report.schema.json",
+  "title": "Durable metrics report",
+  "description": "A report over the durable metric vocabulary. Every number in it is a Postgres computation over the tables the product already writes, because a counter is a live reading and a report is a thing somebody signs. Every rate carries its N, its window, when it was computed and its confidence interval: a rate without those four is a number nobody can act on. The North Star is never reported alone; it travels with its four companions, and a report missing one does not validate.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["report_version", "tenant_id", "generated_at", "window", "source", "metrics"],
+  "properties": {
+    "report_version": {
+      "const": "security.io/metrics-report/v1",
+      "description": "The report's own contract. A reader refuses a version it does not understand rather than reading a field as something it is not."
+    },
+    "tenant_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "window": { "$ref": "#/$defs/window" },
+    "site": {
+      "type": ["string", "null"],
+      "maxLength": 128,
+      "description": "The site the report is about, or null for every site the principal may see. A site filter is a FILTER, never a grant: a principal sees only its own sites' rows, and a cross-site request sees the other site's number as ABSENT rather than as zero."
+    },
+    "class": {
+      "type": ["string", "null"],
+      "maxLength": 128,
+      "description": "The rule class the report is about, or null for every class."
+    },
+    "source": {
+      "const": "postgres",
+      "description": "Where the numbers came from. A report whose numbers came from a counter says so, and this schema has no other value: the durable report is a Postgres computation or it is not a report."
+    },
+    "metrics": {
+      "type": "array",
+      "description": "The rolled-up numbers. An EMPTY array means nothing was measured in the window, which is a different answer from a window whose metrics are all zero: zero is a measurement and an empty array is the absence of one.",
+      "items": { "$ref": "#/$defs/measure" }
+    },
+    "north_star": { "$ref": "#/$defs/northStar" },
+    "on_demand": {
+      "type": "array",
+      "description": "Numbers computed from the source tables at read time rather than rolled up. MTTI and MTTV live here: a median of a histogram is not a median, so they are computed on demand from the incidents and dispositions, and the report says which is which.",
+      "items": { "$ref": "#/$defs/onDemand" }
+    }
+  },
+  "$defs": {
+    "window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to"],
+      "description": "The window the numbers cover. It is part of every number, not a property of the report, because a rate without its window is a rate without a denominator.",
+      "properties": {
+        "from": { "type": "string", "format": "date-time" },
+        "to": { "type": "string", "format": "date-time" }
+      }
+    },
+    "measure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metric", "value", "n", "window", "computed_at"],
+      "description": "One rolled-up number. The N is the number of things counted, and it is required: an average over one incident is not an average, and a reader who cannot see the N cannot tell that.",
+      "properties": {
+        "metric": { "$ref": "#/$defs/metricName" },
+        "value": { "type": "number" },
+        "n": { "type": "integer", "minimum": 0 },
+        "window": { "$ref": "#/$defs/window" },
+        "computed_at": { "type": "string", "format": "date-time" },
+        "site_id": { "type": ["string", "null"], "maxLength": 128 },
+        "rule_id": { "type": ["string", "null"], "maxLength": 128 }
+      }
+    },
+    "rate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metric", "value", "n", "window", "computed_at", "confidence_interval"],
+      "description": "A rate. The N, the window, the computation time and the confidence interval are all REQUIRED, because a rate without them is a number with an undisclosed denominator and an unknown precision. A rate whose N is zero is reported as null, never as zero: a rate of zero out of zero observations is not a rate.",
+      "properties": {
+        "metric": { "$ref": "#/$defs/metricName" },
+        "value": { "type": ["number", "null"] },
+        "n": { "type": "integer", "minimum": 0 },
+        "window": { "$ref": "#/$defs/window" },
+        "computed_at": { "type": "string", "format": "date-time" },
+        "confidence_interval": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["method", "lower", "upper"],
+          "description": "The interval on the rate. Null when the N is too small for one, and null is a different answer from a zero-width interval.",
+          "properties": {
+            "method": { "const": "wilson" },
+            "lower": { "type": "number" },
+            "upper": { "type": "number" }
+          }
+        }
+      }
+    },
+    "northStar": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metric", "value", "numerator", "denominator", "cap_seconds", "n", "window", "computed_at", "confidence_interval", "companions"],
+      "description": "The North Star and its four companions. The companions are REQUIRED here and not optional beside it, because the report that shows the North Star without them is the report that lets a reader improve the number by making the product worse: the denominator is canonical events and not incidents, so a rule set that fires less does not improve the ratio.",
+      "properties": {
+        "metric": { "const": "north_star_attention_minutes_per_1000_events" },
+        "value": { "type": ["number", "null"] },
+        "numerator": { "$ref": "#/$defs/measure" },
+        "denominator": { "$ref": "#/$defs/measure" },
+        "cap_seconds": {
+          "type": "number",
+          "minimum": 0,
+          "description": "The cap applied to each incident's attention. It is reported because a capped number and an uncapped number are different numbers, and the reader cannot tell which one they have."
+        },
+        "n": { "type": "integer", "minimum": 0 },
+        "window": { "$ref": "#/$defs/window" },
+        "computed_at": { "type": "string", "format": "date-time" },
+        "confidence_interval": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["method", "lower", "upper"],
+          "properties": {
+            "method": { "const": "wilson" },
+            "lower": { "type": "number" },
+            "upper": { "type": "number" }
+          }
+        },
+        "companions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["operator_override_rate", "ai_false_escalation_rate", "evidence_completeness", "missed_incident_rate"],
+          "description": "The four companions. All four are required: a North Star with three companions is a North Star with a number nobody can check it against.",
+          "properties": {
+            "operator_override_rate": { "$ref": "#/$defs/rate" },
+            "ai_false_escalation_rate": { "$ref": "#/$defs/rate" },
+            "evidence_completeness": { "$ref": "#/$defs/rate" },
+            "missed_incident_rate": { "$ref": "#/$defs/rate" }
+          }
+        }
+      }
+    },
+    "onDemand": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "value", "n", "window", "computed_at", "source_tables"],
+      "description": "A number computed from the source tables at read time rather than rolled up. The source tables are named, because a reader who cannot see where a number came from cannot decide whether to believe it.",
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "value": { "type": ["number", "null"] },
+        "n": { "type": "integer", "minimum": 0 },
+        "window": { "$ref": "#/$defs/window" },
+        "computed_at": { "type": "string", "format": "date-time" },
+        "source_tables": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "metricName": {
+      "type": "string",
+      "description": "The metric's wire name. The set is CLOSED: the enum below is the vocabulary, and it is checked against the Go set in internal/operatormetrics and against the database's CHECK constraint in migration 0029.",
+      "enum": [
+        "canonical_events",
+        "attention_minutes_capped",
+        "attention_minutes_uncapped",
+        "attention_incidents",
+        "incidents_raised",
+        "verification_corroborated",
+        "verification_unverified",
+        "verification_contradicted",
+        "verification_duplicate",
+        "verification_suppressed",
+        "dispositions_agreed",
+        "dispositions_disagreed",
+        "dispositions_unsure",
+        "dispositions_no_ai",
+        "ai_observations",
+        "ai_observations_degraded",
+        "ai_observations_insufficient",
+        "evidence_items_stored",
+        "evidence_fetch_failed",
+        "north_star_attention_minutes_per_1000_events",
+        "operator_override_rate",
+        "ai_false_escalation_rate",
+        "evidence_completeness",
+        "missed_incident_rate"
+      ]
+    }
+  }
+}

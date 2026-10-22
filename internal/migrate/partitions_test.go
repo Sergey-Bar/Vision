@@ -61,6 +61,7 @@ func TestNewPartitionsCarryTenantAndSitePolicies(t *testing.T) {
 	partitions := []string{
 		"inbox_events_2027_06", "inbox_events_default",
 		"canonical_events_2027_06", "canonical_events_default",
+		"recording_segments_2027_06", "recording_segments_default",
 	}
 	for _, part := range partitions {
 		t.Run(part, func(t *testing.T) {

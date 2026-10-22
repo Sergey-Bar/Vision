@@ -71,6 +71,25 @@ const (
 	GaugeClockSevereDevices = "clock_severe_device_count"
 	GaugePostgresConns      = "postgres_conns_in_use"
 	GaugeIncidentVisibility = "incident_visibility_seconds"
+	// GaugeRecordingContinuityGapSeconds is the SILENCE in a camera's
+	// recording.
+	//
+	// It is a gauge and not a counter because the question is not "how much
+	// silence has there been" but "how quiet is it RIGHT NOW": a camera that
+	// has been dark since Tuesday and a camera that has been dark for four
+	// minutes are different states, and a counter cannot tell them apart.
+	//
+	// The value is the gap between the last two segments, or between the
+	// last segment and NOW for a camera that has stopped recording. It is
+	// per CAMERA, and the site's worst one is what the operator sees.
+	GaugeRecordingContinuityGapSeconds = "recording_continuity_gap_seconds"
+	// GaugeRecordingSegments is how many segments the recorder has written
+	// for the site.
+	//
+	// It is the companion to the gap: a gap of zero with no segments is a
+	// camera that has never recorded, and a camera that has never recorded
+	// is not a camera that is recording well.
+	GaugeRecordingSegments = "recording_segments"
 )
 
 // The closed set, split by kind.
@@ -102,7 +121,8 @@ var gaugeMetrics = map[string]bool{
 	GaugeJobQueueDepth: true, GaugeClockDriftMS: true, GaugeDeadLetterCount: true,
 	GaugeEvidenceDiskFree: true, GaugeIncidentOpen: true, GaugeIncidentDegraded: true,
 	GaugeAIUnavailable: true, GaugeClockSevereDevices: true, GaugePostgresConns: true,
-	GaugeIncidentVisibility: true,
+	GaugeIncidentVisibility:            true,
+	GaugeRecordingContinuityGapSeconds: true, GaugeRecordingSegments: true,
 }
 
 // knownMetrics is the union, so a call site can ask whether a name is legal at

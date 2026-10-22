@@ -128,10 +128,21 @@ __pycache__/
 # The SPA's build output. `npm run build` in web/spa writes it; the source that
 # produces it is committed. A committed bundle is a binary that no build step
 # reproduces and that every clone pays for.
+#
+# It lands in web/consoleui/dist, next to the committed placeholder the
+# console server serves when the bundle has not been built. The placeholder is
+# committed on purpose: a server that answers 404 with an empty body reads as a
+# broken product, and a server that answers "run npm run build" reads as a
+# machine that has not been set up yet.
+#
+# The coverage report is here for the same reason: `npm run test:coverage`
+# writes it, it is a measurement of this machine's run, and a committed one
+# goes stale the moment the tree moves.
 /web/spa/node_modules/
+/web/spa/coverage/
 /web/spa/playwright-report/
 /web/spa/test-results/
-/web/static/spa/
+/web/consoleui/dist/
 
 # Editor and tooling backups. A `.bak` file is a copy of a file that is already
 # in the history, and it goes stale the moment the original changes.

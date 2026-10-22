@@ -186,7 +186,7 @@ func (s *Server) deadLetterAbsence(ctx context.Context, reader DeadLetterReader,
 // A GET, no side effects, and no CSRF field: there is nothing to submit, and a form
 // that cannot act is a form that can only be replayed.
 func (s *Server) handleConsoleAbsence(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
-	data := s.consoleData(r, p, "Coverage")
+	data := s.consoleData(r, p, "Coverage", d)
 
 	views, err := s.Absence(r.Context(), d.Absence, d.DeadLetters, p.TenantID, p.SiteScope)
 	if err != nil {
@@ -205,4 +205,49 @@ func (s *Server) handleConsoleAbsence(w http.ResponseWriter, r *http.Request, p 
 		}
 	}
 	s.render(w, http.StatusOK, "absence.html", data)
+}
+
+// handleCoverage is the same panel as JSON.
+//
+// The page above and this route read the SAME facts through the SAME assembly --
+// `s.Absence` -- so the two cannot disagree. A console with its own coverage
+// reader would be a second reader for the same four tables, and two readers for
+// one set of tables drift the way two clocks do.
+//
+// The rows are the four fixed ones, always all four, in the same order. A row
+// that disappears when it is fine is a row that is only interesting when it is
+// broken, which trains a reader to ignore the table.
+func (s *Server) handleCoverage(w http.ResponseWriter, r *http.Request, p identity.Principal, d Deps) {
+	views, err := s.Absence(r.Context(), d.Absence, d.DeadLetters, p.TenantID, p.SiteScope)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "coverage_unavailable",
+			"The coverage panel could not be read: "+err.Error(), requestID(r))
+		return
+	}
+	rows := make([]map[string]any, 0, len(views))
+	for _, v := range views {
+		row := map[string]any{
+			"kind":  v.Kind,
+			"what":  v.What,
+			"count": v.Count,
+			"seen":  v.Seen,
+		}
+		if v.Worst != "" {
+			row["worst"] = v.Worst
+		}
+		if !v.Since.IsZero() {
+			// UTC, and the offset is explicit: the site's clock is the site's
+			// clock, and a timestamp without one is not a fact anybody can place.
+			row["since"] = v.Since.UTC().Format(time.RFC3339)
+		}
+		if v.Breaking {
+			row["breaking"] = true
+		}
+		rows = append(rows, row)
+	}
+	sites := p.SiteScope
+	if sites == nil {
+		sites = []string{}
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"sites": sites, "rows": rows})
 }

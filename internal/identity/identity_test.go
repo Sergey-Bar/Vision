@@ -20,6 +20,7 @@ import (
 	"github.com/Sergey-Bar/vision/internal/identity"
 	"github.com/Sergey-Bar/vision/internal/migrate"
 	"github.com/Sergey-Bar/vision/internal/testutil"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // testSecretStore is a reversible wrapper so the tests can exercise the
@@ -51,7 +52,30 @@ func (testSecretStore) UnwrapFor(tenant, userID, factorID string, b []byte) ([]b
 
 var clock = time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC)
 
+// service builds the identity service the other tests in this file use.
+//
+// The per-source rate limit is raised out of the way on purpose, and the
+// reason is in the limiter's own tests: the controls this file is about are
+// the ACCOUNT lockout and the challenge budget, and both of them are
+// exercised by bursts from ONE address. Sixty-four wrong passwords at once is
+// the whole point of the concurrency test. A limit of five would refuse those
+// bursts before the control under test ever ran, and a test that no longer
+// reaches the thing it names passes for the wrong reason.
+//
+// The limiter has its own tests, in ratelimit_test.go, with the published
+// default in force.
 func service(t *testing.T) (*identity.Service, string, string) {
+	t.Helper()
+	svc, tenant, site, _ := serviceWith(t, func() time.Time { return clock }, 1000)
+	return svc, tenant, site
+}
+
+// serviceWith builds an identity service with a chosen clock and a chosen
+// per-source rate limit.
+//
+// A limit of zero is the published default, which is what the limiter's own
+// tests use.
+func serviceWith(t *testing.T, now func() time.Time, perMinute int) (*identity.Service, string, string, *pgxpool.Pool) {
 	t.Helper()
 	raw := testutil.Pool(t)
 	if _, err := (&migrate.Runner{Pool: raw}).Up(context.Background()); err != nil {
@@ -69,11 +93,12 @@ func service(t *testing.T) (*identity.Service, string, string) {
 
 	tenant, site, _ := testutil.NewTenant(t, raw)
 	return &identity.Service{
-		Pool:        wrapped,
-		Audit:       &audit.Writer{Pool: wrapped},
-		Now:         func() time.Time { return clock },
-		SecretStore: testSecretStore{},
-	}, tenant, site
+		Pool:                    wrapped,
+		Audit:                   &audit.Writer{Pool: wrapped},
+		Now:                     now,
+		SecretStore:             testSecretStore{},
+		LoginRateLimitPerMinute: perMinute,
+	}, tenant, site, raw
 }
 
 // ---------------------------------------------------------------------------

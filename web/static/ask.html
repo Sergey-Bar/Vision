@@ -12,18 +12,19 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
     <title>VISION — Ask</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232563eb'/%3E%3Cpath d='M16 7l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10v-4z' fill='none' stroke='%23ffffff' stroke-width='2'/%3E%3C/svg%3E">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/app.css">
     <link rel="stylesheet" href="/static/showcase.css">
+    <link rel="stylesheet" href="/static/page.css">
 </head>
 <body>
 
 <nav class="nav">
     <a class="brand" href="/">
-        <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#2563eb"/><path d="M16 7l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10v-4z" fill="none" stroke="#ffffff" stroke-width="2"/></svg>
-        VISION
+        <svg class="mark" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 2.5 20 6.6v6.2c0 4.9-3.3 8.3-8 9.7-4.7-1.4-8-4.8-8-9.7V6.6z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M7.7 10.4h8.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="12" cy="15.1" r="1.5" fill="currentColor"/></svg>
+        <span class="brand-text">
+          <span class="brand-name">VISION</span>
+          <span class="brand-statement">The system that says what it does not know.</span>
+        </span>
     </a>
     <div class="links">
         <a href="/">Home</a>
@@ -43,7 +44,7 @@
     <header class="hero ask-hero">
         <span class="eyebrow">free text / closed vocabulary / no upload</span>
         <h1>Ask it in plain words. It answers from the record, or it refuses.</h1>
-        <p class="lead" style="max-width:78ch">
+        <p class="lead measure">
             One input. A sentence enters it and what comes out is a reading of a file this machine
             already wrote, or a rule drafted in the product's own language and compiled by its own
             compiler, or a refusal said plainly. The words go nowhere else: they select an intent,
@@ -81,7 +82,7 @@
 </footer>
 
 <script src="/static/ask.js"></script>
-<script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("/static/sw.js").catch(function(){});});}</script>
+<script src="/static/register-sw.js" defer></script>
 <nav class="bottom-tabs" aria-label="Primary">
     <a href="/"><span>Home</span></a>
     <a href="/ask" aria-current="page"><span>Ask</span></a>

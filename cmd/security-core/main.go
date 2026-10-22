@@ -43,21 +43,25 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Sergey-Bar/vision/internal/aichain"
 	"github.com/Sergey-Bar/vision/internal/airuntime"
 	"github.com/Sergey-Bar/vision/internal/api"
 	"github.com/Sergey-Bar/vision/internal/audit"
 	"github.com/Sergey-Bar/vision/internal/bundles"
+	"github.com/Sergey-Bar/vision/internal/calibration"
 	"github.com/Sergey-Bar/vision/internal/checkpoint"
 	"github.com/Sergey-Bar/vision/internal/clock"
 	"github.com/Sergey-Bar/vision/internal/clocksub"
 	"github.com/Sergey-Bar/vision/internal/config"
 	"github.com/Sergey-Bar/vision/internal/correlator"
 	"github.com/Sergey-Bar/vision/internal/dbx"
+	"github.com/Sergey-Bar/vision/internal/device"
 	"github.com/Sergey-Bar/vision/internal/dispatch"
 	"github.com/Sergey-Bar/vision/internal/embeddings"
 	"github.com/Sergey-Bar/vision/internal/eventsearch"
 	"github.com/Sergey-Bar/vision/internal/evidence"
 	"github.com/Sergey-Bar/vision/internal/evidencefetch"
+	"github.com/Sergey-Bar/vision/internal/export"
 	"github.com/Sergey-Bar/vision/internal/graph"
 	"github.com/Sergey-Bar/vision/internal/identity"
 	"github.com/Sergey-Bar/vision/internal/inbox"
@@ -68,10 +72,14 @@ import (
 	"github.com/Sergey-Bar/vision/internal/normalize"
 	"github.com/Sergey-Bar/vision/internal/observability"
 	"github.com/Sergey-Bar/vision/internal/observations"
+	"github.com/Sergey-Bar/vision/internal/onvif"
 	"github.com/Sergey-Bar/vision/internal/outbox"
 	"github.com/Sergey-Bar/vision/internal/pipeline"
+	"github.com/Sergey-Bar/vision/internal/recording"
 	"github.com/Sergey-Bar/vision/internal/rules"
 	"github.com/Sergey-Bar/vision/internal/sitemodel"
+	"github.com/Sergey-Bar/vision/internal/threat"
+	"github.com/Sergey-Bar/vision/migrations"
 )
 
 func main() {
@@ -167,7 +175,23 @@ func run() error {
 	}
 
 	correlatorSvc := &correlator.Correlator{Pool: pool}
-	incidentsSvc := &incidents.Service{Pool: pool, Audit: writer}
+	incidentsSvc := &incidents.Service{
+		Pool: pool, Audit: writer,
+		// The queue's order, and the decay behind it. Under the legacy
+		// engine the order is the raw threat score, which is the product's
+		// own judgement; under the calibrated engine it is the decayed
+		// score, with the severity as a tie-break inside it.
+		ThreatEngine:  cfg.ThreatEngine,
+		QueueHalfLife: cfg.ThreatHalfLife,
+	}
+	// The local base rate the calibrated engine reads. It is nil when the
+	// install has no labelled history, and the calibrated engine then leaves
+	// every rule's score alone: an absence of history is not a negative
+	// observation about a rule.
+	var priors threat.PriorLookup
+	if cfg.ThreatEngine == config.ThreatEngineCalibrated {
+		priors = calibration.NewStore(pool, cfg.Tenant, time.Minute)
+	}
 	bundlesSvc := &bundles.Service{Pool: pool, Compiler: rules.NewCompiler(), Audit: writer, Metrics: registry}
 	inboxSvc := inbox.NewWriter(pool)
 	jobWorker := &jobs.Worker{Enqueuer: jobs.Enqueuer{Pool: pool}, Name: jobs.QueueVLM}
@@ -178,6 +202,13 @@ func run() error {
 	}
 	vlm := airuntime.NewVLMWorker(jobWorker, aiClient,
 		&observations.Writer{Pool: pool}, store, registry, log)
+	// The site's provider CHAIN.
+	//
+	// It is nil for an install whose sites have no chain policy, and then
+	// the local runtime is the brain, which is the ordinary configuration.
+	// A site that HAS a chain gets it, and the chain records what left the
+	// site.
+	vlm.Chain = aichain.NewService(pool)
 
 	// Evidence fetch worker: places Milestone bookmarks for incidents.
 	// It runs on the evidence_fetch queue and is wired with the same dependencies
@@ -289,6 +320,11 @@ func run() error {
 		return err
 	}
 
+	// The pipeline's loops, for the health endpoint's liveness report. The
+	// server is built before the loops are started, so the health endpoint reads
+	// through this pointer.
+	var loops *pipeline.Loops
+
 	server := &api.Server{
 		Audit: writer, Log: log,
 		Tenant: cfg.Tenant,
@@ -297,6 +333,13 @@ func run() error {
 		// The capability checks are real against it.
 		PrincipalRole:  identity.Role(cfg.PrincipalRole),
 		PrincipalSites: cfg.PrincipalSites,
+		// The install's own site. It is the configured principal's scope when
+		// SP_PRINCIPAL_SITES names none, so the single-site install's principal
+		// is assigned to the site the install already declared. Without it the
+		// site view, the incident detail and the clip content all 404 while the
+		// incident list keeps answering, because the two read the scope
+		// differently.
+		PrincipalSite: cfg.SiteID,
 		// Secure is configuration, not a constant. It was hardcoded true, which
 		// marked the cookie Secure over a plaintext listener instead of letting
 		// config refuse the pairing. config refuses Secure=false on anything but a
@@ -309,14 +352,90 @@ func run() error {
 		Metrics:        registry,
 		BehindProxy:    cfg.BehindProxy,
 		TrustedProxies: cfg.TrustedProxyCIDRs,
+		// The proxy's identity header, when there is one.
+		//
+		// The header carries the operator's NAME and nothing else: the role and
+		// the site scope stay configuration, so a proxy that asserts an
+		// operator's identity cannot grant that operator more than the product's
+		// capability set allows. The header is believed only from a trusted
+		// peer, and a request from anywhere else is refused.
+		TrustProxyAuthHeader: cfg.TrustProxyAuthHeader,
+		// The pipeline's loop liveness, for the health endpoint.
+		//
+		// A loop that has stopped is an outage that looks like a healthy core:
+		// the process keeps answering /v1/health and the backlog grows. The
+		// health endpoint names the loops that are not running, and this is where
+		// it learns about them.
+		//
+		// The closure reads a POINTER, because the server is built before the
+		// loops are started, and a closure over a variable that does not exist
+		// yet is not a thing Go has.
+		Loops: func() []api.LoopLiveness {
+			out := []api.LoopLiveness{}
+			if loops == nil {
+				return out
+			}
+			for _, l := range loops.Snapshot() {
+				out = append(out, api.LoopLiveness{
+					Name: l.Name, Running: l.Running, LastBeat: l.LastBeat, Panics: l.Panics,
+				})
+			}
+			return out
+		},
 	}
 	server.SetStartTime(start)
+
+	// The identity service, for the second factor that the two sensitive
+	// dispositions require.
+	//
+	// The secret store is the file the installer generated: the factor is
+	// sealed under it, so the process that verifies a factor has to be the one
+	// that can open it. A key file that is not there is NOT a startup refusal
+	// -- the daemon still serves everything else, and the sensitive dispositions
+	// refuse with a message that says what is missing rather than taking the
+	// whole console down over a file.
+	secretStore, err := identity.NewFileSecretStore(cfg.SecretKeyPath)
+	if err != nil {
+		return err
+	}
+	identities := &identity.Service{
+		Pool:                    pool,
+		Audit:                   writer,
+		SecretStore:             secretStore,
+		LoginRateLimitPerMinute: cfg.LoginRateLimitPerMinute,
+	}
+
+	// The provider chain: which models may answer for this site, in what
+	// order, and what has left the site when they did.
+	//
+	// It is over the SAME pool the API already holds, because a service that
+	// needed its own would be a second connection count for one table, and
+	// the chain and the Chief's voice must read the SAME policy.
+	chainSvc := aichain.NewService(pool)
+
+	// The recording index and the recording root.
+	//
+	// The root is the recorder's own directory, and the core reads it so
+	// that playback is a core surface. It is the SAME variable the recorder
+	// uses, so a site that configures one has both.
+	recordingService := recording.NewService(pool)
+	recordingService.Root = strings.TrimSpace(os.Getenv("SP_RECORDING_ROOT"))
+	// The sweep reports what it did, and the report is the only record of
+	// a segment that is gone.
+	recordingService.SetLogger(func(format string, args ...any) {
+		log.Info("recording retention: "+fmt.Sprintf(format, args...),
+			"tenant_id", cfg.Tenant, "site_id", cfg.SiteID)
+	})
 
 	deps := api.Deps{
 		Incidents: incidentsSvc,
 		Bundles:   bundlesSvc,
 		Evidence:  store,
 		Inbox:     inboxSvc,
+		// The durable analytics read the rollup, and the rollup is site-scoped,
+		// so the reader binds the PRINCIPAL's scope onto the connection. The
+		// pool the API already holds is the pool it queries.
+		AnalyticsPool: pool,
 		// The structured search: SQL over the canonical event windows, behind
 		// the same capability the incident pages carry. Wired here because the
 		// pool the API already holds is the pool it queries, and a service that
@@ -327,10 +446,78 @@ func run() error {
 		// it is compared to. Two embedders that disagreed would produce a
 		// ranking that is confidently wrong.
 		EventSearch: &eventsearch.Service{Pool: pool, Embed: embeddings.Embedder{}},
+		// The provider chain: which models may answer for this site, in what
+		// order, and what has left the site when they did.
+		//
+		// It is over the SAME pool the API already holds, because a service
+		// that needed its own would be a second connection count for one
+		// table.
+		AIChain: chainSvc,
+		// The Chief's VOICE, over the site's provider chain.
+		//
+		// It is the second AI FAMILY — narration, which decides how to say
+		// what we know and NEVER affects a decision — and it is the only
+		// production implementation of `chief.Narrator`.
+		//
+		// It is wired even when the site has no chain, because a site with
+		// no chain is a site whose Chief speaks DETERMINISTICALLY, which is
+		// a supported mode and not a degraded one. The narrator refuses
+		// when there is no chain, and the API treats that refusal as the
+		// absence it is.
+		ChiefNarrator: aichain.NewNarrator(chainSvc),
+		// The recording index: what was recorded, where the holes in it
+		// are, and whether the chain that proves it still verifies.
+		//
+		// The Root is the recorder's own directory: the core READS the
+		// bytes the recorder wrote, because playback is a core surface and
+		// the bytes are the customer's. An install whose recorder runs on
+		// another machine has no root to read, and the routes say so by
+		// name rather than answering with an empty body.
+		Recordings: recordingService,
+		// The clip: the segments covering a window, and the pre-roll
+		// before it.
+		Export: export.NewService(recordingService),
+		// The schema version this build SHIPS, so the setup path can
+		// say whether the database is behind it.
+		SchemaVersion: shippedSchemaVersion(),
+		// Whether a recorder is configured.
+		//
+		// The recorder is a separate binary with its own environment and
+		// the core cannot see it. The core is what the operator asks, so
+		// the core is what answers -- and it answers from the recorder's
+		// own configuration, because the question is about the recorder.
+		RecorderConfigured: api.RecorderConfigured,
 		// The site's own model: the zones, cameras and routes the operator
 		// declared. The console draws them; the live state comes from the VMS.
-		Site:        siteModel,
+		Site: siteModel,
+		// The site's clock. The `sites` row records the zone, and the rendering
+		// law is that dates cross the site timezone and never the host's, so
+		// without this the console is the only surface that cannot say what time
+		// it is.
+		SiteTimezone: NewSiteTimezoneReader(pool),
+		// The identity service, for the second factor that the two sensitive
+		// dispositions require.
+		//
+		// The secret store is the file the installer generated: the factor is
+		// sealed under it, so the process that verifies a factor has to be the
+		// one that can open it. A key file that is not there is NOT a startup
+		// refusal -- the daemon still serves everything else, and the sensitive
+		// dispositions refuse with a message that says what is missing rather
+		// than taking the whole console down over a file.
+		Identities:  identities,
 		DeadLetters: api.DeadLetters{Inbox: inboxSvc, Jobs: jobWorker},
+		// The device registry: what a device is, what was MEASURED about it,
+		// and where its credential lives.
+		//
+		// It is over the SAME pool the API already holds, because a service
+		// that needed its own would be a second connection count for one
+		// table, and the tenant-context discipline is the pool's.
+		Devices: &device.Service{Pool: pool},
+		// The prober. It is the only thing in the product that opens a
+		// socket to a camera to find out what a camera can do, and it runs
+		// when a caller asks -- not on a loop -- because a camera that does
+		// not answer must not be able to stall the pipeline.
+		DeviceProber: onvif.Prober{},
 		// The coverage panel's counts. Supplied here rather than inside `internal/api`
 		// because these tables belong to the packages that own them, and a COUNT over
 		// four of them inside the API package would be the second reader for each.
@@ -385,7 +572,7 @@ func run() error {
 		log.Warn("no checkpoint directory is configured; the audit ledger is not being sealed")
 	}
 
-	loops := pipeline.Start(ctx, pipeline.Deps{
+	loops = pipeline.Start(ctx, pipeline.Deps{
 		Pool: pool, Log: log, Metrics: registry,
 		Adapter: adapter, Inbox: inboxSvc,
 		// The normalizer carries the search writer, and the writer carries the
@@ -402,12 +589,28 @@ func run() error {
 		// observation with different consequences, and the zone's type is where
 		// the difference comes from.
 		SiteModel: siteModel,
+		// The threat engine, and the local base rate it reads. The choice is
+		// the install's and a human's: see docs/decisions.md D-15.
+		ThreatEngine: cfg.ThreatEngine,
+		Priors:       priors,
 		// The evidence volume, so `evidence_disk_free_percent` measures the
 		// filesystem the evidence store actually writes to rather than whatever the
 		// process's working directory happens to be on.
 		EvidenceRoot:           cfg.EvidenceRoot,
 		EvidenceStore:          store,
 		RetentionSweepInterval: cfg.RetentionSweepInterval,
+		// The recording index, for the continuity sampler.
+		Recordings: recordingService,
+		// The durable metric rollup, which is what the analytics report reads.
+		// Zero disables it, and an install with it disabled has a report that
+		// says "not measured" rather than one that says a number.
+		RollupInterval: cfg.RollupInterval,
+		// The scheduled reports, and where their artefacts go.
+		ReportRoot:     cfg.ReportRoot,
+		ReportInterval: cfg.ReportInterval,
+		// The event retention, and the sweep that enforces it.
+		EventRetention:         cfg.EventRetention,
+		PartitionSweepInterval: cfg.PartitionSweepInterval,
 		PollInterval:           cfg.PollInterval,
 		ClaimBatch:             cfg.ClaimBatchSize,
 		LeaseDuration:          cfg.LeaseDuration,
@@ -712,6 +915,23 @@ func milestoneToken() string { return strings.TrimSpace(os.Getenv("SP_MILESTONE_
 // enrolment path -- the console has no login -- so it has no reason to know
 // where the key is, and a function that names a key path the daemon never
 // opens is a function that invites somebody to open it.
+
+// shippedSchemaVersion is the schema version this build ships.
+//
+// It is the MIGRATION set's highest version rather than the compatibility
+// window's top, because the window is a range this build ACCEPTS and the
+// setup path asks what a fresh install converges to.
+//
+// A failure to read it is not fatal: the setup path then compares the
+// database with ITSELF and reports the version it found, which is still true
+// and still useful.
+func shippedSchemaVersion() int {
+	v, err := migrations.LatestVersion()
+	if err != nil {
+		return 0
+	}
+	return v
+}
 
 // clockPolicy is the site's clock policy.
 //

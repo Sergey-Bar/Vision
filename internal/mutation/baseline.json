@@ -1,0 +1,24 @@
+{
+  "note": [
+    "The known-surviving mutants.",
+    "",
+    "A mutant that survives is a place where the assertions do not bite: the code",
+    "changed and the suite still passed. That is a hole in the test suite, and a",
+    "hole that is not written down is a hole nobody has to fix.",
+    "",
+    "So every surviving mutant is named here, with the reason it survives, and the",
+    "gate refuses a survivor that is not in this file. The list is empty at the",
+    "moment: the critical path's covered-code mutation score is 100, so there is",
+    "nothing to excuse.",
+    "",
+    "An entry is a JSON object with `file`, `line`, `mutator` and `why`. The `why`",
+    "is not optional. A survivor with no reason is a hole with a bookmark in it.",
+    "",
+    "The rule about a survivor that has been FIXED is the same as the rule about a",
+    "refusal that has been closed: the entry is deleted in the same commit that",
+    "kills the mutant, because a record that goes stale is a record that stops",
+    "being checked. `internal/mutation`'s test asserts that every entry here still",
+    "names a line in a file that exists."
+  ],
+  "survivors": []
+}

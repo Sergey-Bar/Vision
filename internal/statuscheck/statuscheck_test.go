@@ -64,23 +64,23 @@ func TestDeriveCountsTheTreeDirectly(t *testing.T) {
 	if d.Enums != 22 {
 		t.Errorf("contract enums: got %d, want 22", d.Enums)
 	}
-	if d.Schemas != 8 {
-		t.Errorf("published JSON Schemas: got %d, want 8", d.Schemas)
+	if d.Schemas != 10 {
+		t.Errorf("published JSON Schemas: got %d, want 10", d.Schemas)
 	}
-	if d.Paths != 22 {
-		t.Errorf("OpenAPI paths: got %d, want 22", d.Paths)
+	if d.Paths != 47 {
+		t.Errorf("OpenAPI paths: got %d, want 47", d.Paths)
 	}
 	// The eight published schemas' properties, summed. The number moves when a
 	// schema gains a property, and `contractcheck -mode write` records it in the
 	// baseline - which is why a document that disagrees is a defect and not a
 	// rounding difference.
-	if d.Properties != 269 {
-		t.Errorf("schema properties: got %d, want 269", d.Properties)
+	if d.Properties != 399 {
+		t.Errorf("schema properties: got %d, want 399", d.Properties)
 	}
 	if d.GoMinor != "26" {
 		t.Errorf("go.mod minor: got %q, want %q", d.GoMinor, "26")
 	}
-	// Thirty-three named gates in scripts/verify.ps1. `lint`, `generated-code`
+	// Thirty-six named gates in scripts/verify.ps1. `lint`, `generated-code`
 	// and `ai-runtime` each appear twice because they are registered inside a tool-
 	// present branch, and one branch is one gate. `skip-audit`, `no-silent-skips`,
 	// `cover-floor`, `dead-export` and `predicate-cov` are the five added with the
@@ -88,14 +88,84 @@ func TestDeriveCountsTheTreeDirectly(t *testing.T) {
 	// are three more; `roadmap-check` is the one that holds the roadmap documents'
 	// package, migration and contract counts to the tree; `boot` is the 2026-10-14
 	// Wave 2 gate that migrates, seeds, starts the whole service against a real
-	// Postgres and requires it to serve, rather than asserting a binary builds.
+	// Postgres and requires it to serve, rather than asserting a binary builds;
+	// `demo-rehearsal` is the gate that walks the five-minute judge track in a
+	// browser and fails when a page of the demo does not answer.
 	//
 	// This is the one assertion in the file that duplicates what the gate already
 	// derives, and it is deliberate: a derivation that stops finding gates would
 	// make the document agree with a smaller tree, and only a number written out
 	// here notices that. Updating it is the cost of adding a gate.
-	if d.Gates != 35 {
-		t.Errorf("gates: got %d, want 35", d.Gates)
+	if d.Gates != 41 {
+		t.Errorf("gates: got %d, want 40", d.Gates)
+	}
+}
+
+// TestACommentedOutGateIsNotAGate is the control on the control.
+//
+// The derivation counts the gates the script RUNS, and a gate that is commented
+// out is a note about a gate somebody wrote and then took out. The script keeps
+// two of those notes on purpose - `contract-sync` and `recovery-drill` are
+// retired and their lines are left behind as a record of what they were.
+//
+// The first derivation matched the raw text of the script, so both notes were
+// counted. The count came out at thirty-eight, the document said thirty-six, and
+// the two halves of one tool disagreed: `countGates` read the file, and
+// `gateearnings_test.go` read the same file by LINE PREFIX and found thirty-six.
+// A number two readers derive differently is a number nobody can rely on.
+//
+// So the rule is stated here, in the test, rather than left in the
+// implementation: a line whose first non-space character is `#` is not a gate.
+func TestACommentedOutGateIsNotAGate(t *testing.T) {
+	const script = `
+Invoke-Gate 'live-one' { }
+# Invoke-Gate 'retired-one' { }
+   # Invoke-Gate 'retired-two' { }
+Invoke-Gate 'live-one' { }
+`
+	if got := countGates(script); got != 1 {
+		t.Errorf("a script with one live gate and two commented-out gates counted %d, want 1: "+
+			"a retired gate left as a comment is a note about a gate, not a gate", got)
+	}
+}
+
+// TestTheRetiredGatesAreNotCounted is the same rule against the real script.
+//
+// The synthetic script above proves the rule. This one proves the rule is
+// LOADED: the two retired gates really are still sitting in `scripts/verify.ps1`
+// as comments, and a derivation that counted them would be reading the script
+// this repository actually has.
+func TestTheRetiredGatesAreNotCounted(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join(repoRoot(t), "scripts", "verify.ps1"))
+	if err != nil {
+		t.Fatalf("read verify.ps1: %v", err)
+	}
+	script := string(raw)
+
+	// The retired gates are still in the file, as comments. If they ever stop
+	// being there, this test has nothing left to prove and says so rather than
+	// passing for the wrong reason.
+	for _, retired := range []string{"contract-sync", "recovery-drill"} {
+		found := false
+		for _, line := range strings.Split(script, "\n") {
+			if !strings.Contains(line, "Invoke-Gate '"+retired+"'") {
+				continue
+			}
+			if strings.HasPrefix(strings.TrimSpace(line), "#") {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("scripts/verify.ps1 no longer carries the retired gate %q as a comment, "+
+				"so this test is asserting nothing; the retired gates are the reason the "+
+				"derivation has to skip comment lines", retired)
+		}
+	}
+
+	d := mustDerive(t, repoRoot(t))
+	if d.Gates != 41 {
+		t.Errorf("gates: got %d, want 40 - the two retired gates are still in the script "+
+			"as comments, so a count above 41 means a comment was read as a gate", d.Gates)
 	}
 }
 

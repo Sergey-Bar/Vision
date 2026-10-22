@@ -55,7 +55,7 @@ func TestTheEvidenceContentRouteIsGatedOnFetchNotRead(t *testing.T) {
 		// The bootstrap administrator holds identity.* but not evidence.fetch, so
 		// testing "a principal without it" against the administrator asserts
 		// nothing. Reduce it to the least-privileged role that can still sign in.
-		reduceToViewer(t, tenant, site)
+		reduceToViewer(t, s)
 		evID := seedEvidence(t, tenant, site, "viewer-can-not-have-this")
 
 		rec := call(t, s, http.MethodGet, "/v1/evidence/"+evID+"/content", nil)
@@ -128,8 +128,8 @@ func TestFetchingEvidenceIsWrittenToTheLedger(t *testing.T) {
 			"the bytes that actually left, or it is a record of an intention",
 			resultHash, rec.Header().Get("X-Content-SHA256"))
 	}
-	if actor != "admin" {
-		t.Errorf("the row's actor is %q, want the signed-in principal", actor)
+	if actor != "operator" {
+		t.Errorf("the row's actor is %q, want the configured principal's name", actor)
 	}
 	if scope == "" || scope == "{}" {
 		t.Errorf("the row carries site scope %q, so it does not say which site's "+
@@ -141,7 +141,7 @@ func TestFetchingEvidenceIsWrittenToTheLedger(t *testing.T) {
 // records a release of bytes; there were none.
 func TestARefusedEvidenceFetchLeavesNoLedgerRow(t *testing.T) {
 	s, tenant, site := server(t)
-	reduceToViewer(t, tenant, site)
+	reduceToViewer(t, s)
 	evID := seedEvidence(t, tenant, site, "not-released")
 
 	if rec := call(t, s, http.MethodGet, "/v1/evidence/"+evID+"/content", nil); rec.Code == http.StatusOK {

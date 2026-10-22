@@ -2,6 +2,7 @@ import { Page, PageHeader } from '@/components/Shell'
 import { useQuery } from '@tanstack/react-query'
 import { get } from '@/lib/api'
 import { useVMSCameras } from '@/hooks/vms'
+import { useCameras } from '@/hooks/api'
 import { cn } from '@/lib/utils'
 
 // The site.
@@ -42,10 +43,10 @@ interface SiteModel {
 }
 
 const ZONE_COLOURS: Record<string, string> = {
-  restricted: 'stroke-danger fill-danger/15',
-  choke: 'stroke-warning fill-warning/15',
+  restricted: 'stroke-bad-ink fill-bad-ink/15',
+  choke: 'stroke-warn-ink fill-warn-ink/15',
   monitor: 'stroke-accent fill-accent/10',
-  asset: 'stroke-white/30 fill-white/5',
+  asset: 'stroke-line-strong fill-bg-elevated',
 }
 
 export function SitePage() {
@@ -58,12 +59,13 @@ export function SitePage() {
     retry: 0,
   })
   const { data: cameras } = useVMSCameras(2000)
+  const { data: inventory } = useCameras()
 
   if (isError) {
     return (
       <Page>
         <PageHeader title="Site" subtitle="The operator's own drawing of the site" />
-        <div className="rounded-2xl p-8 bg-danger/10 border border-danger/30 text-danger text-sm font-medium">
+        <div className="rounded-lg p-8 bg-bad-ink/10 border border-bad-ink/40 text-bad-ink text-sm font-medium">
           This install has no site model, so there is no site to draw. Set SP_SITE_MODEL to the
           operator's site map.
         </div>
@@ -74,8 +76,8 @@ export function SitePage() {
     return (
       <Page>
         <PageHeader title="Site" subtitle="The operator's own drawing of the site" />
-        <div className="rounded-2xl border border-white/10 bg-black/30 px-8 py-6 text-sm text-text-dim">
-          Loading the site model…
+        <div className="rounded-lg border border-line bg-bg-panel px-8 py-6 text-sm text-text-dim">
+        Loading the site model…
         </div>
       </Page>
     )
@@ -97,25 +99,27 @@ export function SitePage() {
   const width = Math.max(maxX - minX, 1) + pad * 2
   const height = Math.max(maxY - minY, 1) + pad * 2
   const live = new Map((cameras ?? []).map((c) => [c.id, !c.refusal]))
+  const inventoryRows = inventory ?? []
 
   return (
     <Page>
       <PageHeader title="Site" subtitle={`${site.siteId} · ${site.zones.length} zones · ${site.cameras.length} cameras`} />
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        <div className="xl:col-span-2 rounded-3xl border border-white/10 bg-black/30 p-6">
+      <div className="xl:col-span-2 rounded-lg border border-line bg-bg-panel p-6">
           <svg viewBox={`${minX - pad} ${minY - pad} ${width} ${height}`} className="w-full h-auto">
             {site.zones.map((z) => (
               <polygon
                 key={z.id}
                 points={z.polygon.map((p) => `${p.x},${p.y}`).join(' ')}
-                className={cn('stroke-2', ZONE_COLOURS[z.type] ?? 'stroke-white/20 fill-white/5')}
+                className={cn('stroke-2', ZONE_COLOURS[z.type] ?? 'stroke-line fill-bg-elevated')}
               />
             ))}
             {site.routes.map((r) => (
               <polyline
                 key={r.id}
                 points={r.points.map((p) => `${p.x},${p.y}`).join(' ')}
-                className="fill-none stroke-accent/60 stroke-2 stroke-dasharray"
+                className="fill-none stroke-accent/60 stroke-2"
+                strokeDasharray="4 3"
               />
             ))}
             {site.cameras.map((c) => (
@@ -124,7 +128,7 @@ export function SitePage() {
                   cx={c.position.x}
                   cy={c.position.y}
                   r={14}
-                  className={live.get(c.id) ? 'fill-success/40 stroke-success' : 'fill-white/10 stroke-white/30'}
+                  className={live.get(c.id) ? 'fill-ok-ink/40 stroke-ok-ink' : 'fill-bg-elevated stroke-line-strong'}
                   strokeWidth={2}
                 />
                 <text
@@ -133,7 +137,7 @@ export function SitePage() {
                   textAnchor="middle"
                   className="fill-text-dim"
                   fontSize={22}
-                  fontWeight={800}
+                  fontWeight={600}
                 >
                   {c.id}
                 </text>
@@ -146,7 +150,7 @@ export function SitePage() {
                 y={(z.polygon[0]?.y ?? 0) - 12}
                 className="fill-text-muted"
                 fontSize={22}
-                fontWeight={800}
+                fontWeight={600}
               >
                 {z.name || z.id}
               </text>
@@ -155,15 +159,15 @@ export function SitePage() {
         </div>
 
         <div className="space-y-4">
-          <div className="rounded-3xl border border-white/10 bg-black/30 px-6 py-5">
-            <div className="text-[10px] font-black uppercase tracking-[0.12em] text-text-dim mb-3">Zones</div>
+        <div className="rounded-lg border border-line bg-bg-panel px-6 py-5">
+        <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-text-dim mb-3">Zones</div>
             <div className="space-y-2">
               {site.zones.map((z) => (
                 <div key={z.id} className="flex items-center gap-3 text-xs">
                   <span
                     className={cn(
                       'w-2.5 h-2.5 rounded-sm',
-                      z.type === 'restricted' ? 'bg-danger' : z.type === 'choke' ? 'bg-warning' : 'bg-accent',
+                      z.type === 'restricted' ? 'bg-bad-ink' : z.type === 'choke' ? 'bg-warn-ink' : 'bg-accent-ink',
                     )}
                   />
                   <span className="text-text flex-1 truncate">{z.name || z.id}</span>
@@ -172,12 +176,12 @@ export function SitePage() {
               ))}
             </div>
           </div>
-          <div className="rounded-3xl border border-white/10 bg-black/30 px-6 py-5">
-            <div className="text-[10px] font-black uppercase tracking-[0.12em] text-text-dim mb-3">Cameras</div>
+          <div className="rounded-lg border border-line bg-bg-panel px-6 py-5">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-text-dim mb-3">Cameras</div>
             <div className="space-y-2">
               {site.cameras.map((c) => (
                 <div key={c.id} className="flex items-center gap-3 text-xs">
-                  <span className={cn('w-2 h-2 rounded-full', live.get(c.id) ? 'bg-success' : 'bg-white/20')} />
+                  <span className={cn('w-2 h-2 rounded-full', live.get(c.id) ? 'bg-ok-ink' : 'bg-white/20')} />
                   <span className="text-text flex-1 truncate">{c.id}</span>
                   <span className="text-text-dim">{c.zoneIds.join(', ') || '—'}</span>
                 </div>
@@ -188,6 +192,40 @@ export function SitePage() {
             </div>
           </div>
         </div>
+      </div>
+
+      {/*
+          The platform's INVENTORY, beside the operator's DRAWING.
+
+          They are different facts. The drawing is the site model the operator
+          declared; the inventory is what the platform has been told about. A
+          camera can be in one and not the other, and an operator looking at a
+          map needs to see both, because the difference is exactly the thing
+          they are looking for.
+      */}
+      <div className="mt-6 rounded-lg border border-line bg-bg-panel px-5 py-4">
+        <div className="mb-3 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-text-dim">
+          The inventory the platform has
+        </div>
+        {inventoryRows.length === 0 ? (
+          <p className="text-[13px] leading-[20px] text-text-dim">
+            The platform has been told about no camera. That is not the same as the site
+            having none: the drawing above is the operator's, and it is the only thing
+            that can put a camera on the map.
+          </p>
+        ) : (
+          <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {inventoryRows.map((c) => (
+              <li key={c.id} className="flex items-center gap-3 text-[13px] text-text-muted">
+                <span aria-hidden="true" className="text-text-dim">
+                  ·
+                </span>
+                <span className="font-mono text-[12px] text-text">{c.id}</span>
+                {c.siteId && <span className="text-text-dim">{c.siteId}</span>}
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </Page>
   )

@@ -56,7 +56,7 @@ Thumbs.db
 web/spa/node_modules/
 web/spa/playwright-report/
 web/spa/test-results/
-web/static/spa/
+web/consoleui/dist/
 *.exe
 yolo11x.pt
 record.log

@@ -5,93 +5,51 @@ info:
   description: |
     Strict JSON API served by `security-core`. Every response is JSON; there is
     no HTML content negotiation on these paths. The operator console is a
-    separate, server-rendered surface.
+    separate surface: a client application served by the console server.
 
-    Tenancy: every authenticated request resolves to a principal and a set of
-    site assignments. `tenant_id` is never taken from the request body. A
-    `X-Tenant-Id` header is honoured only when it matches the session tenant;
-    a mismatch is 403 and is audited.
+    Tenancy: every request resolves to a principal and a set of site
+    assignments. `tenant_id` is never taken from the request body, and it is
+    never taken from a request header either: the tenant is configuration, and
+    a header is not consulted at all. The site scope is the principal's, bound
+    onto the database connection, and a site-scoped table is visible only
+    within it.
 
-    Authentication: session cookie plus CSRF token on every state-changing
-    method. Service accounts authenticate with a bearer token scoped to a
-    single integration.
+    Authentication: there is no login. The API runs as a CONFIGURED principal
+    -- a role and a site scope, both from configuration -- and every action in
+    the audit ledger is attributed to that principal. There is no session
+    cookie and no CSRF token, because there is no session: a cookie and a
+    token would protect a session that does not exist, and a document that
+    asks for one teaches a client to send a secret nobody checks.
+
+    The console is a client application served by the console server, so a
+    browser-originated state-changing request must be same-origin. Nothing on
+    this surface stops a request another site's page can make: there is no
+    session to expire and no token to forge, and the configured principal
+    would carry it out. The refusal belongs to the console server, and
+    refusing it is the console server's job.
+
+    Service accounts authenticate with a bearer token scoped to a single
+    integration.
 servers:
   - url: https://localhost:8443
     description: Local console/API listener.
 
 security:
-  - sessionCookie: []
+  - serviceBearer: []
 
 tags:
-  - name: auth
   - name: incidents
   - name: evidence
   - name: disposition
   - name: audit
   - name: rules
+  - name: site
+  - name: identity
   - name: health
   - name: ops
+  - name: analytics
 
 paths:
-  /v1/auth/login:
-    post:
-      tags: [auth]
-      security: []
-      summary: Start an MFA session
-      description: |
-        Rate limited per source, with exponential lockout. A successful
-        password step without MFA returns 200 with `mfaRequired` and no session
-        cookie. Break-glass credentials return `breakGlass: true` and raise a
-        high-priority audit event.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/LoginRequest" }
-      responses:
-        "200": { $ref: "#/components/responses/MFAPendingOrSuccess" }
-        "401": { $ref: "#/components/responses/Error" }
-        "423": { $ref: "#/components/responses/Locked" }
-        "429": { $ref: "#/components/responses/Error" }
-
-  /v1/auth/mfa/verify:
-    post:
-      tags: [auth]
-      security: []
-      summary: Complete an MFA challenge
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/MFARequest" }
-      responses:
-        "200":
-          description: Authenticated. Sets a hardened session cookie.
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/SessionInfo" }
-        "401": { $ref: "#/components/responses/Error" }
-        "429": { $ref: "#/components/responses/Error" }
-
-  /v1/auth/session:
-    get:
-      tags: [auth]
-      summary: Current session
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/SessionInfo" }
-        "401": { $ref: "#/components/responses/Error" }
-    delete:
-      tags: [auth]
-      summary: End session
-      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
-      responses:
-        "204": { description: Ended }
-        "401": { $ref: "#/components/responses/Error" }
-
   /v1/principal:
     get:
       tags: [identity]
@@ -125,57 +83,7 @@ paths:
           description: OK
           content:
             application/json:
-              schema:
-                type: object
-                required: [siteId, zones, cameras, routes]
-                properties:
-                  siteId: { type: string }
-                  zones:
-                    type: array
-                    items:
-                      type: object
-                      required: [id, type, polygon]
-                      properties:
-                        id: { type: string }
-                        type: { type: string }
-                        name: { type: string }
-                        polygon:
-                          type: array
-                          items:
-                            type: object
-                            properties:
-                              x: { type: number }
-                              y: { type: number }
-                  cameras:
-                    type: array
-                    items:
-                      type: object
-                      required: [id, position]
-                      properties:
-                        id: { type: string }
-                        zoneIds:
-                          type: array
-                          items: { type: string }
-                        position:
-                          type: object
-                          properties:
-                            x: { type: number }
-                            y: { type: number }
-                  routes:
-                    type: array
-                    items:
-                      type: object
-                      required: [id, points]
-                      properties:
-                        id: { type: string }
-                        allowedDirection: { type: string }
-                        points:
-                          type: array
-                          items:
-                            type: object
-                            properties:
-                              x: { type: number }
-                              y: { type: number }
+              schema: { $ref: "#/components/schemas/SiteModel" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404":
@@ -183,6 +91,44 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+
+  /v1/coverage:
+    get:
+      tags: [site]
+      summary: What the site could not see
+      description: >
+        The coverage panel: four rows, each a count over a site-scoped table, each
+        with the reason and the worst instance named. It never renders a degraded
+        observation as a negative one -- there is no "no intrusions detected" here,
+        because the model may not have been there and nobody knows. The scope is
+        in the answer, because a count with no scope is a number nobody can check.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Coverage" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /v1/handover:
+    get:
+      tags: [site]
+      summary: The shift hand-over
+      description: >
+        The brief the shift wrote, and the state of the artifact it came from. It
+        is the same brief the server-rendered console page shows -- this is its
+        JSON form, for a client that is not a browser. An install with no
+        hand-over artifact says so by name, because a hand-over panel that
+        renders empty reads as "nothing happened".
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Handover" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
 
   /v1/attention:
     get:
@@ -217,6 +163,551 @@ paths:
                             why:
                               type: [object, "null"]
                               description: The incident's replay, or null when it could not be produced.
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /v1/chief:
+    get:
+      tags: [incidents]
+      summary: The Chief of Security
+      description: >
+        What changed since the operator last looked, what needs them now, and
+        what the system does not know.
+
+
+        The `since` cursor is a QUERY PARAMETER and is stored nowhere. It is
+        durable -- a bookmark survives it and it survives a reload -- and it
+        leaves when the operator closes the tab, which is the correct lifetime
+        for "where I was". A cursor in browser storage would be a second reader
+        of the record; a cursor on the server would be a table of what each
+        operator looked at.
+
+
+        The Chief reads through the SAME two readers the attention queue and the
+        hand-over read, so the Chief and the two surfaces beside it cannot
+        disagree about the same site.
+
+
+        `narration` is the AI plane's voice over the facts, and it is OPTIONAL.
+        Its absence is a supported mode, not a degraded one. A narration that
+        cites a fact the product did not record is REFUSED: the deterministic
+        form speaks instead and `degradation` names the refusal. A provider
+        that was asked and could not answer produces a NAMED degradation, which
+        is a different fact from "the model said no".
+      parameters:
+        - name: since
+          in: query
+          description: >
+            The cursor. An RFC3339 instant. Absent means "the whole picture",
+            and the response says so -- a delta with no cursor is never
+            reported as quiet, because nothing was measured to be still. A
+            malformed cursor is refused with the reason.
+          schema: { type: string, format: date-time }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 20 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Chief" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /v1/devices:
+    get:
+      tags: [site]
+      summary: The device registry
+      description: >
+        What a device IS, what was MEASURED about it, and where its credential
+        lives.
+
+
+        A camera NAMES the profiles it supports and is routinely wrong about
+        it, so a capability that was not measured is not a capability. Only the
+        `verified` entries in the manifest count, and a device that has never
+        been probed says so with `probed: false` rather than rendering an
+        empty capability list that reads as "we looked and it can do nothing".
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeviceRegistry" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+    post:
+      tags: [site]
+      summary: Register a device
+      description: >
+        Records a device in the registry.
+
+
+        It does NOT touch the capability manifest, and that is the point: a
+        device acquires capabilities by being MEASURED, not by being
+        registered. `address` is a host and a port and nothing else -- the
+        credential is in the keystore and is named by `credentialRef`, never
+        here.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeviceRegistration" }
+      responses:
+        "201":
+          description: Registered
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deviceId, siteId, registered, probed]
+                properties:
+                  deviceId: { type: string }
+                  siteId: { type: string }
+                  registered: { type: boolean }
+                  probed:
+                    type: boolean
+                    description: Always false. A device that has just been registered has no capabilities.
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /v1/devices/{id}/capabilities:
+    get:
+      tags: [site]
+      summary: One device's measured manifest
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - name: capability
+          in: query
+          description: >
+            Ask about ONE capability. The answer is a boolean AND the state,
+            because a capability that is absent and a capability that is
+            present-and-unverified are different facts. Only a `verified`
+            capability is a capability.
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manifest]
+                properties:
+                  manifest: { $ref: "#/components/schemas/CapabilityManifest" }
+                  capability: { type: string }
+                  present: { type: boolean }
+                  state: { type: string, enum: [unverified, verified, contradicted, unsupported] }
+                  supported: { type: boolean }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/devices/{id}/probe:
+    post:
+      tags: [site]
+      summary: Measure a device and record what it established
+      description: >
+        Runs the probe against the device's registered address and records the
+        manifest.
+
+
+        This is the step that makes the registry honest. Everything before it
+        is a claim somebody typed; everything after it is a measurement. A
+        probe that fails writes NO manifest, and a device that did not answer
+        has no capabilities.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: The measured manifest
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CapabilityManifest" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+
+  /v1/devices/discover:
+    get:
+      tags: [site]
+      summary: Find the ONVIF devices on the network
+      description: >
+        The FIRST step of adding a camera: the operator does not type an
+        address when the camera can say where it is.
+
+
+        The scan is a multicast probe, and on a network that does not carry
+        multicast it finds nothing. That is the honest answer and the route
+        says so, because an empty list and a broken scan look identical to an
+        operator and only one of them is true. A device that answered but
+        published no address it can be reached at is listed with
+        `usable: false` and the reason.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, scan]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        address: { type: string }
+                        name: { type: string }
+                        types: { type: array, items: { type: string } }
+                        scopes: { type: array, items: { type: string } }
+                        usable: { type: boolean }
+                        reason: { type: string }
+                        baseUrl: { type: string }
+                        deviceService: { type: string }
+                        mediaService: { type: string }
+                  scan:
+                    type: object
+                    properties:
+                      multicastGroup: { type: string }
+                      multicastPort: { type: integer }
+                      found: { type: integer }
+                      note: { type: string }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+
+  /v1/devices/{id}/credentials:
+    get:
+      tags: [site]
+      summary: One device's credential inventory
+      description: >
+        Which purposes we hold a credential for, when each was enrolled, and
+        when each was last VERIFIED against the device itself.
+
+
+        The secrets are in the keystore and the REFERENCES are here, so a
+        support export of this route carries no password. A credential that has
+        never been verified is not a working credential, and the inventory says
+        so by leaving the verification time empty.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deviceId, items, purposes]
+                properties:
+                  deviceId: { type: string }
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        purpose: { type: string, enum: [rtsp, onvif, ftp, other] }
+                        secretRef: { type: string, description: A pointer into the keystore. Never a secret. }
+                        enrolledAt: { type: string, format: date-time }
+                        verified: { type: boolean }
+                        lastVerifiedAt: { type: string, format: date-time }
+                  purposes:
+                    type: array
+                    description: The closed vocabulary of purposes.
+                    items: { type: string }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    post:
+      tags: [site]
+      summary: Enrol a credential reference for a device
+      description: >
+        Records a POINTER into the keystore. The secret itself never reaches
+        this route, a log or the ledger.
+
+
+        A purpose outside the closed vocabulary is refused. A free-text
+        purpose becomes "the camera login" and then "the camera login (old)"
+        and then two credentials for one device with nobody able to say which
+        one is live.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [purpose, secretRef]
+              properties:
+                purpose: { type: string, enum: [rtsp, onvif, ftp, other] }
+                secretRef: { type: string, description: A pointer into the keystore. Never a secret. }
+      responses:
+        "201":
+          description: Enrolled
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deviceId, purpose, enrolled]
+                properties:
+                  deviceId: { type: string }
+                  purpose: { type: string }
+                  enrolled: { type: boolean }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/recordings:
+    get:
+      tags: [evidence]
+      summary: The recorded segments
+      description: >
+        The recording index: one row per segment, with the digest that makes
+        the bytes provable and the reference that says where they are.
+
+
+        The BYTES are not streamed by this API. They live on the recorder's
+        disk, in the customer's own storage, and this route publishes the
+        index over them.
+
+
+        The window defaults to the last hour and is capped at 24 hours. A
+        window longer than that is REFUSED with the reason rather than
+        silently clamped, because a clamped window answers a different
+        question from the one that was asked.
+      parameters:
+        - { name: siteId, in: query, schema: { type: string } }
+        - { name: deviceId, in: query, schema: { type: string }, description: Absent means every camera in the site. }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 2000, default: 200 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecordingList" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /v1/recordings/timeline:
+    get:
+      tags: [evidence]
+      summary: One camera's recording, and whether it is continuous
+      description: >
+        The segments, the MEASURED holes between them, and a named verdict.
+
+
+        The verdict is one of three states and they are three different facts:
+        `no_recording` (the camera recorded nothing in the window),
+        `broken` (there is at least one hole, and the holes are published),
+        and `continuous` (there are segments and no hole larger than the
+        threshold). There is no state in which the answer is unknown, because
+        the gaps are measured from the stored rows and a read failure is an
+        error rather than a verdict.
+      parameters:
+        - { name: siteId, in: query, schema: { type: string } }
+        - { name: deviceId, in: query, required: true, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: minGapMs, in: query, schema: { type: integer, minimum: 0 }, description: The silence that counts as a hole. Absent means one second. }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecordingTimeline" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /v1/recordings/gaps:
+    get:
+      tags: [evidence]
+      summary: Where the recording was broken
+      description: >
+        The measured holes in one camera's recording, with their sizes.
+
+
+        A hole is the silence between the previous segment's last frame and
+        this segment's first. The boundary between two segments is about one
+        frame wide, because the keyframe that ends one segment is the first
+        frame of the next, so the threshold is a parameter rather than a
+        constant.
+      parameters:
+        - { name: siteId, in: query, schema: { type: string } }
+        - { name: deviceId, in: query, required: true, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: minGapMs, in: query, schema: { type: integer, minimum: 0 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecordingGaps" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /v1/recordings/chain:
+    get:
+      tags: [evidence]
+      summary: Whether a recording can be proved
+      description: >
+        The chain that binds one segment to the next, RECOMPUTED from the rows
+        rather than read from the chain row.
+
+
+        A reader that trusted the stored head would report a broken recording
+        as sound, so the recomputed head and the recorded head are both
+        published and a mismatch is visible rather than inferred. The chain is
+        per camera per UTC day, because it is sealed into the audit ledger at
+        day close.
+      parameters:
+        - { name: siteId, in: query, schema: { type: string } }
+        - { name: deviceId, in: query, required: true, schema: { type: string } }
+        - { name: day, in: query, schema: { type: string, format: date }, description: "The UTC day. Absent means today." }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecordingChain" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /v1/ai/chain:
+    get:
+      tags: [site]
+      summary: The provider chain and what it has sent away
+      description: >
+        The site's BRAIN: which providers may answer, in what order, and
+        whether the site may send anything off the machine at all.
+
+
+        The order IS the policy. It says what may leave the site, and it is
+        what an auditor asks about.
+
+
+        The EGRESS LOG records what left: which provider, which observation,
+        how many pieces of evidence and how many bytes -- and the DIGESTS of
+        that evidence. It never carries the content, because a log of what
+        left that kept what left would be a second copy of the evidence in a
+        place nobody chose to put it.
+      parameters:
+        - { name: siteId, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AIChain" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /v1/setup:
+    get:
+      tags: [site]
+      summary: What is left to do before this site records anything
+      description: >
+        The "plug and play" promise, made checkable.
+
+
+        Each step is answered by the PRODUCT — the migration ledger, the sites,
+        the device registry, the provider policy — and each unfinished step
+        names the ONE action that would finish it. A step that is not done and
+        does not say what to do is a complaint.
+
+
+        The steps are ordered by dependency: a site with a camera and no schema
+        cannot record anything, and a site with a schema and no site has
+        nothing to record for. `next` is therefore the first unfinished step,
+        because that is the one blocking the rest.
+      parameters:
+        - { name: siteId, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Setup" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /v1/recordings/{segmentId}/content:
+    get:
+      tags: [evidence]
+      summary: A recorded segment's bytes
+      description: >
+        The segment's BYTES, served from the site's own recording root.
+
+
+        The digest is published in `X-Content-Digest`, and whether the bytes
+        were CHECKED against it is published in `X-Content-Verified` — a client
+        that knows the check was on can trust the digest, and one that does not
+        know is trusting nothing.
+
+
+        A segment whose bytes no longer match the row is REFUSED with
+        `content_mismatch` rather than served: footage that cannot be proven to
+        be the footage the recording index names is worse than no footage.
+      parameters:
+        - { name: segmentId, in: path, required: true, schema: { type: string } }
+        - { name: siteId, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: The segment's bytes.
+          content:
+            video/mp4:
+              schema: { type: string, format: binary }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+
+  /v1/recordings/clip:
+    get:
+      tags: [evidence]
+      summary: The clip for a window, with its pre-roll
+      description: >
+        The segments covering a window, and the PRE-ROLL — the segment
+        immediately before it, which is where the lead-in lives.
+
+
+        The clip is a LIST and not a file. Each segment is an independently
+        playable fragmented MP4, and the product's own recorder wrote them that
+        way on purpose: a segment that cannot be decoded on its own is not
+        evidence. Concatenating them into one file would mean re-muxing, and a
+        re-mux is a second implementation of a muxer that already exists.
+
+
+        `preRoll` is null when the window starts at the beginning of what was
+        recorded, and that is a fact about the recording rather than a gap in
+        the clip.
+      parameters:
+        - { name: deviceId, in: query, required: true, schema: { type: string } }
+        - { name: siteId, in: query, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecordingClip" }
+        "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
 
@@ -286,10 +777,20 @@ paths:
     post:
       tags: [disposition]
       summary: Record an operator disposition
-      description: Never overwrites the AI observation; both are stored and both replay.
+      description: |
+        Never overwrites the AI observation; both are stored and both replay.
+
+        `escalated` and `dismissed` require a second factor. The request carries
+        the FACTOR -- the operator's own code -- and not a proof: a proof is a
+        bearer token, and putting one in a request body puts it in a log, a
+        trace and a browser history. The server spends a freshly minted proof
+        against the factor and never hands the proof back.
+
+        An outcome that needs a factor and was not given one is refused with
+        403 and the code `step_up_required`. It is a permission and not a
+        malformed request, so it is not a 400.
       parameters:
         - { $ref: "#/components/parameters/IncidentId" }
-        - { $ref: "#/components/parameters/CSRFToken" }
       requestBody:
         required: true
         content:
@@ -302,7 +803,15 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Disposition" }
         "401": { $ref: "#/components/responses/Error" }
-        "403": { $ref: "#/components/responses/Error" }
+        "403":
+          description: >
+            Forbidden. Either the principal does not hold `incident.disposition`,
+            or the outcome needs a fresh second factor and the request carried
+            none: `escalated` and `dismissed` are refused with the code
+            `step_up_required`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /v1/incidents/{incidentId}/evidence:
     get:
@@ -332,7 +841,6 @@ paths:
         symlink escapes are rejected on fetch and on export.
       parameters:
         - { $ref: "#/components/parameters/IncidentId" }
-        - { $ref: "#/components/parameters/CSRFToken" }
       requestBody:
         required: true
         content:
@@ -346,6 +854,35 @@ paths:
               schema: { $ref: "#/components/schemas/JobAccepted" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+
+  /v1/evidence/{evidenceId}:
+    get:
+      tags: [evidence]
+      summary: One evidence row's metadata
+      description: >
+        The kind, the capture time, the digest and the size.
+
+
+        The BYTES are served by the content route and the incident's evidence
+        list names the row, but a reader of ONE moment needs the row itself.
+        The digest in particular is the field an operator has to be able to
+        read before they trust a clip.
+
+
+        The site scope is applied in the query. A row at a site the principal
+        may not see is a row that does not exist for them, and the answer is
+        the same 404 either way: a different one is a disclosure.
+      parameters:
+        - { name: evidenceId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Evidence" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
 
   /v1/evidence/{evidenceId}/content:
     get:
@@ -469,7 +1006,6 @@ paths:
       tags: [rules]
       summary: Store a new immutable bundle
       description: Storing is not activation. Activation requires lint and a reviewed simulate diff.
-      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
       requestBody:
         required: true
         content:
@@ -504,7 +1040,6 @@ paths:
       summary: Simulate a bundle and return the diff against the active bundle
       parameters:
         - { $ref: "#/components/parameters/BundleVersion" }
-        - { $ref: "#/components/parameters/CSRFToken" }
       requestBody:
         required: true
         content:
@@ -525,7 +1060,6 @@ paths:
       description: Fails unless lint passed and the simulate diff was acknowledged by digest.
       parameters:
         - { $ref: "#/components/parameters/BundleVersion" }
-        - { $ref: "#/components/parameters/CSRFToken" }
       requestBody:
         required: true
         content:
@@ -543,7 +1077,6 @@ paths:
     post:
       tags: [rules]
       summary: Roll back to the previous immutable bundle version
-      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
       responses:
         "200": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
@@ -556,7 +1089,6 @@ paths:
         Converts natural language (e.g. "person with bag at entrance in the last
         hour") into a rule-bundle YAML document. The existing rules.Compiler
         compiles it; this endpoint only produces the document.
-      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
       requestBody:
         required: true
         content:
@@ -579,7 +1111,6 @@ paths:
         Multipart upload of a video container (MP4, MOV, AVI, WebM, MKV). The
         file is stored in the evidence store and a canonical video_ingest
         inbox event is emitted so videoingest can ingest it as a file source.
-      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
       requestBody:
         required: true
         content:
@@ -613,7 +1144,6 @@ paths:
         Emits a canonical video_ingest inbox event for a YouTube URL.
         videoingest downloads the real bytes via yt-dlp when it processes
         the event. The same URL always maps to the same evidence id.
-      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
       requestBody:
         required: true
         content:
@@ -720,7 +1250,7 @@ paths:
       summary: Liveness
       responses:
         "200":
-          description: Process is up. Deliberately excludes the AI plane: core liveness must not depend on it.
+          description: "Process is up. Deliberately excludes the AI plane: core liveness must not depend on it."
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Health" }
@@ -739,23 +1269,255 @@ paths:
               schema: { $ref: "#/components/schemas/Readiness" }
         "503": { $ref: "#/components/responses/Error" }
 
+  /v1/analytics/summary:
+    get:
+      tags: [analytics]
+      summary: The durable report -- the North Star and its four companions
+      description: >
+        The North Star is operator attention minutes per 1000 canonical events,
+        and it is never reported alone. The four companions are the four ways the
+        product can be quietly bad, and a report that is missing one of them does
+        not validate.
+
+
+        The denominator is canonical events and NEVER incidents. A denominator of
+        incidents improves the ratio automatically as the rules get more
+        conservative, which is a metric that improves when the product gets
+        worse.
+
+
+        There is no target. M1 is baseline only, and a report that carried a
+        target would be carrying a decision that had not been made.
+
+
+        The report shape is published as
+        `contracts/json-schema/metrics-report.schema.json`, and that document is
+        the contract.
+      parameters:
+        - { name: from, in: query, schema: { type: string }, description: "An RFC3339 instant or a duration (24h). Defaults to the last 24 whole hours." }
+        - { name: to, in: query, schema: { type: string }, description: "An RFC3339 instant. Defaults to now." }
+        - { name: site, in: query, schema: { type: string }, description: "A FILTER. The site scope bound onto the connection is the grant, and a site outside it is refused." }
+        - { name: class, in: query, schema: { type: string }, description: "The rule class, or every class." }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "../../json-schema/metrics-report.schema.json" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /v1/analytics/series:
+    get:
+      tags: [analytics]
+      summary: One metric over the window
+      description: >
+        The metric's value per bucket, read out of the durable rollup. Every
+        point carries its N, its bucket and when it was computed, and the series
+        carries a drill-down reference that re-derives one window from the raw
+        rows.
+
+
+        The granularity is `hour` or `day`, and a day is a SUM of hours rather
+        than an average: a day of attention minutes is a duration, and averaging
+        a count would report a number that is not a thing anybody counted.
+      parameters:
+        - { name: metric, in: query, required: true, schema: { type: string }, description: "The metric's wire name. The vocabulary is closed and the refusal names it." }
+        - { name: from, in: query, schema: { type: string } }
+        - { name: to, in: query, schema: { type: string } }
+        - { name: granularity, in: query, schema: { type: string, enum: [hour, day], default: hour } }
+        - { name: site, in: query, schema: { type: string } }
+        - { name: class, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [metric, window, granularity, source, computed_at, points, drilldown]
+                properties:
+                  metric: { type: string }
+                  window: { $ref: "#/components/schemas/AnalyticsWindow" }
+                  granularity: { type: string, enum: [hour, day] }
+                  source: { type: string, const: postgres }
+                  computed_at: { type: string, format: date-time }
+                  drilldown: { type: string, description: "A reference that re-derives a window from the raw rows." }
+                  points:
+                    type: array
+                    items:
+                      type: object
+                      required: [metric, bucket_start, bucket_end, value, n, computed_at]
+                      properties:
+                        metric: { type: string }
+                        bucket_start: { type: string, format: date-time }
+                        bucket_end: { type: string, format: date-time }
+                        site_id: { type: string }
+                        rule_id: { type: string }
+                        value: { type: number }
+                        n: { type: integer, minimum: 0 }
+                        computed_at: { type: string, format: date-time }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /v1/analytics/trend:
+    get:
+      tags: [analytics]
+      summary: One metric over the window and over the window before it
+      description: >
+        The current window against the window immediately before it, of the SAME
+        length, so the comparison is like for like. A week against a month would
+        be a trend about the calendar.
+
+
+        A side that was not measured is absent rather than zero, and a trend
+        against an absent side is absent rather than a delta. "The product did
+        not measure this" and "the product measured nothing" are different
+        answers.
+      parameters:
+        - { name: metric, in: query, required: true, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string } }
+        - { name: to, in: query, schema: { type: string } }
+        - { name: site, in: query, schema: { type: string } }
+        - { name: class, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [metric, window, prior_window, source, computed_at, drilldown]
+                properties:
+                  metric: { type: string }
+                  window: { $ref: "#/components/schemas/AnalyticsWindow" }
+                  prior_window: { $ref: "#/components/schemas/AnalyticsWindow" }
+                  source: { type: string, const: postgres }
+                  computed_at: { type: string, format: date-time }
+                  current: { type: [object, "null"] }
+                  prior: { type: [object, "null"] }
+                  delta: { type: [number, "null"] }
+                  delta_percent: { type: [number, "null"] }
+                  drilldown: { type: string }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /v1/analytics/drilldown:
+    get:
+      tags: [analytics]
+      summary: Re-derive the numbers for a window from the RAW rows
+      description: >
+        The check on the rollup. The numbers are computed from the source tables
+        and not read out of `metric_rollups`, and they are the SAME computation
+        over the SAME rows -- so a reader who finds the two different has found
+        a bucket that was derived before the rows it summarises existed.
+
+
+        It is a re-derivation and not a read, and it costs what a scan of the
+        window costs.
+      parameters:
+        - { name: metric, in: query, required: true, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string } }
+        - { name: to, in: query, schema: { type: string } }
+        - { name: site, in: query, required: true, schema: { type: string }, description: "Required: the rollup is site-scoped, and a derivation with no site would read nothing." }
+        - { name: class, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [report_version, metric, window, source, computed_at, rows]
+                properties:
+                  report_version: { type: string }
+                  metric: { type: string }
+                  window: { $ref: "#/components/schemas/AnalyticsWindow" }
+                  source: { type: string, const: "raw rows" }
+                  computed_at: { type: string, format: date-time }
+                  note: { type: string }
+                  rows:
+                    type: array
+                    items:
+                      type: object
+                      required: [metric, site_id, value, n]
+                      properties:
+                        metric: { type: string }
+                        site_id: { type: string }
+                        rule_id: { type: string }
+                        device_id: { type: string }
+                        value: { type: number }
+                        n: { type: integer, minimum: 0 }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /v1/analytics/incident-rate:
+    get:
+      tags: [analytics]
+      summary: M1 gate 5's ratio -- incidents raised per 1,000 canonical events, per camera
+      description: >
+        The ratio a release note quotes: events ingested, canonical events,
+        incidents raised, per camera.
+
+
+        The third leg -- events INGESTED -- is a tenant number and is not in this
+        response: the inbox is per integration, and a camera's events are
+        resolved later by the normalizer. The response says so.
+
+
+        An incident is attributed to the camera whose event TRIGGERED it, which is
+        the only attribution the data supports.
+      parameters:
+        - { name: from, in: query, schema: { type: string }, description: "An RFC3339 instant or a duration (336h). Defaults to the fortnight the gate names." }
+        - { name: to, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [window, source, computed_at, rows, total]
+                properties:
+                  window: { $ref: "#/components/schemas/AnalyticsWindow" }
+                  source: { type: string, const: postgres }
+                  computed_at: { type: string, format: date-time }
+                  note: { type: string }
+                  rows:
+                    type: array
+                    items:
+                      type: object
+                      required: [canonical_events, incidents_raised]
+                      properties:
+                        site_id: { type: string }
+                        device_id: { type: string }
+                        canonical_events: { type: integer, minimum: 0 }
+                        incidents_raised: { type: integer, minimum: 0 }
+                        rate: { type: [number, "null"] }
+                        confidence_interval: { type: [object, "null"] }
+                  total:
+                    type: object
+                    required: [canonical_events, incidents_raised]
+                    properties:
+                      canonical_events: { type: integer, minimum: 0 }
+                      incidents_raised: { type: integer, minimum: 0 }
+                      rate: { type: [number, "null"] }
+                      confidence_interval: { type: [object, "null"] }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
-    sessionCookie:
-      type: apiKey
-      in: cookie
-      name: sp_session
+    # The one scheme this API publishes.
+    #
+    # It is a bearer credential for a service account: an integration that
+    # calls the product as itself, scoped to a single integration. There is no
+    # cookie scheme and no CSRF scheme, because there is no login: the API runs
+    # as a CONFIGURED principal and there is no session for a cookie to carry
+    # and no token for a CSRF check to spend.
     serviceBearer:
       type: http
       scheme: bearer
 
   parameters:
-    CSRFToken:
-      name: X-CSRF-Token
-      in: header
-      required: true
-      description: Required on every state-changing method.
-      schema: { type: string, minLength: 16, maxLength: 256 }
     IncidentId:
       name: incidentId
       in: path
@@ -773,23 +1535,15 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
-    Locked:
-      description: Account locked by exponential backoff
-      content:
-        application/json:
-          schema: { $ref: "#/components/schemas/Error" }
-    MFAPendingOrSuccess:
-      description: MFA required, or authenticated
-      content:
-        application/json:
-          schema:
-            type: object
-            required: [mfaRequired]
-            properties:
-              mfaRequired: { type: boolean }
-              session: { $ref: "#/components/schemas/SessionInfo" }
 
   schemas:
+    AnalyticsWindow:
+      type: object
+      required: [from, to]
+      description: The period the numbers cover. It is part of every number, not a property of the report, because a rate without its window is a rate without a denominator.
+      properties:
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
     Error:
       type: object
       additionalProperties: false
@@ -799,40 +1553,6 @@ components:
         message: { type: string }
         requestId: { type: string }
         details: { type: array, items: { type: object } }
-
-    LoginRequest:
-      type: object
-      additionalProperties: false
-      required: [username, password]
-      properties:
-        username: { type: string, minLength: 1, maxLength: 128 }
-        password: { type: string, minLength: 1, maxLength: 1024, format: password }
-        breakGlass: { type: boolean, default: false }
-
-    MFARequest:
-      type: object
-      additionalProperties: false
-      required: [challengeId, "method", "code]
-      properties:
-        challengeId: { type: string, minLength: 1, maxLength: 128 }
-        method: { enum: [webauthn, totp] }
-        code: { type: string, minLength: 1, maxLength: 64 }
-        assertion: { type: object, description: WebAuthn assertion payload. } 
-
-    SessionInfo:
-      type: object
-      additionalProperties: false
-      required: [sessionId, principalId, "roles", "siteScope", "csrfToken", "mfaVerified"]
-      properties:
-        sessionId: { type: string }
-        principalId: { type: string }
-        displayName: { type: string }
-        roles: { type: array, items: { $ref: "#/components/schemas/Role" } }
-        siteScope: { type: array, items: { type: string } }
-        csrfToken: { type: string }
-        mfaVerified: { type: boolean }
-        breakGlass: { type: boolean }
-        expiresAt: { type: string, format: "date-time" }
 
     Role:
       enum: [tenant_admin, security_manager, operator, viewer, service]
@@ -862,6 +1582,744 @@ components:
             Always true for the configured principal. The console has no login, so
             there is no person to be; the ledger attributes every action to this
             principal and the console says so rather than implying otherwise.
+        timezone:
+          type: string
+          description: >
+            The site's own timezone, as the site's row records it. Rendering law:
+            dates cross the site timezone, never the host's, so an operator at one
+            site and a reader of the record at another read the same timestamp as
+            the same moment. Absent when the site's row could not be read: a
+            guessed zone is a wrong clock, and the console is told the clock is
+            unknown rather than shown UTC as though it were the site's.
+
+    SiteModel:
+      type: object
+      required: [siteId, zones, cameras, routes]
+      properties:
+        siteId: { type: string }
+        timezone:
+          type: string
+          description: >
+            The site's own timezone, as the site's row records it. Rendering law:
+            dates cross the site timezone, never the host's. Absent when the
+            site's row could not be read: a guessed zone is a wrong clock.
+        zones:
+          type: array
+          items:
+            type: object
+            required: [id, type, polygon]
+            properties:
+              id: { type: string }
+              type: { type: string }
+              name: { type: string }
+              polygon:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    x: { type: number }
+                    y: { type: number }
+        cameras:
+          type: array
+          items:
+            type: object
+            required: [id, position]
+            properties:
+              id: { type: string }
+              zoneIds:
+                type: array
+                items: { type: string }
+              position:
+                type: object
+                properties:
+                  x: { type: number }
+                  y: { type: number }
+        routes:
+          type: array
+          items:
+            type: object
+            required: [id, points]
+            properties:
+              id: { type: string }
+              allowedDirection: { type: string }
+              points:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    x: { type: number }
+                    y: { type: number }
+
+    Coverage:
+      type: object
+      required: [sites, rows]
+      properties:
+        sites:
+          type: array
+          items: { type: string }
+          description: The sites these counts cover.
+        rows:
+          type: array
+          description: >
+            The fixed row order, always the same four rows, because a panel whose
+            rows appear and vanish with the data cannot be scanned.
+          items:
+            type: object
+            required: [kind, what, count, seen]
+            properties:
+              kind: { type: string }
+              what: { type: string }
+              count: { type: integer }
+              worst: { type: string }
+              since: { type: string, format: date-time }
+              seen: { type: boolean }
+              breaking: { type: boolean }
+
+    Device:
+      type: object
+      additionalProperties: false
+      required: [deviceId, siteId, kind, enabled, probed, capabilities]
+      properties:
+        deviceId: { type: string }
+        siteId: { type: string }
+        zoneId: { type: string }
+        kind: { type: string, description: "camera, door, sensor, gate, alarm_panel, access_reader, other." }
+        displayName: { type: string }
+        enabled: { type: boolean }
+        make: { type: string }
+        model: { type: string }
+        firmware: { type: string }
+        onvifDeviceId: { type: string }
+        rtspRef:
+          type: string
+          description: A reference to the stream configuration, never a URL with a credential in it.
+        substreamProfile: { type: string }
+        probed:
+          type: boolean
+          description: False when the device has never been measured.
+        probedAt: { type: string, format: date-time }
+        probeId: { type: string }
+        capabilities:
+          type: array
+          description: The VERIFIED capability names. A capability in any other state is not a capability.
+          items: { type: string }
+
+    DeviceRegistry:
+      type: object
+      additionalProperties: false
+      required: [items]
+      description: >
+        The registry, and the CLOSED vocabularies the product knows.
+      properties:
+        available:
+          type: boolean
+          description: False when this install has no device registry.
+        unavailable:
+          type: string
+          description: Why there is no registry, when there is not one.
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Device" }
+        vocabulary: { $ref: "#/components/schemas/DeviceVocabulary" }
+
+    DeviceVocabulary:
+      type: object
+      additionalProperties: false
+      required: [credentialPurposes, capabilityStates, onvifCapabilities, onvifProfiles]
+      description: >
+        The closed sets, published so a reader knows the WHOLE set rather than
+        only the members this install has met. A report that names only the
+        capabilities it has seen is a report about the past.
+      properties:
+        credentialPurposes:
+          type: array
+          items: { type: string, enum: [rtsp, onvif, ftp, other] }
+        capabilityStates:
+          type: array
+          items: { type: string, enum: [unverified, verified, contradicted, unsupported] }
+        onvifCapabilities:
+          type: array
+          items: { type: string }
+        onvifProfiles:
+          type: array
+          items: { type: string }
+
+    RecordingSegment:
+      type: object
+      additionalProperties: false
+      required: [segmentId, deviceId, seq, startedAt, endedAt, bytes, digest, storageRef, state]
+      description: >
+        One recorded segment. The BYTES live on the recorder's disk; this is
+        the index over them, and the digest is what makes them provable.
+      properties:
+        segmentId: { type: string }
+        deviceId: { type: string }
+        seq: { type: integer, format: int64 }
+        startedAt: { type: string, format: date-time }
+        endedAt: { type: string, format: date-time }
+        gapBeforeMs:
+          type: integer
+          description: The measured silence before this segment. About one frame on a healthy camera.
+        bytes: { type: integer, format: int64 }
+        digest: { type: string, description: The SHA-256 of the segment's bytes. }
+        codec: { type: string }
+        width: { type: integer }
+        height: { type: integer }
+        storageRef:
+          type: string
+          description: Where the bytes are, RELATIVE to the recording root. Never absolute, never a URL.
+        state:
+          type: string
+          enum: [complete, partial]
+          description: >
+            `partial` is a segment that was cut short, and its boundary is the
+            TRUE boundary. A partial segment is never a silent hole: it is a
+            hole that says how big it is.
+        chainHash: { type: string }
+
+    RecordingGap:
+      type: object
+      additionalProperties: false
+      required: [deviceId, startedAt, endedAt, durationMs]
+      description: A measured hole in a recording.
+      properties:
+        deviceId: { type: string }
+        startedAt: { type: string, format: date-time }
+        endedAt: { type: string, format: date-time }
+        durationMs: { type: integer, format: int64 }
+
+    RecordingList:
+      type: object
+      additionalProperties: false
+      required: [available, items]
+      properties:
+        available:
+          type: boolean
+          description: False when this install has no recording index.
+        unavailable:
+          type: string
+          description: Why there is no recording index, when there is not one.
+        siteId: { type: string }
+        deviceId: { type: string }
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/RecordingSegment" }
+
+    RecordingContinuity:
+      type: object
+      additionalProperties: false
+      required: [segmentCount, coveredMs, windowMs, gapCount, gapMs]
+      description: The three numbers that say whether the recording is whole.
+      properties:
+        segmentCount: { type: integer }
+        coveredMs: { type: integer, format: int64 }
+        windowMs: { type: integer, format: int64 }
+        gapCount: { type: integer }
+        gapMs: { type: integer, format: int64 }
+
+    SetupStep:
+      type: object
+      additionalProperties: false
+      required: [id, title, done, detail]
+      description: >
+        One step of the setup path. An unfinished step carries the ONE action
+        that would finish it, in the operator's terms rather than the
+        product's.
+      properties:
+        id: { type: string }
+        title: { type: string }
+        done: { type: boolean }
+        detail: { type: string }
+        action:
+          type: string
+          description: What to do next. Empty when the step is done.
+
+    Setup:
+      type: object
+      additionalProperties: false
+      required: [steps, doneCount, totalCount, ready]
+      properties:
+        siteId: { type: string }
+        steps:
+          type: array
+          items: { $ref: "#/components/schemas/SetupStep" }
+        doneCount: { type: integer }
+        totalCount: { type: integer }
+        ready:
+          type: boolean
+          description: Whether the product can record. It is a claim about the PRODUCT and not about the console.
+        next:
+          type: string
+          description: The first unfinished step, because the steps are ordered by dependency.
+
+    AIProvider:
+      type: object
+      additionalProperties: false
+      required: [position, kind, model]
+      description: >
+        One provider in the chain. The POSITION is the policy: the order is
+        what says which provider the site prefers and what it falls back to.
+      properties:
+        position: { type: integer, minimum: 1 }
+        kind:
+          type: string
+          enum: [openai_compatible, anthropic, local_bundle]
+        model: { type: string }
+        baseUrl:
+          type: string
+          description: Where the provider lives. It never carries a credential.
+        credentialConfigured:
+          type: boolean
+          description: Whether a credential is configured. Never the credential.
+
+    AIEgressRecord:
+      type: object
+      additionalProperties: false
+      required: [egressId, provider, observationId, profileId, evidenceCount, evidenceBytes, evidenceHashes, requestedAt]
+      description: >
+        One record of what left the site. The digests are enough to answer
+        "was this exact piece of evidence what was sent?" without keeping the
+        thing that was sent.
+      properties:
+        egressId: { type: string }
+        provider: { type: string }
+        observationId: { type: string }
+        profileId: { type: string }
+        evidenceCount: { type: integer }
+        evidenceBytes: { type: integer, format: int64 }
+        evidenceHashes:
+          type: array
+          items: { type: string }
+        requestedAt: { type: string, format: date-time }
+
+    AIChain:
+      type: object
+      additionalProperties: false
+      required: [available, providers, egress]
+      properties:
+        available:
+          type: boolean
+          description: False when this install has no AI provider chain configured.
+        unavailable: { type: string }
+        siteId: { type: string }
+        providers:
+          type: array
+          items: { $ref: "#/components/schemas/AIProvider" }
+        egress:
+          type: array
+          items: { $ref: "#/components/schemas/AIEgressRecord" }
+        egressAllowed:
+          type: boolean
+          description: Whether this site may send evidence off the machine at all.
+        policyAvailable:
+          type: boolean
+          description: False when the site has no provider policy.
+        policyUnavailable: { type: string }
+        chainAvailable:
+          type: boolean
+          description: Whether the chain BUILDS. A policy can name a provider this build cannot use, or one the site may not reach, and the operator needs to know that before the first observation is due.
+        chainUnavailable:
+          type: string
+          description: Why the chain does not build, when it does not.
+        systemPromptConfigured: { type: boolean }
+        timeoutSeconds: { type: integer }
+
+    RecordingClipSegment:
+      type: object
+      additionalProperties: false
+      required: [segmentId, seq, startedAt, endedAt, bytes, digest, state, contentUrl]
+      description: One segment of a clip.
+      properties:
+        segmentId: { type: string }
+        seq: { type: integer, format: int64 }
+        startedAt: { type: string, format: date-time }
+        endedAt: { type: string, format: date-time }
+        bytes: { type: integer, format: int64 }
+        digest: { type: string }
+        state: { type: string, enum: [complete, partial] }
+        contentUrl:
+          type: string
+          description: Where the segment's bytes are served from.
+
+    RecordingClip:
+      type: object
+      additionalProperties: false
+      required: [available, siteId, deviceId, from, to, segments, gaps, coveredMs, windowMs]
+      properties:
+        available: { type: boolean }
+        siteId: { type: string }
+        deviceId: { type: string }
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        segments:
+          type: array
+          items: { $ref: "#/components/schemas/RecordingClipSegment" }
+        preRoll:
+          description: >
+            The segment immediately BEFORE the window — the lead-in. It is null
+            when the window starts at the beginning of what was recorded, and
+            that is a fact about the recording rather than a gap in the clip.
+          oneOf:
+            - { $ref: "#/components/schemas/RecordingClipSegment" }
+            - { type: "null" }
+        gaps:
+          type: array
+          items: { $ref: "#/components/schemas/RecordingGap" }
+        coveredMs: { type: integer, format: int64 }
+        windowMs: { type: integer, format: int64 }
+
+    RecordingVerdict:
+      type: object
+      additionalProperties: false
+      required: [state, detail]
+      description: >
+        What the recording IS, named rather than a boolean.
+
+        The three states are three DIFFERENT facts: `no_recording` (the camera
+        recorded nothing in the window), `broken` (there is at least one hole,
+        and the holes are published), and `continuous` (there are segments and
+        no hole larger than the threshold).
+      properties:
+        state:
+          type: string
+          enum: [no_recording, broken, continuous]
+        detail: { type: string }
+
+    RecordingTimeline:
+      type: object
+      additionalProperties: false
+      required: [available, segments, gaps, continuity, verdict]
+      properties:
+        available:
+          type: boolean
+          description: False when this install has no recording index.
+        unavailable: { type: string }
+        siteId: { type: string }
+        deviceId: { type: string }
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        gapThresholdMs: { type: integer, format: int64 }
+        segments:
+          type: array
+          items: { $ref: "#/components/schemas/RecordingSegment" }
+        gaps:
+          type: array
+          items: { $ref: "#/components/schemas/RecordingGap" }
+        continuity: { $ref: "#/components/schemas/RecordingContinuity" }
+        verdict: { $ref: "#/components/schemas/RecordingVerdict" }
+
+    RecordingGaps:
+      type: object
+      additionalProperties: false
+      required: [available, gaps]
+      properties:
+        available:
+          type: boolean
+          description: False when this install has no recording index.
+        unavailable: { type: string }
+        siteId: { type: string }
+        deviceId: { type: string }
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        gapThresholdMs: { type: integer, format: int64 }
+        totalGapMs: { type: integer, format: int64 }
+        gaps:
+          type: array
+          items: { $ref: "#/components/schemas/RecordingGap" }
+
+    RecordingChain:
+      type: object
+      additionalProperties: false
+      required: [available, verified]
+      description: >
+        The chain's verification. The recomputed head and the recorded head
+        are both published, so a mismatch is visible rather than inferred.
+      properties:
+        available:
+          type: boolean
+          description: False when this install has no recording index.
+        unavailable: { type: string }
+        siteId: { type: string }
+        deviceId: { type: string }
+        day: { type: string, format: date }
+        verified: { type: boolean }
+        reason:
+          type: string
+          description: Why there is no chain, when there is none.
+        segmentCount: { type: integer }
+        recordedHead: { type: string }
+        expectedHead: { type: string }
+        brokenAtSeq:
+          type: integer
+          format: int64
+          description: The sequence of the first segment whose recomputed hash differs. Zero means the day is sound.
+
+    DeviceRegistration:
+      type: object
+      additionalProperties: false
+      required: [deviceId]
+      properties:
+        deviceId:
+          type: string
+          minLength: 1
+          description: The tenant-scoped key of the device.
+        siteId:
+          type: string
+          description: >
+            The site. It is never read from a request body for the TENANT, and
+            a site the principal may not see is refused rather than accepted
+            and hidden.
+        zoneId: { type: string }
+        kind: { type: string, description: "camera, door, sensor, gate, alarm_panel, access_reader, other." }
+        displayName: { type: string }
+        address:
+          type: string
+          description: >
+            The device's ONVIF base address. A host and a port and nothing
+            else -- the credential is in the keystore and is named by
+            `credentialRef`, never here.
+        credentialRef:
+          type: string
+          description: A reference into the keystore. A pointer, never a secret.
+        substreamProfile: { type: string }
+
+    CapabilityManifest:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, tenantId, siteId, deviceId, probeId, probedAt, capabilities]
+      description: >
+        What was MEASURED about one device, in the shape published at
+        `contracts/json-schema/capability-manifest.schema.json`.
+
+
+        A `verified` capability with no probe behind it is refused rather than
+        published. The manifest is read whole or not at all: a consumer needs
+        the whole set to decide what to enable, and half a manifest is not a
+        smaller manifest -- it is a wrong one.
+      properties:
+        schemaVersion: { type: integer, const: 1 }
+        tenantId: { type: string }
+        siteId: { type: string }
+        deviceId: { type: string }
+        probeId: { type: string }
+        probedAt: { type: string, format: date-time }
+        make: { type: string }
+        model: { type: string }
+        firmware: { type: string }
+        onvifDeviceId: { type: string }
+        capabilities:
+          type: array
+          items:
+            type: object
+            required: [name, state]
+            properties:
+              name: { type: string }
+              state:
+                type: string
+                enum: [unverified, verified, contradicted, unsupported]
+              probe: { type: string }
+              observedAt: { type: string, format: date-time }
+              detail: { type: string }
+
+    Chief:
+      type: object
+      additionalProperties: false
+      required: [schema, generatedAt, since, headline, delta, attention, autonomy, effectiveAutonomy]
+      description: >
+        The Chief, in its published `chief/v1` shape.
+      properties:
+        schema: { type: string, const: "chief/v1" }
+        tenantId: { type: string }
+        siteId: { type: string }
+        generatedAt: { type: string, format: date-time }
+        since:
+          type: string
+          format: date-time
+          description: The cursor the delta was measured against, echoed.
+        headline:
+          type: string
+          description: >
+            The Chief's opening line. Deterministic: the same facts always
+            produce the same sentence. It names what changed AND what is still
+            open, because "nothing new" on its own reads as "nothing is
+            happening", which at 02:00 is a dangerous claim.
+        delta: { $ref: "#/components/schemas/ChiefDelta" }
+        attention:
+          type: array
+          description: The queue, in the PRODUCT's order. The Chief does not re-sort it.
+          items: { $ref: "#/components/schemas/ChiefItem" }
+        brief:
+          type: object
+          description: The deterministic shift brief, in its published `brief/v1` shape. Absent when the site has no hand-over artifact.
+        narration: { $ref: "#/components/schemas/ChiefNarration" }
+        degradation: { $ref: "#/components/schemas/ChiefDegradation" }
+        autonomy:
+          $ref: "#/components/schemas/ChiefAutonomy"
+        effectiveAutonomy:
+          $ref: "#/components/schemas/ChiefAutonomy"
+          description: >
+            The level the site is actually permitted to act at. It differs
+            from `autonomy` when A2 is configured at a site with no labelled
+            base rate, and it is PUBLISHED rather than applied silently.
+
+    ChiefDelta:
+      type: object
+      additionalProperties: false
+      required: [since, measured, newIncidents, newActions, newOpenItems, quiet]
+      properties:
+        since: { type: string, format: date-time }
+        measured:
+          type: boolean
+          description: >
+            False when there was no cursor to measure against. A delta with no
+            cursor is the WHOLE PICTURE and is never reported as quiet.
+        newIncidents:
+          type: array
+          items: { $ref: "#/components/schemas/ChiefItem" }
+        newActions:
+          type: array
+          items: { type: object }
+        newOpenItems:
+          type: array
+          items: { type: object }
+        quiet:
+          type: boolean
+          description: Nothing changed within the measured window.
+        quietReason:
+          type: string
+          description: What the quiet means, in words.
+        note:
+          type: string
+          description: How the delta was measured, when that is not obvious.
+
+    ChiefItem:
+      type: object
+      additionalProperties: false
+      required: [incidentId, siteId, state, severity, title, ruleId, createdAt, degraded, threatScore, queueScore]
+      properties:
+        incidentId: { type: string }
+        siteId: { type: string }
+        state: { $ref: "#/components/schemas/IncidentState" }
+        severity: { enum: [info, low, medium, high, critical] }
+        title: { type: string }
+        ruleId: { type: string }
+        createdAt: { type: string, format: date-time }
+        degraded:
+          type: boolean
+          description: The incident was raised without an AI observation.
+        degradedReasons:
+          type: array
+          items: { type: string }
+        threatScore: { type: integer }
+        queueScore:
+          type: integer
+          description: The score the queue is ORDERED by, which is not always the stored score.
+
+    ChiefNarration:
+      type: object
+      additionalProperties: false
+      required: [text, provider, model, contractVersion, temperature, inputDigest, citations]
+      description: >
+        The AI plane's voice over the facts. EVERY attribution field is
+        mandatory: a narration without them cannot be replayed, and a sentence
+        nobody can replay may not be shown to an operator.
+      properties:
+        text: { type: string }
+        provider: { type: string }
+        model: { type: string }
+        modelIdentity: { type: string }
+        contractVersion: { type: string }
+        temperature: { type: number }
+        inputDigest:
+          type: string
+          description: The hash of exactly what left the site.
+        citations:
+          type: array
+          description: >
+            The fact ids the narration is about. Every one of them must be a
+            fact the product recorded; a narration citing anything else is
+            refused and the deterministic form speaks instead.
+          items: { type: string }
+
+    ChiefDegradation:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          description: >
+            The named reason. A closed vocabulary, because a reader matches on
+            it and a sentence that changes between two runs cannot be matched
+            on. One of `narration_cited_unknown_fact`, `narration_unavailable`,
+            `brief_unavailable`.
+        detail:
+          type: string
+          description: Which part was missing, in words.
+
+    ChiefAutonomy:
+      type: string
+      enum: [A0, A1, A2]
+      description: >
+        The dial. A0 is report-and-nothing-else, A1 is propose-and-one-key-
+        approve, A2 is act-within-the-site's-own-base-rate. A2 is only ever
+        offered at a site with a labelled history, because a site with no
+        labelled history has NO prior to dispose against.
+
+    EvidenceMetadata:
+      type: object
+      additionalProperties: false
+      required: [evidenceId, kind, tier, sha256]
+      description: >
+        One evidence row's metadata: the kind, the capture time, the digest
+        and the size.
+
+
+        It is a SUBSET of the `Evidence` schema on purpose. The full row
+        carries the incident that cites it, the camera, the retention policy
+        and the media type, and a reader of ONE moment needs the fields that
+        describe the moment itself. A schema that carried the whole row would
+        publish fields the route does not answer for, and a generated client
+        would then expect them.
+      properties:
+        evidenceId: { type: string }
+        kind: { enum: [snapshot, clip, bookmark, export] }
+        tier: { enum: [A, B, C] }
+        storageRef: { type: string, description: Relative to the evidence root. Never absolute. }
+        sha256: { type: string, pattern: "^[0-9a-f]{64}$" }
+        sizeBytes: { type: integer }
+        capturedAt: { type: string, format: date-time }
+        storedAt: { type: string, format: date-time }
+        legalHold: { type: boolean }
+
+    Handover:
+      type: object
+      required: [siteId, available]
+      properties:
+        siteId: { type: string }
+        available:
+          type: boolean
+          description: False when this install has no hand-over artifact.
+        unavailable:
+          type: string
+          description: Why there is no brief, when there is not one.
+        brief:
+          type: object
+          description: The brief, in its published `brief/v1` shape.
+        dutyLog:
+          type: object
+          description: The artifact's own state.
+          properties:
+            path: { type: string }
+            shift: { type: string }
+            siteId: { type: string }
+            lines: { type: integer }
+            headHash: { type: string }
+            verification: { type: string }
+            dump: { type: string }
+            dumpNote: { type: string }
 
     IncidentSummary:
       type: object
@@ -1046,7 +2504,16 @@ components:
         reasonCode: { type: string, maxLength: 64 }
         notes: { type: string, maxLength: 4000 }
         agreement: { enum: [no_ai_observation, agreed, disagreed, unsure] }
-        stepUpToken: { type: string, description: Required for escalated and dismissed outcomes. }
+        secondFactor:
+          type: string
+          maxLength: 256
+          description: >
+            The operator's second factor -- the code, not a proof. Required for
+            `escalated` and `dismissed`, and refused with 403
+            `step_up_required` when one of those outcomes arrives without it.
+            A proof is a bearer token, and a token in a request body is a token
+            in a log, a trace and a browser history; the factor is spent against
+            a freshly minted proof that is never handed back.
 
     Disposition:
       allOf:

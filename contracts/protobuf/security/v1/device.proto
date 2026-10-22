@@ -21,6 +21,72 @@ message Device {
   // Free-form topology placement for the graph projection.
   map<string, string> attributes = 10;
   google.protobuf.Timestamp registered_at = 11;
+  // What the device says it is. Never a capability claim: a model name is not
+  // a measurement, and the manifest below is where measurements live.
+  string make = 12;
+  string model = 13;
+  string firmware = 14;
+  // The device's own identifier, as it reports it. Not a tenant-scoped key.
+  string onvif_device_id = 15;
+  // A reference to the device's stream, held in configuration. It carries no
+  // credential: the credential is a separate reference into the keystore.
+  string rtsp_ref = 16;
+  // A reference into the keystore. A pointer, never a secret. The secret
+  // itself is never in this contract, in the database, or in a log.
+  string credential_ref = 17;
+  // The substream the recorder should use, when the device has more than one.
+  string substream_profile = 18;
+  // What was MEASURED about this device. A capability that is not verified
+  // here is not a capability, and the console draws nothing for it.
+  DeviceManifest manifest = 19;
+}
+
+// What a probe established about one device.
+//
+// The state is the whole point. A camera names the profiles it supports; a
+// camera is routinely wrong about that, and a product that believes a device's
+// own claims is a product whose capability report is fiction.
+enum CapabilityState {
+  CAPABILITY_STATE_UNSPECIFIED = 0;
+  // Claimed by the device, never checked.
+  CAPABILITY_STATE_UNVERIFIED = 1;
+  // A probe established it. The only state that counts as a capability.
+  CAPABILITY_STATE_VERIFIED = 2;
+  // A probe established that the device does NOT have it, whatever it says.
+  CAPABILITY_STATE_CONTRADICTED = 3;
+  // A probe established that the device does not have it and does not claim it.
+  CAPABILITY_STATE_UNSUPPORTED = 4;
+}
+
+// One capability of one device, and the probe that decided it.
+message DeviceCapability {
+  // The capability's name, in the `namespace.verb` form the manifest
+  // publishes: `onvif.profile_m`, `rtsp.tcp_interleaved`, `ptz.absolute`.
+  string name = 1;
+  CapabilityState state = 2;
+  // What established the state. A verified capability with no probe is a
+  // claim, and the manifest refuses to publish it.
+  string probe = 3;
+  google.protobuf.Timestamp observed_at = 4;
+  // The probe's own words: the token, the status, the reason.
+  string detail = 5;
+}
+
+// The measured capability set of one device, and the probe that produced it.
+message DeviceManifest {
+  string tenant_id = 1;
+  string site_id = 2;
+  string device_id = 3;
+  // The probe run that produced this manifest. It is what a reader checks
+  // the capabilities against.
+  string probe_id = 4;
+  google.protobuf.Timestamp probed_at = 5;
+  repeated DeviceCapability capabilities = 6;
+  // The device's own identity, as the probe read it.
+  string make = 7;
+  string model = 8;
+  string firmware = 9;
+  string onvif_device_id = 10;
 }
 
 enum DeviceKind {

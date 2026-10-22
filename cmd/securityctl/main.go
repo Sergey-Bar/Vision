@@ -73,6 +73,11 @@ or from the site configuration.`,
 		incidentCommand(),
 		auditCommand(),
 		identityCommand(),
+		// The second factor's own enrolment. It is a command and not a route
+		// because enrolment is an install-time act on the console terminal: a
+		// web surface that mints a factor is a surface a stolen session can
+		// call twice.
+		mfaCommand(),
 		releaseKeyCommand(),
 		siteConfigCommand(),
 		// The M3 unlock's operator surface: what a decision was made under. It
@@ -82,6 +87,15 @@ or from the site configuration.`,
 		// The report comes from Postgres rather than from /v1/metrics, because a
 		// number in a gate artefact cannot be a reading of a process's memory.
 		efficiencyCommand(),
+		// The durable analytics report: the North Star and the four companions
+		// that check it, read from the rollup rather than recomputed. `efficiency`
+		// computes its numbers at the moment it is asked; this reads a derivation,
+		// so two reports over the same window are the same report.
+		analyticsCommand(),
+		// The threat engine, scored against this install's own labelled
+		// history. The committed corpus is a fixture that proves the arithmetic;
+		// this measures the engine.
+		calibrationCommand(),
 		// The C3 adjacency table's backfill and read: the table is a projection
 		// of the site model, and this is how an operator says "recompute it".
 		cameraAdjacencyCommand(),

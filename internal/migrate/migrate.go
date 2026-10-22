@@ -86,8 +86,104 @@ func (r *Runner) CurrentVersion(ctx context.Context) (int, error) {
 	return v, nil
 }
 
+// DropExpiredPartitions drops the monthly partitions whose whole period ended
+// before the retention horizon.
+//
+// # Why it is a separate function
+//
+// `EnsurePartitions` creates forward and never removes anything, so a table
+// that has been running for a year holds twelve months of partitions the
+// install has no use for. The handover named the gap exactly: the partitions
+// are created and "the caller does not drop", and no caller existed.
+//
+// # What it may drop, and what it may not
+//
+// ONLY the two partitioned tables -- `inbox_events` and `canonical_events` --
+// and only a partition whose WHOLE period ended before the horizon. A
+// partition that is still the current one is never dropped, whatever the
+// horizon says, and a partition that STRADDLES the horizon is not dropped
+// either: a horizon of 90 days and a partition covering 89 to 120 days ago
+// still holds data the install is keeping.
+//
+// The audit ledger and the AI observations are NOT partitioned and are never
+// touched here. They are append-only, and "append-only" is the invariant: a
+// sweep that deleted ledger rows would break the chain's meaning, and the
+// chain is what makes the ledger worth keeping.
+//
+// # The retention window is the CALLER's
+//
+// A function that guessed a window would be a function that deletes data
+// nobody agreed to delete. The horizon is an argument, it is the same number
+// the install's configuration carries, and a non-positive horizon is a refusal
+// rather than "keep everything".
+func (r *Runner) DropExpiredPartitions(ctx context.Context, retention time.Duration) (int, error) {
+	if retention <= 0 {
+		return 0, fmt.Errorf("migrate: a retention window of %s would drop every partition, so "+
+			"it is refused. Pass the window the install is configured to keep", retention)
+	}
+	horizon := time.Now().UTC().Add(-retention)
+	dropped := 0
+
+	tables := []string{"inbox_events", "canonical_events"}
+	for _, table := range tables {
+		names, err := r.expiredPartitions(ctx, table, horizon)
+		if err != nil {
+			return dropped, err
+		}
+		for _, name := range names {
+			// The name comes from `pg_class.relname` and matches the pattern
+			// `<table>_<YYYY_MM>`, so it is a generated identifier and not user
+			// input. The interpolation is still quoted, because a DROP that
+			// names something else is not a mistake worth making possible.
+			if _, err := r.Pool.Exec(ctx, fmt.Sprintf(`DROP TABLE IF EXISTS %s`, quoteIdent(name))); err != nil {
+				return dropped, fmt.Errorf("migrate: drop partition %s: %w", name, err)
+			}
+			dropped++
+		}
+	}
+	return dropped, nil
+}
+
+// expiredPartitions names the partitions of one table whose whole period ended
+// before the horizon.
+func (r *Runner) expiredPartitions(ctx context.Context, table string, horizon time.Time) ([]string, error) {
+	rows, err := r.Pool.Query(ctx, fmt.Sprintf(`
+		SELECT c.relname
+		  FROM pg_class c
+		  JOIN pg_namespace n ON n.oid = c.relnamespace
+		 WHERE n.nspname = 'public'
+		   AND c.relkind = 'r'
+		   AND c.relname LIKE '%s_%%'
+		   AND c.relname NOT LIKE '%%_default'
+		   AND (substring(c.relname FROM '_(\d{4}_\d{2})$') || '-01T00:00:00Z')::timestamptz <= $1
+		 ORDER BY c.relname`, table), horizon)
+	if err != nil {
+		return nil, fmt.Errorf("migrate: list the expired partitions of %s: %w", table, err)
+	}
+	defer rows.Close()
+
+	var out []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("migrate: scan the expired partitions of %s: %w", table, err)
+		}
+		out = append(out, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("migrate: read the expired partitions of %s: %w", table, err)
+	}
+	return out, nil
+}
+
+// quoteIdent quotes an identifier for interpolation into DDL.
+func quoteIdent(name string) string {
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+}
+
 // EnsurePartitions creates monthly partitions for the next N years on the
-// partitioned tables that need them (inbox_events and canonical_events).
+// partitioned tables that need them (inbox_events, canonical_events and
+// recording_segments).
 // It is safe to call repeatedly; it only creates partitions that do not exist.
 // The function returns the number of partitions created.
 func (r *Runner) EnsurePartitions(ctx context.Context, yearsAhead int) (int, error) {
@@ -105,6 +201,16 @@ func (r *Runner) EnsurePartitions(ctx context.Context, yearsAhead int) (int, err
 	}{
 		{name: "inbox_events", partitionBy: "received_at"},
 		{name: "canonical_events", partitionBy: "observed_at"},
+		// The recording index. It is partitioned by the segment's own start, for
+		// the same reason the event tables are: one row per segment per device,
+		// written and never updated, which is exactly the shape that bloats a
+		// table and then makes every retention sweep expensive.
+		//
+		// A partitioned table with no future partition stops accepting rows, and
+		// this one accepting rows is the RECORDING: a segment that cannot be
+		// written is a hole in the recording, and a hole in the recording is the
+		// one failure this product must not have.
+		{name: "recording_segments", partitionBy: "started_at"},
 	}
 
 	// Find the latest partition boundary for each table
@@ -175,9 +281,25 @@ func (r *Runner) EnsurePartitions(ctx context.Context, yearsAhead int) (int, err
 			// `from` and `to` are times this function computed from a date loop,
 			// never user input, so the interpolation is safe: the values are
 			// bounded to `YYYY-MM-01` boundaries and rendered in ISO form.
+			//
+			// The bounds are UTC INSTANTS with an explicit `Z`, and that is not
+			// a formatting preference. A bare `YYYY-MM-DD` is cast to
+			// `timestamptz` with the SESSION's timezone, so a host that is not
+			// on UTC creates a partition whose boundary is offset by the host's
+			// offset -- and that boundary then OVERLAPS the partition the
+			// migrations created, which is written with an explicit `Z`. The
+			// failure reads as "would overlap partition inbox_events_2030_12"
+			// and only happens on a machine whose clock is not on UTC, which is
+			// why it was invisible to an author on UTC and to nobody else.
+			//
+			// The site's timezone is the site's timezone and never the host's,
+			// and a partition boundary is a storage boundary: it belongs to
+			// the same law.
 			ddl := fmt.Sprintf(
 				"CREATE TABLE %s PARTITION OF %s FOR VALUES FROM ('%s') TO ('%s')",
-				partitionName, t.name, from.Format("2006-01-02"), to.Format("2006-01-02"))
+				partitionName, t.name,
+				from.UTC().Format("2006-01-02T15:04:05Z"),
+				to.UTC().Format("2006-01-02T15:04:05Z"))
 			if _, err := r.Pool.Exec(ctx, ddl); err != nil {
 				return created, fmt.Errorf("migrate: create partition %s: %w", partitionName, err)
 			}

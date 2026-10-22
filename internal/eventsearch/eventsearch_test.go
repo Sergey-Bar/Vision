@@ -199,6 +199,75 @@ func TestASiteOutsideTheScopeIsNotReturned(t *testing.T) {
 	}
 }
 
+// An event that does not name the device, the zone or the correlation is still
+// an event, and the search has to answer with it.
+//
+// The three columns are nullable in the schema, because a canonical event does
+// not have to name the device that saw it. They were scanned into plain
+// strings, so a NULL in any of them was a scan error, and a scan error is a
+// 500 on the search route.
+//
+// The symptom was a search that answered 500 for a whole page of events, and
+// it was invisible for as long as the route was refused with a 401 before it
+// was reached: the boot gate was reading a broken route and calling the
+// refusal a proof that the route was fine.
+func TestAnEventWithNoDeviceOrZoneIsStillFound(t *testing.T) {
+	svc, tenant, site := service(t)
+	ctx := context.Background()
+	at := time.Date(2026, 6, 1, 14, 0, 0, 0, time.UTC)
+	seedEvent(t, tenant, site, "evt-named", at, 0)
+	seedEventWithoutOptionalColumns(t, tenant, site, "evt-unnamed", at)
+
+	got, err := svc.Search(ctx, tenant, eventsearch.Query{
+		SiteIDs: []string{site}, From: at.Add(-time.Hour), To: at.Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("the search failed on an event with no device: %v", err)
+	}
+	if len(got.Hits) != 2 {
+		t.Fatalf("the search answered %v, want both events: an event that does not "+
+			"name its device is still an event", hitIDs(got))
+	}
+	for _, h := range got.Hits {
+		if h.EventID != "evt-unnamed" {
+			continue
+		}
+		if h.DeviceID != "" || h.ZoneID != "" || h.CorrelationID != "" {
+			t.Errorf("the unnamed event came back as %+v; the columns it does not "+
+				"have are empty, not invented", h)
+		}
+	}
+}
+
+// seedEventWithoutOptionalColumns writes a canonical event with no device, no
+// zone and no correlation.
+//
+// It is the row the schema permits and the search used to refuse.
+func seedEventWithoutOptionalColumns(t *testing.T, tenant, site, eventID string, observed time.Time) {
+	t.Helper()
+	raw := testutil.Pool(t)
+	_, err := raw.Exec(context.Background(), `
+		INSERT INTO canonical_event_keys (tenant_id, integration_id, source_event_id, event_id)
+		VALUES ($1, 'int-1', $2, $3)
+		ON CONFLICT (tenant_id, integration_id, source_event_id) DO UPDATE SET event_id = EXCLUDED.event_id`,
+		tenant, eventID, eventID)
+	if err != nil {
+		t.Fatalf("seed key: %v", err)
+	}
+	_, err = raw.Exec(context.Background(), `
+		INSERT INTO canonical_events (tenant_id, event_id, site_id, source_system_id, source_event_id,
+		                              integration_id, event_type, schema_version, observed_at, received_at,
+		                              normalized_at, clock_source, clock_drift_ms, device_id, zone_id,
+		                              correlation_id, causation_id, payload, integrity_hash)
+		VALUES ($1,$2,$3,'sys',$4,'int-1','motion','1',$5,$5,$5,'ntp',0,NULL,NULL,
+		        NULL,$4,'{"vendor":{}}'::jsonb, $6)
+		ON CONFLICT DO NOTHING`,
+		tenant, eventID, site, eventID, observed.UTC(), strings.Repeat("b", 64))
+	if err != nil {
+		t.Fatalf("seed the event with no device: %v", err)
+	}
+}
+
 // TestAnEmptyScopeReturnsNothing.
 //
 // A principal with no sites is not a principal with every site. The empty page

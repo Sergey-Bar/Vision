@@ -280,7 +280,7 @@ func TestDeriveRecordsWhatWasMeasured(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	b := covercheck.Derive(pkgs, mod, "atomic", covercheck.DefaultMargin, "2026-10-02", "race")
+	b := covercheck.Derive(pkgs, mod, "atomic", covercheck.DefaultMargin, "2026-10-02", "race", nil)
 
 	f, ok := b.Floors["internal/rules"]
 	if !ok {

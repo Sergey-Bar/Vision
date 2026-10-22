@@ -59,6 +59,25 @@ type Config struct {
 	TLSKeyFile  string
 	// BehindProxy says a TLS-terminating proxy fronts this process.
 	BehindProxy bool
+	// TrustProxyAuthHeader names the header a trusted reverse proxy sets with
+	// the OPERATOR'S identity, as `SP_TRUST_PROXY_AUTH_HEADER`.
+	//
+	// It is empty on a single-operator install, and the console then runs as
+	// the configured principal. It is set on an install that fronts the console
+	// with a proxy that terminates TLS and authenticates the operator, and it
+	// changes the console's refusal behaviour: a request that does not carry
+	// the header is refused, and a request that carries it from an untrusted
+	// peer is refused.
+	//
+	// The header carries the IDENTITY and not the AUTHORITY. The role and the
+	// site scope stay configuration, so a proxy that asserts an operator's
+	// name cannot grant that operator more than the product's capability set
+	// allows.
+	//
+	// It requires `SP_BEHIND_PROXY` and `SP_TRUSTED_PROXY_CIDRS`, and there is
+	// no default: a header nobody can check the source of is a header anybody
+	// can set.
+	TrustProxyAuthHeader string
 
 	// TrustedProxyCIDRs names the proxies whose X-Forwarded-For this process is
 	// willing to believe, as `SP_TRUSTED_PROXY_CIDRS`: a comma-separated list of
@@ -97,9 +116,80 @@ type Config struct {
 	// configured an identity has one identity, and it is the one that
 	// administers.
 	PrincipalRole string
+	// ReportRoot is where the scheduled and exported analytics reports are
+	// written.
+	//
+	// It is a ROOT and not a path: a report names a file INSIDE it, and the
+	// name is validated by `internal/evidence`'s path guard before anything is
+	// written. An operator who wants a report somewhere else configures the
+	// root; they do not get to name an absolute path, because a path that
+	// crosses out of the root is a path that reaches wherever the process can
+	// write.
+	ReportRoot string
+	// ReportInterval is how often the loop checks for a report that is due.
+	//
+	// An hour, because the shortest cadence is a day, and a check every hour
+	// misses at most one publication by an hour.
+	ReportInterval time.Duration
+	// EventRetention is how long the event tables are kept, and it is the
+	// horizon the partition sweep drops at.
+	//
+	// It is the install's number and not a constant, because a sweep that
+	// guessed a window would be a sweep that deleted data nobody agreed to
+	// delete. Zero disables the sweep, and the ledger and the AI observations
+	// are never swept at all: they are append-only, and the chain is what makes
+	// the ledger worth keeping.
+	EventRetention time.Duration
+	// PartitionSweepInterval is how often the partition sweep runs.
+	PartitionSweepInterval time.Duration
 	// PrincipalSites are the sites the configured principal may see. Empty means
 	// every site, which is the single-site install's case.
 	PrincipalSites []string
+
+	// SecretKeyPath is where the MFA wrapping key lives, as `SP_SECRET_KEY`.
+	//
+	// The key seals the second factor: the database holds the factor wrapped
+	// under it, so the process that verifies a factor has to be the one that
+	// can open it. The default is the installer's, so an install that has not
+	// overridden it still finds the key the installer wrote.
+	SecretKeyPath string
+
+	// LoginRateLimitPerMinute is how many authentication attempts one source
+	// may make per minute, as `SP_LOGIN_RATE_LIMIT_PER_MINUTE`.
+	//
+	// It is the site configuration's `console.loginRateLimitPerMinute`
+	// (contracts/json-schema/site-config.schema.json), under the name the
+	// configuration publishes it under: a control that is tuned under one name
+	// and documented under another is a control nobody can tune.
+	LoginRateLimitPerMinute int
+
+	// ThreatEngine is which threat engine scores the attention queue, as
+	// `SP_THREAT_ENGINE`.
+	//
+	// It is `legacy` or `calibrated`, and it is `legacy` by default.
+	//
+	// The default is `legacy` because the calibrated engine changes what the
+	// operator sees, and a change to what an operator sees is a decision a
+	// human signs (docs/decisions.md D-15). A flag that defaulted to the new
+	// behaviour would make the decision by default, which is the same thing
+	// as making it without one.
+	//
+	// A site with no labelled history sees NO difference between the two:
+	// the calibrated engine leaves a rule's score alone when the site has no
+	// history for it, because an absence is not a negative observation.
+	ThreatEngine string
+
+	// ThreatHalfLife is the attention queue's recency decay, as
+	// `SP_THREAT_HALF_LIFE`.
+	//
+	// It is a duration, and it is the half-life: an incident twice this old
+	// carries half its score in the queue. Zero disables the decay, which is
+	// what the legacy engine has.
+	//
+	// The decay is a property of the QUEUE. The incident's stored score does
+	// not change, because an incident's score is a fact about the incident
+	// and a queue's order is a judgement.
+	ThreatHalfLife time.Duration
 
 	// Database is the connection policy. The password is not here.
 	Database dbx.Config
@@ -162,6 +252,15 @@ type Config struct {
 	// Set to 0 to disable automatic sweeps.
 	RetentionSweepInterval time.Duration
 
+	// RollupInterval is how often the durable metric rollup is derived.
+	// Default 5 minutes. Set to 0 to disable the rollup.
+	//
+	// The rollup is what the analytics report reads, so an install with it
+	// disabled has a report that says "not measured" and an install with it
+	// enabled has one that says a number. Both are honest; the second is
+	// useful.
+	RollupInterval time.Duration
+
 	// SiteModelPath is the operator's site map: the YAML that declares the
 	// site's zones, cameras and routes.
 	//
@@ -196,7 +295,68 @@ const (
 	DefaultEvidenceFetchPostRoll  = 10 * time.Second
 	DefaultEvidenceFetchRetainFor = 90 * 24 * time.Hour
 	DefaultRetentionSweepInterval = time.Hour
-	DefaultVLMConcurrency         = 1
+	// DefaultRollupInterval is how often the durable metric rollup is
+	// derived.
+	//
+	// Five minutes rather than hourly, because the rollup derives the hour
+	// that just ENDED: a pass every five minutes means the freshest bucket in
+	// the table is never more than five minutes stale, and a report an
+	// operator asks for at nine in the morning covers the night rather than
+	// stopping at seven.
+	DefaultRollupInterval = 5 * time.Minute
+	// DefaultReportInterval is how often the loop checks for a report that is
+	// due.
+	//
+	// An hour, because the shortest cadence is a day, and a check every hour
+	// misses at most one publication by an hour.
+	DefaultReportInterval = time.Hour
+	DefaultVLMConcurrency = 1
+	// DefaultEventRetention is how long the event tables are kept.
+	//
+	// Ninety days, which is a quarter. It is long enough that a site's
+	// behaviour can be compared across a season and short enough that the
+	// tables do not grow without a conversation.
+	DefaultEventRetention = 90 * 24 * time.Hour
+	// DefaultPartitionSweepInterval is how often the partition sweep runs.
+	//
+	// A day, because a partition only becomes droppable once a month has
+	// passed, and a check that often misses at most one day of a month's
+	// worth of partitions.
+	DefaultPartitionSweepInterval = 24 * time.Hour
+	// DefaultSecretKeyPath is where the MFA wrapping key lives when the
+	// environment does not say. It matches the installer's, so an install that
+	// has not overridden it still finds the key the installer wrote.
+	DefaultSecretKeyPath = "/etc/security-platform/secret.key"
+	// DefaultLoginRateLimitPerMinute is the published default for the
+	// per-source login rate limit, the same number the site configuration
+	// publishes as `console.loginRateLimitPerMinute`.
+	DefaultLoginRateLimitPerMinute = 5
+	// DefaultThreatEngine is the threat engine an install uses when the
+	// configuration does not name one.
+	//
+	// It is `legacy`, and the reason is in the field's own comment: the
+	// calibrated engine changes what the operator sees, and a human signs
+	// that decision.
+	DefaultThreatEngine = ThreatEngineLegacy
+	// DefaultThreatHalfLife is the attention queue's default recency decay.
+	// Two hours is long enough that an incident an operator is working
+	// through does not fall down the queue, and short enough that
+	// yesterday's fire is not today's fire.
+	DefaultThreatHalfLife = 2 * time.Hour
+)
+
+// The threat engines.
+//
+// They are a closed vocabulary because a typo in an env file must not
+// silently select a third behaviour.
+const (
+	// ThreatEngineLegacy is the engine the product shipped with: one score,
+	// one axis, and a decision the matrix derived from the score.
+	ThreatEngineLegacy = "legacy"
+	// ThreatEngineCalibrated is the engine that scores the claim and the
+	// evidence separately, calibrates against the site's own labelled
+	// history, and decides on the two axes rather than on the score.
+	ThreatEngineCalibrated = "calibrated"
 )
 
 // Ceilings for the bounded values. A batch size or lease that can be set
@@ -207,6 +367,10 @@ const (
 	MaxClaimBatch    = 1000
 	MaxLeaseDuration = time.Hour
 	MaxPollInterval  = time.Hour
+	// MaxLoginRateLimitPerMinute is the ceiling on the per-source login rate
+	// limit, and it is the same bound the site configuration publishes. A
+	// limit above it is not a tighter limit; it is a limit nobody can trip.
+	MaxLoginRateLimitPerMinute = 600
 )
 
 // Load reads the configuration from the process environment and validates it.
@@ -227,6 +391,7 @@ func LoadFrom(get Lookup) (Config, error) {
 	c.TLSCertFile = strings.TrimSpace(get("SP_TLS_CERT"))
 	c.TLSKeyFile = strings.TrimSpace(get("SP_TLS_KEY"))
 	c.BehindProxy = boolEnv(get, "SP_BEHIND_PROXY", false)
+	c.TrustProxyAuthHeader = strings.TrimSpace(get("SP_TRUST_PROXY_AUTH_HEADER"))
 	c.SessionCookieSecure = boolEnv(get, "SP_SESSION_COOKIE_SECURE", true)
 
 	c.Tenant = strings.TrimSpace(get("SP_TENANT_ID"))
@@ -253,8 +418,24 @@ func LoadFrom(get Lookup) (Config, error) {
 	}
 
 	c.EvidenceRoot = strings.TrimSpace(get("SP_EVIDENCE_ROOT"))
+	// The report root, and the reason it is derived from the evidence root
+	// rather than invented: the reports are the product's own artefacts and
+	// they belong next to the other artefacts, on the same volume, under the
+	// same owner. An install that moves the evidence root moves the reports
+	// with it.
+	c.ReportRoot = strings.TrimSpace(get("SP_REPORT_ROOT"))
+	if c.ReportRoot == "" && c.EvidenceRoot != "" {
+		c.ReportRoot = filepath.Join(c.EvidenceRoot, "reports")
+	}
 	c.CheckpointDir = strings.TrimSpace(get("SP_CHECKPOINT_DIR"))
 	c.CheckpointKeyPath = strings.TrimSpace(get("SP_CHECKPOINT_KEY"))
+
+	// The MFA wrapping key and the per-source login rate limit.
+	//
+	// Both are configuration a site can change, and both are read here rather
+	// than inside the packages that use them, because a value a site cannot
+	// change without a rebuild is not configuration.
+	c.SecretKeyPath = envOr(get, "SP_SECRET_KEY", DefaultSecretKeyPath)
 
 	// HandoverDir is where the shift hand-over artifact is written and read
 	// from: one append-only, hash-chained JSONL per shift, the console's
@@ -317,6 +498,38 @@ func LoadFrom(get Lookup) (Config, error) {
 			return c, fmt.Errorf("config: SP_RETENTION_SWEEP_INTERVAL: %w", err)
 		}
 	}
+	c.RollupInterval = DefaultRollupInterval
+	c.ReportInterval = DefaultReportInterval
+	c.EventRetention = DefaultEventRetention
+	c.PartitionSweepInterval = DefaultPartitionSweepInterval
+	if v := strings.TrimSpace(get("SP_EVENT_RETENTION")); v != "" {
+		var err error
+		c.EventRetention, err = time.ParseDuration(v)
+		if err != nil {
+			return c, fmt.Errorf("config: SP_EVENT_RETENTION: %w", err)
+		}
+	}
+	if v := strings.TrimSpace(get("SP_PARTITION_SWEEP_INTERVAL")); v != "" {
+		var err error
+		c.PartitionSweepInterval, err = time.ParseDuration(v)
+		if err != nil {
+			return c, fmt.Errorf("config: SP_PARTITION_SWEEP_INTERVAL: %w", err)
+		}
+	}
+	if v := strings.TrimSpace(get("SP_REPORT_INTERVAL")); v != "" {
+		var err error
+		c.ReportInterval, err = time.ParseDuration(v)
+		if err != nil {
+			return c, fmt.Errorf("config: SP_REPORT_INTERVAL: %w", err)
+		}
+	}
+	if v := strings.TrimSpace(get("SP_ROLLUP_INTERVAL")); v != "" {
+		var err error
+		c.RollupInterval, err = time.ParseDuration(v)
+		if err != nil {
+			return c, fmt.Errorf("config: SP_ROLLUP_INTERVAL: %w", err)
+		}
+	}
 	c.VLMConcurrency = DefaultVLMConcurrency
 	if v := strings.TrimSpace(get("SP_VLM_CONCURRENCY")); v != "" {
 		var err error
@@ -343,6 +556,18 @@ func LoadFrom(get Lookup) (Config, error) {
 		return c, err
 	}
 	if c.ClaimBatchSize, err = intEnv(get, "SP_CLAIM_BATCH", DefaultClaimBatch); err != nil {
+		return c, err
+	}
+	if c.LoginRateLimitPerMinute, err = intEnv(get, "SP_LOGIN_RATE_LIMIT_PER_MINUTE", DefaultLoginRateLimitPerMinute); err != nil {
+		return c, err
+	}
+
+	// The threat engine, and the queue's recency decay.
+	c.ThreatEngine = strings.ToLower(strings.TrimSpace(get("SP_THREAT_ENGINE")))
+	if c.ThreatEngine == "" {
+		c.ThreatEngine = DefaultThreatEngine
+	}
+	if c.ThreatHalfLife, err = durationEnv(get, "SP_THREAT_HALF_LIFE", DefaultThreatHalfLife); err != nil {
 		return c, err
 	}
 
@@ -374,6 +599,9 @@ func (c Config) validate() error {
 	case c.AIEndpoint != "" && !strings.HasPrefix(c.AIEndpoint, "http://") &&
 		!strings.HasPrefix(c.AIEndpoint, "https://"):
 		return fmt.Errorf("config: SP_AI_ENDPOINT must be an http:// or https:// URL, got %q", c.AIEndpoint)
+	case c.ThreatEngine != ThreatEngineLegacy && c.ThreatEngine != ThreatEngineCalibrated:
+		return fmt.Errorf("config: SP_THREAT_ENGINE must be %q or %q, got %q",
+			ThreatEngineLegacy, ThreatEngineCalibrated, c.ThreatEngine)
 	}
 	if !filepath.IsAbs(c.EvidenceRoot) && !strings.HasPrefix(c.EvidenceRoot, "/") {
 		// Windows and POSIX are both handled by filepath; this only rejects the
@@ -407,6 +635,14 @@ func (c Config) validate() error {
 		return fmt.Errorf("config: SP_VLM_CONCURRENCY must be between 0 and 16, got %d",
 			c.VLMConcurrency)
 	}
+	// The per-source login rate limit is bounded at both ends, and the low end
+	// matters as much as the high one: a limit of zero would refuse every
+	// attempt from every source, which reads as a broken install rather than
+	// as a strict one.
+	if c.LoginRateLimitPerMinute < 1 || c.LoginRateLimitPerMinute > MaxLoginRateLimitPerMinute {
+		return fmt.Errorf("config: SP_LOGIN_RATE_LIMIT_PER_MINUTE must be between 1 and %d, got %d",
+			MaxLoginRateLimitPerMinute, c.LoginRateLimitPerMinute)
+	}
 	if c.AIDeadline < time.Second {
 		return fmt.Errorf("config: SP_AI_DEADLINE must be at least 1s, got %s: a sub-second "+
 			"client deadline produces degraded observations that say nothing about the runtime",
@@ -432,6 +668,28 @@ func (c Config) validate() error {
 		return fmt.Errorf("config: SP_RETENTION_SWEEP_INTERVAL must be 0 (disabled) or at least 1m, got %s",
 			c.RetentionSweepInterval)
 	}
+	if c.RollupInterval < 0 {
+		return fmt.Errorf("config: SP_ROLLUP_INTERVAL cannot be negative, got %s",
+			c.RollupInterval)
+	}
+	if c.RollupInterval > 0 && c.RollupInterval < time.Minute {
+		return fmt.Errorf("config: SP_ROLLUP_INTERVAL must be 0 (disabled) or at least 1m, got %s",
+			c.RollupInterval)
+	}
+	// A negative retention would be a horizon in the FUTURE, and the sweep
+	// drops everything before it -- which is everything.
+	if c.EventRetention < 0 {
+		return fmt.Errorf("config: SP_EVENT_RETENTION cannot be negative, got %s: a horizon in "+
+			"the future drops every partition", c.EventRetention)
+	}
+	if c.PartitionSweepInterval < 0 {
+		return fmt.Errorf("config: SP_PARTITION_SWEEP_INTERVAL cannot be negative, got %s",
+			c.PartitionSweepInterval)
+	}
+	if c.ReportInterval < 0 {
+		return fmt.Errorf("config: SP_REPORT_INTERVAL cannot be negative, got %s",
+			c.ReportInterval)
+	}
 	// The three refusals below are the "insecure by default" pairings. Same shape
 	// as the ceilings above: the failure mode is a configuration that loads and
 	// then quietly hands somebody else's traffic the wrong answer, so the answer
@@ -441,14 +699,58 @@ func (c Config) validate() error {
 			"without a trusted-proxy list the only client address left is the leftmost " +
 			"X-Forwarded-For entry, which the caller wrote, so an audit row or a rate " +
 			"limiter keyed on it is keyed on something the caller chose. Set " +
-			"SP_TRUSTED_PROXY_CIDRS to the CIDR blocks your proxy connects from " +
+			"SP_TRUSTED_PROXY_CIDRs to the CIDR blocks your proxy connects from " +
 			"(comma-separated, e.g. 10.0.0.0/8), or unset SP_BEHIND_PROXY if nothing proxies this process")
+	}
+	// The proxy-auth header is only believed when the request came from a
+	// TRUSTED proxy, and the trusted-proxy list is what says which peers are
+	// trusted. Without it the header is a header: forgeable by anybody who can
+	// reach the port, which is the opposite of what it is for.
+	if c.TrustProxyAuthHeader != "" {
+		if !c.BehindProxy {
+			return fmt.Errorf("config: SP_TRUST_PROXY_AUTH_HEADER is set but SP_BEHIND_PROXY is " +
+				"not: the identity header is only believed when the request arrives from a " +
+				"trusted proxy, and without SP_BEHIND_PROXY there is no trusted-proxy list to " +
+				"check it against. Set SP_BEHIND_PROXY and SP_TRUSTED_PROXY_CIDRS, or unset " +
+				"SP_TRUST_PROXY_AUTH_HEADER")
+		}
+		if len(c.TrustedProxyCIDRs) == 0 {
+			return fmt.Errorf("config: SP_TRUST_PROXY_AUTH_HEADER is set but " +
+				"SP_TRUSTED_PROXY_CIDRS is empty: the identity header would be believed from " +
+				"any peer, which makes it a way in rather than a way in. Set " +
+				"SP_TRUSTED_PROXY_CIDRS to the CIDR blocks your proxy connects from")
+		}
 	}
 	if !c.SessionCookieSecure && !isLoopbackListener(c.Listen) {
 		return fmt.Errorf("config: SP_SESSION_COOKIE_SECURE=false is refused on a non-loopback "+
 			"listener (%s): a session cookie without the Secure attribute is handed to the "+
 			"network on every request. Bind SP_LISTEN_ADDR to 127.0.0.1 or [::1] if this is a "+
 			"local development install, or leave the cookie Secure", c.Listen)
+	}
+	// The console's identity is the network's, and a console on a network an
+	// operator's browser shares with a stranger has no identity at all.
+	//
+	// With no authenticating proxy, every request runs as the CONFIGURED
+	// principal, so every operator who can reach the port is the same
+	// operator, and the audit ledger cannot tell them apart. On a loopback
+	// address that is fine -- the only thing that can reach it is the operator
+	// on the machine. On a routable address it is not, and the refusal is at
+	// STARTUP rather than a warning, because a warning is read by the person
+	// who is already looking and this is read by nobody.
+	//
+	// This is D-16's consequence in code: the appliance era's answer is
+	// "loopback or a proxy", and an install that wants neither has to say so
+	// out loud.
+	//
+	// It is checked AFTER the session-cookie refusal, so a configuration with
+	// both problems is told about the more specific one first.
+	if c.TrustProxyAuthHeader == "" && !isLoopbackListener(c.Listen) {
+		return fmt.Errorf("config: SP_LISTEN_ADDR is %s, which is not a loopback address, and no "+
+			"authenticating proxy is configured: the console would serve every operator who can "+
+			"reach the port as the SAME configured principal, with no way to tell them apart. "+
+			"Bind SP_LISTEN_ADDR to 127.0.0.1 or [::1], or set SP_TRUST_PROXY_AUTH_HEADER with "+
+			"SP_BEHIND_PROXY and SP_TRUSTED_PROXY_CIDRS and put an authenticating proxy in "+
+			"front (deploy/ ships a reference configuration)", c.Listen)
 	}
 	if c.TLSCertFile == "" && !c.BehindProxy {
 		return fmt.Errorf("config: neither TLS nor a trusted proxy is configured: with " +
@@ -510,6 +812,7 @@ func (c Config) Redacted() map[string]any {
 		"listen":                    c.Listen,
 		"tls":                       c.TLSCertFile != "",
 		"behind_proxy":              c.BehindProxy,
+		"trust_proxy_auth_header":   c.TrustProxyAuthHeader,
 		"trusted_proxy_cidrs":       strings.Join(cidrStrings(c.TrustedProxyCIDRs), ","),
 		"session_cookie_secure":     c.SessionCookieSecure,
 		"tenant_id":                 c.Tenant,
@@ -529,7 +832,10 @@ func (c Config) Redacted() map[string]any {
 		"evidence_fetch_post_roll":  c.EvidenceFetchPostRoll.String(),
 		"evidence_fetch_retain_for": c.EvidenceFetchRetainFor.String(),
 		"retention_sweep_interval":  c.RetentionSweepInterval.String(),
+		"rollup_interval":           c.RollupInterval.String(),
 		"vlm_concurrency":           c.VLMConcurrency,
+		"threat_engine":             c.ThreatEngine,
+		"threat_half_life":          c.ThreatHalfLife.String(),
 	}
 }
 

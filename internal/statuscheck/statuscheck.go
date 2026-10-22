@@ -160,10 +160,29 @@ func (e *claimError) Error() string { return e.msg }
 // guessed.
 var gateRe = regexp.MustCompile(`Invoke-Gate\s+'([a-z0-9-]+)'`)
 
+// countGates is how many gates the script RUNS.
+//
+// It counts the ACTIVE gates, and the word matters: a gate that is commented out
+// is not a gate, it is a note about a gate somebody wrote and then took out. The
+// document used to carry the number of names the script DECLARES, which is a
+// different number from the number of gates that run, and the two were printed
+// in the same paragraph without saying which was which. A reader comparing the
+// paragraph with a run record saw a contradiction and had no way to tell it was
+// a difference of KIND rather than a drift.
+//
+// A commented-out `Invoke-Gate` is skipped. The skip is line-level, because the
+// name and the call are on the same line: `# Invoke-Gate 'contract-sync' { ... }`
+// is one line, and the closing brace of the block is not a gate either.
 func countGates(script string) int {
 	seen := map[string]bool{}
-	for _, m := range gateRe.FindAllStringSubmatch(script, -1) {
-		seen[m[1]] = true
+	for _, line := range strings.Split(script, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		for _, m := range gateRe.FindAllStringSubmatch(line, -1) {
+			seen[m[1]] = true
+		}
 	}
 	return len(seen)
 }
@@ -298,6 +317,40 @@ func numbers(status string, d Derived) []Finding {
 // Which is the thing worth keeping: the failure was correct, the document was
 // genuinely stale, and the cost of being right was one map entry rather than a
 // rule the author had to remember.
+//
+// It reached thirty-four and thirty-five with the gates that hold the console's
+// route table and the demo's rehearsal, and thirty-six with `demo-rehearsal`.
+// Each was one line in the script and one line here, and each time the document
+// was wrong before the gate was, which is the whole argument for having the
+// gate: the failure was not a surprise, it was a bill arriving.
+//
+// It then stopped at thirty-six for a while, and the pause is worth recording
+// because the pause was where the defect lived.
+//
+// Thirty-six was what the script had LIVE gates. The script also had two
+// RETIRED gates sitting in it as comments -- `contract-sync` and
+// `recovery-drill` -- because a line that is left behind is a record of what
+// the script used to run, and deleting the line would delete the record. The
+// derivation read the raw text of the script and matched every `Invoke-Gate`
+// in it, comments included, so it counted thirty-eight. The document said
+// thirty-six. The other half of the same tool, `gateearnings_test.go`, read
+// the same file by LINE PREFIX and found thirty-six.
+//
+// Two readers, one file, two numbers. A number two readers derive
+// differently is a number nobody can rely on, and the fix was to make the
+// derivation skip a line whose first non-space character is `#` -- which is
+// now stated in a TEST rather than only in the implementation.
+//
+// And then three more gates landed in one session: `spa-coverage` and
+// `spa-e2e` for the console, and `qa-matrix` for the fourteen categories of
+// test. And then one more: `mutation`, which asks whether the assertions bite
+// rather than whether the lines ran.
+//
+// So the table reaches forty, and the paragraph that says a matcher must be
+// taught every spelling is this one, written again. The count has now moved
+// four times in a session, and the cost of each move has been one map entry
+// and one sentence in a document that was wrong before the gate was -- which
+// is the whole argument for having the gate at all.
 var gateWords = map[string]int{
 	"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
 	"eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13,
@@ -306,7 +359,7 @@ var gateWords = map[string]int{
 	"twenty-three": 23, "twenty-four": 24, "twenty-five": 25, "twenty-six": 26,
 	"twenty-seven": 27, "twenty-eight": 28, "twenty-nine": 29, "thirty": 30,
 	"thirty-one": 31, "thirty-two": 32, "thirty-three": 33,
-	"thirty-four": 34, "thirty-five": 35,
+	"thirty-four": 34, "thirty-five": 35, "thirty-six": 36, "thirty-seven": 37, "thirty-eight": 38, "thirty-nine": 39, "forty": 40, "forty-one": 41,
 }
 
 var gateCountRe = regexp.MustCompile(`(?i)\b((?:[a-z]+-)?[a-z]+)\s+gates\b`)
@@ -358,6 +411,51 @@ func gateClaim(block string, d Derived) []Finding {
 			Want:  d.Gates,
 			Got:   got,
 			Line:  lineOf(block, m[0]),
+		})
+	}
+	return out
+}
+
+// gateClaimRepeats asserts that the Verification block states the gate count
+// in BOTH of the places it states it.
+//
+// The block says the count twice: once in the opening line, and once in the
+// sentence that explains what the count means. They are two claims about the
+// same number, and the drift this catches is one of them going stale while the
+// other stays right.
+//
+// A block that mentioned the count ONCE would not be a document that had
+// drifted -- it would be a document that had been reworded, and the reword
+// would have dropped the claim without anybody noticing. That is the failure
+// mode this check exists for: the same one the unrecognised-word branch above
+// refuses to accept silently.
+//
+// So the number has to appear in both places, and both places are checked
+// against the tree by `gateClaim` above. The count is a word, so "twice" means
+// "two claims that resolve to the derived count".
+func gateClaimRepeats(block string, d Derived) []Finding {
+	var out []Finding
+	seen := 0
+	for _, m := range gateCountRe.FindAllStringSubmatchIndex(block, -1) {
+		if len(m) < 4 {
+			continue
+		}
+		word := strings.ToLower(block[m[2]:m[3]])
+		got, ok := gateWords[word]
+		if !ok {
+			continue
+		}
+		if got != d.Gates {
+			continue
+		}
+		seen++
+	}
+	if seen < 2 {
+		out = append(out, Finding{
+			Label: "the Verification block states the gate count once",
+			Want:  2,
+			Got:   seen,
+			Line:  1,
 		})
 	}
 	return out
@@ -431,6 +529,7 @@ func Check(root string) ([]Finding, error) {
 	}
 	out := numbers(block, d)
 	out = append(out, gateClaim(block, d)...)
+	out = append(out, gateClaimRepeats(block, d)...)
 	out = append(out, toolchainClaim(block, d)...)
 	// Line numbers are relative to the block, so shift them back onto the document
 	// or every finding sends its reader to the wrong line.

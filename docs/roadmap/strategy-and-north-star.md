@@ -1,10 +1,16 @@
 # Strategy and North Star
 
-Owner: E1 (Product/Architecture). Status: living. Last revised 2026-09-28.
+Owner: E1 (Product/Architecture). Status: living. Last revised 2026-10-21.
 
 This is the document every other roadmap document is measured against. If a
 plan somewhere else in `docs/roadmap/` contradicts this one, this one wins and
 the other is wrong.
+
+> **The 2026-10-21 revision is unsigned.** §1 and §7 changed, and they changed
+> what the company is. `AGENTS.md` reserves a change of this kind to a human
+> who reads the diff, and none has. The amended text below is the shape the
+> code is being built to; until it is signed, §9 records what was decided and
+> what was not.
 
 ## The North Star metric
 
@@ -30,14 +36,36 @@ four numbers are how we prove the difference rather than assert it.
 
 ## 1. The one-sentence product
 
-VISION is the local-first intelligence and autonomy layer that sits **above**
-the physical-security stack a customer already owns, turns raw signals into
-verified, evidenced incidents, and then handles the routine work under policy so
-that humans receive exceptions instead of alerts.
+**A VMS that proves.**
 
-The product does not replace the VMS, the panel, or the camera. It replaces the
-three human shifts a day of alarm triage, and it does that without ever asking
-the customer to trust an opaque model.
+VISION is the local-first video management system that records the cameras it
+is given, reads the VMSes a customer already runs as a first-class secondary
+source, turns raw signals into verified, evidenced incidents, and then handles
+the routine work under policy so that humans receive exceptions instead of
+alerts.
+
+Every frame, every decision and every exported evidence item is verifiable
+offline. The system states what it does **not** know. Recording continues when
+the cloud, the network and the model are gone. Video never leaves the site.
+
+**What changed on 2026-10-21, and the reason.** This section used to say the
+product sat *above* the physical-security stack and did not replace the VMS.
+That was an accurate description of a layer, and it is the wrong description of
+a product a customer buys in order to record video. We now own the camera path
+— RTSP ingest, our recording, our pre-roll, our per-device-day hash chain —
+and we keep reading other vendors' VMSes as a first-class source. Both are the
+product. Neither is a downgrade of the other.
+
+The reason is not ambition. It is that a layer cannot make the one promise a
+security buyer actually asks for, which is *prove what you recorded*. Recording
+continuity is ours to own, and a gap in it is ours to publish rather than
+merely to have inherited.
+
+The intelligence above the stack is still the product's mind; what changed is
+that the recording now sits under it, in the same product, on the same site,
+under the same audit ledger. The three human shifts a day of alarm triage are
+still what the customer is buying, and the model is still never asked to be
+trusted opaquely — it is asked to be replayable.
 
 ## 2. Why now
 
@@ -103,7 +131,10 @@ degraded behaviour is written down before it ever runs.
 **"Can I prove the system did what it says it did?"**
 The audit ledger is append-only and hash-chained, sealed to signed offline
 checkpoints. Editing any row fails verification. A `kill -9` at any stage of
-the pipeline loses no accepted event and duplicates no side effect.
+the pipeline loses no accepted event and duplicates no side effect. And the
+recording is part of that ledger: every segment is chained to the one before
+it, per device, per day, and the chain head is sealed into the ledger at day
+close. A gap in the recording is measured and published, not hidden.
 
 ## 5. The moat, and why it compounds
 
@@ -128,11 +159,36 @@ the site's baselines, memory and rule pack are already built and the marginal
 site is configuration.** If that is not true at the M6 review, the data moat did
 not materialise and M7–M8 are an automation project on top of a search product.
 
+**The recording is a second moat, and it is the one the incumbents cannot
+copy without contradicting their own story.** They ship camera-to-cloud, and
+their unit of evidence is a screenshot somebody exported. Ours is a
+hash-chained segment set on the customer's own disk, with a measured
+`recording_continuity_gap_seconds` published per device. The incumbents cannot
+answer "were you recording at 03:14 on the 12th?" without a forensic
+engineering exercise, and they cannot answer it at all about a site that was
+air-gapped. Copying that means becoming local-first, and local-first contradicts
+the recurring revenue that their cloud attachment exists to produce.
+
 ## 6. The capacity law
 
 Two engineers plus heavy AI assistance. This is the constraint that shapes
 every date in [the master roadmap](master-roadmap.md), so it is written down
 rather than discovered later.
+
+> **Overridden for the AI VMS programme on 2026-10-21, by the founder.** The law
+> below still holds for everything that is not the media plane, the device
+> registry, the AI provider registry or the command deck — which is, for now,
+> most of the company. What changed is the *number of tracks*: the AI VMS
+> programme runs four independent streams at once (P0/P1/P4/P6 in the execution
+> plan) because each of them is a precondition for a different downstream
+> phase, and serialising them would put the camera lab, the model providers and
+> the ONVIF membership — three things with external lead times — behind each
+> other. The law's other two clauses survive unchanged and are the ones that
+> keep the plan honest: **scope reduction is the only allowed response to a
+> slip**, and **no new runtime, no new datastore, no new protocol family
+> without an ADR**. The override is recorded here rather than left implicit,
+> because a capacity law that is quietly not being followed is a plan that
+> cannot be dated.
 
 - **2 engineers, 13 weeks per quarter, ~60% of that on new build.** The
   remaining 40% is the tax that quietly kills two-person companies: support,
@@ -154,18 +210,42 @@ rather than discovered later.
   The value of the existing stack is that a six-month-old release is still
   installable on a customer's isolated network. A dependency that breaks that is
   a regression, not a feature.
+- **The media plane does not break this law, and that was a decision rather
+  than an accident.** The recorder is a **second Go binary** (`security-recorder`),
+  not a second language, and it is a *process* rather than a *runtime*: it
+  speaks the same Postgres, the same contracts and the same release archive as
+  the core, and it is a separate process so that a recorder crash cannot stop
+  event ingest. Video bytes live on the filesystem or the customer's own object
+  store — **not in Postgres** — so the datastore did not change either. FFmpeg
+  and ONNX stay inside the AI sub-process, where they already are. The only
+  new protocol family is ONVIF, and it is §9's item for a human to sign.
 
 ## 7. What we are not building
 
-Not a VMS. Not a camera maker. Not a generic SIEM. Not a general LLM platform.
-Not cloud-only. Not a proprietary hardware ecosystem. We do not train foundation
-models; we use the best available models behind our own abstraction layer, and
-the abstraction is the asset.
+Not a cloud video service — we host no video, ever. Not a camera
+manufacturer: we consume cameras, we do not build them. Not a generic SIEM:
+physical security is the whole product. Not a general LLM platform. Not
+cloud-only. Not a proprietary hardware ecosystem. Not a GPU farm for playback.
+Not a device-driver plugin marketplace in the first cut.
 
-The test for any new feature: does it deepen the intelligence layer above the
-installed security stack, or does it grow us into a different company? A
-feature that fails that test is declined even if a customer asks for it in
-writing.
+We do not train foundation models; we use the best available models behind our
+own abstraction layer, and the abstraction is the asset.
+
+**The test for any new feature, in order.**
+
+1. **Does it make the record provable?** The recording, the decision, the
+   evidence, or the statement of what the system does not know. A feature that
+   moves none of those four is a feature nobody can audit, and it is declined.
+2. **Does it grow us into a different company?** A feature that fails this is
+   declined even if a customer asks for it in writing.
+
+**What the old test said, and why it changed.** Until 2026-10-21 the test was a
+single question: *does it deepen the intelligence layer above the installed
+security stack?* That question assumed we never recorded video, and it is
+exactly why the plan was a layer. It is now the second half of the first
+question rather than the whole of it. A camera path is not a departure from the
+product. And a layer that cannot prove its own recording has handed the
+product's central promise to somebody else to keep.
 
 ## 8. Evidence discipline
 
@@ -175,3 +255,53 @@ and a date, and are never asserted in the product, the docs or the code. This
 applies to us selling to security buyers, whose entire profession is detecting
 claims that turn out to be unsupported, and it applies to the roadmap itself:
 every date here is a commitment subject to a named gate, not a promise.
+
+## 9. The 2026-10-21 revision: what changed, and what is still unsigned
+
+**One sentence.** The company stopped being a layer above the installed
+security stack and became a video management system that proves, keeping the
+layer above the stack as its mind and the other vendors' VMSes as a first-class
+secondary source.
+
+**The four decisions the revision makes.** They are recorded in full, with their
+reopen triggers, in
+[`docs/roadmap/milestones/m2-ai-vms-execution-plan.md`](milestones/m2-ai-vms-execution-plan.md).
+
+| # | Decision | Reopen trigger |
+|---|---|---|
+| D1 | **Media: we own the camera path** (RTSP ingest, our recording, our pre-roll, our chain) **and** keep reading other VMSes as a secondary source | never |
+| D2 | **AI: policy-gated multi-provider.** `local_only` is the default; cloud is an explicit, audited, per-site opt-in | never |
+| D9 | **Video never leaves the site.** Only management may federate to cloud | never |
+| D10 | **Postgres + RLS is the system of record. Media bytes live on the filesystem or the customer's own object store** | never |
+
+**What the revision costs, stated plainly.** Three things this document used
+to assert are now false, and every one of them was load-bearing:
+
+1. **"We do not replace the VMS."** We now compete with one. The competitive
+   ground is not recording — everyone records — but *provable* recording, and
+   the ground we chose is narrow enough that it is defensible and wide enough
+   that it is a real company.
+2. **"Not per camera. Ever."** That was correct for a layer and wrong for a
+   VMS, because a VMS's cost driver *is* the device count.
+   `pricing-and-packaging.md` §1.1 carries the amendment and the reason.
+3. **"Not a VMS."** The test in §7 is now two questions, and the first one
+   covers the ground the old test excluded.
+
+**What is still unsigned, and therefore not a decision.** `AGENTS.md` reserves
+this to a human who reads the diff:
+
+- the strategy change itself — this section, §1, §4, §5 and §7;
+- the pricing model change — `pricing-and-packaging.md` §1.1 and §4;
+- the **auth posture reversal** — the appliance era's "no in-app login" cannot
+  stand for a VMS sold to an enterprise, which cannot have a configured
+  principal standing in for a person. `docs/decisions.md` D-16 holds the
+  current reading, and a new proposal supersedes it;
+- ONVIF as a new protocol family, which §6's capacity law gates behind an ADR;
+- every migration and every published contract change in the plan.
+
+**What did not change.** The five invariants in `AGENTS.md` are untouched, and
+so is the North Star: human attention minutes per 1,000 security events, always
+reported with its four companions. A VMS that records more does not make the
+operator's attention any less valuable, and a product that made the North Star
+irrelevant by removing the operator would be a product that stopped being the
+thing a customer bought.

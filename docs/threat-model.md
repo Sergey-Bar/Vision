@@ -65,11 +65,17 @@ inbox and read device and integration state. Nothing else. It has no grant on
 `audit_ledger`, `incidents`, `users` or `rule_bundles`, so a compromised adapter
 cannot alter authoritative state or erase its own tracks.
 
-**B3 — core to console browser.** TLS with no plaintext fallback, `HttpOnly`
-+ `Secure` + `SameSite` cookies, a CSRF token on every state-changing method, a
-strict CSP with no inline script. `tenant_id` is never read from a request body:
-a `X-Tenant-Id` header is honoured only when it matches the session tenant, and a
-mismatch is 403 and audited.
+**B3 — core to console browser.** TLS with no plaintext fallback, a strict CSP
+with no inline script, and a tenant that comes from configuration rather than
+from the request. `tenant_id` is never read from a request body, and it is
+never read from a request header either: the header is not consulted at all, so
+there is nothing for a caller to forge. The console has no session, no cookie
+and no token, so there is no bearer credential in the browser to steal; the
+operator's identity is established at the network boundary, by a trusted
+reverse proxy in front of the console, which is D-16 in `docs/decisions.md` and
+is unsigned. Until it is signed, the honest statement about this boundary is
+that it rests on the network, and A3.2, A3.3 and A3.5 below say what that
+costs.
 
 **B4 — core to AI runtime.** The AI plane is off the availability and boot
 critical path. Its database account can insert `ai_observations` and read
@@ -153,21 +159,87 @@ reach as P3 but persistent. This is why an event's provenance records
   a drop; dead letters are surfaced within 60 seconds.
 
 ### B3
-- **A3.1** A stolen session cookie is replayed. *Mitigation*: `HttpOnly` +
-  `Secure` + `SameSite`, session rotation on authentication and privilege
-  change, absolute expiry, and revocation.
-- **A3.2** CSRF from a page an operator is visiting, disposing an incident they
-  never saw. *Mitigation*: a CSRF token on every state-changing method; the
-  cookie alone is not authorization.
-- **A3.3** A crafted request sets `X-Tenant-Id` to another tenant. *Mitigation*:
-  the header is honoured only when it matches the session tenant, a mismatch is
-  403 and audited, and RLS independently refuses the row.
+- **A3.1** A stolen session cookie is replayed. *Mitigation*: **there is no
+  session to replay.** The console has no login, no session row and no cookie,
+  so there is no bearer credential in the browser to steal and re-present.
+  What the boundary does have is a configured principal, which is a property
+  of the deployment and not of the request, and a configured principal is
+  shared by every operator who reaches the console. The consequence is not
+  that this threat is mitigated; it is that this threat is replaced by two
+  others, A3.2 and A3.5, which are not.
+  - **The control that would replace it is BUILT but UNSIGNED.** The console
+    has a proxy mode (`SP_TRUST_PROXY_AUTH_HEADER`): a trusted reverse proxy
+    authenticates the operator and injects an identity header, the console
+    believes the header only from a trusted peer, and the operator's name is
+    the only thing the header carries. That is D-16 in `docs/decisions.md`, and
+    D-16 has no signature, so the posture an install RUNS is still the
+    configured principal. What the code changes is the set of postures an
+    install may choose, not the one it chooses.
+  - **A3.2** CSRF from a page an operator is visiting, disposing an incident they
+    never saw. *Mitigation*: **NOT IN PLACE — the control was removed with the
+    login and has not been restored.** The CSRF middleware went with the
+    login, and the reasoning that justifies its absence is sound for a MACHINE
+    API: a token that protects a cookie protects nothing when there is no
+    cookie, and the API's authority comes from its own configuration rather
+    than from anything the caller carries. It is NOT sound for the console's
+    own form routes, which are served from the same origin as the API and are
+    reachable by a browser: there, a cross-site POST is a request the product
+    honours. The console's proxy also forwards the product's `/v1` routes, so
+    the browser can reach the write surface through it. Restoring the control
+    is an auth change, and `AGENTS.md` reserves auth for a human who reads the
+    diff; the test that asserted it was removed rather than inverted, and the
+    removal is recorded in `docs/status.md`. The mitigation that is in place
+    instead is the deployment boundary: the product is a local service, and
+    the console is the surface. **A human who reads the diff should decide
+    between a CSRF token, a same-origin check, and a server-held credential
+    on the console's proxy.**
+    - What is NOT in place, and used to be in the markup, is the appearance
+      of the control. The console's forms rendered an empty
+      `<input type="hidden" name="csrf_token" value="">`, because the page
+      data carried a token field and the configured principal has no session
+      to mint one from. An empty token field is worse than no token field: a
+      reader auditing the markup concludes the console refuses a cross-site
+      POST, and it does not. The field is gone, and the form that carries it
+      is asserted not to carry it, so the markup and this finding now say the
+      same thing.
+  - **A3.3** A crafted request sets `X-Tenant-Id` to another tenant.
+    *Mitigation*: the header is not read. The tenant is configuration, and the
+    console's scope comes from the same `SP_TENANT_ID` the product uses; RLS
+    refuses the row independently. The header used to be honoured on an
+    install with no configured tenant, which was the one case where promoting
+    it was least wanted, and it no longer is. What remains is the boundary's
+    own weight: a request that reaches the console's port reaches the
+    tenant, so the console must not be exposed to a network an operator's
+    browser shares with a stranger. That is D-16, and D-16 is unsigned.
 - **A3.4** XSS through an event payload rendered in the console. *Mitigation*:
   strict CSP with no inline script, and the server-rendered console exists partly
   to make that achievable.
-- **A3.5** Credential stuffing against the console. *Mitigation*: rate limiting
-  per source, exponential lockout, mandatory MFA, and a break-glass login that
-  raises a high-priority audit event.
+- **A3.5** Credential stuffing against the console. *Mitigation*: **NOT IN
+  PLACE — the controls exist and are unreachable.** `internal/identity`
+  implements a per-source rate limit, exponential lockout, MFA, step-up and a
+  break-glass path, and every one of them is tested; none of them is wired to
+  the console, because the console has no login for them to guard. The
+  per-source rate limit is real, and it is real inside a package that nothing
+  calls, which is the honest shape of this finding: the machinery is built and
+  the door it was built for is not there. Restoring the wiring is an auth
+  change, and `AGENTS.md` reserves auth for a human who reads the diff.
+
+  **The per-source rate limit is implemented, and it is named here because a
+  mitigation that exists and is not named is a mitigation nobody looks for.**
+  It is also named here for the opposite reason, which is the one A3.5 is
+  about: it is implemented, and it is not reachable from the console, because
+  the console has no password step and no challenge completion for it to
+  bound. A reader who finds this paragraph and concludes the console resists
+  credential stuffing has been misled by the paragraph, which is why the
+  paragraph says so in the second sentence.
+  It is a sliding sixty-second window per source, enforced at the top of the
+  password step and of the challenge completion, so it bounds the attacker's
+  throughput *before* Argon2 runs rather than refusing the session afterwards.
+  The two routes have separate budgets, because the published API gives each
+  its own 429. The state is in memory on purpose: a throttle on a source's
+  throughput is not a durable record, and the audit ledger is the durable
+  record. The red-check is RC-42, and the test is
+  `identity.TestALoginBurstFromOneSourceIsRefusedAfterTheLimit`.
 
 ### B4
 - **A4.1** The model runtime is compromised and writes a fabricated observation

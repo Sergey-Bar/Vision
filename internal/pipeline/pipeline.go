@@ -40,6 +40,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/Sergey-Bar/vision/internal/audit"
 	"github.com/Sergey-Bar/vision/internal/bundles"
 	"github.com/Sergey-Bar/vision/internal/clock"
 	"github.com/Sergey-Bar/vision/internal/correlator"
@@ -49,12 +50,16 @@ import (
 	"github.com/Sergey-Bar/vision/internal/inbox"
 	"github.com/Sergey-Bar/vision/internal/incidents"
 	"github.com/Sergey-Bar/vision/internal/jobs"
+	"github.com/Sergey-Bar/vision/internal/migrate"
 	"github.com/Sergey-Bar/vision/internal/milestone"
 	"github.com/Sergey-Bar/vision/internal/normalize"
 	"github.com/Sergey-Bar/vision/internal/observability"
+	"github.com/Sergey-Bar/vision/internal/operatormetrics"
 	"github.com/Sergey-Bar/vision/internal/outbox"
+	"github.com/Sergey-Bar/vision/internal/recording"
 	"github.com/Sergey-Bar/vision/internal/rules"
 	"github.com/Sergey-Bar/vision/internal/sitemodel"
+	"github.com/Sergey-Bar/vision/internal/threat"
 )
 
 // Deps is everything the loops need.
@@ -135,6 +140,12 @@ type Deps struct {
 	// EvidenceStore is the evidence filesystem store, used by the retention sweep.
 	EvidenceStore *evidence.Store
 
+	// Recordings is the recording index, used by the continuity sampler.
+	//
+	// Nil means the install does not record, and the continuity gauges stay
+	// unwritten — which reads as "not measured" rather than as "healthy".
+	Recordings *recording.Service
+
 	// RetentionSweepInterval is how often the retention sweep runs. Zero disables it.
 	RetentionSweepInterval time.Duration
 
@@ -149,12 +160,59 @@ type Deps struct {
 	// rule matched all day.
 	InSchedule func(id string, at time.Time) bool
 
+	// ThreatEngine is which engine scores the attention queue: `legacy` or
+	// `calibrated`. Empty means `legacy`.
+	//
+	// The calibrated engine scores the claim and the evidence separately,
+	// calibrates against the site's own labelled history, and decides on the
+	// two axes rather than on the score. It is behind this field because a
+	// change to what the operator sees is a decision a human signs
+	// (docs/decisions.md D-15), and the default has to be the behaviour the
+	// product shipped with.
+	ThreatEngine string
+
+	// Priors is the local base rate the calibrated engine reads.
+	//
+	// It is nil when the install has no labelled history, and the calibrated
+	// engine then leaves every rule's score alone: an absence of history is
+	// not a negative observation about a rule.
+	Priors threat.PriorLookup
+
 	// PollInterval is how often the ingest loop polls.
 	PollInterval time.Duration
 	// ClaimBatch is how many inbox rows one consume pass takes.
 	ClaimBatch int
 	// LeaseDuration is the inbox visibility timeout.
 	LeaseDuration time.Duration
+	// RollupInterval is how often the durable metric rollup is derived.
+	// Zero disables it.
+	//
+	// It is a field rather than a constant because the rollup is a WRITE: a
+	// write on a timer is a write an install does not want, and an install
+	// that does not want it should be able to say so. The default in
+	// `cmd/security-core` is five minutes.
+	RollupInterval time.Duration
+	// ReportRoot is where the scheduled analytics reports are written. Empty
+	// disables the scheduled reports.
+	//
+	// It is a ROOT and not a path: a report names a file INSIDE it, and the
+	// name is validated by `internal/evidence`'s path guard before anything is
+	// written.
+	ReportRoot string
+	// ReportInterval is how often the loop checks for a report that is due.
+	// Zero means an hour.
+	ReportInterval time.Duration
+	// EventRetention is how long the event tables are kept.
+	//
+	// It is the horizon the partition sweep drops at, and it is the CALLER's
+	// number rather than a constant: a function that guessed a window would be
+	// a function that deletes data nobody agreed to delete.
+	//
+	// Zero disables the sweep.
+	EventRetention time.Duration
+	// PartitionSweepInterval is how often the partition sweep runs. Zero means
+	// a day.
+	PartitionSweepInterval time.Duration
 	// Relay drains the outbox. The daemon builds it because its handler closes
 	// over the logger; the pipeline owns when it runs. There is no default: a
 	// Deps with no relay leaves the outbox pending and says so in the log, which
@@ -221,6 +279,14 @@ type Loops struct {
 	// consistent with.
 	sloMu      sync.Mutex
 	loggedSLOs []string
+
+	// stateMu guards states, the per-loop liveness records.
+	//
+	// It is its own mutex because the health endpoint reads the states from a
+	// request goroutine while the loops write them from their own, and the
+	// Loops mutex is held across Start and Stop.
+	stateMu sync.Mutex
+	states  map[string]*loopState
 }
 
 // New builds the loops without starting them.
@@ -231,7 +297,7 @@ type Loops struct {
 // caller driving it - which is what makes an assertion about what a pass did
 // attributable to that pass.
 func New(d Deps) *Loops {
-	return &Loops{Deps: d, hostname: hostname()}
+	return &Loops{Deps: d, hostname: hostname(), states: map[string]*loopState{}}
 }
 
 // Start launches every loop under one cancellable context.
@@ -243,6 +309,24 @@ func Start(ctx context.Context, d Deps) *Loops {
 	l.spawn(l.ctx, "consume", l.runConsume)
 	l.spawn(l.ctx, "outbox", l.runOutbox)
 	l.spawn(l.ctx, "gauges", l.runGauges)
+
+	if l.Deps.RollupInterval > 0 {
+		l.spawn(l.ctx, "rollup", l.runRollup)
+	} else {
+		l.log("the durable rollup is disabled; set SP_ROLLUP_INTERVAL to enable it")
+	}
+
+	if l.Deps.ReportRoot != "" {
+		l.spawn(l.ctx, "reports", l.runScheduledReports)
+	} else {
+		l.log("the scheduled reports are disabled; set SP_REPORT_ROOT to enable them")
+	}
+
+	if l.Deps.EventRetention > 0 {
+		l.spawn(l.ctx, "partitions", l.runPartitionSweep)
+	} else {
+		l.log("the event retention sweep is disabled; set SP_EVENT_RETENTION to enable it")
+	}
 
 	if l.Deps.EvidenceStore != nil && l.Deps.RetentionSweepInterval > 0 {
 		l.spawn(l.ctx, "retention-sweep", l.runRetentionSweep)
@@ -263,6 +347,7 @@ func Start(ctx context.Context, d Deps) *Loops {
 func (l *Loops) runGauges(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
+	l.Beat("gauges")
 	l.SampleGauges(ctx)
 	for {
 		select {
@@ -274,10 +359,191 @@ func (l *Loops) runGauges(ctx context.Context) {
 	}
 }
 
+// runRollup derives the durable metric rollup.
+//
+// # Why the PREVIOUS hour
+//
+// A bucket is only complete when its end has passed. A bucket that is still
+// open would be written with whatever the source tables held at the moment it
+// was written, and the next pass would rewrite it with more -- and the
+// derivation is idempotent, so the second write is not wrong. The first one
+// is a number for a period that had not finished, and a report that quoted it
+// would be quoting a partial bucket as if it were a whole one.
+//
+// So the pass derives the hour that ended most recently, and the window is
+// TRUNCATED to the hour, because the rollup's bucket boundaries are the hour
+// and a bucket that starts at 10:17 is a bucket nothing else agrees with.
+//
+// # A missed hour is a rebuild, not a hole
+//
+// The pass derives the hour before the last one, not every hour since the
+// process started. An hour the process missed -- it was down, the database was
+// unreachable -- is recovered by `securityctl analytics rebuild`, which
+// re-derives a window from the source tables.
+//
+// That is the honest arrangement: the loop is a producer, the rebuild is the
+// repair, and the repair is safe to run at any time because the rollup is a
+// derivation and not a recording.
+func (l *Loops) runRollup(ctx context.Context) {
+	ticker := time.NewTicker(l.Deps.RollupInterval)
+	defer ticker.Stop()
+	l.Beat("rollup")
+	l.rollupOnce(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			l.rollupOnce(ctx)
+		}
+	}
+}
+
+// rollupOnce derives one bucket.
+func (l *Loops) rollupOnce(ctx context.Context) {
+	if l.Deps.Pool == nil {
+		return
+	}
+	now := time.Now().UTC()
+	end := now.Truncate(time.Hour)
+	start := end.Add(-time.Hour)
+	if !start.Before(end) {
+		return
+	}
+	writer := &operatormetrics.Rollup{Pool: l.Deps.Pool, SiteID: l.Deps.SiteID}
+	result, err := writer.Write(ctx, l.Deps.Tenant, operatormetrics.Bucket{Start: start, End: end})
+	if err != nil {
+		if ctx.Err() == nil {
+			l.log("the durable rollup could not be derived; the report will be missing this hour",
+				"error", err.Error(), "bucket_start", start.Format(time.RFC3339))
+		}
+		return
+	}
+	l.log("the durable rollup was derived",
+		"bucket_start", start.Format(time.RFC3339),
+		"metrics", result.Metrics,
+		"rows", result.Rows)
+}
+
+// runScheduledReports publishes the reports that are due.
+//
+// It is a CHECK, not a publisher of everything: the loop asks which reports
+// are due -- a period that has ended and has not been published -- and
+// publishes only those. A loop that published everything on every tick would
+// write the same daily report twenty-four times a day, and the artefact
+// directory would become the only honest description of the product's output
+// rate.
+func (l *Loops) runScheduledReports(ctx context.Context) {
+	interval := l.Deps.ReportInterval
+	if interval <= 0 {
+		interval = time.Hour
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	l.publishDueReports(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			l.publishDueReports(ctx)
+		}
+	}
+}
+
+// publishDueReports publishes every report that is due.
+func (l *Loops) publishDueReports(ctx context.Context) {
+	l.Beat("reports")
+	if l.Deps.Pool == nil || l.Deps.ReportRoot == "" {
+		return
+	}
+	scheduled := &operatormetrics.Scheduled{
+		Pool:  l.Deps.Pool,
+		Root:  l.Deps.ReportRoot,
+		Audit: &audit.Writer{Pool: l.Deps.Pool},
+		Sites: []string{l.Deps.SiteID},
+	}
+	kinds, windows, err := scheduled.Due(ctx, l.Deps.Tenant)
+	if err != nil {
+		if ctx.Err() == nil {
+			l.log("the scheduled reports could not be read; none was published", "error", err.Error())
+		}
+		return
+	}
+	for i, kind := range kinds {
+		published, err := scheduled.Publish(ctx, l.Deps.Tenant, kind, windows[i])
+		if err != nil {
+			if ctx.Err() == nil {
+				l.log("a scheduled report could not be published", "kind", string(kind), "error", err.Error())
+			}
+			continue
+		}
+		if !published.Written {
+			continue
+		}
+		l.log("a scheduled report was published",
+			"kind", string(kind),
+			"window_from", published.Window.From.UTC().Format(time.RFC3339),
+			"window_to", published.Window.To.UTC().Format(time.RFC3339),
+			"digest", published.Digest,
+			"path", published.Path)
+	}
+}
+
+// runPartitionSweep drops the event partitions the install no longer keeps.
+//
+// The partitions were created forward and never removed, so a table that had
+// been running for a year held twelve months of partitions the install had no
+// use for. The sweep is what closes that gap, and it drops only a partition
+// whose WHOLE period ended before the horizon the install configured.
+//
+// It runs on its own interval rather than inside the evidence sweep, because
+// the two are different retentions: the evidence store's is about BYTES and
+// legal hold, and this one is about ROWS. A sweep that mixed them would make
+// a dry run mean two things.
+func (l *Loops) runPartitionSweep(ctx context.Context) {
+	interval := l.Deps.PartitionSweepInterval
+	if interval <= 0 {
+		interval = 24 * time.Hour
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	l.sweepPartitions(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			l.sweepPartitions(ctx)
+		}
+	}
+}
+
+// sweepPartitions drops one round of expired partitions.
+func (l *Loops) sweepPartitions(ctx context.Context) {
+	l.Beat("partitions")
+	if l.Deps.Pool == nil || l.Deps.EventRetention <= 0 {
+		return
+	}
+	runner := &migrate.Runner{Pool: l.Deps.Pool.Pool}
+	dropped, err := runner.DropExpiredPartitions(ctx, l.Deps.EventRetention)
+	if err != nil {
+		if ctx.Err() == nil {
+			l.log("the expired partitions could not be dropped", "error", err.Error())
+		}
+		return
+	}
+	if dropped > 0 {
+		l.log("expired event partitions were dropped",
+			"dropped", dropped, "retention", l.Deps.EventRetention.String())
+	}
+}
+
 // runRetentionSweep runs the evidence retention sweep periodically.
 func (l *Loops) runRetentionSweep(ctx context.Context) {
 	ticker := time.NewTicker(l.Deps.RetentionSweepInterval)
 	defer ticker.Stop()
+	l.Beat("retention-sweep")
 	l.runSweepOnce(ctx)
 	for {
 		select {
@@ -480,6 +746,7 @@ func (l *Loops) SampleGauges(ctx context.Context) {
 	// -- an unreadable backlog, an unresolved scope -- does not silently skip them.
 	l.samplePool()
 	l.sampleEvidenceDisk()
+	l.sampleRecordingContinuity(ctx)
 
 	l.evaluateSLOs()
 }
@@ -535,6 +802,51 @@ func (l *Loops) sampleEvidenceDisk() {
 		return
 	}
 	l.set(observability.GaugeEvidenceDiskFree, free)
+}
+
+// sampleRecordingContinuity samples how CONTINUOUS the site's recording is.
+//
+// # What it measures
+//
+// The gap between the last two segments of each camera, and — for a camera
+// that has stopped recording — the gap between its last segment and NOW.
+//
+// The site's WORST camera is what the gauge carries, because the question an
+// operator has is "is anything wrong", and one camera that has been dark
+// since Tuesday is a thing that is wrong even when every other camera is
+// perfect.
+//
+// # Why it is a gauge and not a counter
+//
+// The question is not "how much silence has there been" but "how quiet is it
+// RIGHT NOW". A counter cannot tell a camera that has been dark for four
+// minutes from one that has been dark since Tuesday; a gauge can, because
+// the gap keeps growing.
+//
+// # What it does NOT say
+//
+// A gap of zero with no segments is a camera that has NEVER recorded, and
+// that is not a camera that is recording well. So the segment count is
+// published beside the gap, and a site with no segments at all leaves both
+// unwritten — which reads as "not measured" rather than as "healthy".
+func (l *Loops) sampleRecordingContinuity(ctx context.Context) {
+	if l.Deps.Metrics == nil || l.Deps.Recordings == nil {
+		return
+	}
+	continuity, err := l.Deps.Recordings.Continuity(ctx, l.Deps.Tenant, l.Deps.SiteID)
+	if err != nil {
+		l.log("the recording continuity could not be read; its gauges keep their last values",
+			"error", err.Error())
+		return
+	}
+	if continuity.Cameras == 0 {
+		// Nothing has been recorded, so there is no gap to report. A
+		// gauge that says zero here would be a camera that is
+		// recording perfectly.
+		return
+	}
+	l.set(observability.GaugeRecordingContinuityGapSeconds, continuity.WorstGapSeconds)
+	l.set(observability.GaugeRecordingSegments, float64(continuity.Segments))
 }
 
 // evaluateSLOs records which objectives are not being met, and says so.
@@ -613,20 +925,187 @@ func (l *Loops) sloChanged(names []string) bool {
 	return true
 }
 
+// LoopState is one loop's liveness.
+//
+// It exists because a loop that dies is an outage that looks like a healthy
+// core: the process keeps answering /v1/health, the backlog grows, and
+// nothing says so. A stopped ingest loop is a product that has stopped
+// ingesting and is still green.
+type LoopState struct {
+	// Name is the loop's name, as it appears in the log.
+	Name string
+	// Running says whether the loop's goroutine is alive right now.
+	Running bool
+	// LastBeat is when the loop last reported in.
+	LastBeat time.Time
+	// Panics is how many times the loop has panicked.
+	//
+	// It is a count and not a flag because a loop that panics once and recovers
+	// is a different thing from a loop that panics every pass, and the second
+	// one is a defect that a boolean would hide.
+	Panics int
+}
+
+// loopState tracks one loop's liveness.
+type loopState struct {
+	mu       sync.Mutex
+	name     string
+	running  bool
+	lastBeat time.Time
+	panics   int
+}
+
+// beat records that the loop is alive.
+func (s *loopState) beat(now time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastBeat = now
+	s.running = true
+}
+
+// stopped records that the loop's goroutine is gone.
+func (s *loopState) stopped(now time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.running = false
+	if s.lastBeat.IsZero() {
+		s.lastBeat = now
+	}
+}
+
+// panicked records a panic and the loop's death.
+func (s *loopState) panicked(now time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.panics++
+	s.running = false
+	if s.lastBeat.IsZero() {
+		s.lastBeat = now
+	}
+}
+
+// snapshot renders the state.
+func (s *loopState) snapshot() LoopState {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return LoopState{
+		Name:     s.name,
+		Running:  s.running,
+		LastBeat: s.lastBeat,
+		Panics:   s.panics,
+	}
+}
+
+// Snapshot returns every loop's liveness, in a stable order.
+//
+// It is the answer to "is the product actually running", which is a question
+// the health endpoint asks and which nothing else could answer.
+func (l *Loops) Snapshot() []LoopState {
+	l.stateMu.Lock()
+	defer l.stateMu.Unlock()
+	names := make([]string, 0, len(l.states))
+	for name := range l.states {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	out := make([]LoopState, 0, len(names))
+	for _, name := range names {
+		out = append(out, l.states[name].snapshot())
+	}
+	return out
+}
+
+// Beat records that a loop is alive.
+//
+// The loops call it, and the health endpoint reads the result. A loop that
+// stops beating is a loop that has stopped, and the difference between "has
+// not beaten for a while" and "has never beaten" is the difference between a
+// slow loop and a dead one.
+func (l *Loops) Beat(name string) {
+	l.stateMu.Lock()
+	s, ok := l.states[name]
+	if !ok {
+		s = &loopState{name: name}
+		l.states[name] = s
+	}
+	l.stateMu.Unlock()
+	s.beat(time.Now().UTC())
+}
+
+// spawn runs a loop, and RESTARTS it if it panics.
+//
+// The restart is the point. A panic in a loop used to kill the process rather
+// than one stage of the pipeline, and the reason it was recovered at all was
+// that a silently-stopped ingest loop is an outage that looks like a healthy
+// core: it keeps answering /v1/health. Recovering it and letting it die was
+// the same outage with a log line attached.
+//
+// So the loop is restarted, after a pause, and the pause grows with the
+// number of consecutive panics. A loop that panics on every pass would
+// otherwise spin, and a spinning loop is a hot loop that burns the CPU the
+// product needs to do the work it is failing at.
+//
+// The state is recorded either way, so the health endpoint can say which loop
+// is not running.
 func (l *Loops) spawn(ctx context.Context, name string, run func(context.Context)) {
+	l.stateMu.Lock()
+	if _, ok := l.states[name]; !ok {
+		l.states[name] = &loopState{name: name}
+	}
+	l.stateMu.Unlock()
+
 	l.wg.Add(1)
 	go func() {
 		defer l.wg.Done()
-		defer func() {
-			// A panic in a loop kills the process rather than one stage of the
-			// pipeline, because a silently-stopped ingest loop is an outage that
-			// looks like a healthy core: it keeps answering /v1/health.
-			if rec := recover(); rec != nil {
-				l.log("loop panicked", "loop", name, "recovered", fmt.Sprint(rec))
+		backoff := time.Second
+		for {
+			panicked := l.runOnce(ctx, name, run)
+			if !panicked {
+				return
 			}
-		}()
-		run(ctx)
+			if ctx.Err() != nil {
+				return
+			}
+			l.log("a loop panicked and is being restarted", "loop", name,
+				"retry_in", backoff.String())
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(backoff):
+			}
+			if backoff < 30*time.Second {
+				backoff *= 2
+			}
+		}
 	}()
+}
+
+// runOnce runs the loop and reports whether it panicked.
+func (l *Loops) runOnce(ctx context.Context, name string, run func(context.Context)) (panicked bool) {
+	state := l.stateFor(name)
+	defer func() {
+		if rec := recover(); rec != nil {
+			panicked = true
+			state.panicked(time.Now().UTC())
+			l.log("loop panicked", "loop", name, "recovered", fmt.Sprint(rec))
+		}
+	}()
+	state.beat(time.Now().UTC())
+	run(ctx)
+	state.stopped(time.Now().UTC())
+	return false
+}
+
+// stateFor is a loop's state record.
+func (l *Loops) stateFor(name string) *loopState {
+	l.stateMu.Lock()
+	defer l.stateMu.Unlock()
+	s, ok := l.states[name]
+	if !ok {
+		s = &loopState{name: name}
+		l.states[name] = s
+	}
+	return s
 }
 
 // Stop cancels every loop and waits for them to return.
@@ -697,12 +1176,14 @@ func (l *Loops) runIngest(ctx context.Context) {
 
 	// One pass immediately, so a restart does not idle for a whole interval
 	// with an event sitting in the feed.
+	l.Beat("ingest")
 	l.PollOnce(ctx)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			l.Beat("ingest")
 			l.PollOnce(ctx)
 		}
 	}
@@ -882,12 +1363,14 @@ func (l *Loops) saveCursor(ctx context.Context, at time.Time) error {
 func (l *Loops) runConsume(ctx context.Context) {
 	ticker := time.NewTicker(l.consumeInterval())
 	defer ticker.Stop()
+	l.Beat("consume")
 	l.ConsumeOnce(ctx)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			l.Beat("consume")
 			l.ConsumeOnce(ctx)
 		}
 	}
@@ -1454,6 +1937,7 @@ func (l *Loops) runOutbox(ctx context.Context) {
 	}
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
+	l.Beat("outbox")
 	for {
 		// DrainOnce returns a delivery count, not an error. A short count is
 		// messages that became dead letters, which is a metric and a queue an
@@ -1473,6 +1957,7 @@ func (l *Loops) runOutbox(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			l.Beat("outbox")
 		}
 	}
 }

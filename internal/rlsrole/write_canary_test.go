@@ -287,6 +287,104 @@ var writeCanaries = []writeCanary{
 			VALUES ($1, $2, 'canary_cam_a', 'canary_cam_b', 'shares_zone', 'site_model', 'canary')`,
 		delete: `DELETE FROM camera_adjacency WHERE tenant_id = $1 AND camera_id = 'canary_cam_a'`,
 	},
+	{
+		// metric_rollups is the durable metric table: one row per (metric,
+		// bucket, site, scope). It is site-scoped and MUST be, because
+		// `app_site_visible(NULL)` is TRUE -- so a tenant-wide row would be
+		// visible to a principal assigned to one site, and the tenant-wide
+		// attention minutes of every other site would be inside its scope.
+		// That is why `site_id` is NOT NULL on the table, and this canary is
+		// the other end of the same decision: a cross-site write here is a
+		// number in somebody else's scope.
+		//
+		// The values have to satisfy the table's own CHECKs -- a metric from
+		// the closed vocabulary, a non-empty bucket, a non-negative N -- so a
+		// failure is a policy failure rather than a constraint one.
+		table: "metric_rollups",
+		insert: `INSERT INTO metric_rollups
+			(tenant_id, metric, bucket_start, bucket_end, site_id, rule_id, device_id,
+			 value, n, numerator, denominator, computed_at)
+			VALUES ($1, 'canonical_events', now() - interval '1 hour', now(), $2, NULL, NULL,
+			        1, 1, NULL, NULL, now())`,
+		delete: `DELETE FROM metric_rollups WHERE tenant_id = $1 AND metric = 'canonical_events'`,
+	},
+	{
+		// The recording index: what the recorder wrote, and where the bytes are.
+		//
+		// It is the table the product's central claim rests on. A recording that
+		// another tenant could write into is a recording whose chain proves
+		// nothing, because the chain is only a proof if the rows it is over
+		// cannot be replaced.
+		//
+		// The values have to satisfy the table's own CHECKs -- a real 64-character
+		// lowercase hex digest, a non-negative byte count, a known state -- so a
+		// failure is a policy failure rather than a constraint one.
+		table: "recording_segments",
+		insert: `INSERT INTO recording_segments
+			(tenant_id, site_id, device_id, seq, segment_id, started_at, ended_at,
+			 gap_before_ms, bytes, digest, codec, width, height, fps, storage_ref, state)
+			VALUES ($1, $2, 'canary_cam_' || $1, 1, 'seg_canary_' || $1, now(), now(),
+			        0, 1, repeat('a', 64), 'h264', 1920, 1080, 25, 'canary/' || $1, 'complete')`,
+		delete: `DELETE FROM recording_segments WHERE tenant_id = $1 AND segment_id = 'seg_canary_' || $1`,
+	},
+	{
+		// The chain: one row per device per day, holding the head that is sealed
+		// into the audit ledger.
+		//
+		// A chain another tenant could write into is a chain whose head means
+		// nothing, and the chain is the PROOF. A cross-tenant write here is a
+		// forged proof.
+		table: "recording_chains",
+		insert: `INSERT INTO recording_chains
+			(tenant_id, site_id, device_id, day, chain_head, segments, last_started_at, last_digest)
+			VALUES ($1, $2, 'canary_cam_' || $1, current_date, repeat('b', 64), 1, now(), repeat('a', 64))`,
+		delete: `DELETE FROM recording_chains WHERE tenant_id = $1 AND device_id = 'canary_cam_' || $1`,
+	},
+	{
+		// The retention policy: how long a segment is kept, and the legal hold
+		// that says it may not be deleted.
+		//
+		// It is site-scoped because a retention policy is a statement about ONE
+		// SITE's disk, and a policy another site could write is a policy that
+		// decides somebody else's retention.
+		table: "recording_policies",
+		insert: `INSERT INTO recording_policies
+			(tenant_id, site_id, device_id, continuous, pre_roll_s, post_roll_s,
+			 segment_s, retention_days, legal_hold)
+			VALUES ($1, $2, 'canary_cam_' || $1, true, 15, 15, 10, 30, false)`,
+		delete: `DELETE FROM recording_policies WHERE tenant_id = $1 AND device_id = 'canary_cam_' || $1`,
+	},
+	{
+		// The provider chain: which models may answer for this site, in
+		// what order, and whether the site may send anything off the
+		// machine.
+		//
+		// It is site-scoped because the ORDER is the policy, and the order
+		// says what may leave the site. A cross-site write here is a
+		// policy for somebody else's site.
+		table: "ai_policies",
+		insert: `INSERT INTO ai_policies
+			(tenant_id, site_id, providers, system_prompt, egress_allowed, timeout_seconds)
+			VALUES ($1, $2, '[]'::jsonb, 'canary', false, 30)`,
+		delete: `DELETE FROM ai_policies WHERE tenant_id = $1 AND site_id = $2`,
+	},
+	{
+		// What LEFT the site.
+		//
+		// It is site-scoped because the question it answers is about ONE
+		// site's egress, and a log another site can read tells a
+		// competitor what left this one. The digests are the only thing
+		// in it about the evidence, and a canary that carried content
+		// would be a second copy of the evidence in a table nobody chose
+		// to put it in.
+		table: "ai_egress_log",
+		insert: `INSERT INTO ai_egress_log
+			(tenant_id, site_id, egress_id, provider, observation_id, profile_id,
+			 evidence_count, evidence_bytes, evidence_hashes, requested_at)
+			VALUES ($1, $2, 'egr_canary_' || $1, 'local_bundle', 'obs_canary', 'general-monitoring',
+			        0, 0, '{}'::text[], now())`,
+		delete: `DELETE FROM ai_egress_log WHERE tenant_id = $1 AND egress_id = 'egr_canary_' || $1`,
+	},
 }
 
 // TestAWriteWithNoTenantContextIsRefused is case 1.

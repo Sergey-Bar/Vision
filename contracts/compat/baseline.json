@@ -2489,6 +2489,76 @@
         }
       }
     },
+    "capability-manifest.schema.json": {
+      "properties": {
+        "capabilities": {
+          "type": "array",
+          "required": true
+        },
+        "capabilities[]": {
+          "type": "object"
+        },
+        "capabilities[].detail": {
+          "type": "string"
+        },
+        "capabilities[].name": {
+          "type": "string",
+          "required": true
+        },
+        "capabilities[].observedAt": {
+          "type": "string"
+        },
+        "capabilities[].probe": {
+          "type": "string"
+        },
+        "capabilities[].state": {
+          "type": "enum",
+          "required": true,
+          "enum": [
+            "contradicted",
+            "unsupported",
+            "unverified",
+            "verified"
+          ]
+        },
+        "deviceId": {
+          "type": "string",
+          "required": true
+        },
+        "firmware": {
+          "type": "string"
+        },
+        "make": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "onvifDeviceId": {
+          "type": "string"
+        },
+        "probeId": {
+          "type": "string",
+          "required": true
+        },
+        "probedAt": {
+          "type": "string",
+          "required": true
+        },
+        "schemaVersion": {
+          "type": "const:1",
+          "required": true
+        },
+        "siteId": {
+          "type": "string",
+          "required": true
+        },
+        "tenantId": {
+          "type": "string",
+          "required": true
+        }
+      }
+    },
     "investigation-template.schema.json": {
       "properties": {
         "apiVersion": {
@@ -2562,6 +2632,631 @@
           "required": true
         },
         "version": {
+          "type": "string",
+          "required": true
+        }
+      }
+    },
+    "metrics-report.schema.json": {
+      "properties": {
+        "class": {
+          "type": ""
+        },
+        "generated_at": {
+          "type": "string",
+          "required": true
+        },
+        "metrics": {
+          "type": "array",
+          "required": true
+        },
+        "metrics[]": {
+          "type": "object"
+        },
+        "metrics[].computed_at": {
+          "type": "string",
+          "required": true
+        },
+        "metrics[].metric": {
+          "type": "string",
+          "required": true,
+          "enum": [
+            "ai_false_escalation_rate",
+            "ai_observations",
+            "ai_observations_degraded",
+            "ai_observations_insufficient",
+            "attention_incidents",
+            "attention_minutes_capped",
+            "attention_minutes_uncapped",
+            "canonical_events",
+            "dispositions_agreed",
+            "dispositions_disagreed",
+            "dispositions_no_ai",
+            "dispositions_unsure",
+            "evidence_completeness",
+            "evidence_fetch_failed",
+            "evidence_items_stored",
+            "incidents_raised",
+            "missed_incident_rate",
+            "north_star_attention_minutes_per_1000_events",
+            "operator_override_rate",
+            "verification_contradicted",
+            "verification_corroborated",
+            "verification_duplicate",
+            "verification_suppressed",
+            "verification_unverified"
+          ]
+        },
+        "metrics[].n": {
+          "type": "integer",
+          "required": true
+        },
+        "metrics[].rule_id": {
+          "type": ""
+        },
+        "metrics[].site_id": {
+          "type": ""
+        },
+        "metrics[].value": {
+          "type": "number",
+          "required": true
+        },
+        "metrics[].window": {
+          "type": "object",
+          "required": true
+        },
+        "metrics[].window.from": {
+          "type": "string",
+          "required": true
+        },
+        "metrics[].window.to": {
+          "type": "string",
+          "required": true
+        },
+        "north_star": {
+          "type": "object"
+        },
+        "north_star.cap_seconds": {
+          "type": "number",
+          "required": true
+        },
+        "north_star.companions": {
+          "type": "object",
+          "required": true
+        },
+        "north_star.companions.ai_false_escalation_rate": {
+          "type": "object",
+          "required": true
+        },
+        "north_star.companions.ai_false_escalation_rate.computed_at": {
+          "type": "string",
+          "required": true
+        },
+        "north_star.companions.ai_false_escalation_rate.confidence_interval": {
+          "type": "",
+          "required": true
+        },
+        "north_star.companions.ai_false_escalation_rate.confidence_interval.lower": {
+          "type": "number",
+          "required": true
+        },
+        "north_star.companions.ai_false_escalation_rate.confidence_interval.method": {
+          "type": "const:\"wilson\"",
+          "required": true
+        },
+        "north_star.companions.ai_false_escalation_rate.confidence_interval.upper": {
+          "type": "number",
+          "required": true
+        },
+        "north_star.companions.ai_false_escalation_rate.metric": {
+          "type": "string",
+          "required": true,
+          "enum": [
+            "ai_false_escalation_rate",
+            "ai_observations",
+            "ai_observations_degraded",
+            "ai_observations_insufficient",
+            "attention_incidents",
+            "attention_minutes_capped",
+            "attention_minutes_uncapped",
+            "canonical_events",
+            "dispositions_agreed",
+            "dispositions_disagreed",
+            "dispositions_no_ai",
+            "dispositions_unsure",
+            "evidence_completeness",
+            "evidence_fetch_failed",
+            "evidence_items_stored",
+            "incidents_raised",
+            "missed_incident_rate",
+            "north_star_attention_minutes_per_1000_events",
+            "operator_override_rate",
+            "verification_contradicted",
+            "verification_corroborated",
+            "verification_duplicate",
+            "verification_suppressed",
+            "verification_unverified"
+          ]
+        },
+        "north_star.companions.ai_false_escalation_rate.n": {
+          "type": "integer",
+          "required": true
+        },
+        "north_star.companions.ai_false_escalation_rate.value": {
+          "type": "",
+          "required": true
+        },
+        "north_star.companions.ai_false_escalation_rate.window": {
+          "type": "object",
+          "required": true
+        },
+        "north_star.companions.ai_false_escalation_rate.window.from": {
+          "type": "string",
+          "required": true
+        },
+        "north_star.companions.ai_false_escalation_rate.window.to": {
+          "type": "string",
+          "required": true
+        },
+        "north_star.companions.evidence_completeness": {
+          "type": "object",
+          "required": true
+        },
+        "north_star.companions.evidence_completeness.computed_at": {
+          "type": "string",
+          "required": true
+        },
+        "north_star.companions.evidence_completeness.confidence_interval": {
+          "type": "",
+          "required": true
+        },
+        "north_star.companions.evidence_completeness.confidence_interval.lower": {
+          "type": "number",
+          "required": true
+        },
+        "north_star.companions.evidence_completeness.confidence_interval.method": {
+          "type": "const:\"wilson\"",
+          "required": true
+        },
+        "north_star.companions.evidence_completeness.confidence_interval.upper": {
+          "type": "number",
+          "required": true
+        },
+        "north_star.companions.evidence_completeness.metric": {
+          "type": "string",
+          "required": true,
+          "enum": [
+            "ai_false_escalation_rate",
+            "ai_observations",
+            "ai_observations_degraded",
+            "ai_observations_insufficient",
+            "attention_incidents",
+            "attention_minutes_capped",
+            "attention_minutes_uncapped",
+            "canonical_events",
+            "dispositions_agreed",
+            "dispositions_disagreed",
+            "dispositions_no_ai",
+            "dispositions_unsure",
+            "evidence_completeness",
+            "evidence_fetch_failed",
+            "evidence_items_stored",
+            "incidents_raised",
+            "missed_incident_rate",
+            "north_star_attention_minutes_per_1000_events",
+            "operator_override_rate",
+            "verification_contradicted",
+            "verification_corroborated",
+            "verification_duplicate",
+            "verification_suppressed",
+            "verification_unverified"
+          ]
+        },
+        "north_star.companions.evidence_completeness.n": {
+          "type": "integer",
+          "required": true
+        },
+        "north_star.companions.evidence_completeness.value": {
+          "type": "",
+          "required": true
+        },
+        "north_star.companions.evidence_completeness.window": {
+          "type": "object",
+          "required": true
+        },
+        "north_star.companions.evidence_completeness.window.from": {
+          "type": "string",
+          "required": true
+        },
+        "north_star.companions.evidence_completeness.window.to": {
+          "type": "string",
+          "required": true
+        },
+        "north_star.companions.missed_incident_rate": {
+          "type": "object",
+          "required": true
+        },
+        "north_star.companions.missed_incident_rate.computed_at": {
+          "type": "string",
+          "required": true
+        },
+        "north_star.companions.missed_incident_rate.confidence_interval": {
+          "type": "",
+          "required": true
+        },
+        "north_star.companions.missed_incident_rate.confidence_interval.lower": {
+          "type": "number",
+          "required": true
+        },
+        "north_star.companions.missed_incident_rate.confidence_interval.method": {
+          "type": "const:\"wilson\"",
+          "required": true
+        },
+        "north_star.companions.missed_incident_rate.confidence_interval.upper": {
+          "type": "number",
+          "required": true
+        },
+        "north_star.companions.missed_incident_rate.metric": {
+          "type": "string",
+          "required": true,
+          "enum": [
+            "ai_false_escalation_rate",
+            "ai_observations",
+            "ai_observations_degraded",
+            "ai_observations_insufficient",
+            "attention_incidents",
+            "attention_minutes_capped",
+            "attention_minutes_uncapped",
+            "canonical_events",
+            "dispositions_agreed",
+            "dispositions_disagreed",
+            "dispositions_no_ai",
+            "dispositions_unsure",
+            "evidence_completeness",
+            "evidence_fetch_failed",
+            "evidence_items_stored",
+            "incidents_raised",
+            "missed_incident_rate",
+            "north_star_attention_minutes_per_1000_events",
+            "operator_override_rate",
+            "verification_contradicted",
+            "verification_corroborated",
+            "verification_duplicate",
+            "verification_suppressed",
+            "verification_unverified"
+          ]
+        },
+        "north_star.companions.missed_incident_rate.n": {
+          "type": "integer",
+          "required": true
+        },
+        "north_star.companions.missed_incident_rate.value": {
+          "type": "",
+          "required": true
+        },
+        "north_star.companions.missed_incident_rate.window": {
+          "type": "object",
+          "required": true
+        },
+        "north_star.companions.missed_incident_rate.window.from": {
+          "type": "string",
+          "required": true
+        },
+        "north_star.companions.missed_incident_rate.window.to": {
+          "type": "string",
+          "required": true
+        },
+        "north_star.companions.operator_override_rate": {
+          "type": "object",
+          "required": true
+        },
+        "north_star.companions.operator_override_rate.computed_at": {
+          "type": "string",
+          "required": true
+        },
+        "north_star.companions.operator_override_rate.confidence_interval": {
+          "type": "",
+          "required": true
+        },
+        "north_star.companions.operator_override_rate.confidence_interval.lower": {
+          "type": "number",
+          "required": true
+        },
+        "north_star.companions.operator_override_rate.confidence_interval.method": {
+          "type": "const:\"wilson\"",
+          "required": true
+        },
+        "north_star.companions.operator_override_rate.confidence_interval.upper": {
+          "type": "number",
+          "required": true
+        },
+        "north_star.companions.operator_override_rate.metric": {
+          "type": "string",
+          "required": true,
+          "enum": [
+            "ai_false_escalation_rate",
+            "ai_observations",
+            "ai_observations_degraded",
+            "ai_observations_insufficient",
+            "attention_incidents",
+            "attention_minutes_capped",
+            "attention_minutes_uncapped",
+            "canonical_events",
+            "dispositions_agreed",
+            "dispositions_disagreed",
+            "dispositions_no_ai",
+            "dispositions_unsure",
+            "evidence_completeness",
+            "evidence_fetch_failed",
+            "evidence_items_stored",
+            "incidents_raised",
+            "missed_incident_rate",
+            "north_star_attention_minutes_per_1000_events",
+            "operator_override_rate",
+            "verification_contradicted",
+            "verification_corroborated",
+            "verification_duplicate",
+            "verification_suppressed",
+            "verification_unverified"
+          ]
+        },
+        "north_star.companions.operator_override_rate.n": {
+          "type": "integer",
+          "required": true
+        },
+        "north_star.companions.operator_override_rate.value": {
+          "type": "",
+          "required": true
+        },
+        "north_star.companions.operator_override_rate.window": {
+          "type": "object",
+          "required": true
+        },
+        "north_star.companions.operator_override_rate.window.from": {
+          "type": "string",
+          "required": true
+        },
+        "north_star.companions.operator_override_rate.window.to": {
+          "type": "string",
+          "required": true
+        },
+        "north_star.computed_at": {
+          "type": "string",
+          "required": true
+        },
+        "north_star.confidence_interval": {
+          "type": "",
+          "required": true
+        },
+        "north_star.confidence_interval.lower": {
+          "type": "number",
+          "required": true
+        },
+        "north_star.confidence_interval.method": {
+          "type": "const:\"wilson\"",
+          "required": true
+        },
+        "north_star.confidence_interval.upper": {
+          "type": "number",
+          "required": true
+        },
+        "north_star.denominator": {
+          "type": "object",
+          "required": true
+        },
+        "north_star.denominator.computed_at": {
+          "type": "string",
+          "required": true
+        },
+        "north_star.denominator.metric": {
+          "type": "string",
+          "required": true,
+          "enum": [
+            "ai_false_escalation_rate",
+            "ai_observations",
+            "ai_observations_degraded",
+            "ai_observations_insufficient",
+            "attention_incidents",
+            "attention_minutes_capped",
+            "attention_minutes_uncapped",
+            "canonical_events",
+            "dispositions_agreed",
+            "dispositions_disagreed",
+            "dispositions_no_ai",
+            "dispositions_unsure",
+            "evidence_completeness",
+            "evidence_fetch_failed",
+            "evidence_items_stored",
+            "incidents_raised",
+            "missed_incident_rate",
+            "north_star_attention_minutes_per_1000_events",
+            "operator_override_rate",
+            "verification_contradicted",
+            "verification_corroborated",
+            "verification_duplicate",
+            "verification_suppressed",
+            "verification_unverified"
+          ]
+        },
+        "north_star.denominator.n": {
+          "type": "integer",
+          "required": true
+        },
+        "north_star.denominator.rule_id": {
+          "type": ""
+        },
+        "north_star.denominator.site_id": {
+          "type": ""
+        },
+        "north_star.denominator.value": {
+          "type": "number",
+          "required": true
+        },
+        "north_star.denominator.window": {
+          "type": "object",
+          "required": true
+        },
+        "north_star.denominator.window.from": {
+          "type": "string",
+          "required": true
+        },
+        "north_star.denominator.window.to": {
+          "type": "string",
+          "required": true
+        },
+        "north_star.metric": {
+          "type": "const:\"north_star_attention_minutes_per_1000_events\"",
+          "required": true
+        },
+        "north_star.n": {
+          "type": "integer",
+          "required": true
+        },
+        "north_star.numerator": {
+          "type": "object",
+          "required": true
+        },
+        "north_star.numerator.computed_at": {
+          "type": "string",
+          "required": true
+        },
+        "north_star.numerator.metric": {
+          "type": "string",
+          "required": true,
+          "enum": [
+            "ai_false_escalation_rate",
+            "ai_observations",
+            "ai_observations_degraded",
+            "ai_observations_insufficient",
+            "attention_incidents",
+            "attention_minutes_capped",
+            "attention_minutes_uncapped",
+            "canonical_events",
+            "dispositions_agreed",
+            "dispositions_disagreed",
+            "dispositions_no_ai",
+            "dispositions_unsure",
+            "evidence_completeness",
+            "evidence_fetch_failed",
+            "evidence_items_stored",
+            "incidents_raised",
+            "missed_incident_rate",
+            "north_star_attention_minutes_per_1000_events",
+            "operator_override_rate",
+            "verification_contradicted",
+            "verification_corroborated",
+            "verification_duplicate",
+            "verification_suppressed",
+            "verification_unverified"
+          ]
+        },
+        "north_star.numerator.n": {
+          "type": "integer",
+          "required": true
+        },
+        "north_star.numerator.rule_id": {
+          "type": ""
+        },
+        "north_star.numerator.site_id": {
+          "type": ""
+        },
+        "north_star.numerator.value": {
+          "type": "number",
+          "required": true
+        },
+        "north_star.numerator.window": {
+          "type": "object",
+          "required": true
+        },
+        "north_star.numerator.window.from": {
+          "type": "string",
+          "required": true
+        },
+        "north_star.numerator.window.to": {
+          "type": "string",
+          "required": true
+        },
+        "north_star.value": {
+          "type": "",
+          "required": true
+        },
+        "north_star.window": {
+          "type": "object",
+          "required": true
+        },
+        "north_star.window.from": {
+          "type": "string",
+          "required": true
+        },
+        "north_star.window.to": {
+          "type": "string",
+          "required": true
+        },
+        "on_demand": {
+          "type": "array"
+        },
+        "on_demand[]": {
+          "type": "object"
+        },
+        "on_demand[].computed_at": {
+          "type": "string",
+          "required": true
+        },
+        "on_demand[].n": {
+          "type": "integer",
+          "required": true
+        },
+        "on_demand[].name": {
+          "type": "string",
+          "required": true
+        },
+        "on_demand[].source_tables": {
+          "type": "array",
+          "required": true
+        },
+        "on_demand[].source_tables[]": {
+          "type": "string"
+        },
+        "on_demand[].value": {
+          "type": "",
+          "required": true
+        },
+        "on_demand[].window": {
+          "type": "object",
+          "required": true
+        },
+        "on_demand[].window.from": {
+          "type": "string",
+          "required": true
+        },
+        "on_demand[].window.to": {
+          "type": "string",
+          "required": true
+        },
+        "report_version": {
+          "type": "const:\"security.io/metrics-report/v1\"",
+          "required": true
+        },
+        "site": {
+          "type": ""
+        },
+        "source": {
+          "type": "const:\"postgres\"",
+          "required": true
+        },
+        "tenant_id": {
+          "type": "string",
+          "required": true
+        },
+        "window": {
+          "type": "object",
+          "required": true
+        },
+        "window.from": {
+          "type": "string",
+          "required": true
+        },
+        "window.to": {
           "type": "string",
           "required": true
         }
@@ -2765,7 +3460,13 @@
             "alarm.closed",
             "alarm.created",
             "analytics",
+            "analytics.animal",
+            "analytics.balloon",
+            "analytics.bird",
+            "analytics.drone",
+            "analytics.person_with_bag",
             "analytics.restricted_person",
+            "analytics.vehicle",
             "bookmark",
             "device.camera_offline",
             "device.camera_online",
@@ -2786,7 +3487,13 @@
             "alarm.closed",
             "alarm.created",
             "analytics",
+            "analytics.animal",
+            "analytics.balloon",
+            "analytics.bird",
+            "analytics.drone",
+            "analytics.person_with_bag",
             "analytics.restricted_person",
+            "analytics.vehicle",
             "bookmark",
             "device.camera_offline",
             "device.camera_online",
@@ -3209,26 +3916,66 @@
   "openapi": {
     "v1/openapi.yaml": {
       "paths": {
+        "/v1/ai/chain": [
+          "get"
+        ],
+        "/v1/analytics/drilldown": [
+          "get"
+        ],
+        "/v1/analytics/incident-rate": [
+          "get"
+        ],
+        "/v1/analytics/series": [
+          "get"
+        ],
+        "/v1/analytics/summary": [
+          "get"
+        ],
+        "/v1/analytics/trend": [
+          "get"
+        ],
+        "/v1/attention": [
+          "get"
+        ],
         "/v1/audit/checkpoints": [
           "get"
         ],
         "/v1/audit/ledger": [
           "get"
         ],
-        "/v1/auth/login": [
-          "post"
-        ],
-        "/v1/auth/mfa/verify": [
-          "post"
-        ],
-        "/v1/auth/session": [
-          "delete",
+        "/v1/chief": [
           "get"
+        ],
+        "/v1/coverage": [
+          "get"
+        ],
+        "/v1/devices": [
+          "get",
+          "post"
+        ],
+        "/v1/devices/discover": [
+          "get"
+        ],
+        "/v1/devices/{id}/capabilities": [
+          "get"
+        ],
+        "/v1/devices/{id}/credentials": [
+          "get",
+          "post"
+        ],
+        "/v1/devices/{id}/probe": [
+          "post"
         ],
         "/v1/evidence": [
           "get"
         ],
+        "/v1/evidence/{evidenceId}": [
+          "get"
+        ],
         "/v1/evidence/{evidenceId}/content": [
+          "get"
+        ],
+        "/v1/handover": [
           "get"
         ],
         "/v1/health": [
@@ -3262,6 +4009,27 @@
         "/v1/ops/dead-letters/replay": [
           "post"
         ],
+        "/v1/principal": [
+          "get"
+        ],
+        "/v1/recordings": [
+          "get"
+        ],
+        "/v1/recordings/chain": [
+          "get"
+        ],
+        "/v1/recordings/clip": [
+          "get"
+        ],
+        "/v1/recordings/gaps": [
+          "get"
+        ],
+        "/v1/recordings/timeline": [
+          "get"
+        ],
+        "/v1/recordings/{segmentId}/content": [
+          "get"
+        ],
         "/v1/rules/bundles": [
           "get",
           "post"
@@ -3276,6 +4044,21 @@
           "post"
         ],
         "/v1/rules/bundles/{version}/simulate": [
+          "post"
+        ],
+        "/v1/rules/from-text": [
+          "post"
+        ],
+        "/v1/setup": [
+          "get"
+        ],
+        "/v1/site": [
+          "get"
+        ],
+        "/v1/video/upload": [
+          "post"
+        ],
+        "/v1/video/youtube": [
           "post"
         ]
       }

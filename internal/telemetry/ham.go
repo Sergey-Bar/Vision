@@ -7,11 +7,26 @@ import (
 
 // HAMCalculator computes Human Attention Minutes per 1000 events.
 //
+// # This is the POC's ESTIMATE, and the product's number is a different one
+//
 // The estimate is deliberately stated rather than hidden: it counts the two
 // moments an operator is actually interrupted — an escalation that needs them,
 // and an override they chose to make — and it names the minutes each one costs.
 // A different site can disagree with the constants; what it may not do is
 // present the result as measured when it is an estimate.
+//
+// The PRODUCT's HAM-per-1000 is the North Star: operator attention minutes
+// divided by a thousand canonical events, computed from Postgres by
+// `internal/operatormetrics` and reported with the window and the N. That is a
+// MEASUREMENT. This is an estimate with magic constants, computed from an
+// in-process counter, in a package whose only importer is
+// `internal/calibration`.
+//
+// The two are not the same number and a reader must not find both and pick one.
+// `docs/roadmap/engineering/metrics-and-analytics.md` records the resolution.
+//
+// The calculator stays, because `internal/calibration` uses its arithmetic and
+// a second implementation of the same estimate would be worse than one.
 type HAMCalculator struct {
 	EscalationMinutes float64
 	OverrideMinutes   float64
@@ -90,7 +105,17 @@ func (m Sample) AuditIntegrityPct() float64 {
 	return 100.0
 }
 
-// LiveTelemetry is the shape GET /api/telemetry/live returns.
+// LiveTelemetry is the POC's live-KPI wire shape.
+//
+// It was the shape `GET /api/telemetry/live` returned, and that ROUTE DOES NOT
+// EXIST: the product has no telemetry endpoint, and this shape is served by
+// nothing. The comment said otherwise for as long as the shape was here, and a
+// comment that names a route that is not there is a reader's first and only
+// clue about where to look.
+//
+// The product's live numbers are the Prometheus exposition at `/v1/metrics` and
+// the durable report at `/v1/analytics/summary`, and both of them are Postgres
+// computations.
 type LiveTelemetry struct {
 	HAMPer1000              float64 `json:"ham_per_1000"`
 	TimeToDecisionSec       float64 `json:"time_to_decision_sec"`

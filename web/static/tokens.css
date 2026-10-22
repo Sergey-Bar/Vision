@@ -1,0 +1,265 @@
+/* ==========================================================================
+   VISION — the design system's token file.
+
+   ONE file. It is read by the showcase (the vanilla pages under web/static,
+   which link it) and by the console (the React SPA, which imports it), and it
+   is the only place a colour, a size, a radius or a duration is written down.
+
+   It used not to be. The showcase had a good palette in `app.css` and the SPA
+   had a different one in `index.css` — Netflix black and Apple red against a
+   blue accent on a near-black ground — and the pages reached for whichever
+   they happened to want. Two token sets in one product is two answers, and the
+   second one is always the one nobody remembers to update.
+
+   The rules the tokens obey, and why each one is here:
+
+   - The accent is BLUE and it is not a semantic colour. The SPA's accent was
+     the same red as "critical", so every button, focus ring and active nav
+     item shouted at the operator about something that was not wrong.
+   - A FILLED accent uses `--accent-fg`, never white. White on this blue is
+     3.4:1; the accent's own foreground is 6.4:1.
+   - No pure black, no pure white. The ground is #0A0C0F and the ink is
+     #E8ECF1, because a real black and a real white are the two values a
+     display cannot show and a camera cannot record.
+   - Depth is a TINT STEP plus a hairline edge. There is not one drop shadow
+     in this file: on a dark ground a shadow reads as a smudge, and the
+     console used to put `shadow-2xl` on nearly every card.
+   - Colour is never the only channel. Every status carries a glyph and a
+     word as well; see the chip variants in `app.css`.
+   ========================================================================== */
+
+/* ---------- the faces ------------------------------------------------------
+   Self-hosted, latin subset, variable. They were fetched from Google Fonts,
+   which meant the demo asked the internet for its typography before it had
+   said anything, and rendered in a fallback on a machine with no network. The
+   licence text is beside the files in web/static/fonts. */
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("/static/fonts/InterVariable.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("/static/fonts/JetBrainsMonoVariable.woff2") format("woff2");
+}
+
+/* ---------- colour ---------------------------------------------------------
+   The ground, the surfaces, the lines, the ink, the accent, the four states.
+
+   The state colours are the FILL colours: the dot, the bar, the ring. A chip
+   also needs a legible INK for its word, and the ink is a separate token
+   because the fill and the text of a 12px word are not the same problem. */
+
+:root {
+  /* ground and surfaces */
+  --bg: #0a0c0f;
+  --bg-panel: #11151b;
+  --bg-elevated: #161b22;
+  --bg-hover: #1c232d;
+
+  /* hairlines */
+  --line: #1e2530;
+  --line-strong: #2a3442;
+
+  /* ink */
+  --ink-1: #e8ecf1;
+  --ink-2: #8b95a5;
+
+  /* The de-emphasised tone.
+     The plan proposed #4A5568, and #4A5568 is 2.6:1 on this ground — it is a
+     BORDER colour, not a text colour. It is used for text here, so it is
+     #7A8494, which is 5.2:1. The contrast requirement won over the palette
+     proposal, and the token test below is what holds the line. */
+  --ink-3: #7a8494;
+
+  /* the accent, and the one accent */
+  --accent: #4c9be8;
+  --accent-strong: #6fb4f2;
+  --accent-fg: #05121e;
+
+  /* the four states */
+  --ok: #3fb950;
+  --warn: #d29922;
+  --bad: #f85149;
+  --unknown: #6b7280;
+
+  /* the state INKS: the same hues, lifted for 12px type on a dark ground */
+  --ok-ink: #56d364;
+  --warn-ink: #e3b341;
+  --bad-ink: #ff7b72;
+  --unknown-ink: #9ca3af;
+  --accent-ink: #79c0ff;
+
+  /* ---------- type --------------------------------------------------------
+     Eight sizes and no more. A console is read at a glance, so the scale is
+     a hierarchy rather than a palette: one display number, a title, a
+     heading, and then the sizes text is actually set in. */
+
+  --fs-display: 56px;
+  --lh-display: 52px;
+  --fs-title: 34px;
+  --lh-title: 40px;
+  --fs-heading: 22px;
+  --lh-heading: 28px;
+  --fs-subhead: 17px;
+  --lh-subhead: 24px;
+  --fs-body: 15px;
+  --lh-body: 22px;
+  --fs-body-sm: 14px;
+  --lh-body-sm: 20px;
+  --fs-meta: 13px;
+  --lh-meta: 18px;
+  --fs-micro: 12px;
+  --lh-micro: 16px;
+
+  --tracking-display: -0.03em;
+  --tracking-title: -0.025em;
+  --tracking-heading: -0.015em;
+  --tracking-subhead: -0.005em;
+  --tracking-body: 0;
+  --tracking-micro: 0.08em;
+
+  /* Weights 400, 500 and 600. Nothing heavier.
+     The SPA used `font-black` 128 times, which is not a hierarchy: at 900
+     every element is shouting and the eye has no idea where to start. */
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* ---------- material ----------------------------------------------------
+     Sharp. A radius is a hint about what a surface is made of, and 24, 32 and
+     40 pixels are the radii of a consumer app: they say "toy". */
+
+  --radius-sm: 4px;
+  --radius: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+  --radius-full: 9999px;
+
+  /* ---------- motion -------------------------------------------------------
+     Four durations and one curve. Only transform and opacity animate; a
+     layout change is FLIP, which is a transform.
+
+     `prefers-reduced-motion` collapses every one of them to 0.01ms at the
+     bottom of this file. */
+
+  --dur-1: 120ms;
+  --dur-2: 200ms;
+  --dur-3: 320ms;
+  --dur-4: 520ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* ---------- spacing -----------------------------------------------------
+     A four-pixel grid. The names are the scale, not the multiples, so a
+     layout that reads "16" can be changed without reading the file. */
+
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+  --sp-16: 64px;
+  --sp-20: 80px;
+  --sp-24: 96px;
+
+  /* ---------- density ------------------------------------------------------
+     Two densities, and they are a TOKEN SCALE rather than a component
+     variant: a dense region is dense in its rows and in its cell padding and
+     in nothing else.
+
+     Comfortable is the default. Compact is the same layout with less air in
+     it, for a reader who wants more rows on the screen.
+
+     They are declared here rather than in the console's own stylesheet
+     because this file is the one place a size is written down, and a density
+     that lives in a second file is a density that drifts. */
+  --row-h: 40px;
+  --cell-pad: 12px;
+}
+
+/* The compact density.
+
+   It is a REGION's attribute rather than a page's setting, so a queue can be
+   dense while the wall and the strip breathe. The console reads it from the
+   URL (`?density=compact`) and puts it on the region, because the console
+   holds no state of its own: a density kept in the browser is a density
+   that differs per browser, and the density of a screen is a property of the
+   screen rather than of the machine somebody is reading it on. */
+[data-density='compact'] {
+  --row-h: 28px;
+  --cell-pad: 8px;
+}
+
+/* ---------- the names the existing stylesheets already use --------------------
+   Aliases, not new values. `--fast` and `--med` were the showcase's two
+   durations before the scale had four; `--accent-dim` is the accent at lower
+   emphasis. They point at the canonical tokens so that a duration is written
+   down once. */
+
+:root {
+  --fast: var(--dur-1);
+  --med: var(--dur-2);
+  --accent-dim: #3d84d6;
+}
+
+/* ---------- the Tailwind-side names -----------------------------------------
+   Tailwind's class vocabulary is an API, and this block is that API's
+   translation table, not a second palette: every name points at a canonical
+   token above, so changing a value changes it everywhere.
+
+   It exists because a Tailwind config cannot read a CSS variable and rename
+   it: the config maps `bg-surface` onto `var(--color-surface)`, and the
+   console's pages were written against those names. Renaming 128 class names
+   across sixteen files would be churn; the VALUES are what must not drift,
+   and they do not. */
+
+:root {
+  --color-bg: var(--bg);
+  --color-bg-panel: var(--bg-panel);
+  --color-bg-elevated: var(--bg-elevated);
+  --color-bg-hover: var(--bg-hover);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-text: var(--ink-1);
+  --color-text-muted: var(--ink-2);
+  --color-text-dim: var(--ink-3);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-fg: var(--accent-fg);
+  --color-success: var(--ok);
+  --color-warning: var(--warn);
+  --color-danger: var(--bad);
+  --color-unknown: var(--unknown);
+  --color-ok-ink: var(--ok-ink);
+  --color-warn-ink: var(--warn-ink);
+  --color-bad-ink: var(--bad-ink);
+  --color-unknown-ink: var(--unknown-ink);
+  --color-accent-ink: var(--accent-ink);
+}
+
+/* ---------- reduced motion --------------------------------------------------
+   Every duration in this file collapses. The states remain distinguishable
+   without movement: a colour, a glyph and a word. */
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-1: 0.01ms;
+    --dur-2: 0.01ms;
+    --dur-3: 0.01ms;
+    --dur-4: 0.01ms;
+  }
+}

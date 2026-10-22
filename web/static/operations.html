@@ -12,37 +12,45 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
     <title>VISION — Operations</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232563eb'/%3E%3Cpath d='M16 7l8 4v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10v-4z' fill='none' stroke='%23ffffff' stroke-width='2'/%3E%3C/svg%3E">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/app.css">
     <link rel="stylesheet" href="/static/showcase.css">
+    <link rel="stylesheet" href="/static/page.css">
 </head>
 <body>
 <div class="shell">
 
-  <header class="topbar">
-    <div class="mark" aria-hidden="true">
-      <svg viewBox="0 0 32 32" fill="none"><path d="M16 5l9 4.5v6.8c0 5.7-3.9 9.6-9 11.2-5.1-1.6-9-5.5-9-11.2V9.5z" stroke="#ffffff" stroke-width="2.2" stroke-linejoin="round"/><path d="M11.5 16.2l3.2 3.2 6-6.4" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-    </div>
-    <div>
-      <div class="title">VISION</div>
-      <div class="subtitle">Operations — where the system stays quiet, and why</div>
-    </div>
-    <div style="margin-left:auto;display:flex;gap:8px">
-      <a class="btn secondary" href="/">Showcase</a>
-      <a class="btn secondary" href="/console">Console</a>
-    </div>
+  <header class="nav">
+    <a class="brand" href="/">
+      <svg class="mark" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 2.5 20 6.6v6.2c0 4.9-3.3 8.3-8 9.7-4.7-1.4-8-4.8-8-9.7V6.6z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M7.7 10.4h8.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="12" cy="15.1" r="1.5" fill="currentColor"/></svg>
+      <span class="brand-text">
+        <span class="brand-name">VISION</span>
+        <span class="brand-statement">The system that says what it does not know.</span>
+      </span>
+    </a>
+    <nav class="links">
+      <a href="/">Showcase</a>
+      <a href="/console">Console</a>
+      <a href="/operations" aria-current="page">Operations</a>
+    </nav>
   </header>
 
-  <nav class="tabs" role="tablist" aria-label="Sections">
-    <button class="tab" role="tab" aria-selected="true" id="tab-attention">Attention</button>
-    <button class="tab" role="tab" aria-selected="false" id="tab-silence">Where it stayed quiet</button>
-    <button class="tab" role="tab" aria-selected="false" id="tab-why">Why nothing was raised</button>
+  <!--
+      The three questions, in one page.
+
+      They used to be TABS, which hid two of them behind the third: a judge
+      who did not press the second tab never learned that the system had
+      stayed quiet on purpose, and a page that hides its own evidence is a
+      page that looks emptier than it is. The tabs are now links that move
+      the eye down the page, and all three answers are on the page at once.
+  -->
+  <nav class="jump" aria-label="On this page">
+    <a href="#view-attention">Attention</a>
+    <a href="#view-silence">Where it stayed quiet</a>
+    <a href="#view-why">Why nothing was raised</a>
   </nav>
 
   <!-- ================= attention ================= -->
-  <section id="view-attention">
+  <section id="view-attention" class="jump-target">
     <div class="panel">
       <div class="panel-head">
         <h2>Attention on incidents</h2>
@@ -54,7 +62,7 @@
         ledger row written on the first authenticated read — not from a timer in a
         browser tab.
       </p>
-      <div class="row" style="margin-bottom:20px">
+      <div class="row mb-5">
         <div>
           <label class="eyebrow" for="hours">Window</label>
           <select class="field" id="hours">
@@ -79,7 +87,7 @@
   </section>
 
   <!-- ================= silence ================= -->
-  <section id="view-silence" hidden>
+  <section id="view-silence" class="jump-target">
     <div class="panel">
       <div class="panel-head">
         <h2>Where the system stayed quiet</h2>
@@ -113,7 +121,7 @@
   </section>
 
   <!-- ================= why ================= -->
-  <section id="view-why" hidden>
+  <section id="view-why" class="jump-target">
     <div class="panel">
       <div class="panel-head"><h2>Why nothing was raised</h2></div>
       <p class="hint">
@@ -129,7 +137,7 @@
         <button class="btn primary" id="run-explain"><span class="label">Explain</span></button>
         <button class="btn secondary" id="run-incident"><span class="label">Show the decision</span></button>
       </div>
-      <div id="why-body" style="margin-top:20px">
+      <div id="why-body" class="mt-5">
         <div class="empty"><strong>Nothing asked yet</strong></div>
       </div>
     </div>
@@ -137,7 +145,7 @@
 
 </div>
 <script src="/static/operations.js"></script>
-<script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("/static/sw.js").catch(function(){});});}</script>
+<script src="/static/register-sw.js" defer></script>
 <nav class="bottom-tabs" aria-label="Primary">
     <a href="/" aria-current="page"><span>Home</span></a>
     <a href="/ask"><span>Ask</span></a>

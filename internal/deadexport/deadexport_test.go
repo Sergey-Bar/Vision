@@ -27,14 +27,8 @@ const repoRoot = "../.."
 // Written from a run of the gate, not from memory. A reason written from memory
 // is a guess about why a symbol has no reader, and a guess in an allow-list is
 // indistinguishable from a real reason to anyone reading it.
-// allowList is every exported symbol in the tree that nothing outside its own
-// package reads, and why that is not dead code.
 //
-// Written from a run of the gate, not from memory. A reason written from memory
-// is a guess about why a symbol has no reader, and a guess in an allow-list is
-// indistinguishable from a real reason to anyone reading it.
-//
-// It has two sections, and the split is the point.
+// It has three sections, and the split is the point.
 //
 // **Published** — a closed vocabulary (the audit ledger's action names, the rule
 // kind set, the H.264 NAL types), a sentinel error the package publishes as its
@@ -43,10 +37,24 @@ const repoRoot = "../.."
 // string in a ledger row, a comparison in a future failure path, or an operator
 // reading a configuration value.
 //
-// **Unwired** — genuinely dead. The reason says so, says what would close it, and
-// names the phase. This is not an exemption that claims the code works; it is a
-// backlog item made visible, and the gate's stale-entry check turns it into a
-// failure the day somebody wires or deletes the symbol.
+// **Unwired** — genuinely dead. Nothing calls it, anywhere: not outside the
+// package and not inside it. The reason says what would close it and names the
+// phase. This is not an exemption that claims the code works; it is a backlog
+// item made visible, and the gate's stale-entry check turns it into a failure
+// the day somebody wires or deletes the symbol.
+//
+// **In-package** — the declaring package calls it and nothing outside the
+// package does. The gate's rule is that a reader is a use OUTSIDE the declaring
+// package, so a helper the package uses on itself reads as dead, and the entry
+// has to say so in words: "the request decoder nothing calls" was false for a
+// decoder the API calls on every POST, and a false reason in a ledger is
+// indistinguishable from no reason at all.
+//
+// The two are told apart by a fact about the tree rather than by a judgement
+// about the code, and `TestTheLedgerSaysWhatIsTrue` checks it: an `UNWIRED`
+// entry must have no in-package reader and an `IN-PACKAGE` entry must have one.
+// The reason is therefore true by construction, and it stops being true the
+// moment somebody wires the symbol, which is the day the entry should go.
 var (
 	allowList = map[string]deadexport.Exemption{
 		// The audit ledger's action and actor vocabularies. These names are
@@ -84,16 +92,19 @@ var (
 
 		"internal/clocksub.ErrUnknownDevice": {Symbol: "internal/clocksub.ErrUnknownDevice", Why: "sentinel: the clock subscriber returns it and the drift row records the reason in prose, so the identity is published without an errors.Is caller"},
 
-		"internal/config.DefaultLookup":                 {Symbol: "internal/config.DefaultLookup", Why: "published default: how often the DSN lookup cache re-reads. The value is a decision in the site configuration contract and a tuning knob an operator is told about by name"},
-		"internal/config.DefaultShutdownGrace":          {Symbol: "internal/config.DefaultShutdownGrace", Why: "published default: the drain window on shutdown, stated in the operations runbook by its Go name so an operator can find it"},
-		"internal/config.MaxClaimBatch":                 {Symbol: "internal/config.MaxClaimBatch", Why: "published bound: the ceiling on a lease claim batch. It is a safety limit whose value belongs to the configuration contract, and raising it is a product decision rather than a refactor"},
-		"internal/config.MaxLeaseDuration":              {Symbol: "internal/config.MaxLeaseDuration", Why: "published bound: the ceiling on a job lease. Same reasoning as MaxClaimBatch — a limit that exists to be lowered by a deployment, not to be referenced by a caller"},
-		"internal/config.MaxPollInterval":               {Symbol: "internal/config.MaxPollInterval", Why: "published bound: the ceiling on the poll backoff. Same reasoning as MaxClaimBatch"},
-		"internal/config.DefaultEvidenceFetchPreRoll":   {Symbol: "internal/config.DefaultEvidenceFetchPreRoll", Why: "published default: the default pre-roll for evidence fetch bookmarks, stated in the site configuration documentation"},
-		"internal/config.DefaultEvidenceFetchPostRoll":  {Symbol: "internal/config.DefaultEvidenceFetchPostRoll", Why: "published default: the default post-roll for evidence fetch bookmarks, stated in the site configuration documentation"},
-		"internal/config.DefaultEvidenceFetchRetainFor": {Symbol: "internal/config.DefaultEvidenceFetchRetainFor", Why: "published default: the default retention period for evidence fetch receipts, stated in the site configuration documentation"},
-		"internal/config.DefaultRetentionSweepInterval": {Symbol: "internal/config.DefaultRetentionSweepInterval", Why: "published default: the default interval for the retention sweep, stated in the site configuration documentation"},
-		"internal/config.DefaultVLMConcurrency":         {Symbol: "internal/config.DefaultVLMConcurrency", Why: "published default: the default VLM worker concurrency, stated in the site configuration documentation"},
+		"internal/config.DefaultLookup":                  {Symbol: "internal/config.DefaultLookup", Why: "published default: how often the DSN lookup cache re-reads. The value is a decision in the site configuration contract and a tuning knob an operator is told about by name"},
+		"internal/config.DefaultShutdownGrace":           {Symbol: "internal/config.DefaultShutdownGrace", Why: "published default: the drain window on shutdown, stated in the operations runbook by its Go name so an operator can find it"},
+		"internal/config.MaxClaimBatch":                  {Symbol: "internal/config.MaxClaimBatch", Why: "published bound: the ceiling on a lease claim batch. It is a safety limit whose value belongs to the configuration contract, and raising it is a product decision rather than a refactor"},
+		"internal/config.MaxLeaseDuration":               {Symbol: "internal/config.MaxLeaseDuration", Why: "published bound: the ceiling on a job lease. Same reasoning as MaxClaimBatch — a limit that exists to be lowered by a deployment, not to be referenced by a caller"},
+		"internal/config.MaxPollInterval":                {Symbol: "internal/config.MaxPollInterval", Why: "published bound: the ceiling on the poll backoff. Same reasoning as MaxClaimBatch"},
+		"internal/config.DefaultEvidenceFetchPreRoll":    {Symbol: "internal/config.DefaultEvidenceFetchPreRoll", Why: "published default: the default pre-roll for evidence fetch bookmarks, stated in the site configuration documentation"},
+		"internal/config.DefaultEvidenceFetchPostRoll":   {Symbol: "internal/config.DefaultEvidenceFetchPostRoll", Why: "published default: the default post-roll for evidence fetch bookmarks, stated in the site configuration documentation"},
+		"internal/config.DefaultEvidenceFetchRetainFor":  {Symbol: "internal/config.DefaultEvidenceFetchRetainFor", Why: "published default: the default retention period for evidence fetch receipts, stated in the site configuration documentation"},
+		"internal/config.DefaultRetentionSweepInterval":  {Symbol: "internal/config.DefaultRetentionSweepInterval", Why: "published default: the default interval for the retention sweep, stated in the site configuration documentation"},
+		"internal/config.DefaultVLMConcurrency":          {Symbol: "internal/config.DefaultVLMConcurrency", Why: "published default: the default VLM worker concurrency, stated in the site configuration documentation"},
+		"internal/config.DefaultSecretKeyPath":           {Symbol: "internal/config.DefaultSecretKeyPath", Why: "published default: where the MFA wrapping key lives, the same path the installer writes and the site configuration documents"},
+		"internal/config.DefaultLoginRateLimitPerMinute": {Symbol: "internal/config.DefaultLoginRateLimitPerMinute", Why: "published default: the per-source login rate limit, the number the site configuration publishes as `console.loginRateLimitPerMinute`"},
+		"internal/config.MaxLoginRateLimitPerMinute":     {Symbol: "internal/config.MaxLoginRateLimitPerMinute", Why: "published bound: the ceiling on the per-source login rate limit. It is the same bound the site configuration publishes, and a limit above it is a limit nobody can trip"},
 
 		"internal/correlator.DefaultTiers":  {Symbol: "internal/correlator.DefaultTiers", Why: "published default tier policy. The tiers are a product decision recorded in docs/ai-and-data.md, and the function is the seam a site configuration overrides"},
 		"internal/correlator.MaxCandidates": {Symbol: "internal/correlator.MaxCandidates", Why: "published bound: the ceiling on correlation candidates per trigger. It is a cost limit an operator can lower, so the number belongs to the configuration contract"},
@@ -137,15 +148,11 @@ var (
 		"internal/identity.CheckCSRFByToken":     {Symbol: "internal/identity.CheckCSRFByToken", Why: "login and MFA are removed; the CSRF-by-token check nothing calls. Restore it only if sign-in is reintroduced"},
 		"internal/identity.CompleteChallenge":    {Symbol: "internal/identity.CompleteChallenge", Why: "login and MFA are removed; the second-factor challenge nothing calls. Restore it only if sign-in is reintroduced"},
 		"internal/identity.CompleteRegistration": {Symbol: "internal/identity.CompleteRegistration", Why: "login and MFA are removed; the WebAuthn registration completion nothing calls. Restore it only if sign-in is reintroduced"},
-		"internal/identity.EnrollTOTP":           {Symbol: "internal/identity.EnrollTOTP", Why: "login and MFA are removed; TOTP enrolment nothing calls. Restore it only if sign-in is reintroduced"},
 		"internal/identity.Logout":               {Symbol: "internal/identity.Logout", Why: "login and MFA are removed; logout nothing calls. Restore it only if sign-in is reintroduced"},
-		"internal/identity.NewToken":             {Symbol: "internal/identity.NewToken", Why: "login and MFA are removed; the session-token mint nothing calls. Restore it only if sign-in is reintroduced"},
+		"internal/identity.NewToken":             {Symbol: "internal/identity.NewToken", Why: "IN-PACKAGE. The session-token mint, called by the session service's own issue path. Login and MFA are removed, so nothing outside the package calls it; the export is for the sign-in that D-16 would reintroduce"},
 		"internal/identity.PasswordStep":         {Symbol: "internal/identity.PasswordStep", Why: "login and MFA are removed; the password step nothing calls. Restore it only if sign-in is reintroduced"},
 		"internal/identity.RegistrationPayload":  {Symbol: "internal/identity.RegistrationPayload", Why: "login and MFA are removed; the WebAuthn registration payload builder nothing calls. Restore it only if sign-in is reintroduced"},
 		"internal/identity.RotateCSRF":           {Symbol: "internal/identity.RotateCSRF", Why: "login and MFA are removed; the CSRF rotation nothing calls. Restore it only if sign-in is reintroduced"},
-		"internal/identity.StepUp":               {Symbol: "internal/identity.StepUp", Why: "login and MFA are removed; the step-up proof nothing calls. Restore it only if sign-in is reintroduced"},
-		"internal/identity.VerifyTOTPEnrollment": {Symbol: "internal/identity.VerifyTOTPEnrollment", Why: "login and MFA are removed; TOTP enrolment confirmation nothing calls. Restore it only if sign-in is reintroduced"},
-		"internal/incidents.OutcomeNeedsStepUp":  {Symbol: "internal/incidents.OutcomeNeedsStepUp", Why: "login and MFA are removed; the step-up outcome predicate nothing calls. Restore it only if sign-in is reintroduced"},
 
 		"internal/inbox.StatusReceived": {Symbol: "internal/inbox.StatusReceived", Why: "the inbox lifecycle vocabulary. Statuses are stored as text and read by the recovery drill, by `securityctl doctor` and by the ops screen rather than by a Go caller"},
 		"internal/jobs.Status":          {Prefix: "internal/jobs.Status", Why: "the job lifecycle vocabulary. Statuses are stored as text and read by the recovery drill, by the soak criteria and by the ops screen rather than by a Go caller"},
@@ -180,9 +187,9 @@ var (
 		"internal/mp4.Err":                 {Prefix: "internal/mp4.Err", Why: "sentinel: the Annex-B reader returns it and the recorder propagates the reason into the clip's own record, so the identity is published without an errors.Is caller"},
 		"internal/mp4.Default":             {Prefix: "internal/mp4.Default", Why: "published default: the pre-roll, post-roll and clip-length ceilings a site gets when configuration omits them. The values are the site's evidence budget, stated in the operations runbook by name"},
 		"internal/mp4.Max":                 {Prefix: "internal/mp4.Max", Why: "published bound: the ceiling on a box or a parameter set, which is what stops a malformed file from making the reader allocate without limit. A bound nobody names is still the bound that is enforced"},
-		"internal/mp4.AVCC":                {Symbol: "internal/mp4.AVCC", Why: "UNWIRED. The length-prefix reader nothing calls. Close it by having the recorder read AVCC when a camera emits length-prefixed NALs, or delete it"},
-		"internal/mp4.AVCCLen":             {Symbol: "internal/mp4.AVCCLen", Why: "UNWIRED. The companion of AVCC and the same decision: wire both in the same commit or delete both"},
-		"internal/mp4.NewPreRoll":          {Symbol: "internal/mp4.NewPreRoll", Why: "UNWIRED. The pre-roll ring constructor nothing calls. Close it by having the RTSP recorder build its pre-roll through it, or delete it"},
+		"internal/mp4.AVCC":                {Symbol: "internal/mp4.AVCC", Why: "IN-PACKAGE. The length-prefix reader, called by the fragment writer in the same package. Nothing outside the package calls it"},
+		"internal/mp4.AVCCLen":             {Symbol: "internal/mp4.AVCCLen", Why: "IN-PACKAGE. The companion of AVCC, called by the same package. Same decision as AVCC: no caller outside the package yet"},
+		"internal/mp4.NewPreRoll":          {Symbol: "internal/mp4.NewPreRoll", Why: "IN-PACKAGE. The pre-roll ring constructor, called by the recorder in the same package. Nothing outside the package calls it"},
 		"internal/mp4.DecoderConfigRecord": {Symbol: "internal/mp4.DecoderConfigRecord", Why: "UNWIRED. The decoder-configuration record extractor nothing calls. Close it by having the evidence viewer render the codec it extracted, or delete it"},
 		"internal/mp4.PreRollDepth":        {Symbol: "internal/mp4.PreRollDepth", Why: "UNWIRED. The pre-roll depth accessor nothing calls. Close it by having the recorder's health line report it, or delete it"},
 		"internal/mp4.PreRollGroups":       {Symbol: "internal/mp4.PreRollGroups", Why: "UNWIRED. The pre-roll group accessor nothing calls. Close it with PreRollDepth, in the same commit"},
@@ -223,7 +230,7 @@ var (
 		"internal/soak.Answer":      {Prefix: "internal/soak.Answer", Why: "the soak harness's stub-answer vocabulary. It is the set of failure shapes a soak run rehearses — degraded, garbage, malformed, refused, timeout, unavailable — and a rehearsal set that dropped a member would no longer cover it"},
 		"internal/soak.Event":       {Prefix: "internal/soak.Event", Why: "the soak harness's event-state vocabulary, compared against the events a run observed to decide whether the run passed. Every member is a pass/fail criterion, so the set is the specification of the criterion"},
 		"internal/soak.CostPerCall": {Symbol: "internal/soak.CostPerCall", Why: "published cost constant: the per-call cost the soak report multiplies by a call count, so an operator can read a budget rather than a number"},
-		"internal/soak.Rehearsals":  {Symbol: "internal/soak.Rehearsals", Why: "UNWIRED. The failure-rehearsal runner nothing calls. Close it by having `securityctl loadrun` and `securityctl demo` run the rehearsals before the load, so the degradation path is exercised before it is measured, or delete it"},
+		"internal/soak.Rehearsals":  {Symbol: "internal/soak.Rehearsals", Why: "IN-PACKAGE. The failure-rehearsal catalogue, called by the soak package's own runner. Nothing outside the package calls it: `securityctl loadrun` and `securityctl demo` are the callers it is waiting for"},
 
 		"internal/mp4.Closed": {Symbol: "internal/mp4.Closed", Why: "UNWIRED. The recorder's 'stopped accepting samples' accessor: a cap bound it or the post-roll window closed. Nothing reads it, so a capped clip is indistinguishable from a complete one in every current consumer, which is why `securityctl poc` reports its own distinct halt reason instead. Close it by having the clip report carry Closed() and a capped clip say so in the report, or delete it"},
 
@@ -232,21 +239,41 @@ var (
 		// written into the `correlated` broadcast the operator surface renders,
 		// and read there as strings rather than as Go values, so a member with
 		// no in-tree comparator is a decision the POC has not produced yet.
-		"internal/threat.Action":          {Prefix: "internal/threat.Action", Why: "the autonomy layer's action vocabulary: OBSERVE, VERIFY, ESCALATE, HOLD. An action is written into the correlated-incident broadcast the operator surface renders and into the autonomy status badge, so the consumer reads a string rather than comparing in Go"},
-		"internal/threat.Severity":        {Prefix: "internal/threat.Severity", Why: "the severity axis of the decision matrix. The matrix is a table over this set, so the enumeration is the control: adding a severity without adding a row would silently decide nothing"},
-		"internal/threat.Likelihood":      {Prefix: "internal/threat.Likelihood", Why: "the likelihood axis of the decision matrix, same reasoning as Severity"},
-		"internal/threat.DecideFromScore": {Symbol: "internal/threat.DecideFromScore", Why: "the score-only entry point into the matrix: given nothing but a score, decide an action, with no anomaly set to route through. It is the seam a documented override takes (a site that decides purely on score), and it is tested directly against the matrix's boundary rows in internal/threat. UNWIRED in the product path today: the playbook calls DecideWithSight and routes through the full form. Close it by wiring the score-bar's band derivation or the override path through this function, or delete it"},
+		//
+		// The severity and likelihood axes and the score-only entry point are
+		// NOT here any more: the calibrated engine reads them and the
+		// calibration package measures against them, so they have readers.
+		"internal/threat.Action": {Prefix: "internal/threat.Action", Why: "the autonomy layer's action vocabulary: OBSERVE, VERIFY, ESCALATE, HOLD. An action is written into the correlated-incident broadcast the operator surface renders and into the autonomy status badge, so the consumer reads a string rather than comparing in Go"},
+
+		// The calibrated engine's published formulas.
+		//
+		// They are published rather than private because they are decisions:
+		// the soft cap is the curve the plan names (docs/decisions.md D-14) and
+		// the decay is the queue's recency factor. A reader checking the
+		// decision should not have to read the implementation to check the
+		// arithmetic, and a formula nobody can name is a formula nobody can
+		// argue with.
+		"internal/threat.SoftCap":     {Symbol: "internal/threat.SoftCap", Why: "published formula: the saturating curve the calibrated engine caps a raw sum with, 100*(1-e^(-sum/100)). The curve is the decision D-14 records, and the calibration gate measures the engine's calibration error against it"},
+		"internal/threat.DecayFactor": {Symbol: "internal/threat.DecayFactor", Why: "published formula: the queue's recency factor, the same decay the attention queue's SQL applies. One formula in one place, and the SQL is its twin rather than a second decision"},
+
+		// The calibration package's published vocabulary.
+		//
+		// The corpus's own version, the label vocabulary and the generator are
+		// read by a site's own tooling rather than by a Go caller in this tree:
+		// the version by whoever writes a corpus, the labels by whoever
+		// produces one from an installation's history, and the generator by the
+		// database-backed test that regenerates it.
+		"internal/calibration.ScoreCase": {Symbol: "internal/calibration.ScoreCase", Why: "the per-case legacy decision, published so the corpus's golden file and the gate that reads it score the same case the same way. It is the fixture adapter the external test package scores through"},
+
+		// The threat engine's published configuration.
+		"internal/config.DefaultThreatEngine": {Symbol: "internal/config.DefaultThreatEngine", Why: "published default: which engine scores the attention queue when the configuration does not name one. It is `legacy`, and the reason is a product decision a human signs (docs/decisions.md D-15), so the value is named in the configuration's own contract rather than buried in a call site"},
 
 		"internal/airuntime.MaxResponseBytes": {Symbol: "internal/airuntime.MaxResponseBytes", Why: "published bound: the largest body the AI runtime will read. The AI runtime is untrusted input, so the bound is part of its contract and is asserted by the Python test that drives it"},
 
-		"internal/airuntime.DetectObjects":                {Symbol: "internal/airuntime.DetectObjects", Why: "published method: object detection against the AI runtime's object-detection profile. It is the consumer-facing entry point the operator console calls. UNWIRED in the product path today, and the previous justification for it -- that the videoingest path called it -- was false: internal/videoingest never called it, and that package is gone. Close it by wiring the console's live view through it, or delete it"},
-		"internal/airuntime.ObjectDetectionProfile":       {Symbol: "internal/airuntime.ObjectDetectionProfile", Why: "published constant: the profile id for object detection. It is written into inbox event payloads and rule conditions, and the runtime validates answers against the schema named by it"},
-		"internal/airuntime.ObjectDetectionProfileSchema": {Symbol: "internal/airuntime.ObjectDetectionProfileSchema", Why: "published schema: the output field set the AI runtime returns for object detection. It is the contract the model answers against, and a rule's aiObservation condition reads its fields"},
-
-		"internal/api.DecodeJSON":           {Symbol: "internal/api.DecodeJSON", Why: "UNWIRED. The request decoder nothing calls. Close it by having the disposition form and the new write routes decode through it, so every body is bounded the same way, or delete it"},
-		"internal/api.WriteError":           {Symbol: "internal/api.WriteError", Why: "UNWIRED. The error-response writer nothing calls. Close it with the two above: every handler's refusal should render through one writer, which is also what makes the console's error pages consistent"},
-		"internal/api.RequestIDFromContext": {Symbol: "internal/api.RequestIDFromContext", Why: "UNWIRED. The request-id accessor nothing calls. Close it by having the handlers stamp the request id on every log line, which is the convention AGENTS.md already states and nothing currently enforces"},
-		"internal/api.ErrNotWired":          {Symbol: "internal/api.ErrNotWired", Why: "UNWIRED. The not-wired sentinel nothing returns. Close it by having each route that has a nil dependency return it rather than rendering an empty page, which is the distinction the console's own comments call out"},
+		"internal/api.DecodeJSON":           {Symbol: "internal/api.DecodeJSON", Why: "IN-PACKAGE. The request decoder, called by the console's own POST routes. The gate's rule is that a reader is a use OUTSIDE the declaring package, so a decoder the API uses on itself reads as unwired. It is exported because a caller outside the package will need it; until one does, the export is the only thing wrong with it"},
+		"internal/api.WriteError":           {Symbol: "internal/api.WriteError", Why: "IN-PACKAGE. The error-response writer, called by every refusal in the package. Same shape as DecodeJSON: the gate cannot see a package reading itself, and the export exists for a caller outside that has not arrived"},
+		"internal/api.RequestIDFromContext": {Symbol: "internal/api.RequestIDFromContext", Why: "IN-PACKAGE. The request-id accessor, called by the access log and by the panic recovery. The export is for a caller outside the package; the reason it is here is that the gate cannot see the package reading itself"},
+		"internal/api.ErrNotWired":          {Symbol: "internal/api.ErrNotWired", Why: "IN-PACKAGE. The not-wired sentinel, returned by the read models when a dependency is absent, so a route renders nothing rather than a zero. It is exported so a route outside the read models can compare against it; no such route exists yet"},
 
 		"internal/checkpoint.SealOnce": {Symbol: "internal/checkpoint.SealOnce", Why: "UNWIRED. The single-interval seal entry point nothing calls. Its range sibling SealRange was one of the nine dead exports that started this gate; this is the same cluster. Close it by having the scheduler call it, or delete it"},
 
@@ -294,7 +321,7 @@ var (
 		"internal/bundles.ErrNotStored": {Symbol: "internal/bundles.ErrNotStored", Why: "sentinel: the bundle store returns it for a version it does not hold, and the console's rules screen renders the reason so an operator at a site with no network can tell a missing version from a refused activation"},
 
 		"internal/detector.LastRatio":  {Symbol: "internal/detector.LastRatio", Why: "UNWIRED. The changed-pixel fraction accessor nothing calls. Close it by having the incident's evidence line report the ratio beside the threshold, which is the number an operator needs to tell a real movement from a lighting change, or delete it"},
-		"internal/fixture.RedactURL":   {Symbol: "internal/fixture.RedactURL", Why: "UNWIRED. The URL redactor nothing outside the package calls. Close it by having the sanitiser's entry point route through it, so there is one redactor rather than two shapes, or delete it"},
+		"internal/fixture.RedactURL":   {Symbol: "internal/fixture.RedactURL", Why: "IN-PACKAGE. The URL redactor, called by the sanitiser's own entry point, so there is one redactor rather than two shapes. Nothing outside the package calls it"},
 		"internal/fixture.SortedNames": {Symbol: "internal/fixture.SortedNames", Why: "UNWIRED. The manifest ordering helper nothing calls. Close it by having the manifest writer order through it, which is what the comment says it is for — a regenerated manifest has to produce a reviewable diff rather than a reshuffle — or delete it"},
 
 		"internal/graph.Relations": {Symbol: "internal/graph.Relations", Why: "the graph's closed relation vocabulary, enforced in-package by the edge validator and exported so anything that offers an edge can check membership first. No adapter offers an edge by hand today, so the exported set has no external reader; the enumeration is what makes an unrecognised relation a deployment fault rather than a row nobody reads"},
@@ -324,9 +351,12 @@ var (
 
 		"internal/deadexport.FilesParsed":     {Symbol: "internal/deadexport.FilesParsed", Why: "TEST-ONLY. This gate's own accessor, read by its own test. The gate reported itself before it reported anything else, which is the only honest way to introduce one. It stays because the test's floor on the walk is the control that catches a walk which stopped working"},
 		"internal/deadexport.SymbolsDeclared": {Symbol: "internal/deadexport.SymbolsDeclared", Why: "TEST-ONLY. The other half of that floor: a walk that reaches nothing reports no symbols, and both numbers are asserted together so neither can pass alone"},
+		"internal/deadexport.InPackageReader": {Symbol: "internal/deadexport.InPackageReader", Why: "TEST-ONLY. The in-package reader check, read by this gate's own test. It answers the question the ledger's two unwired sections turn on -- whether a symbol its own package calls reads as dead -- and nothing in production needs that answer, so it stays here. A method used only by a test is reported dead by the method rule, which is the rule and not a defect: the rule asks whether a name appears as a selector in PRODUCTION code"},
 
 		"internal/evidence.Exists":         {Symbol: "internal/evidence.Exists", Why: "TEST-ONLY. Whether a stored reference is present. The console's evidence list and the retention sweep should both ask it; neither does, so a fetch can be reported for a reference the store was never told about"},
 		"internal/evidence.StagingResidue": {Symbol: "internal/evidence.StagingResidue", Why: "TEST-ONLY. What the staging directory still holds after a crash. It should be what `securityctl doctor` reports: a crash mid-fetch leaves footage staged for ever and nothing surfaces it"},
+
+		"internal/device.MarshalJSON": {Symbol: "internal/device.MarshalJSON", Why: "PART OF AN INTERFACE. The manifest's json.Marshaler implementation: the PUBLISHED shape of a manifest is written by the package that owns it, and `json.Marshal` reaches it through the interface. The gate matches a method by a bare name and cannot see an interface, so a caller that encodes the manifest is invisible to it -- which is the same reason `internal/milestone.FetchSnapshot` is excused"},
 
 		"internal/graph.AddEdge":      {Symbol: "internal/graph.AddEdge", Why: "TEST-ONLY. The single-edge adder behind the bulk one. Either the bulk form should be built on it or the single form should go; a pair where only one has a caller is a pair whose shape is undecided"},
 		"internal/graph.CheckRebuild": {Symbol: "internal/graph.CheckRebuild", Why: "TEST-ONLY. The rebuild check that reports a graph problem rather than storing it. The console's topology view should render its findings; until then a broken edge set is found by a test and by nobody else"},
@@ -361,14 +391,14 @@ var (
 		// because the packages are newly created and their consumers (pipeline, relay,
 		// acceptance) are wired in subsequent commits. Each entry is a commitment to
 		// wire it, not a permanent exemption.
-		"internal/dispatch.DecodeNotification": {Symbol: "internal/dispatch.DecodeNotification", Why: "UNWIRED. The notification decoder. The relay will call it when handling notify_* outbox messages; currently only the internal test reads it"},
-		"internal/dispatch.DecodeJob":          {Symbol: "internal/dispatch.DecodeJob", Why: "UNWIRED. The job decoder. The relay will call it when handling fetch_evidence/request_vlm outbox messages; currently only the internal test reads it"},
+		"internal/dispatch.DecodeNotification": {Symbol: "internal/dispatch.DecodeNotification", Why: "IN-PACKAGE. The notification decoder, used by the package's own decode path. The relay in another package will call it when handling notify_* outbox messages; nothing outside the package does today"},
+		"internal/dispatch.DecodeJob":          {Symbol: "internal/dispatch.DecodeJob", Why: "IN-PACKAGE. The job decoder, used by the package's own decode path. The relay in another package will call it when handling fetch_evidence/request_vlm outbox messages; nothing outside the package does today"},
 		// DecodeJobPayload and EncodeJobPayload are used by internal/evidencefetch, so they
 		// have external readers and are not dead. The allow-list entries were stale.
-		"internal/evidencefetch.ActionPlaced":   {Symbol: "internal/evidencefetch.ActionPlaced", Why: "UNWIRED. The audit action for a placed bookmark. The audit ledger will record it when the worker runs; currently only the worker writes it"},
-		"internal/evidencefetch.ActionRefused":  {Symbol: "internal/evidencefetch.ActionRefused", Why: "UNWIRED. The audit action for a refused bookmark. The audit ledger will record it when the worker refuses; currently only the worker writes it"},
-		"internal/evidencefetch.ReceiptVersion": {Symbol: "internal/evidencefetch.ReceiptVersion", Why: "UNWIRED. The receipt document's contract version. A future reader will check it; currently only the worker writes it"},
-		"internal/evidencefetch.VendorName":     {Symbol: "internal/evidencefetch.VendorName", Why: "UNWIRED. The vendor name constant. The receipt carries it; currently only the worker writes it"},
+		"internal/evidencefetch.ActionPlaced":   {Symbol: "internal/evidencefetch.ActionPlaced", Why: "IN-PACKAGE. The audit action for a placed bookmark, written by the worker in this package. The audit ledger will record it when the worker runs; nothing outside the package reads it today"},
+		"internal/evidencefetch.ActionRefused":  {Symbol: "internal/evidencefetch.ActionRefused", Why: "IN-PACKAGE. The audit action for a refused bookmark, written by the worker in this package. The audit ledger will record it when the worker refuses; nothing outside the package reads it today"},
+		"internal/evidencefetch.ReceiptVersion": {Symbol: "internal/evidencefetch.ReceiptVersion", Why: "IN-PACKAGE. The receipt document's contract version, written by the worker in this package. A future reader will check it; nothing outside the package reads it today"},
+		"internal/evidencefetch.VendorName":     {Symbol: "internal/evidencefetch.VendorName", Why: "IN-PACKAGE. The vendor name constant, carried by the receipt the worker in this package writes. Nothing outside the package reads it today"},
 
 		// Three that the gate was NOT reporting, and the reason is in the gate's own
 		// code. `addSelectors` records every selector name in the tree UNQUALIFIED,
@@ -400,7 +430,17 @@ var (
 		// the package rather than the symbol. Closing them properly means a
 		// `tools/` runner per gate so the script can invoke the package directly,
 		// and that is a real change to the gate script rather than to these packages.
-		"internal/statuscheck.Derive": {Symbol: "internal/statuscheck.Derive", Why: "UNWIRED (test-only caller). The countable-claims derivation behind internal/statuscheck. It has an external test package reader today -- statuscheck_test.go -- which is a real consumer, and this entry is here because the derivation is also what `securityctl status` should print, so a caller in the command would close it properly"},
+		// The granularity vocabulary's second member, and the closed set that
+		// names it, need NO entry here, and that is worth a line.
+		//
+		// `internal/operatormetrics`'s own black-box suite -- a `_test.go`
+		// file whose package name ends in `_test` -- reads both of them, and
+		// the gate counts a black-box suite as a real consumer. An entry for
+		// them would be a STALE entry, and the gate refuses an allow-list
+		// entry that matches nothing: the reader arrives, the entry stops
+		// matching, and the entry becomes a finding. An allow-list is a list
+		// of exemptions that are still needed, not a list of symbols somebody
+		// once worried about.
 
 		// Two lease defaults, one per job family. The inbox worker and the outbox
 		// relay each state how long a claim is held; both are also deployment
@@ -476,6 +516,77 @@ func TestNoExportedSymbolIsDead(t *testing.T) {
 	}
 	for _, f := range findings {
 		t.Errorf("%s", f)
+	}
+}
+
+// TestTheLedgerSaysWhatIsTrue is the check on the ledger's own claims.
+//
+// The gate's rule is that a reader is a use OUTSIDE the declaring package, and
+// that rule makes a whole class of symbol look dead when it is working: a
+// helper the package calls on itself, exported because a caller outside it was
+// always going to be needed. The entry for such a symbol has to say so in
+// words, and the words it used to use were false.
+//
+// "The request decoder nothing calls" was false for a decoder the API calls on
+// every POST. Three ledger entries said a thing that was not true, and nothing
+// could tell, because a false reason in a ledger reads exactly like a true one.
+//
+// So the split is checked against the tree rather than trusted:
+//
+//   - an `UNWIRED.` entry must have no in-package reader, or the reason is
+//     false;
+//   - an `IN-PACKAGE.` entry must have one, or the reason is false.
+//
+// The check is the point. A reason that says "nothing calls it" is now true by
+// construction rather than by assertion, and it stops being true the moment
+// somebody wires the symbol, which is the day the entry should go.
+func TestTheLedgerSaysWhatIsTrue(t *testing.T) {
+	repo := loadRepo(t)
+	for key, ex := range allowList {
+		switch {
+		case strings.HasPrefix(ex.Why, unwiredMarker):
+			if repo.InPackageReader(key) {
+				t.Errorf("%s says nothing calls it, and its own package does call it. The reason "+
+					"is false, and a false reason in a ledger is indistinguishable from no reason "+
+					"at all. Say so instead: the marker is %q", key, inPackageMarker)
+			}
+		case strings.HasPrefix(ex.Why, inPackageMarker):
+			if !repo.InPackageReader(key) {
+				t.Errorf("%s says its own package calls it, and nothing does. The reason is "+
+					"false. Either the symbol is dead and the marker is %q, or the claim is "+
+					"wrong", key, unwiredMarker)
+			}
+		}
+	}
+}
+
+// The two markers the ledger's two unwired sections are written with.
+//
+// They are markers rather than a field on the exemption because the exemption
+// is the gate's own type and the gate has no business knowing what a ledger
+// says. A marker in the reason is visible to the person reading the reason,
+// which is the person who has to correct it.
+const (
+	unwiredMarker   = "UNWIRED."
+	inPackageMarker = "IN-PACKAGE."
+)
+
+// TestEveryUnwiredEntryIsInOneOfTheTwoSections is the floor on the split.
+//
+// An entry that claims neither is not in a section, and a reader cannot tell
+// what kind of unwired symbol it is looking at. The other sections -- a
+// published vocabulary, a sentinel, a bound, a test-only symbol -- are
+// identified by NOT carrying a marker, so a marker means exactly one thing.
+func TestEveryUnwiredEntryIsInOneOfTheTwoSections(t *testing.T) {
+	repo := loadRepo(t)
+	for key, ex := range allowList {
+		inPackage := repo.InPackageReader(key)
+		switch {
+		case strings.HasPrefix(ex.Why, unwiredMarker) && inPackage:
+			t.Errorf("%s carries the %q marker and its own package calls it", key, unwiredMarker)
+		case strings.HasPrefix(ex.Why, inPackageMarker) && !inPackage:
+			t.Errorf("%s carries the %q marker and nothing calls it", key, inPackageMarker)
+		}
 	}
 }
 

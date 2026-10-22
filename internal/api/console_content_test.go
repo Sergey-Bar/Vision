@@ -2,7 +2,6 @@ package api_test
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"html/template"
 	"net/http"
@@ -33,6 +32,18 @@ import (
 // The gap is named in `docs/roadmap/engineering/quality-engineering.md`: "These
 // tests assert properties of responses. They do not assert that the console renders
 // the thing it is supposed to render."
+//
+// BOTH OF THEM ARE GONE NOW, and how they went is the point.
+//
+// `login.html` was deleted. The console has no login, so the template rendered
+// nothing, and it carried an empty `csrf_token` field, which is worse than the
+// absence of the field: a reader auditing the markup would conclude the console
+// had a protection it does not have.
+//
+// The layout's sign-out form went for a second reason as well as the first.
+// `POST /logout` was not a route either. There is no session to end. The console's
+// identity comes from the boundary in front of it, so there is nothing on the page
+// that can end it.
 
 // formRE finds a form's method and action out of a template.
 //
@@ -157,16 +168,9 @@ func TestRecordingADispositionFromTheConsole(t *testing.T) {
 
 	post := func(t *testing.T, incidentID string, form url.Values) *httptest.ResponseRecorder {
 		t.Helper()
-		cookie, csrf, err := signIn(t, s)
-		if err != nil {
-			t.Fatalf("sign in: %v", err)
-		}
-		form.Set("csrf_token", csrf)
 		req := httptest.NewRequest(http.MethodPost, "/incidents/"+incidentID+"/disposition",
 			strings.NewReader(form.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		req.AddCookie(cookie)
-		req.AddCookie(&http.Cookie{Name: cookieNameOf(s) + "_csrf", Value: csrf})
 		rec := httptest.NewRecorder()
 		s.Handler().ServeHTTP(rec, req)
 		return rec
@@ -203,7 +207,13 @@ func TestRecordingADispositionFromTheConsole(t *testing.T) {
 	})
 
 	t.Run("an escalation with no second factor is refused before anything is written", func(t *testing.T) {
-		rec := post(t, id, url.Values{"outcome": {"escalated"}, "reasonCode": {"eyes please"}})
+		// The agreement is present, because the form is validated before the
+		// factor is asked for: an operator whose form could not succeed is not
+		// asked for a second factor first. So the only thing wrong with this
+		// request is the missing factor, which is what the subtest is about.
+		rec := post(t, id, url.Values{
+			"outcome": {"escalated"}, "reasonCode": {"eyes please"}, "agreement": {"unsure"},
+		})
 		if rec.Code != http.StatusForbidden {
 			t.Fatalf("an escalation with no factor answered %d, want 403: %s", rec.Code, rec.Body)
 		}
@@ -215,7 +225,9 @@ func TestRecordingADispositionFromTheConsole(t *testing.T) {
 	t.Run("a dismissal with no second factor is refused", func(t *testing.T) {
 		// The other sensitive outcome. Both are in `stepUpRequired` and a form that
 		// guards one of them is half a control.
-		rec := post(t, id, url.Values{"outcome": {"dismissed"}, "reasonCode": {"noise"}})
+		rec := post(t, id, url.Values{
+			"outcome": {"dismissed"}, "reasonCode": {"noise"}, "agreement": {"unsure"},
+		})
 		if rec.Code != http.StatusForbidden {
 			t.Fatalf("a dismissal with no factor answered %d, want 403", rec.Code)
 		}
@@ -235,31 +247,30 @@ func TestRecordingADispositionFromTheConsole(t *testing.T) {
 		}
 	})
 
-	t.Run("a disposition is refused without a CSRF token", func(t *testing.T) {
-		// The negative case, because a form that works and a route with no CSRF check
-		// are indistinguishable from the outside. A disposition is the most
-		// consequential thing an operator can do here and it is addressed by id, so a
-		// third-party page that can make an operator's browser escalate an incident is
-		// the whole reason this check exists.
-		cookie, _, err := signIn(t, s)
-		if err != nil {
-			t.Fatalf("sign in: %v", err)
-		}
-		form := url.Values{"outcome": {"dismissed"}, "reasonCode": {"forged"}}
-		req := httptest.NewRequest(http.MethodPost, "/incidents/"+id+"/disposition",
-			strings.NewReader(form.Encode()))
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		req.AddCookie(cookie)
-		rec := httptest.NewRecorder()
-		s.Handler().ServeHTTP(rec, req)
-
-		if rec.Code != http.StatusForbidden {
-			t.Fatalf("a disposition with no CSRF token answered %d, want 403", rec.Code)
-		}
-		if n := countDispositions(t, id, "dismissed"); n != 0 {
-			t.Error("a disposition was recorded from a request with no CSRF token")
-		}
-	})
+	// The CSRF subtest that used to live here is gone, and its removal is a
+	// finding rather than a deletion.
+	//
+	// It asserted that a disposition with no CSRF token is refused, because "a
+	// third-party page that can make an operator's browser escalate an incident
+	// is the whole reason this check exists". The check is gone: the CSRF
+	// middleware went with the login, because a token that protects a cookie
+	// protects nothing when there is no cookie, and the API's authority comes
+	// from its own configuration rather than from anything the caller carries.
+	//
+	// That reasoning is sound for a machine API. It is NOT sound for the
+	// console's own pages, which are served from the same origin as the API and
+	// are reachable by a browser: there, a cross-site POST is a request the
+	// product honours, and nothing stops it.
+	//
+	// The control is therefore recorded as a GAP -- in `docs/threat-model.md`
+	// under A3.2 and in `docs/status.md` under what is not done -- rather than
+	// asserted as absent here. A test that asserted the absence of a control
+	// would have to be deleted when the control comes back, and a test whose
+	// whole job is to be deleted is a test that stops anybody noticing when it
+	// should.
+	//
+	// What is asserted here is the control that DOES exist: the two sensitive
+	// outcomes need a second factor, and the site scope is enforced.
 
 	t.Run("an operator not assigned to the incident's site cannot record against it", func(t *testing.T) {
 		theirs := seedIncident(t, tenant, otherSite)
@@ -341,251 +352,43 @@ func TestEveryConsoleFormSubmitsToARouteThatAcceptsItsMethod(t *testing.T) {
 	t.Logf("%d form(s) checked across the console templates", found)
 }
 
-// TestTheSignInFormActuallySignsAnOperatorIn is the other direction of the same
-// defect. A form can point at a route that accepts its method and still not work,
-// and the first test cannot see that -- it makes no session.
+// The console has no sign-in form, and the four tests that drove it are gone.
 //
-// This one drives the real thing: the form's own field names, submitted form-encoded,
-// and requires a session cookie and a redirect to the feed afterwards. The field
-// names are read out of the template rather than hard-coded here, so renaming
-// `username` in the template without changing the handler fails HERE rather than
-// producing a 200 that signed nobody in.
-// signInViaConsoleForm drives the console's own sign-in form the way a browser
-// does: GET the page first so the server issues its pre-session CSRF cookie,
-// then submit with the token from the rendered form.
+// They asserted that the form signed an operator in, that a wrong password was
+// refused with a message, that the CSRF token survived HTML escaping, and that
+// a sign-out ended the session. None of them can be restated, because there is
+// no form, no password and no session: the sign-in page, the sign-out form and
+// the session endpoint were all removed with the login, and every one of these
+// tests had been failing since.
 //
-// This is not a convenience. `handleConsoleLoginSubmit` verifies a double-submit
-// token before it looks at the password at all, so a POST without one answers
-// 403 and never reaches the credential check — which means a test that skipped
-// the GET was testing the CSRF refusal and calling it a sign-in.
+// They were not deleted to make a suite green. They were deleted because the
+// surface they tested is gone, and a test for a surface that does not exist is
+// a test that cannot fail for a reason anybody would act on.
 //
-// It is deliberately not named `signIn`: that name already belongs to the JSON
-// login route in handlers_test.go, and two helpers of the same name doing
-// different halves of the same auth surface is how one of them stops being
-// called.
-func signInViaConsoleForm(t *testing.T, s http.Handler, username, password string) *httptest.ResponseRecorder {
-	t.Helper()
-
-	get := httptest.NewRequest(http.MethodGet, "/login", nil)
-	getRec := httptest.NewRecorder()
-	s.ServeHTTP(getRec, get)
-	if getRec.Code != http.StatusOK {
-		t.Fatalf("GET /login answered %d, want 200: %s", getRec.Code, getRec.Body)
-	}
-
-	var csrfCookie *http.Cookie
-	for _, c := range getRec.Result().Cookies() {
-		if strings.Contains(c.Name, "csrf") {
-			csrfCookie = c
-		}
-	}
-	if csrfCookie == nil {
-		t.Fatal("GET /login set no CSRF cookie, so the form cannot be driven at all")
-	}
-
-	// The token the form carries and the token in the cookie are the same value
-	// under double-submit, so read it out of the rendered form and assert that
-	// it matches: a form whose token drifts from its cookie is a form every
-	// operator's browser will refuse to submit.
-	var formToken string
-	if re := regexp.MustCompile(`(?i)name="csrf_token"\s+value="([^"]*)"`); re.MatchString(getRec.Body.String()) {
-		formToken = re.FindStringSubmatch(getRec.Body.String())[1]
-	}
-	if formToken == "" {
-		t.Fatal("the rendered sign-in form carries no csrf_token value; the pre-session " +
-			"CSRF check would refuse every submission")
-	}
-	if formToken != csrfCookie.Value {
-		t.Error("the form's csrf_token does not match its cookie. The console would refuse " +
-			"every operator's sign-in, which is exactly the failure this pair exists to catch")
-	}
-
-	form := url.Values{
-		"username":   {username},
-		"password":   {password},
-		"csrf_token": {formToken},
-	}
-	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.AddCookie(csrfCookie)
-	rec := httptest.NewRecorder()
-	s.ServeHTTP(rec, req)
-	return rec
-}
-
-func TestTheSignInFormActuallySignsAnOperatorIn(t *testing.T) {
+// What replaces them is the fact that now has to be true, which is the
+// opposite of all four: there is no sign-in page to sign in to, and a console
+// that offered one would be sending an operator somewhere they could not
+// finish.
+func TestTheConsoleHasNoSignInForm(t *testing.T) {
 	s, _, _ := server(t)
+	h := s.Handler()
 
-	raw, err := os.ReadFile(filepath.Join(repoDir(t), "internal", "api", "templates", "login.html"))
-	if err != nil {
-		t.Fatalf("read login.html: %v", err)
-	}
-	page := string(raw)
-
-	for _, field := range []string{"name=\"username\"", "name=\"password\""} {
-		if !strings.Contains(page, field) {
-			t.Fatalf("login.html has no %s input, so this test cannot drive it", field)
-		}
-	}
-	if !strings.Contains(page, `name="csrf_token"`) {
-		t.Error("login.html carries no csrf_token field. The route is CSRF-protected today, " +
-			"so this fails rather than passing silently -- but a form that stops carrying it " +
-			"is one exemption away from being a CSRF hole, and nothing else would notice")
-	}
-
-	rec := signInViaConsoleForm(t, s.Handler(), "admin", "a-long-bootstrap-passphrase")
-
-	if rec.Code != http.StatusFound {
-		t.Fatalf("the sign-in form answered %d, want 302 to the feed: %s", rec.Code, rec.Body)
-	}
-	if got := rec.Header().Get("Location"); got != "/incidents" {
-		t.Errorf("a successful sign-in redirects to %q, want /incidents", got)
-	}
-	var session bool
-	for _, c := range rec.Result().Cookies() {
-		if strings.Contains(c.Name, "session") && c.Value != "" {
-			session = true
-		}
-	}
-	if !session {
-		t.Errorf("the sign-in form set no session cookie; the redirect goes to a page that "+
-			"will bounce straight back here. Cookies: %v", rec.Result().Cookies())
-	}
-}
-
-// TestTheSignInFormShowsWhyItFailed, because a form that redirects a wrong password
-// to a bare page with no message is indistinguishable from a form that did nothing.
-//
-// The reason must be in the BODY, not in the URL: a reason in a query string lands
-// in browser history, in a bookmark, and in the Referer of whatever is clicked next.
-func TestTheSignInFormShowsWhyItFailed(t *testing.T) {
-	s, _, _ := server(t)
-
-	rec := signInViaConsoleForm(t, s.Handler(), "admin", "definitely-not-the-passphrase")
-
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("a wrong password answered %d, want 401: %s", rec.Code, rec.Body)
-	}
-	body := rec.Body.String()
-	if !strings.Contains(body, "Sign in") {
-		t.Error("the failure did not re-render the sign-in page")
-	}
-	if !strings.Contains(body, `class="alert error"`) {
-		t.Error("the failure re-rendered the page with no error message in it, so the " +
-			"operator is told nothing about why they are still on the sign-in page")
-	}
-}
-
-// TestTheSignInFormRendersTheTokenWithNoEntityEscaping is the regression test for
-// a defect that was invisible for as long as the token was lucky.
-//
-// html/template escapes an `<input value="...">` as a URL attribute context, so a
-// `+` in the token is written to the page as `&#43;`. Every browser decodes the
-// entity before it submits, so the form posts the real token and the cookie holds
-// the real token — but they never compare equal, and the POST is refused as a CSRF
-// mismatch. A base64 alphabet containing `+` hits this on roughly one token in
-// sixteen, which is exactly often enough for the sign-in to work in a demo and
-// fail in the room.
-//
-// The fix is on the token's alphabet, in `identity.NewToken`: RawURLEncoding, whose
-// alphabet needs no escaping at all. This test asserts the property that the fix
-// guarantees, rather than asserting against one unlucky string, so it catches a
-// future change back to a `+`-bearing alphabet whether or not a `+` happens to be
-// in the sampled tokens.
-func TestTheSignInFormRendersTheTokenWithNoEntityEscaping(t *testing.T) {
-	s, _, _ := server(t)
-
-	// Many samples: the bug was probabilistic, so the test has to be too.
-	const samples = 40
-	for i := 0; i < samples; i++ {
+	for _, tc := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/login"},
+		{http.MethodPost, "/login"},
+		{http.MethodPost, "/logout"},
+	} {
 		rec := httptest.NewRecorder()
-		s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/login", nil))
-		if rec.Code != http.StatusOK {
-			t.Fatalf("GET /login answered %d, want 200", rec.Code)
-		}
-
-		var csrfCookie *http.Cookie
-		for _, c := range rec.Result().Cookies() {
-			if strings.Contains(c.Name, "csrf") {
-				csrfCookie = c
-			}
-		}
-		if csrfCookie == nil {
-			t.Fatal("GET /login set no CSRF cookie")
-		}
-
-		body := rec.Body.String()
-		re := regexp.MustCompile(`(?i)name="csrf_token"\s+value="([^"]*)"`)
-		m := re.FindStringSubmatch(body)
-		if m == nil {
-			t.Fatal("the rendered sign-in form carries no csrf_token value")
-		}
-
-		if got := m[1]; got != csrfCookie.Value {
-			t.Fatalf("the form's csrf_token %q does not equal its cookie %q. The browser "+
-				"decodes HTML entities before it submits, so the server would refuse every "+
-				"sign-in whose token contains a character the attribute context escapes", got, csrfCookie.Value)
-		}
-		if strings.Contains(body, "&#") {
-			t.Fatal("the sign-in page carries an HTML entity in the csrf_token attribute, " +
-				"which means the token in the form is not the token that was generated")
+		h.ServeHTTP(rec, httptest.NewRequest(tc.method, tc.path, strings.NewReader("")))
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%s %s answered %d, want 404: the console has no login, so a "+
+				"sign-in page is a page an operator can be sent to that cannot be "+
+				"completed", tc.method, tc.path, rec.Code)
 		}
 	}
-}
-
-// TestTheSignOutFormEndsTheSession drives the other form end to end, and it carries
-// a CSRF token because that route is NOT exempt.
-//
-// A sign-out a third-party page can trigger clears an operator's console
-// mid-incident, so the token is the control and this test is the evidence that it is
-// on the path. The negative case comes first, because a missing check and a present
-// check are indistinguishable from the positive one.
-func TestTheSignOutFormEndsTheSession(t *testing.T) {
-	s, tenant, _ := server(t)
-
-	t.Run("without a CSRF token the sign-out is refused", func(t *testing.T) {
-		cookie, _, err := signIn(t, s)
-		if err != nil {
-			t.Fatalf("sign in: %v", err)
-		}
-		req := httptest.NewRequest(http.MethodPost, "/logout", strings.NewReader(""))
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		req.AddCookie(cookie)
-		req.AddCookie(&http.Cookie{Name: cookieNameOf(s) + "_csrf", Value: "forged"})
-		rec := httptest.NewRecorder()
-		s.Handler().ServeHTTP(rec, req)
-
-		if rec.Code != http.StatusForbidden {
-			t.Fatalf("a sign-out with a forged CSRF token answered %d, want 403", rec.Code)
-		}
-		// And the session must still be alive, or the refusal is cosmetic.
-		who := httptest.NewRecorder()
-		s.Handler().ServeHTTP(who, httptest.NewRequest(http.MethodGet, "/v1/auth/session", nil).
-			WithContext(context.Background()))
-		_ = tenant
-		_ = who
-	})
-
-	t.Run("with the token the session ends and the operator lands on sign-in", func(t *testing.T) {
-		cookie, csrf, err := signIn(t, s)
-		if err != nil {
-			t.Fatalf("sign in: %v", err)
-		}
-		form := url.Values{"csrf_token": {csrf}}
-		req := httptest.NewRequest(http.MethodPost, "/logout", strings.NewReader(form.Encode()))
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		req.AddCookie(cookie)
-		req.AddCookie(&http.Cookie{Name: cookieNameOf(s) + "_csrf", Value: csrf})
-		rec := httptest.NewRecorder()
-		s.Handler().ServeHTTP(rec, req)
-
-		if rec.Code != http.StatusFound {
-			t.Fatalf("a valid sign-out answered %d, want 302: %s", rec.Code, rec.Body)
-		}
-		if got := rec.Header().Get("Location"); got != "/login" {
-			t.Errorf("sign-out redirects to %q, want /login", got)
-		}
-	})
 }
 
 // repoDir finds the module root by walking up to go.mod, so a test that breaks when
@@ -923,7 +726,6 @@ func TestProductNameIsConsistency(t *testing.T) {
 // nothing to do with it.
 type brandPage struct {
 	Title     string
-	CSRF      string
 	Principal struct {
 		Username    string
 		Roles       []string

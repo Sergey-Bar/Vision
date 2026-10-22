@@ -88,10 +88,24 @@ func TestMatrix(t *testing.T) {
 		t.Errorf("Critical+VeryHigh = %s, want ESCALATE", action)
 	}
 
-	// Critical + Low -> Verify
+	// Critical + Low -> Hold.
+	//
+	// This cell used to be VERIFY, and the change is the point of the
+	// calibrated engine: the severity axis is the CLAIM (how bad it would
+	// be if the incident were real) and the likelihood axis is the
+	// EVIDENCE (how likely it is to be real). A serious claim with the
+	// evidence thin at this site is a HOLD, not a VERIFY: the operator is
+	// not sent to check something the site's own base rate says is noise
+	// here, and the incident is not escalated either.
 	action = matrix.Decide(SeverityCritical, LikelihoodLow)
-	if action != ActionVerify {
-		t.Errorf("Critical+Low = %s, want VERIFY", action)
+	if action != ActionHold {
+		t.Errorf("Critical+Low = %s, want HOLD", action)
+	}
+
+	// High + Low -> Hold, for the same reason.
+	action = matrix.Decide(SeverityHigh, LikelihoodLow)
+	if action != ActionHold {
+		t.Errorf("High+Low = %s, want HOLD", action)
 	}
 
 	// Low + Low -> Observe

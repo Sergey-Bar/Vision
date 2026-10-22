@@ -27,25 +27,25 @@ export function UsersPage() {
       />
       <div className="space-y-10">
         {isError ? (
-          <div className="rounded-2xl p-8 bg-danger/10 border border-danger/30 text-danger text-sm font-medium">
+          <div className="rounded-lg p-8 bg-bad-ink/10 border border-bad-ink/40 text-bad-ink text-sm font-medium">
             The API is not answering, so the console cannot say who it is acting as.
           </div>
         ) : (
           <>
-            <div className="rounded-3xl border border-white/10 bg-black/30 px-8 py-6">
-              <div className="text-[10px] font-black uppercase tracking-[0.12em] text-text-dim">
+            <div className="rounded-lg border border-line bg-bg-panel px-8 py-6">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-text-dim">
                 Configured principal
               </div>
               <div className="mt-3 flex items-center gap-4">
-                <div className="w-14 h-14 rounded-2xl bg-accent flex items-center justify-center text-white font-black shadow-lg shadow-accent/40">
+              <div className="w-14 h-14 rounded-lg bg-accent flex items-center justify-center text-text font-semibold">
                   SP
                 </div>
                 <div>
-                  <div className="text-lg font-black text-text">
+                  <div className="text-lg font-semibold text-text">
                     {(principal?.roles ?? []).join(', ') || 'unconfigured'}
                   </div>
                   <div className="text-xs text-text-dim mt-1">
-                    tenant {principal?.tenantId ?? '—'} · service account
+                  tenant {principal?.tenantId ?? '—'} · service account
                   </div>
                 </div>
               </div>
@@ -57,15 +57,15 @@ export function UsersPage() {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <div className="rounded-3xl border border-white/10 bg-black/30 px-8 py-6">
-                <div className="text-[10px] font-black uppercase tracking-[0.12em] text-text-dim mb-4">
+            <div className="rounded-lg border border-line bg-bg-panel px-8 py-6">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-text-dim mb-4">
                   Capabilities
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {(principal?.capabilities ?? []).map((c) => (
                     <span
                       key={c}
-                      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-white/10 text-[10px] font-black text-text-dim"
+                      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-line text-[10px] font-semibold text-text-dim"
                     >
                       <Shield size={12} className="text-accent" />
                       {c}
@@ -79,15 +79,15 @@ export function UsersPage() {
                 </div>
               </div>
 
-              <div className="rounded-3xl border border-white/10 bg-black/30 px-8 py-6">
-                <div className="text-[10px] font-black uppercase tracking-[0.12em] text-text-dim mb-4">
+              <div className="rounded-lg border border-line bg-bg-panel px-8 py-6">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-text-dim mb-4">
                   Site scope
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {(principal?.siteScope ?? []).map((s) => (
                     <span
                       key={s}
-                      className="px-3 py-1.5 rounded-full border border-accent/30 bg-accent/10 text-[10px] font-black text-accent"
+                      className="px-3 py-1.5 rounded-full border border-accent/40 bg-accent/10 text-[10px] font-semibold text-accent"
                     >
                       {s}
                     </span>

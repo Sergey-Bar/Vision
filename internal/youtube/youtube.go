@@ -6,8 +6,18 @@ import (
 	"regexp"
 )
 
+// videoIDPatterns are the shapes a YouTube id arrives in.
+//
+// The BOUNDARY after the eleven characters is not decoration. Without it, a
+// fourteen-character id matches its first eleven and the helper returns a
+// DIFFERENT video -- and the caller then requests a video the operator did not
+// paste. A YouTube id is exactly eleven characters, so anything longer is not
+// an id and the honest answer is to refuse it.
+//
+// The boundary is "a character that is not part of an id, or the end of the
+// string", so `watch?v=ID&t=30` and `youtu.be/ID` both work.
 var videoIDPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/embed/|youtube\.com/live/)([A-Za-z0-9_-]{11})`),
+	regexp.MustCompile(`(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/embed/|youtube\.com/live/)([A-Za-z0-9_-]{11})(?:[^\w-]|$)`),
 	regexp.MustCompile(`^([A-Za-z0-9_-]{11})$`),
 }
 

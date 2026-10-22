@@ -271,9 +271,9 @@ func TestOpenAPIReaderReadsThePublishedDocument(t *testing.T) {
 			"is not reading the `paths:` block", len(doc.Paths))
 	}
 	for path, want := range map[string]string{
-		"/v1/auth/login":   "post",
-		"/v1/incidents":    "get",
-		"/v1/auth/session": "delete",
+		"/v1/incidents": "get",
+		"/v1/principal": "get",
+		"/v1/incidents/{incidentId}/dispositions": "post",
 	} {
 		var found bool
 		for _, m := range doc.Paths[path] {
@@ -283,6 +283,20 @@ func TestOpenAPIReaderReadsThePublishedDocument(t *testing.T) {
 		}
 		if !found {
 			t.Errorf("%s has no %s; got %v", path, want, doc.Paths[path])
+		}
+	}
+	// The authentication paths are NOT in the published document, and their
+	// absence is asserted rather than assumed.
+	//
+	// There is no login: the API runs as a CONFIGURED principal, and the three
+	// endpoints the document used to declare -- the login, the MFA challenge
+	// and the session -- have no implementation behind them. A reader that
+	// still found them would be reading a document nobody ships, and a
+	// baseline built from it would go on protecting endpoints that answer 404.
+	for _, path := range []string{"/v1/auth/login", "/v1/auth/mfa/verify", "/v1/auth/session"} {
+		if methods, present := doc.Paths[path]; present {
+			t.Errorf("the published document still declares %s (%v); there is no login, "+
+				"so there is no such endpoint", path, methods)
 		}
 	}
 	// The published document is well-formed. It was not: /v1/health and

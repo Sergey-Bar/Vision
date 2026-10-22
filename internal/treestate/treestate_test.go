@@ -1,6 +1,7 @@
 package treestate_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -786,6 +788,81 @@ func goFiles(t *testing.T, root string) (map[string]string, map[string]bool) {
 		files[key] = string(raw)
 	}
 	return files, present
+}
+
+func TestTheRealTreeHasNoStrayByteOrderMarks(t *testing.T) {
+	// A U+FEFF anywhere other than as a file's FIRST character is a defect, and
+	// it is a defect of the worst kind: it is invisible in every editor that
+	// renders it as nothing, and it is not nothing to a script.
+	//
+	// `scripts/verify.ps1` carried one, at the start of the line that opens the
+	// thirty-first entry of the red-check table. PowerShell read the line as a
+	// command whose name was the byte-order mark, and the gate -- the one that
+	// proves every control in the table is real -- died on it, at every entry
+	// from that one onwards, with a message about a cmdlet that does not exist.
+	// The red-check had been reporting nothing at all and saying nothing about
+	// it: the failure was a FAILURE, but the gate that reads the run record
+	// could not tell a dead gate from a passing one.
+	//
+	// So the rule is here, over the tree, and it is checked by the suite rather
+	// than by the script that would have caught it.
+	root := repoRoot(t)
+	textExtensions := map[string]bool{
+		".ps1": true, ".go": true, ".yaml": true, ".yml": true, ".md": true,
+		".json": true, ".ts": true, ".tsx": true, ".js": true, ".html": true,
+		".sql": true, ".sh": true, ".py": true, ".txt": true, ".proto": true,
+		".css": true, ".toml": true, ".mod": true, ".sum": true,
+	}
+	var found []string
+	skipped := map[string]bool{
+		".git": true, "node_modules": true, "dist": true, ".venv-poc": true,
+		".venv": true, "models": true, "Videos": true, "testdata": true,
+		"__pycache__": true, "coverage": true, "vendor": true,
+	}
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if skipped[d.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !textExtensions[strings.ToLower(filepath.Ext(path))] {
+			return nil
+		}
+		// A file this large is a fixture, not a script, and reading every byte of
+		// the tree to find a three-byte marker is a gate nobody runs.
+		if info, err := d.Info(); err == nil && info.Size() > 2<<20 {
+			return nil
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		// A leading byte-order mark is legitimate: it is how a file says it is
+		// UTF-16 or UTF-8, and every reader handles it. One in the middle of a
+		// file is a zero-width no-break space nobody typed on purpose.
+		body := raw
+		if len(body) >= 3 && body[0] == 0xEF && body[1] == 0xBB && body[2] == 0xBF {
+			body = body[3:]
+		}
+		if i := bytes.Index(body, []byte{0xEF, 0xBB, 0xBF}); i >= 0 {
+			rel, _ := filepath.Rel(root, path)
+			found = append(found, fmt.Sprintf("%s: a byte-order mark at byte %d", rel, i))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk the tree: %v", err)
+	}
+	if len(found) > 0 {
+		sort.Strings(found)
+		t.Errorf("these files carry a byte-order mark in the middle of them, which is "+
+			"invisible in an editor and not nothing to a script:\n  %s",
+			strings.Join(found, "\n  "))
+	}
 }
 
 func TestTheRealTreeHasNoWorktreeFrozenMidMerge(t *testing.T) {

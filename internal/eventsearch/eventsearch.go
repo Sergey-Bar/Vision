@@ -299,18 +299,9 @@ func (s *Service) Search(ctx context.Context, tenant string, q Query) (Result, e
 
 	hits := make([]Hit, 0, limit)
 	for rows.Next() {
-		var h Hit
-		var incidentID *string
-		var evidenceID *string
-		if err := rows.Scan(&h.EventID, &h.SiteID, &h.EventType, &h.DeviceID,
-			&h.ZoneID, &h.CorrelationID, &h.ObservedAt, &h.NormalizedAt, &incidentID, &evidenceID); err != nil {
-			return Result{}, fmt.Errorf("eventsearch: scan: %w", err)
-		}
-		if incidentID != nil {
-			h.IncidentID = *incidentID
-		}
-		if evidenceID != nil {
-			h.EvidenceID = *evidenceID
+		h, err := scanHit(rows)
+		if err != nil {
+			return Result{}, err
 		}
 		hits = append(hits, h)
 		if len(hits) > limit {
@@ -397,22 +388,55 @@ func (s *Service) vectorAvailable(ctx context.Context) (bool, error) {
 
 func ptr(b bool) *bool { return &b }
 
+// scanHit reads one row of either search query into a Hit.
+//
+// The optional columns are scanned as NULLABLE and then flattened.
+//
+// `device_id`, `zone_id` and `correlation_id` are all nullable in the schema,
+// because a canonical event does not have to name the device that saw it.
+// Scanning them into a plain string made every such event a 500 on the search
+// route -- and a search that answers 500 for half the events it is asked about
+// is a search that answers nothing.
+//
+// The seed's own events are among them, so the boot gate was reading a broken
+// route and could not see it: the route was refused with a 401 before it was
+// ever reached. That is what a refusal in front of a route hides.
+func scanHit(rows pgx.Rows) (Hit, error) {
+	var h Hit
+	var deviceID *string
+	var zoneID *string
+	var correlationID *string
+	var incidentID *string
+	var evidenceID *string
+	if err := rows.Scan(&h.EventID, &h.SiteID, &h.EventType, &deviceID,
+		&zoneID, &correlationID, &h.ObservedAt, &h.NormalizedAt, &incidentID, &evidenceID); err != nil {
+		return Hit{}, fmt.Errorf("eventsearch: scan: %w", err)
+	}
+	if deviceID != nil {
+		h.DeviceID = *deviceID
+	}
+	if zoneID != nil {
+		h.ZoneID = *zoneID
+	}
+	if correlationID != nil {
+		h.CorrelationID = *correlationID
+	}
+	if incidentID != nil {
+		h.IncidentID = *incidentID
+	}
+	if evidenceID != nil {
+		h.EvidenceID = *evidenceID
+	}
+	return h, nil
+}
+
 func (s *Service) scanFreeText(rows pgx.Rows, limit int) (Result, error) {
 	defer rows.Close()
 	hits := make([]Hit, 0, limit)
 	for rows.Next() {
-		var h Hit
-		var incidentID *string
-		var evidenceID *string
-		if err := rows.Scan(&h.EventID, &h.SiteID, &h.EventType, &h.DeviceID,
-			&h.ZoneID, &h.CorrelationID, &h.ObservedAt, &h.NormalizedAt, &incidentID, &evidenceID); err != nil {
-			return Result{}, fmt.Errorf("eventsearch: scan: %w", err)
-		}
-		if incidentID != nil {
-			h.IncidentID = *incidentID
-		}
-		if evidenceID != nil {
-			h.EvidenceID = *evidenceID
+		h, err := scanHit(rows)
+		if err != nil {
+			return Result{}, err
 		}
 		hits = append(hits, h)
 		if len(hits) >= limit {

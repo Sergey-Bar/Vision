@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
@@ -16,12 +17,61 @@ import (
 	"github.com/Sergey-Bar/vision/internal/dbx"
 )
 
+// registerAPIRoutes registers the console's API routes.
+//
+// # The routes that run the CLI are behind `-dev`
+//
+// The development surfaces run a CLI: one of them runs a 200-iteration soak,
+// and the three OPERATOR surfaces run the CLI with a request-supplied incident
+// id.
+//
+// The operator three used to be registered unconditionally, on the grounds that
+// they are "the product's claims, reachable by clicking rather than by knowing
+// which command to run". That is true, and it is not the whole question: a
+// console on plain HTTP with no authentication, serving routes that run a
+// binary with a caller-supplied argument, is a surface anybody who can reach
+// the port can use.
+//
+// The arguments are bounded and there is no shell, so this was never an
+// injection. It was an EXPOSURE: a default server that runs a CLI on request.
+// Behind `-dev` it is a deliberate choice by whoever starts the server, and the
+// demo and the rehearsal both make it, because the judge's walk visits the
+// operations page.
+//
+// It is a function and not inline in `main` so that a test can ask the
+// question -- "is the route there when the flag is off?" -- without starting a
+// server.
+func registerAPIRoutes(mux *http.ServeMux, securityctlPath, repoRoot string, dev bool) {
+	if !dev {
+		log.Print("development surfaces are off; start with -dev to serve /dev, the CLI endpoints " +
+			"and the three operator surfaces that run the CLI")
+		return
+	}
+	mux.HandleFunc("/api/poc", handlePOC(securityctlPath, repoRoot))
+	mux.HandleFunc("/api/acceptance", handleAcceptance(securityctlPath, repoRoot))
+	mux.HandleFunc("/api/rules/lint", handleRulesLint(securityctlPath, repoRoot))
+	mux.HandleFunc("/api/rules/simulate", handleRulesSimulate(securityctlPath, repoRoot))
+	mux.HandleFunc("/api/efficiency", handleEfficiency(securityctlPath, repoRoot))
+	mux.HandleFunc("/api/incident", handleIncident(securityctlPath, repoRoot))
+	mux.HandleFunc("/api/explain", handleExplain(securityctlPath, repoRoot))
+}
+
 func main() {
 	defer func() {
 		if rec := recover(); rec != nil {
 			log.Fatalf("PANIC in main: %v", rec)
 		}
 	}()
+
+	// The development-only surfaces. Off by default, because they run the CLI
+	// and, in one case, a 200-iteration soak, from a request a browser made.
+	dev := flag.Bool("dev", false,
+		"serve the development-only surfaces: the capture-path page and the endpoints that run the CLI")
+	// The port. It was hardcoded, which meant the rehearsal could not run
+	// beside a demo server without the two fighting over 8080.
+	portFlag := flag.String("port", "8080", "the port to listen on")
+	flag.Parse()
+
 	repoRoot := findRepoRoot()
 	if repoRoot == "" {
 		// Refused rather than guessed. This function used to return a hardcoded
@@ -50,48 +100,42 @@ func main() {
 		defer pool.Close()
 	}
 
-	// Static files
-	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir(filepath.Join(repoRoot, "web", "static")))))
-
-	// The SPA builds its assets into web/static/spa/assets and index.html refers to
-	// them at /assets/..., so serve that directory directly.
-	http.Handle("/assets/", http.StripPrefix("/assets/", http.FileServer(http.Dir(filepath.Join(repoRoot, "web", "static", "spa", "assets")))))
+	// Static files. The showcase's pages, stylesheets and scripts are
+	// compiled into the binary, so the server serves the same bytes whether it
+	// was started from a source tree or from a release archive.
+	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub()))))
 
 	// API routes
-	http.HandleFunc("/api/poc", handlePOC(securityctlPath, repoRoot))
-	http.HandleFunc("/api/acceptance", handleAcceptance(securityctlPath, repoRoot))
-	http.HandleFunc("/api/rules/lint", handleRulesLint(securityctlPath, repoRoot))
-	http.HandleFunc("/api/rules/simulate", handleRulesSimulate(securityctlPath, repoRoot))
-
-	// The operator surface. These three are the product's claims, reachable by
-	// clicking rather than by knowing which command to run.
-	http.HandleFunc("/api/efficiency", handleEfficiency(securityctlPath, repoRoot))
-	http.HandleFunc("/api/incident", handleIncident(securityctlPath, repoRoot))
-	http.HandleFunc("/api/explain", handleExplain(securityctlPath, repoRoot))
+	registerAPIRoutes(http.DefaultServeMux, securityctlPath, repoRoot, *dev)
 
 	// Free-text search and grounded chat read the canonical record directly.
-	registerSearchRoutes(repoRoot, pool)
-	registerChatRoutes(repoRoot, pool)
-	registerClipsAndCriticalRoutes(repoRoot, pool)
-	registerCameraRoutes(repoRoot, pool)
+	// The scope the console server acts as: the tenant and the sites, both
+	// configured, neither of them read from a request. See web/scope.go.
+	consoleScope := configuredScope()
+	consoleScope.describeScope()
+	setPrincipal(consoleScope.tenant)
+
+	registerSearchRoutes(repoRoot, pool, consoleScope)
+	registerChatRoutes(repoRoot, pool, consoleScope)
+	registerClipsAndCriticalRoutes(repoRoot, pool, consoleScope)
+	registerCameraRoutes(repoRoot, pool, consoleScope)
 
 	// The console is a third thing: it is the operator's window onto the
 	// product and onto the VMS, so it proxies to both rather than asking the
 	// browser to.
 	registerProxies()
 
-	// The SPA lives under web/static/spa (built by `npm run build` in web/spa).
-	// Its assets are served by the /static/ handler above; its index.html is the
-	// single entry point for every non-API route. Old HTML pages (hub, console,
-	// pipeline, trust, lab, census, operations, ask, live, fleet, chief) redirect
-	// to / so there is one operator surface.
-	spaIndex := filepath.Join(repoRoot, "web", "static", "spa", "index.html")
-	spaHandler := func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, spaIndex)
+	// The pages. Two owners and no others: the showcase owns the root and its
+	// acts, the console owns /console and everything under it. They are
+	// registered on their own mux and mounted at "/", so the root space has
+	// exactly one dispatcher and the API, the proxies and the static files -
+	// which are more specific patterns - still win.
+	pageMux := http.NewServeMux()
+	registerPageRoutes(pageMux)
+	if *dev {
+		pageMux.HandleFunc("/dev", serveDevPage())
 	}
-	for _, p := range []string{"/", "/cameras", "/clips", "/console", "/events", "/incidents", "/pipeline", "/trust", "/lab", "/census", "/operations", "/ask", "/live", "/fleet", "/chief", "/sites", "/users", "/audit", "/settings"} {
-		http.HandleFunc(p, spaHandler)
-	}
+	http.Handle("/", pageMux)
 
 	registerLiveRoutes(repoRoot)
 	registerShowcaseRoutes(repoRoot)
@@ -100,18 +144,47 @@ func main() {
 	registerChiefRoutes(repoRoot)
 	registerReplayRoutes(repoRoot)
 
-	port := "8080"
+	port := *portFlag
 	log.Printf("Starting web UI on http://localhost:%s", port)
 	log.Printf("Using binary at: %s", securityctlPath)
+	// The middleware, in the order they run.
+	//
+	// The request id goes on first, because the access log carries it and a
+	// log line without one is a line nobody can find. The security headers go
+	// on last, because they must be on the response of every handler
+	// including the ones that answer with an error.
 	server := &http.Server{
 		Addr:              ":" + port,
 		ReadHeaderTimeout: 5 * time.Second,
+		Handler: securityHeaders(
+			withRequestID(
+				refuseCrossOrigin(
+					accessLog(http.DefaultServeMux)))),
 	}
 	serveOrFatal(server)
 }
 
 func serveOrFatal(server *http.Server) {
 	log.Fatal(server.ListenAndServe())
+}
+
+// serveDevPage answers /dev, the capture-path runner.
+//
+// It used to be the front door: web/static/index.html, a page with three tabs
+// that ran the capture path, the acceptance criteria and the rule linter. Two
+// front doors on one server is one too many, and the one that was in the way
+// was a page of buttons rather than a claim.
+//
+// It is a development surface, so it is behind -dev, and the pages it drives
+// are behind the same flag.
+func serveDevPage() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.Error(w, "GET only", http.StatusMethodNotAllowed)
+			return
+		}
+		serveEmbedded(w, r, "static/dev.html")
+	}
 }
 
 func mustSecurityctl(repoRoot string) string {

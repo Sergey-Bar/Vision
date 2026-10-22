@@ -12,7 +12,7 @@ if (!container) {
 const root = createRoot(container)
 root.render(
   <QueryClientProvider client={queryClient}>
-    <BrowserRouter>
+    <BrowserRouter basename="/console">
       <Shell />
     </BrowserRouter>
   </QueryClientProvider>

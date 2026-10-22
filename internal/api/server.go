@@ -6,10 +6,22 @@
 // achievable at all — an inline <script> anywhere would mean a CSP with 'unsafe-
 // inline' and no benefit.
 //
-// Every state-changing method requires a CSRF token, every session cookie is
-// HttpOnly + Secure + SameSite, and `tenant_id` is never read from a request
-// body. A `X-Tenant-Id` header is honoured only when it matches the session
-// tenant, and a mismatch is 403 and audited.
+// # There is no login, and this package does not pretend there is
+//
+// The console has no sign-in route, no session, no cookie and no token. Every
+// request runs as a CONFIGURED principal: a role and a site scope, both from
+// configuration. The capability checks are real, and they are the only
+// authorisation this package performs: a role that does not hold
+// `evidence.fetch` does not fetch evidence, whatever the request says.
+//
+// `tenant_id` is never read from a request body, and it is never read from a
+// request header either. The tenant is configuration, and `requestTenant` says
+// so on every log line.
+//
+// The operator's identity is established at the network boundary, by a trusted
+// reverse proxy in front of the console, and not by this package. That posture
+// is D-16 in `docs/decisions.md`; until it is signed, the honest statement is
+// the one above, and `docs/threat-model.md` A3 records what is NOT claimed.
 package api
 
 import (
@@ -36,6 +48,16 @@ import (
 // Server is the HTTP surface.
 type Server struct {
 	Log *slog.Logger
+	// Loops reports the pipeline's loop liveness, for the health endpoint.
+	//
+	// It is a function and not a service because the health endpoint is
+	// registered on the mux directly and has no Deps, and because the state
+	// lives in the pipeline rather than here.
+	//
+	// Nil means the health endpoint cannot say, and it says so by leaving the
+	// member out rather than by reporting an empty set: "no loops" and "nobody
+	// told me about the loops" are different answers.
+	Loops func() []LoopLiveness
 	// Tenant is the site this server serves. Single-site per install, so it is
 	// configuration rather than a routing decision.
 	Tenant string
@@ -46,25 +68,89 @@ type Server struct {
 	// is ALLOWED to do, and the capability checks below are real: a role without
 	// `evidence.fetch` does not fetch evidence, whatever the request says.
 	//
-	// It defaults to the tenant administrator, because an install with no
-	// identity configured has one identity and it is the one that administers.
+	// It defaults to the tenant administrator, because an install that has not
+	// configured an identity has one identity and it is the one that administers.
 	// Narrowing it is a configuration change, not a code change.
 	PrincipalRole identity.Role
+	// TrustProxyAuthHeader names the header a trusted reverse proxy sets with
+	// the OPERATOR'S identity.
+	//
+	// It is empty on a single-operator install, and the console then runs as
+	// the configured principal, which is the behaviour this product shipped
+	// with. It is set on an install that fronts the console with a proxy that
+	// terminates TLS and authenticates the operator.
+	//
+	// The header carries the IDENTITY and not the AUTHORITY: the role and the
+	// site scope stay configured, so a proxy that asserts an operator's name
+	// cannot grant that operator more than the product's capability set
+	// allows. A proxy that could grant capabilities would be a second
+	// authorisation system, and the product would have two.
+	//
+	// The header is only believed when the request arrives from a TRUSTED
+	// PROXY, because a header is forgeable by anybody who can reach the port.
+	// The proxy's obligations -- strip the header from client requests, bind
+	// the console to the proxy's socket -- are in `docs/decisions.md` D-16 and
+	// in `deploy/`.
+	TrustProxyAuthHeader string
 	// PrincipalSites are the sites the configured principal may see.
 	//
-	// Empty means every site, which is the single-site install's case. A
-	// principal scoped to a site it is not assigned to is refused, and the
-	// refusal is the same answer as "no such incident" so the refusal does not
-	// disclose what exists.
+	// Empty means the principal sees NO site, unless PrincipalSite names one:
+	// a principal with an empty scope is a misconfigured assignment, and a
+	// misconfigured assignment denies rather than opens. A principal scoped to
+	// a site it is not assigned to is refused, and the refusal is the same
+	// answer as "no such incident" so the refusal does not disclose what
+	// exists.
 	PrincipalSites []string
+	// PrincipalSite is the install's own site, used as the configured
+	// principal's scope when PrincipalSites is empty.
+	//
+	// A single-site install has exactly one site, and an install that NAMES
+	// its site and then refuses to show that site to its own principal is a
+	// configuration that reads as "nothing to see" on every screen: the site
+	// view 404s, the incident detail 404s, and the clip content 404s, while
+	// the incident LIST -- which reads through a different path -- keeps
+	// answering. The list and the detail disagreeing is the symptom, and it
+	// is a symptom of the scope never having been assigned.
+	//
+	// It is configuration, not a request: nothing the caller sends can widen
+	// it, and an install that does not name a site still has no scope.
+	PrincipalSite string
+	// PrincipalName is the actor every audited action is attributed to.
+	//
+	// The ledger's `actor` column cannot be empty and cannot be a constant
+	// nobody chose: an audit row that says the actor was "" cannot be joined
+	// to anything, and an audit row that says the actor was "console" on
+	// every install in every deployment is a row that says nothing about
+	// WHO. The default is the console, because that is what the configured
+	// principal is: the install's own operator surface.
+	PrincipalName string
+	// PrincipalUserID is the identifier the decision records name.
+	//
+	// A disposition's `actor_id` is NOT NULL, and the incidents service
+	// refuses a disposition with no actor. The configured principal has no
+	// row in `users` -- there is no login, so there is no user to have one --
+	// so the identifier is the configured principal's own name.
+	PrincipalUserID string
+	// PrincipalSession is the session the configured principal acts in.
+	//
+	// It is the key the attention metric deduplicates on: one
+	// `incident.opened` row per incident per session, so a refresh is not a
+	// new bout of attention. With a configured principal there is no login
+	// and therefore no session cookie, and an EMPTY session id would make
+	// every read a new bout -- a refresh counter, which rewards an operator
+	// for pressing F5 and makes attention_minutes a measure of curiosity
+	// rather than of attention.
+	//
+	// Two principals that act in different sessions are two operators as far
+	// as the metric is concerned, which is what the metric has always meant.
+	PrincipalSession string
 	// Handlers registers the API and console routes. Kept as a hook so this
 	// package owns the security properties and the application owns the routes.
 	Routes func(*http.ServeMux)
 
-	// CookieName is the session cookie's name.
-	CookieName string
-	// Secure requires TLS. There is no plaintext fallback: a console that
-	// authenticates over plain HTTP hands a session cookie to the network.
+	// Secure requires TLS. There is no plaintext fallback, because a console
+	// that talks to a browser over plain HTTP hands its operator's traffic to
+	// the network.
 	Secure bool
 	// BehindProxy says the listener is behind a TLS-terminating proxy, which
 	// changes only how the request scheme is read.
@@ -100,8 +186,40 @@ type Server struct {
 	// pool the process was about to close.
 	httpServer *http.Server
 	start      time.Time
-	now        func() time.Time
+	// clockFn is the server's INJECTABLE time source. Nil means the wall
+	// clock, and it is nil in every production install, because the daemon
+	// never calls SetClock.
+	//
+	// It is named `clockFn` and not `now` because the accessor is a METHOD
+	// called `now()`, and a field and a method with one name is a call site
+	// that compiles and panics: the coverage panel reached past the accessor
+	// and called `s.now()` on a nil field, so the live product returned 500
+	// for every request the panel had something to report — which is to say,
+	// the panel crashed exactly when it found something.
+	clockFn func() time.Time
 }
+
+// EnforcedSecuritySchemes names the OpenAPI security schemes this server
+// enforces, spelled the way the published document spells them.
+//
+// There is one, and what it stands for is a statement about AUTHORIZATION
+// rather than about a credential this server checks: there is no login, so
+// there is no cookie and no token to present, and every route on this surface
+// runs behind a capability check against the CONFIGURED principal. An
+// operation that names no scheme is therefore an operation with no check on
+// it, and the two health routes are the only ones.
+//
+// The list lives here, next to the code that does the enforcing, because a
+// published security scheme that nothing enforces is a claim an auditor reads
+// as a protection. The gate in openapi_contract_test.go compares the document
+// with this list in both directions: a scheme the document declares and this
+// list does not name is a protection nobody provides, and a scheme this list
+// names and the document does not declare is a protection the document hides.
+//
+// It is a list of one, and it is meant to stay a short list. A scheme that
+// needs a credential of its own is a scheme somebody has to spend, and the
+// product has nothing to spend.
+var EnforcedSecuritySchemes = []string{"serviceBearer"}
 
 // SetStartTime records when the process began serving.
 //
@@ -126,7 +244,28 @@ func (s *Server) StartedAt() time.Time {
 func (s *Server) SetClock(now func() time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.now = now
+	s.clockFn = now
+}
+
+// now is the server's time source, and it CANNOT be nil.
+//
+// It is a method and not a field because a field can be nil and a nil clock
+// called on a live route is a panic. The coverage panel reached past the
+// accessor and called the field directly, and the daemon — which never
+// installs a clock — answered 500 for every request the panel had something
+// to report. The panel crashed exactly when it found something, which is the
+// one moment it exists for.
+//
+// Every caller goes through here. The injectable source is `clockFn`, and
+// `SetClock` is the only way to set it.
+func (s *Server) now() time.Time {
+	s.mu.Lock()
+	fn := s.clockFn
+	s.mu.Unlock()
+	if fn == nil {
+		return time.Now().UTC()
+	}
+	return fn()
 }
 
 // Shutdown stops accepting connections and waits for in-flight requests, bounded
@@ -152,18 +291,24 @@ func (s *Server) Shutdown(ctx context.Context) error {
 //
 // The layers live here rather than in ListenAndServe, because a security
 // property that only exists on one call path is a property that a test, a
-// benchmark, or a future embedder silently does without. The CSRF check in
-// particular was on the listener only, which meant Handler served every
-// state-changing route with no token at all.
+// benchmark, or a future embedder silently does without.
 //
 // The wrapping order is load-bearing. Middleware runs outermost-first, so
-// requireCSRF is applied *after* the layers that decorate a response: a CSRF
-// rejection is an error response like any other and must carry the same
-// security headers and the same X-Request-Id as a success, and must appear in
-// the access log. With requireCSRF outermost it was none of those - four
-// WriteError calls emitting bare 401/403 with no CSP, no nosniff, no
-// frame-deny, no HSTS, no request id, and nothing in the log. A rejected
-// forgery was the one response an attacker could read the shape of for free.
+// every layer that can refuse a request is applied *after* the layers that
+// decorate a response: a refusal is an error response like any other and must
+// carry the same security headers and the same X-Request-Id as a success, and
+// must appear in the access log.
+//
+// There is no CSRF layer and no tenant-matching layer here, because this
+// product has neither: there is no session, no cookie and no token to protect,
+// and the tenant is configuration rather than something a request carries.
+//
+// The layer that IS here for the identity is `requireProxyIdentity`, and it is
+// a refusal rather than a decoration: in proxy mode a request that did not
+// come from the trusted proxy never reaches a handler.
+//
+// The layers that hold without a session are the ones that are here: the CSP,
+// the security headers, the panic recovery, the access log and the request id.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	if s.Routes != nil {
@@ -176,6 +321,10 @@ func (s *Server) Handler() http.Handler {
 	h = s.contentSecurityPolicy(h)
 	h = s.securityHeaders(h)
 	h = s.recoverPanics(h)
+	// The proxy-identity refusal is INSIDE the layers that decorate a response,
+	// so a refusal carries the same security headers and the same request id as
+	// a success, and appears in the access log.
+	h = s.requireProxyIdentity(h)
 	h = s.logRequests(h)
 	h = s.assignRequestID(h)
 	return h
@@ -268,7 +417,8 @@ func (s *Server) logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := s.clock()
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
-		next.ServeHTTP(rec, r)
+		holder := &siteHolder{}
+		next.ServeHTTP(rec, r.WithContext(context.WithValue(r.Context(), siteHolderKey{}, holder)))
 		if s.Log == nil {
 			return
 		}
@@ -282,23 +432,90 @@ func (s *Server) logRequests(next http.Handler) http.Handler {
 			"duration_ms", s.clock().Sub(start).Milliseconds(),
 			"remote", s.clientIP(r),
 			"tenant_id", s.requestTenant(r),
-			"site_id", r.Header.Get("X-Site-Id"),
+			"site_id", s.requestSite(r, holder),
 			"request_id", reqID,
 		)
 	})
 }
 
+// siteHolder is where a route records the site it resolved.
+//
+// A pointer, because a context is immutable downward and the access log reads
+// upward: the line is written after the handler returns, and the site the
+// request actually touched is something only the route knows.
+//
+// It holds a string rather than being one, because "the route resolved no site"
+// and "the route resolved the empty site" are the same answer. Neither is a
+// site, and a log line that says which of the two it is would be a log line
+// about the absence of a log line.
+type siteHolder struct{ site string }
+
+type siteHolderKey struct{}
+
+// recordSite notes the site a request was about, for the access log.
+//
+// It is called by the route wrappers AFTER the capability check has accepted
+// the site, so the value in the log is a site this principal was allowed to
+// reach rather than one a caller named.
+func recordSite(r *http.Request, site string) {
+	if holder, ok := r.Context().Value(siteHolderKey{}).(*siteHolder); ok {
+		holder.site = site
+	}
+}
+
+// requestSite is the site this request is scoped to.
+//
+// It is NOT a request header. The line used to carry the raw `X-Site-Id` header
+// beside the VALIDATED tenant, and a reader had no way to tell which of the
+// two fields to believe: one was configuration the server checked and the other
+// was a string a caller sent. A log line that can be made to say anything is
+// not a log line.
+//
+// The value is the site the request actually touched, when a route resolved one
+// and the capability check accepted it, and otherwise the principal's own scope
+// when that scope is exactly one site. A principal scoped to several sites has
+// no single site, and an empty field is the honest answer for "not scoped to
+// one site" rather than a guess about which one.
+//
+// It is bounded, because it goes into a log line and a log line that can be
+// made arbitrarily long is a log line that can cost a disk.
+func (s *Server) requestSite(r *http.Request, holder *siteHolder) string {
+	if holder != nil && holder.site != "" {
+		return boundLogField(holder.site)
+	}
+	p := s.OpenPrincipal(r)
+	if len(p.SiteScope) == 1 {
+		return boundLogField(p.SiteScope[0])
+	}
+	return ""
+}
+
+// maxLogField bounds a value that goes into a log line.
+const maxLogField = 128
+
+func boundLogField(v string) string {
+	if len(v) <= maxLogField {
+		return v
+	}
+	return v[:maxLogField] + "..."
+}
+
 // requestTenant is the tenant this request is running as.
 //
 // The server is single-tenant, so the configured tenant is the honest answer
-// and the header is only reported. A header is never *promoted* to the tenant:
-// requireTenant refuses a mismatch, and a log line that echoed an unvalidated
-// header would be a line that can be made to say anything.
-func (s *Server) requestTenant(r *http.Request) string {
-	if s.Tenant != "" {
-		return s.Tenant
-	}
-	return r.Header.Get("X-Tenant-Id")
+// and the ONLY answer. It used to fall back to a request header when the
+// configuration carried no tenant, and the comment above it said a header was
+// never promoted to the tenant - which is exactly what that fallback did, on
+// exactly the install where the promotion was least wanted: one with no tenant
+// configured at all.
+//
+// A header is attacker-controlled, and this product has no session for it to be
+// matched against, so a header is an instruction rather than an authorisation.
+// The tenant is configuration, and an install with no tenant configured is a
+// misconfigured install that says so in its logs rather than a tenant that
+// anybody can name.
+func (s *Server) requestTenant(_ *http.Request) string {
+	return s.Tenant
 }
 
 // newRequestID is the correlation id for a request that arrived without one.
@@ -346,7 +563,7 @@ func (s *statusRecorder) WriteHeader(code int) {
 	s.ResponseWriter.WriteHeader(code)
 }
 
-// openPrincipal is the principal every request runs as when login is removed.
+// OpenPrincipal is the principal every request runs as.
 //
 // The console has no login, so there is no session and no user. What there IS
 // is a CONFIGURED principal: a role and a site scope, both from configuration,
@@ -356,18 +573,143 @@ func (s *statusRecorder) WriteHeader(code int) {
 //
 // The default role is the tenant administrator, because an install that has not
 // configured an identity has one identity and it is the one that administers.
-func (s *Server) openPrincipal(_ *http.Request) identity.Principal {
+//
+// The SITE SCOPE is the install's, for the same reason: it comes from
+// configuration and not from the request, so the principal's scope is decided
+// once, here, and every route reads the same answer. A route that decided the
+// scope for itself is a route that can disagree with its siblings, and the
+// symptom of that disagreement is a list route answering while a detail route
+// 404s on the same record.
+//
+// The ACTOR and the SESSION are the install's too. The actor is who the
+// ledger says did it, and the session is what makes a second read of an
+// incident the same operator looking again rather than a second operator
+// looking for the first time. Both are decided here, from configuration, and
+// neither can be widened or narrowed by anything the caller sends.
+//
+// # The one thing that comes from the request
+//
+// In PROXY MODE -- `TrustProxyAuthHeader` set -- the operator's NAME comes
+// from the header the proxy set, and nothing else does. The role, the scope,
+// the tenant and the session are still configuration.
+//
+// That asymmetry is the control. The proxy says WHO; the product says WHAT.
+// A proxy that could also say what would be a second authorisation system, and
+// the product would then have two, and the stricter one would be the one
+// nobody reads.
+func (s *Server) OpenPrincipal(r *http.Request) identity.Principal {
 	role := s.PrincipalRole
 	if role == "" {
 		role = identity.RoleTenantAdmin
 	}
+	sites := s.PrincipalSites
+	if len(sites) == 0 && s.PrincipalSite != "" {
+		sites = []string{s.PrincipalSite}
+	}
+	name := s.PrincipalName
+	if name == "" {
+		name = "console"
+	}
+	// The proxy's assertion about WHO, when there is one.
+	//
+	// The header is read here and nowhere else, and it is read only after
+	// `requireProxyIdentity` has established that the request came from a
+	// trusted proxy. A request that arrived without the header, or from an
+	// untrusted peer, never reaches a handler at all.
+	if s.TrustProxyAuthHeader != "" && r != nil {
+		if asserted := strings.TrimSpace(r.Header.Get(s.TrustProxyAuthHeader)); asserted != "" {
+			name = asserted
+		}
+	}
+	userID := s.PrincipalUserID
+	if userID == "" {
+		userID = name
+	}
+	session := s.PrincipalSession
+	if session == "" {
+		session = name
+	}
 	return identity.Principal{
 		TenantID:       s.Tenant,
+		UserID:         userID,
+		Username:       name,
 		Roles:          []identity.Role{role},
-		SiteScope:      s.PrincipalSites,
+		SiteScope:      sites,
+		SessionID:      session,
 		MFAVerified:    true,
-		ServiceAccount: true,
+		ServiceAccount: s.TrustProxyAuthHeader == "",
 	}
+}
+
+// requireProxyIdentity is the proxy-mode layer.
+//
+// It is the D-16 posture in code: the console's identity is the network
+// boundary's assertion, and the assertion is only believed when it arrives from
+// a trusted proxy.
+//
+// Three refusals, and they are three different answers:
+//
+//   - the request did not come from a trusted proxy: 403. The peer's POSITION
+//     is checked FIRST, and it is checked whatever the request carries, so the
+//     refusal does not depend on the header and therefore does not tell a
+//     stranger whether they guessed the header's name right.
+//   - the header is absent in proxy mode: 401. The proxy was supposed to
+//     authenticate and did not, or the request did not come through it.
+//   - the header is present and the request came from a trusted proxy: the
+//     request is allowed, and the principal is resolved from the header.
+//
+// The peer check is first because the header cannot be believed from a peer
+// whose position is not trusted, and because a refusal that varies with the
+// header is a refusal that leaks.
+//
+// The second refusal is the whole control, and it is the one a deployment
+// forgets: a proxy that does not STRIP the header from client requests turns
+// the header into something a stranger can set. The proxy's obligations are
+// in `docs/decisions.md` D-16 and in `deploy/`, and the second refusal is what
+// catches a deployment that skipped them.
+//
+// A request from an untrusted peer is refused EVEN IF it carries no header,
+// because in proxy mode there is no identity to serve it under.
+func (s *Server) requireProxyIdentity(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.TrustProxyAuthHeader == "" {
+			// Not proxy mode: the configured principal, which is the behaviour
+			// this product shipped with.
+			next.ServeHTTP(w, r)
+			return
+		}
+		if !s.fromTrustedProxy(r) {
+			WriteError(w, http.StatusForbidden, "forbidden",
+				"This request did not arrive from the trusted proxy, so its identity header "+
+					"is not believed.", requestID(r))
+			return
+		}
+		asserted := strings.TrimSpace(r.Header.Get(s.TrustProxyAuthHeader))
+		if asserted == "" {
+			WriteError(w, http.StatusUnauthorized, "unauthenticated",
+				"This console is behind an authenticating proxy and the request did not "+
+					"carry the identity header. Go through the proxy.", requestID(r))
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// fromTrustedProxy reports whether the request arrived from a configured proxy.
+//
+// It is the PEER's address and not a forwarded header, because a forwarded
+// header is chosen by the caller. The peer is the socket, and the socket is
+// the one thing about a request the caller does not choose.
+func (s *Server) fromTrustedProxy(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	peer := net.ParseIP(host)
+	if peer == nil {
+		return false
+	}
+	return s.isTrustedProxy(peer)
 }
 
 // requireCapability is the wrapper for a capability-gated handler.
@@ -379,7 +721,7 @@ func (s *Server) openPrincipal(_ *http.Request) identity.Principal {
 // that lies.
 func (s *Server) requireCapability(c identity.Capability, h func(http.ResponseWriter, *http.Request, identity.Principal)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		p := s.openPrincipal(r)
+		p := s.OpenPrincipal(r)
 		if !p.Can(c) {
 			WriteError(w, http.StatusForbidden, "capability_denied",
 				"The configured principal does not hold "+string(c)+".", requestID(r))
@@ -401,7 +743,7 @@ func (s *Server) requireCapabilityAtSite(
 	h func(http.ResponseWriter, *http.Request, identity.Principal),
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		p := s.openPrincipal(r)
+		p := s.OpenPrincipal(r)
 		if !p.Can(c) {
 			WriteError(w, http.StatusForbidden, "capability_denied",
 				"The configured principal does not hold "+string(c)+".", requestID(r))
@@ -411,6 +753,12 @@ func (s *Server) requireCapabilityAtSite(
 			WriteError(w, http.StatusNotFound, "not_found",
 				"No such record, or you are not assigned to its site.", requestID(r))
 			return
+		} else if site != "" {
+			// The site was accepted, so it is the site the access log names.
+			// Recorded after the check and not before, so a refused request
+			// does not write a site the principal was not allowed to reach
+			// into the log.
+			recordSite(r, site)
 		}
 		h(w, r, p)
 	}
@@ -506,7 +854,62 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	}
 	body["slo"] = slo
 
+	// The pipeline's loops.
+	//
+	// A loop that has stopped is an outage that looks like a healthy core: the
+	// process keeps answering this endpoint, the backlog grows, and nothing says
+	// so. The loops are named here, and the ones that are not running are named
+	// separately, because "the product is up" and "the product is doing its
+	// work" are different answers and an operator needs the second one.
+	//
+	// The status stays "ok" either way. A readiness probe that turns the
+	// platform unready because a loop is down moves the failure to every
+	// replica at once, and the same reasoning that keeps a breached objective
+	// out of the status keeps a stopped loop out of it: the operator is told,
+	// and the orchestrator is not lied to.
+	if s.Loops != nil {
+		loops := s.Loops()
+		stopped := []string{}
+		panicked := []string{}
+		for _, l := range loops {
+			if !l.Running {
+				stopped = append(stopped, l.Name)
+			}
+			if l.Panics > 0 {
+				panicked = append(panicked, l.Name)
+			}
+		}
+		body["loops"] = map[string]any{
+			"note": "which pipeline loops are running. A loop that has stopped is an outage " +
+				"that looks like a healthy core, so the stopped ones are named here.",
+			"running":  len(loops) - len(stopped),
+			"stopped":  stopped,
+			"panicked": panicked,
+		}
+	}
+
 	WriteJSON(w, http.StatusOK, body)
+}
+
+// LoopLiveness is one pipeline loop's liveness, as the health endpoint needs
+// it.
+//
+// It is the API's own shape rather than the pipeline's, and the wiring
+// translates between them: two packages that both knew both types would be one
+// package, and the pipeline would depend on the API's vocabulary for no reason
+// but convenience.
+type LoopLiveness struct {
+	// Name is the loop's name.
+	Name string
+	// Running says whether the loop's goroutine is alive.
+	Running bool
+	// LastBeat is when the loop last reported in.
+	LastBeat time.Time
+	// Panics is how many times the loop has panicked.
+	//
+	// A loop that panicked once and came back is a different thing from a loop
+	// that panics every pass, and the count is what tells them apart.
+	Panics int
 }
 
 // sloNotEvaluated is the one status this endpoint must not get wrong. "met" from
@@ -554,12 +957,12 @@ func (s *Server) startedAt() time.Time {
 // clock is the Server's time source, so uptime is testable without a sleep.
 func (s *Server) clock() time.Time {
 	s.mu.Lock()
-	now := s.now
+	fn := s.clockFn
 	s.mu.Unlock()
-	if now == nil {
+	if fn == nil {
 		return time.Now()
 	}
-	return now()
+	return fn()
 }
 
 // clientIP reads the client address.

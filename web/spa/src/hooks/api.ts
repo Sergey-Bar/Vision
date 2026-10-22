@@ -10,14 +10,12 @@ import type {
   ChatResponse,
   ChatParams,
   Clip,
-  CriticalStream,
   Camera,
   VideoUploadResponse,
   VideoYouTubeRequest,
   VideoYouTubeResponse,
   RulesFromTextRequest,
   RulesFromTextResponse,
-  AIRuntimeStatus,
 } from '../api'
 
 export const queryClient = new QueryClient({
@@ -79,47 +77,26 @@ export function useClips() {
   })
 }
 
-// ---------- Critical ----------
-
-export function useCritical(limit = 5) {
-  return useQuery({
-    queryKey: ['critical', limit],
-    queryFn: async () => {
-      const res = await get(`/api/critical?limit=${limit}`)
-      const data = (await res.json()) as { streams: CriticalStream[] }
-      return data.streams
-    },
-  })
-}
-
 // ---------- Cameras ----------
 
+// The cameras the platform has heard of.
+//
+// This hook has no fallback list, and that is the point. It used to answer
+// with eight invented cameras at three invented sites when the endpoint was
+// unreachable, and an invented camera list is the worst kind of answer: it
+// looks exactly like a real one, and an operator would take it as the
+// inventory. An unreachable endpoint says the inventory is unknown, and that is
+// a different thing from an empty inventory.
 export function useCameras() {
   return useQuery({
     queryKey: ['cameras'],
     queryFn: async () => {
-      try {
-        const res = await get('/api/cameras')
-        const data = (await res.json()) as { cameras: Camera[] }
-        return data.cameras
-      } catch {
-        // Fall back to demo cameras when the API endpoint is unavailable
-        return DEMO_CAMERAS
-      }
+      const res = await get('/api/cameras')
+      const data = (await res.json()) as { cameras: Camera[] }
+      return data.cameras ?? []
     },
   })
 }
-
-const DEMO_CAMERAS: Camera[] = [
-  { id: 'cam-1', name: 'Entrance North', siteId: 'North Campus', status: 'online', rtsp: undefined },
-  { id: 'cam-2', name: 'Entrance South', siteId: 'North Campus', status: 'online', rtsp: undefined },
-  { id: 'cam-3', name: 'Aisle 4', siteId: 'West Warehouse', status: 'online', rtsp: undefined },
-  { id: 'cam-4', name: 'Aisle 7', siteId: 'West Warehouse', status: 'degraded', rtsp: undefined },
-  { id: 'cam-5', name: 'Loading Dock', siteId: 'Downtown Hub', status: 'offline', rtsp: undefined },
-  { id: 'cam-6', name: 'Parking A', siteId: 'Downtown Hub', status: 'online', rtsp: undefined },
-  { id: 'cam-7', name: 'Parking B', siteId: 'Downtown Hub', status: 'online', rtsp: undefined },
-  { id: 'cam-8', name: 'Back Office', siteId: 'North Campus', status: 'offline', rtsp: undefined },
-]
 
 // ---------- Video Upload ----------
 
@@ -181,7 +158,7 @@ export function useAIRuntime() {
         available: ai?.ok ?? false,
         reason: ai?.detail ?? null,
         model: null,
-      } as AIRuntimeStatus
+      }
     },
     refetchInterval: 10_000,
   })

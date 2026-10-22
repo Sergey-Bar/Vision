@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react'
-import { Activity, ChevronRight, Menu } from 'lucide-react'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from './ui/dropdown-menu'
+import { Activity, ChevronRight, Menu, Search } from 'lucide-react'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from './ui/dropdown-menu'
+import { Wordmark } from './Mark'
+import { usePalette } from './CommandPalette'
 import { useAIRuntime } from '@/hooks/api'
-import { useIncidents } from '@/hooks/product'
+import { useIncidents, usePrincipal } from '@/hooks/product'
+import { useSiteClock } from '@/lib/site'
 
 // The top bar.
 //
@@ -16,80 +18,108 @@ import { useIncidents } from '@/hooks/product'
 // something.
 //
 // The clock is the SITE's, not the host's, and it carries its offset: a time
-// without an offset is a time two people will read differently.
+// without an offset is a time two people will read differently. When the site
+// has not told the console which timezone it is in, the clock says UTC rather
+// than quietly using the browser's.
 export function TopBar({ onMenu }: { onMenu: () => void }) {
-  const [now, setNow] = useState(new Date())
-  useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), 1000)
-    return () => clearInterval(id)
-  }, [])
-
-  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone
-  const clock = new Intl.DateTimeFormat('en-GB', {
-    timeZone: zone,
-    hour12: false,
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    timeZoneName: 'shortOffset',
-  }).format(now)
-
+  const { clock, zone, known } = useSiteClock()
   const { data: aiRuntime } = useAIRuntime()
   const { data: incidents } = useIncidents(50)
+  const { data: principal } = usePrincipal()
+  const palette = usePalette()
+
   const open = (incidents ?? []).filter((i) => i.state === 'open' || i.state === 'detected').length
 
   return (
-    <header className="h-22 border-b border-white/10 bg-black/50 backdrop-blur-3xl flex items-center justify-between px-5 sm:px-10 z-50 sticky top-0">
-      <div className="flex items-center gap-5">
-        {/* The navigation is a drawer on a narrow screen, and this is the button
-            that opens it. It is hidden on the wide screens, where the rail is
-            always there. */}
+    <header className="h-bar border-b border-line bg-bg flex items-center justify-between px-5 sm:px-6 sticky top-0 z-50">
+      <div className="flex items-center gap-4 min-w-0">
+        {/* The navigation is a drawer on a narrow screen, and this is the
+            button that opens it. It is hidden on the wide screens, where the
+            rail is always there. */}
         <button
           onClick={onMenu}
-          className="lg:hidden p-3 -ml-3 text-text-muted hover:text-text hover:bg-white/5 rounded-2xl transition-all duration-300"
+          className="lg:hidden -ml-2 p-2 text-text-muted hover:text-text transition-colors duration-1 ease-out"
           aria-label="Open navigation"
         >
-          <Menu size={20} />
+          <Menu size={18} />
         </button>
-        <div className="flex items-center gap-4">
-          <div className="w-12 h-12 rounded-2xl bg-accent flex items-center justify-center text-[14px] font-black tracking-wider text-white shadow-lg shadow-accent/50 glow-accent">
-            V
-          </div>
-          <span className="text-lg font-black text-text tracking-tight hidden sm:inline">Vision VMS</span>
-        </div>
+        <a href="/console" className="flex items-center min-w-0 hover:opacity-90 transition-opacity duration-1 ease-out">
+          <Wordmark />
+        </a>
       </div>
-      <div className="flex items-center gap-8">
-        <div className="hidden sm:flex items-center gap-4 px-5 py-2.5 rounded-full border border-white/10 bg-black/40 text-[11px] font-black">
-          <span
-            className={`w-3 h-3 rounded-full animate-pulse-green shadow-lg ${
-              aiRuntime?.available ? 'bg-success shadow-success/40' : 'bg-warning shadow-warning/40'
-            }`}
-          />
-          <span className="text-text-muted">{clock}</span>
+
+      <div className="flex items-center gap-5 sm:gap-6">
+        <div className="hidden sm:flex items-center gap-2 text-[12px] text-text-dim tabular-nums">
+          <span>{clock}</span>
+          <span className="text-text-dim/70">{known ? zone : 'UTC (site zone unknown)'}</span>
         </div>
-        <div className="hidden sm:flex items-center gap-4 px-5 py-2.5 rounded-full border border-white/10 bg-black/40 text-[11px] font-black">
-          <Activity size={15} className="text-accent" />
-          <span className="text-text-muted">{open} open</span>
+
+        {/* The AI runtime. It does not pulse: a pulsing dot beside a number
+            that changes is a page that reflows while somebody is reading
+            it, and the word beside the dot says the same thing without
+            moving. */}
+        <div className="hidden sm:flex items-center gap-2 text-[12px] text-text-dim">
+          <span aria-hidden="true" className={aiRuntime?.available ? 'text-ok-ink' : 'text-warn-ink'}>
+            {aiRuntime?.available ? '●' : '▲'}
+          </span>
+          <span>{aiRuntime?.available ? 'AI ready' : 'AI unavailable'}</span>
         </div>
+
+        <div className="flex items-center gap-2 text-[12px] text-text-dim">
+          <Activity size={14} className="text-text-dim" aria-hidden="true" />
+          <span className="tabular-nums">{open}</span>
+          <span className="hidden sm:inline">open</span>
+        </div>
+
+        {/* ONE search. The button is here because the operator's hands are on
+            the keyboard, and the key is ⌘K. The button exists for the ones
+            whose hands are not. */}
+        <button
+          onClick={palette.open}
+          className="flex items-center gap-2 rounded border border-line px-3 py-1.5 text-[12px] text-text-dim hover:text-text hover:bg-bg-elevated transition-colors duration-1 ease-out"
+          aria-label="Search the record"
+        >
+          <Search size={14} aria-hidden="true" />
+          <span className="hidden sm:inline">Search</span>
+          <kbd className="hidden sm:inline rounded border border-line px-1.5 py-0.5 font-mono text-[10px]">
+            ⌘K
+          </kbd>
+        </button>
+
         <DropdownMenu>
-          <DropdownMenuTrigger className="flex items-center gap-4 px-5 py-2.5 rounded-3xl text-[11px] font-black text-text-muted hover:text-text hover:bg-white/5 transition-all duration-300 group">
-            <span className="w-8 h-8 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-[10px] font-black text-text-dim">
+          <DropdownMenuTrigger className="flex items-center gap-2 text-[12px] text-text-muted hover:text-text transition-colors duration-1 ease-out group">
+            <span className="h-7 w-7 rounded border border-line bg-bg-elevated flex items-center justify-center text-[10px] font-medium text-text-dim">
               SP
             </span>
-            <span>Service principal</span>
-            <ChevronRight size={15} className="opacity-50 group-hover:opacity-100 transition-opacity duration-300" />
+            <span className="hidden sm:inline">Service principal</span>
+            <ChevronRight size={14} className="opacity-50 group-hover:opacity-100 transition-opacity duration-1 ease-out" />
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-72 bg-black/95 border border-white/10 rounded-3xl p-3 shadow-2xl backdrop-blur-md">
-            <div className="px-4 py-3">
-              <div className="text-[10px] font-black uppercase tracking-[0.12em] text-text-dim">Acting identity</div>
-              <div className="mt-1 text-[13px] font-black text-text">The product's configured principal</div>
-              <div className="mt-1 text-[11px] text-text-dim">
+          <DropdownMenuContent align="end" className="w-72 rounded-lg border border-line bg-bg-panel p-1.5">
+            <div className="px-3 py-2.5">
+              <div className="font-mono text-[10px] font-medium uppercase tracking-[0.1em] text-text-dim">
+                Acting identity
+              </div>
+              <div className="mt-1 text-[13px] font-semibold text-text">The product's configured principal</div>
+              <div className="mt-1 text-[12px] leading-[18px] text-text-dim">
                 This console has no login. Every action in the ledger is attributed to the
                 principal the API is configured with, and there is no person to sign out of.
               </div>
+              {principal && (
+                <dl className="mt-3 grid grid-cols-[88px_1fr] gap-x-3 gap-y-1 text-[12px]">
+                  <dt className="font-mono text-[10px] uppercase tracking-[0.06em] text-text-dim">tenant</dt>
+                  <dd className="text-text-muted font-mono text-[11px] break-all">{principal.tenantId}</dd>
+                  <dt className="font-mono text-[10px] uppercase tracking-[0.06em] text-text-dim">roles</dt>
+                  <dd className="text-text-muted">{(principal.roles ?? []).join(', ') || 'none'}</dd>
+                  <dt className="font-mono text-[10px] uppercase tracking-[0.06em] text-text-dim">site scope</dt>
+                  <dd className="text-text-muted font-mono text-[11px] break-all">
+                    {(principal.siteScope ?? []).join(', ') || 'every site in the tenant'}
+                  </dd>
+                </dl>
+              )}
             </div>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem className="text-[14px] font-medium py-3">Settings</DropdownMenuItem>
+            {/* The Settings item is gone. The page has its own route, and a
+                dropdown item that does not go to the page is a lie about where
+                the page is. */}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

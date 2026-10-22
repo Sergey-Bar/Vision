@@ -73,7 +73,14 @@ func run() int {
 	}
 
 	if write {
-		b := covercheck.Derive(pkgs, module, "atomic", covercheck.DefaultMargin, time.Now().Format("2006-01-02"), build)
+		// The file's own excluded list is carried over, so writing the
+		// baseline does not quietly floor the packages the file had
+		// deliberately left out.
+		excluded := []string(nil)
+		if existing, err := covercheck.LoadBaseline(baseline); err == nil {
+			excluded = existing.Excluded
+		}
+		b := covercheck.Derive(pkgs, module, "atomic", covercheck.DefaultMargin, time.Now().Format("2006-01-02"), build, excluded)
 		if err := refusePartialBaseline(baseline, b, force); err != nil {
 			fmt.Fprintf(os.Stderr, "covercheck: %v\n", err)
 			return 1

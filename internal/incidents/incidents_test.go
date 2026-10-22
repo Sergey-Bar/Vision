@@ -132,6 +132,131 @@ func aDecision() rules.Decision {
 	}
 }
 
+// TestTheAttentionQueueIsOrderedAndDecays
+//
+// The queue is the product's order, and the calibrated engine's queue decays
+// with recency.
+//
+// The decay is a property of the QUEUE and not of the incident: the stored
+// score does not change, and the queue's order does. An incident that is
+// older than the half-life carries half its score in the queue, and one that
+// is older than four half-lives carries an eighth.
+func TestTheAttentionQueueIsOrderedAndDecays(t *testing.T) {
+	svc, tenant, site := service(t)
+	ctx := context.Background()
+	raw := testutil.Pool(t)
+
+	seedEvent(t, tenant, site, "evt-1", "src-1", "motion", time.Now().UTC())
+	seedEvent(t, tenant, site, "evt-2", "src-2", "motion", time.Now().UTC())
+
+	// The higher-scoring incident, and the lower-scoring one.
+	high, err := svc.CreateIncident(ctx, incidents.Create{
+		TenantID: tenant, SiteID: site,
+		Decision: aDecision(), RuleBundleVersion: "0.1.0",
+		BundleContentHash: strings.Repeat("d", 64), PolicyVersion: "p1",
+		Title: "Camera offline", ThreatScore: 90,
+	})
+	if err != nil {
+		t.Fatalf("CreateIncident: %v", err)
+	}
+	low, err := svc.CreateIncident(ctx, incidents.Create{
+		TenantID: tenant, SiteID: site,
+		Decision: aDecision(), RuleBundleVersion: "0.1.0",
+		BundleContentHash: strings.Repeat("d", 64), PolicyVersion: "p1",
+		Title: "Camera offline", ThreatScore: 20,
+	})
+	if err != nil {
+		t.Fatalf("CreateIncident: %v", err)
+	}
+
+	items, err := svc.ListAttention(ctx, tenant, site, 50)
+	if err != nil {
+		t.Fatalf("ListAttention: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("the queue holds %d item(s), want 2", len(items))
+	}
+	if items[0].IncidentID != high {
+		t.Errorf("the queue's first item is %s and the incident that scored 90 is %s",
+			items[0].IncidentID, high)
+	}
+	if items[0].QueueScore != 90 {
+		t.Errorf("the queue score of a fresh incident is %d, want 90: the legacy engine "+
+			"does not decay", items[0].QueueScore)
+	}
+
+	// Now the calibrated engine, and an incident that is four half-lives old.
+	// Its queue score is an eighth of its stored score, and the lower-scoring
+	// incident, which is recent, overtakes it.
+	if _, err := raw.Exec(ctx, `UPDATE incidents SET created_at = now() - interval '8 hours'
+		WHERE tenant_id = $1 AND incident_id = $2`, tenant, high); err != nil {
+		t.Fatalf("age the incident: %v", err)
+	}
+	calibrated := &incidents.Service{Pool: svc.Pool, ThreatEngine: "calibrated", QueueHalfLife: 2 * time.Hour}
+	items, err = calibrated.ListAttention(ctx, tenant, site, 50)
+	if err != nil {
+		t.Fatalf("ListAttention (calibrated): %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("the queue holds %d item(s), want 2", len(items))
+	}
+	if items[0].IncidentID != low {
+		t.Errorf("the queue's first item is %s and the recent incident is %s: the decay "+
+			"did not move the old incident down the queue", items[0].IncidentID, low)
+	}
+	for _, item := range items {
+		if item.IncidentID != high {
+			continue
+		}
+		if item.ThreatScore != 90 {
+			t.Errorf("the STORED score of the aged incident is %d, want 90: the decay is a "+
+				"property of the queue and not of the incident", item.ThreatScore)
+		}
+		// Eight hours is four half-lives, so the queue score is a sixteenth.
+		if item.QueueScore < 4 || item.QueueScore > 7 {
+			t.Errorf("the queue score of an incident four half-lives old is %d, want about "+
+				"5: the decay is not a half-life", item.QueueScore)
+		}
+	}
+}
+
+// TestTwoIncidentsRaisedInTheSameTickAreDistinct
+//
+// The wall clock does not tick between every pair of calls. Its resolution is
+// about a millisecond on Windows and about a microsecond on Linux, so two
+// incidents of the same rule at the same site raised inside one tick used to
+// derive the SAME id — and the second INSERT failed on the primary key.
+//
+// The incident was then LOST. That is invariant 1, "zero accepted event loss",
+// broken by a clock's resolution, and it is the kind of defect that only
+// shows on a machine whose clock is coarse: a test on a fast machine with a
+// fine clock passes by luck.
+func TestTwoIncidentsRaisedInTheSameTickAreDistinct(t *testing.T) {
+	svc, tenant, site := service(t)
+	ctx := context.Background()
+
+	const raised = 25
+	seen := map[string]bool{}
+	for i := 0; i < raised; i++ {
+		id, err := svc.CreateIncident(ctx, incidents.Create{
+			TenantID: tenant, SiteID: site,
+			Decision: aDecision(), RuleBundleVersion: "0.1.0",
+			BundleContentHash: strings.Repeat("d", 64), PolicyVersion: "p1",
+			Title: "Camera offline",
+		})
+		if err != nil {
+			t.Fatalf("raise incident %d of %d: %v", i+1, raised, err)
+		}
+		if seen[id] {
+			t.Fatalf("two incidents raised in the same tick share the id %q, so the second one was LOST", id)
+		}
+		seen[id] = true
+	}
+	if len(seen) != raised {
+		t.Errorf("%d distinct id(s) for %d incident(s)", len(seen), raised)
+	}
+}
+
 func TestCreateIncidentStoresItsJustification(t *testing.T) {
 	svc, tenant, site := service(t)
 	ctx := context.Background()

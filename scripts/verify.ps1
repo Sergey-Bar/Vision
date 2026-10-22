@@ -14,9 +14,18 @@
                         published contract surfaces: protobuf messages and enums,
                         the JSON Schemas' properties and required sets, and the
                         OpenAPI path/method set
+      load-run          the load-run artefact, if one exists, must cover EVERY
+                        objective in internal/observability/slo.go. An SLO the run did
+                        not cover is worse than none
       statuscheck       docs/status.md's counts are derived from the tree, so a
                         stale claim there is a defect and this is the gate that
                         says so
+      migration-readme  migrations/README.md's file table and the migrations
+                        directory are the same set, so a migration that exists
+                        and is undescribed fails the build
+      truth-check       a document may not claim a control this product does
+                        not have, and the allow-list that permits one names
+                        the document that declares the control absent
       roadmap-check     the roadmap documents state package, migration and
                         contract counts in prose, and all three are derived here
       nl-hits-resolve   any hit that does not resolve to an incident or an
@@ -30,9 +39,20 @@
       vet              Go's own static checks
       gofmt            formatting, without rewriting files
       lint             golangci-lint, including gosec
+      spa              the console's own type check, unit tests and lint
+      spa-coverage     the console's coverage floor, measured with the v8
+                        provider against per-group thresholds that are floors
+                        in both directions
+      spa-e2e          the console in a real browser: the routes walked, the
+                        origin discipline checked, and the contrast rule that
+                        jsdom cannot compute
       test             the full suite with the race detector, -p 8, with the
                         run's own JSON stream kept for the audit gates and a
                         coverage profile kept for the floor
+      qa-matrix        every package is classified against fourteen closed
+                        categories of test, every category is answered by a
+                        NAMED test that exists or by a reason, and the
+                        critical path's ten stages are all proved
       skip-audit       every suite that skipped declared it, with a reason, in a
                         committed file. A skip is a suite whose assertions did
                         not run, so the default answer is that it is a failure
@@ -81,8 +101,8 @@
                         because a superuser suite cannot see a missing tenant
                         context
       ai-runtime       the AI runtime's contract in Python
-      boot             migrate, seed, start security-core, health + two served
-                       (auth-gated) endpoints on a real Postgres, tear down, and a
+         boot             migrate, seed, start security-core, health + two served
+                           endpoints on a real Postgres, tear down, and a
                        second seed that refuses (append-only ledger) -- the gate
                        that turns "it builds" into "it serves"
 
@@ -273,7 +293,29 @@ function Invoke-Gate {
     # mislabelled, in both directions: a real pass could read as a failure and a
     # failure could read as a pass depending on which gate ran before it.
     $global:LASTEXITCODE = 0
-    & $Command
+    # The command runs with the preference at 'Continue', and the preference is
+    # restored afterwards.
+    #
+    # A native command's stderr arrives as ERROR RECORDS once the script's
+    # output is redirected -- `powershell -File .\scripts\run-verify.ps1 *> log`
+    # is how a run is captured, and every gate's stderr becomes an error
+    # record. Under 'Stop' those records THROW, and the gate dies with a
+    # NativeCommandError instead of reporting what it found. The Python
+    # runtime suite writes its progress dots to stderr, so a captured run died
+    # in the `ai-runtime` gate in one second and the record named a gate that
+    # had passed.
+    #
+    # The exit code is what says whether a gate passed, and the exit code is
+    # not affected by the preference. So the preference is lowered for the
+    # command and put back afterwards, and a gate that genuinely fails still
+    # fails -- through its exit code, which is the thing that is recorded.
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $Command
+    } finally {
+        $ErrorActionPreference = $previousPreference
+    }
     $elapsed = [int]((Get-Date) - $started).TotalSeconds
     if ($LASTEXITCODE -ne 0) {
         $script:failures.Add($Name)
@@ -330,6 +372,18 @@ Invoke-Gate 'contract-check-openapi' { & $go run ./tools/contractcheck -mode che
 
 # The status document derives its numbers from the tree; a stale claim is a defect.
 Invoke-Gate 'statuscheck' { & $go test -p 1 -count=1 ./internal/statuscheck/... }
+
+# The migrations README describes the directory it is in, and it stopped
+# describing it at 0014 while the directory ran to 0028. A migration that exists
+# and is undescribed is a migration nobody reads before writing the next one, so
+# the file table and the directory have to be the same set.
+Invoke-Gate 'migration-readme' { & $go test -p 1 -count=1 ./internal/migrationreadme/... }
+
+# A document may not claim a control this product does not have. The API's own
+# package doc claimed a CSRF token, a session cookie and a session tenant, and
+# the console has none of the three. A security product whose documentation
+# claims controls it does not have is worse than one that claims nothing.
+Invoke-Gate 'truth-check' { & $go test -p 1 -count=1 ./internal/truthcheck/... }
 
 # The roadmap documents state build state in prose — package, migration and
 # contract counts — and all three were stale at once (30, 24 and thirty against
@@ -509,9 +563,89 @@ if (-not $node) {
                 # `npm run build` is the type check AND the bundle, and
                 # `npm test` is the unit tests -- both through the package's own
                 # scripts, so they are the same commands a developer runs.
+                #
+                # `npm run lint` is the third of them, and it was missing for a
+                # long time: the console had thirty-eight lint findings -- an
+                # `any` in the upload page's error handling, a paragraph with a
+                # click handler and no keyboard listener, a `||` where a `??`
+                # was meant -- and the gate did not run it, so the debt sat
+                # there and the console was read as clean. The debt was cleared
+                # in the same change that added the gate, which is the only
+                # order that works: a gate added over an existing debt is a
+                # gate that is red on the day it is added, and a red gate is a
+                # gate nobody runs.
                 & npm run build
                 if ($LASTEXITCODE -ne 0) { return }
                 & npm test
+                if ($LASTEXITCODE -ne 0) { return }
+                & npm run lint
+            }
+
+            # The console's own coverage floor.
+            #
+            # `spa` runs the type check, the unit tests and the lint. It does
+            # not MEASURE anything, and a suite that is not measured is a suite
+            # whose untested half nobody notices: the console had one unit
+            # assertion and one browser test when this gate was added, and
+            # every number in it was somebody's guess.
+            #
+            # The thresholds live in `web/spa/vite.config.ts`, and they are
+            # FLOORS in both directions, exactly as the Go side's
+            # `internal/covercheck` floors are. A file under its floor fails
+            # the gate, and a file over its floor asks for the floor to be
+            # raised. A floor nobody raises is a floor that has stopped
+            # meaning anything, and a coverage number that only ever goes
+            # down is a number nobody is reading.
+            #
+            # The thresholds are per-GROUP and per-file, because the console's
+            # own parts are not equally risky: `src/lib` holds the clock, the
+            # keyboard and the error vocabulary, and those are the files where
+            # a mistake is invisible until an operator is misled.
+            Invoke-Gate 'spa-coverage' {
+                & npm run test:coverage
+            }
+
+            # The console, in a real browser.
+            #
+            # The unit tests render the console in jsdom, which is a good deal
+            # about markup and no deal at all about a browser: a router that
+            # redirects, a stylesheet that loads, a focus that moves, a scroll
+            # that follows. This is the layer where those are real.
+            #
+            # It is also where `color-contrast` comes back. The jsdom scan
+            # DISABLES it, because jsdom has no layout -- no boxes, no painted
+            # values, no cascade -- and the rule then reports a violation for
+            # every element in the tree. A scan that is wrong on every page is
+            # a scan people learn to ignore, and a scan people learn to ignore
+            # is worse than no scan. In a browser the stylesheet is applied and
+            # the contrast can be computed, so the rule runs here.
+            #
+            # The browser is a TOOL, and a tool that is absent produces a
+            # visible SKIP rather than a quiet pass. `npx playwright install
+            # --dry-run` prints where the browser WOULD be installed, which is
+            # how the gate asks the question on Windows and on Linux without
+            # knowing either one's layout.
+            $pwDryRun = & npx --no-install playwright install --dry-run 2>&1
+            $pwLocation = ($pwDryRun | Select-String -Pattern 'Install location:\s*(\S+)' |
+                Select-Object -First 1).Matches.Groups[1].Value
+            if ($pwLocation -and (Test-Path -LiteralPath $pwLocation)) {
+                Invoke-Gate 'spa-e2e' {
+                    # The Playwright `webServer` starts the console server with
+                    # `go run`, and the Go tool is not on PATH on a default
+                    # Windows shell -- the same reason this script resolves `go`
+                    # itself. So the PATH is handed to the child rather than
+                    # being assumed, and the child is given the same `go` this
+                    # script uses.
+                    $goDir = Split-Path -Parent $go
+                    $env:Path = "$goDir;$env:Path"
+                    & npm run e2e
+                }
+            } else {
+                Invoke-Skip 'spa-e2e' 'the Playwright browser is not installed, so the console ' +
+                                           'was not walked in a real browser. Run `npx playwright install` in web/spa.'
+                Write-Host "==> spa-e2e SKIPPED (no Playwright browser)"
+                Write-Host "    The console's browser layer is unverified: no route was walked, no"
+                Write-Host "    contrast rule ran, and the console's own origin discipline was not checked."
             }
         }
     } finally {
@@ -522,7 +656,6 @@ if (-not $node) {
 
 # The VMS emulator's own gate: a recorded session produces the same events on a
 # replay.
-#
 # The determinism the fixture design exists to protect, applied to the device
 # that now publishes the events: the same video, the same detector and the same
 # frame produce the same analytics, or the demo is a performance and not a
@@ -530,6 +663,23 @@ if (-not $node) {
 # proved is that the PUBLISHING is deterministic -- the frames are the
 # emulator's, and the detector's contribution is asserted elsewhere.
 Invoke-Gate 'emulator-determinism' { & $go test -p 1 -count=1 ./internal/emulator/... }
+
+# The demo, walked by a machine before a human walks it.
+#
+# Every page of the five-minute judge track is fetched, the hub's three facts are
+# read, and - when a browser is available - every page is opened and the console
+# is watched. It is the gate that catches "the demo 404s", which every other gate
+# missed for a year because the routes were tested and not the ones anybody
+# visits.
+#
+# It skips VISIBLY when node or the browser is missing, and a skip is not a pass.
+Invoke-Gate 'demo-rehearsal' {
+    if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+        throw 'node is not on PATH, so the rehearsal cannot run. Install Node and re-run.'
+    }
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repo 'scripts\demo-rehearsal.ps1')
+    if ($LASTEXITCODE -ne 0) { throw "the rehearsal failed with exit $LASTEXITCODE" }
+}
 
 # The suite runs with -json so that `skip-audit` below has something to read.
 #
@@ -582,6 +732,28 @@ Invoke-Gate 'test' {
     }
     $global:LASTEXITCODE = $code
 }
+
+# The QA matrix: which of fourteen questions has been asked of which package.
+#
+# Coverage answers one question -- was the code executed -- and it is a real
+# question this repository already asks, with a ratchet that fails in both
+# directions. But a package can be ninety per cent covered and still have no
+# boundary test, no refusal test, no concurrency test and no tenant-isolation
+# test, and the coverage number cannot tell the difference between a package
+# that was measured thoroughly and a package whose one uncovered tenth is the
+# branch that refuses a cross-tenant write.
+#
+# So the matrix is a CLOSED set of fourteen categories, and every package has a
+# row saying which of them has been asked and by which NAMED TEST. The rule
+# that makes it worth reading is the fifth: a named test that does not exist is
+# a finding. A row that claims coverage nobody can find is a claim, not a
+# control -- and this repository has been bitten by that shape before, when the
+# `red-check` table held thirty plausible mutations nobody had run and the
+# gate reported thirty guarded controls while proving none of them.
+#
+# The document `docs/qa-matrix.md` is GENERATED from the registry, so the
+# table a person reads and the table a machine checks are one thing.
+Invoke-Gate 'qa-matrix' { & $go test -p 1 -count=1 -v ./internal/qamatrix/... }
 
 # Did the run actually test anything?
 #
@@ -769,6 +941,52 @@ Invoke-Gate 'cover-floor' {
     $global:LASTEXITCODE = $LASTEXITCODE
 }
 
+# The load-run artefact, and the objectives it did not cover.
+#
+# M1 gate 3 needs "every SLO demonstrably met under a recorded load run, with the
+# run and its numbers in the release notes". The artefact is the evidence, and
+# this gate is the check that the evidence covers EVERY objective.
+#
+# An artefact that measured four of the eight and published four numbers reads,
+# to a reader, like one that measured all eight. The objectives it did not
+# cover are the ones nobody is being told about, and the roadmap names this as
+# the one thing that is not cuttable: publishing an SLO the run did not cover is
+# worse than publishing none.
+#
+# No artefact is a PASS, not a failure: there is nothing to check yet, and a
+# load run is something an operator does before a release, not something a gate
+# can conjure.
+Invoke-Gate 'load-run' {
+    $artefacts = @(Get-ChildItem -LiteralPath (Join-Path $repo 'dist\verification') -Filter 'load-run-*.json' -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending)
+    if ($artefacts.Count -eq 0) {
+        Write-Host '  no load-run artefact yet; there is nothing to check'
+        $global:LASTEXITCODE = 0
+        return
+    }
+
+    $artefact = $artefacts[0]
+    $run = Get-Content -LiteralPath $artefact.FullName -Raw | ConvertFrom-Json
+    $measured = @($run.objectives | ForEach-Object { $_.name })
+
+    # The objectives THIS BUILD evaluates, read off the evaluator rather than off
+    # a list kept beside the document. A list that is written down is a list
+    # that drifts, and a drifted list is a gate that checks the wrong thing.
+    $sloSource = Get-Content -LiteralPath (Join-Path $repo 'internal\observability\slo.go') -Raw
+    $objectives = @([regex]::Matches($sloSource, 'Name:\s+"([^"]+)"') |
+        ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+    $uncovered = @($objectives | Where-Object { $measured -notcontains $_ })
+
+    if ($uncovered.Count -gt 0) {
+        Write-Host "  the load-run artefact $($artefact.Name) does not cover: $($uncovered -join ', ')"
+        Write-Host '  an objective the run did not measure is not an objective the run demonstrated.'
+        $global:LASTEXITCODE = 1
+        return
+    }
+    Write-Host "  the load-run artefact $($artefact.Name) covers all $($objectives.Count) objective(s)"
+    $global:LASTEXITCODE = 0
+}
+
 # The "exported symbol with no reader" class.
 #
 # Nine of the runnable-core defects found in one review were this shape, and
@@ -805,6 +1023,102 @@ Invoke-Gate 'capability' { & $go test -p 1 -count=1 -v ./internal/capability/...
 # because a gate that only forbids the wrong column passes when the right one is
 # removed.
 Invoke-Gate 'predicate-cov' { & $go test -p 1 -count=1 ./internal/predicatecov/... }
+
+# ---------------------------------------------------------------------------
+# The mutation gate: do the assertions BITE?
+# ---------------------------------------------------------------------------
+# Coverage answers one question -- was the code executed -- and the cover-floor
+# gate asks it with a ratchet. But a test that calls a function and asserts
+# that it did not panic is coverage: the line ran, and the assertion says
+# nothing about what the function computed. A mutation turns `if tenant !=
+# other` into `if tenant == other`, and that test sails past.
+#
+# So this gate runs `go-mutesting` over the packages on the critical path and
+# asks the question the coverage number cannot: of the code the tests EXECUTE,
+# what share of the changes to it do the assertions catch?
+#
+# The score that is checked is the COVERED one. The overall score counts the
+# code no test reaches, and the coverage floor already measures that; counting
+# it twice would make one number answer two questions.
+#
+# The floor is 100, and it is allowed to be 100 because the critical path's
+# assertions are sharp. It was MEASURED, and the measurement is in
+# docs/status.md.
+#
+# THE SANDBOX. `go-mutesting` mutates the source IN PLACE. Running it against
+# the working tree would leave a mutated file behind if the run was
+# interrupted, and a mutation left applied in the tree is a landmine for every
+# later gate -- which is exactly what `internal/treestate`'s second assertion
+# exists to catch. So the tree is COPIED, the copy is mutated, and the copy is
+# thrown away. The exclusion list is what keeps the copy to a second: the
+# Python virtualenv alone is fifty-six thousand files.
+#
+# The tool is a `go install` tool and not a dependency, so a machine without it
+# gets a visible SKIP rather than a quiet pass.
+$mutTesting = Get-Command go-mutesting -ErrorAction SilentlyContinue
+if (-not $mutTesting) {
+    $gopathBin = & $go env GOPATH
+    $candidate = Join-Path $gopathBin 'bin'
+    if ($candidate -and (Test-Path -LiteralPath $candidate)) {
+        $env:Path = "$candidate;$env:Path"
+        $mutTesting = Get-Command go-mutesting -ErrorAction SilentlyContinue
+    }
+}
+if (-not $mutTesting) {
+    Invoke-Skip 'mutation' 'go-mutesting is not installed. Run: go install github.com/jonbaldie/go-mutesting/v2/cmd/go-mutesting@latest'
+    Write-Host "==> mutation SKIPPED (go-mutesting is not installed)"
+    Write-Host "    Nobody asked whether the assertions bite. A test that runs and asserts"
+    Write-Host "    nothing is coverage, and coverage is not proof."
+} else {
+    Invoke-Gate 'mutation' {
+        & $go test -p 1 -count=1 ./internal/mutation/...
+        if ($LASTEXITCODE -ne 0) { return }
+
+        $cfg = Get-Content -LiteralPath (Join-Path $repo 'internal\mutation\mutation.json') -Raw | ConvertFrom-Json
+        $sandbox = Join-Path ([System.IO.Path]::GetTempPath()) ("vision-mutation-" + [System.Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $sandbox | Out-Null
+        try {
+            # The copy. `robocopy` is the tool that does this on both platforms
+            # and it is on Windows by default; `cp -a` is the fallback. The
+            # exclusions are the configuration's, so the list of directories
+            # that must not be copied lives in one place.
+            $robocopy = Get-Command robocopy -ErrorAction SilentlyContinue
+            if ($robocopy) {
+                $xd = @()
+                foreach ($e in $cfg.excluded) { $xd += $e }
+                & robocopy $repo $sandbox /E /XD @xd /XF '*.exe' '*.log' /NFL /NDL /NJH /NJS /NP | Out-Null
+                if ($LASTEXITCODE -ge 8) { throw "robocopy failed with $LASTEXITCODE" }
+            } else {
+                & cp -a "$repo/." $sandbox
+            }
+            Push-Location $sandbox
+            try {
+                $args = @('/coverage', '/workers', [string]$cfg.workers,
+                          '/min-covered-msi', [string]$cfg.minCoveredMSI,
+                          '/min-msi', [string]$cfg.minMSI)
+                # The per-mutation timeout is a MULTIPLE of the clean run's
+                # duration rather than a fixed number of seconds. The tool's
+                # default is ten seconds, and `internal/api`'s own suite takes
+                # longer than that -- it derives a key with argon2 on purpose,
+                # because a key that is cheap to derive is a key that is cheap to
+                # guess -- so the default killed the suite before the mutation
+                # had a chance and the gate reported a timeout as a coverage
+                # failure.
+                if ($cfg.timeoutCoefficient) {
+                    $args += @('/timeout-coefficient', [string]$cfg.timeoutCoefficient)
+                }
+                if ($cfg.baseline) { $args += @('/baseline', $cfg.baseline) }
+                $args += $cfg.packages
+                & go-mutesting @args
+                $global:LASTEXITCODE = $LASTEXITCODE
+            } finally { Pop-Location }
+        } finally {
+            # The copy goes, whatever happened. A mutation left in a TEMPORARY
+            # directory is harmless; a mutation left in the tree is not.
+            Remove-Item -Recurse -Force -LiteralPath $sandbox -ErrorAction SilentlyContinue
+        }
+    }
+}
 
 # ---------------------------------------------------------------------------
 # The red-check: the controls, removed, each of which must turn the suite red.
@@ -1195,21 +1509,23 @@ Invoke-Gate 'red-check' {
             # numbers; restored; watched it go green. Both transcripts are in
             # docs/status.md.
             #
-            # The `from` had to be moved to 86 when the M2 pass added three packages
+             # The `from` had to be moved to 86 when the M2 pass added three packages
              # and the roadmap's own count caught up, and to 87 when E1 landed
              # `internal/policy` and gave the M3 unlock's owner a package, and to
-             # 88 when this session's e2e probe added `scripts/` as a package. This
+             # 88 when this session's e2e probe added `scripts/` as a package, and
+             # to 104 when the M4 pass added the packages the QA pyramid needs,
+             # and to 108 when that pass added two more of its own. This
              # is the control working as designed in the other direction: when a
              # package lands and the count is bumped, the mutation's `from` no
              # longer matches and the gate reports a SKIPPED naming the string it
              # looked for, which is what turned up in the record's skip list and
              # kept `verified` false until the target was re-pointed. A control
              # whose target moves and which nobody notices is how a table becomes
-             # decorative; this one moved in public - twice.
-             name = 'a stale package count in the roadmap is refused'
-             file = 'ROADMAP.md'
-             from = '103 Go'
-             to   = '105 Go'
+             # decorative; this one moved in public - five times.
+            name = 'a stale package count in the roadmap is refused'
+            file = 'ROADMAP.md'
+            from = '109 Go'
+            to   = '110 Go'
              test = 'TestRoadmapMatchesTheTree'
              pkg  = './internal/roadmapcheck'
              why  = 'the milestone plan is where scope is locked, and a number in it that the tree contradicts reads as checked. Three documents carried three different stale counts of the same tree at once, and the migration count had been wrong for thirteen migrations'
@@ -1439,7 +1755,7 @@ Invoke-Gate 'red-check' {
             pkg  = './web'
             why  = 'el() sets textContent, so String(element) is the literal [object HTMLElement] and the cell renders that instead of the gate name. The helper that appends the element exists so the shape cannot come back, and the scan covers every page script rather than the one that was fixed, because three cells on two pages had already grown the same shape'
         }
-﻿        @{
+        @{
             name = 'a replay serves the clip its stored row names, and never a file the request names'
             file = 'web/replay.go'
             from = 'm := replayClipRe.FindStringSubmatch(row.ClipRef)'
@@ -1465,6 +1781,818 @@ Invoke-Gate 'red-check' {
             test = 'TestChiefBaselineNeedsMinutesBeforeItIsABaseline'
             pkg  = './web'
             why  = 'the animal example in the product story: one fox in one frame is a sighting, not an event. A deviation needs a baseline to deviate from, and a baseline needs minutes of the same scene. Lowering the floor to one turns a single frame into a pattern, and the chief would announce three impossible things from it. The control is not the arithmetic; it is the refusal to declare one too soon'
+        }
+        @{
+            name = 'the console invents no cameras and no sites'
+            file = 'web/spa/src/hooks/api.ts'
+            from = 'export function useCameras() {'
+            to   = 'export function useCameras() { const demoCameras = [{ id: "cam-1", name: "North Campus", siteId: "North Campus", status: "online" }]; // REDCHECK RC-34: the console invents an inventory'
+            test = 'TestTheConsoleInventsNoCamerasOrSites'
+            pkg  = './web'
+            why  = 'the console used to answer with eight cameras at three sites that no installation has, and an invented camera list is the worst kind of answer because it looks exactly like the real one. The camera inventory belongs to the VMS, which has the cameras, and to the platform''s own cameras table, which is what the platform was told about. A reader who cannot tell the real inventory from the invented one is not reading an inventory'
+        }
+        @{
+            name = 'the console''s front end keeps no records of its own'
+            file = 'web/spa/src/hooks/api.ts'
+            from = 'export function useCameras() {'
+            to   = 'export function useCameras() { localStorage.setItem("vision-uploaded-videos", "[]"); // REDCHECK RC-35: the console keeps its own records'
+            test = 'TestTheConsoleFrontEndHoldsNoStateOfItsOwn'
+            pkg  = './web'
+            why  = 'the console used to keep a camera, a clip and an incident per remembered video in the browser: the clip''s observation time was the moment the page opened, its size was zero, and the incident''s severity came out of a round-robin. A console that keeps its own records beside the product''s is a console with two truths, and the one in the browser is the one a reader cannot check'
+        }
+        @{
+            # A byte-order mark in the middle of a file is invisible in an editor
+            # and not nothing to a script.
+            #
+            # `scripts/verify.ps1` carried one, at the start of the line that opens
+            # the thirty-first entry of this table. PowerShell read that line as a
+            # command whose name was the mark, and this gate -- the one that proves
+            # every control in the table is real -- died on it at every entry from
+            # that one onwards, without saying so: the run record could not tell a
+            # dead gate from a passing one.
+            name = 'a byte-order mark does not hide in the middle of a file'
+            file = 'scripts/demo.ps1'
+            from = '# The demo, start to finish.'
+            to   = "# The demo, start to finish.$([char]0xFEFF)"
+            test = 'TestTheRealTreeHasNoStrayByteOrderMarks'
+            pkg  = './internal/treestate'
+            why  = 'a mark that no editor renders is still read by the script that has to run: PowerShell took the line it was on as a command whose name was the mark, and the gate that proves the controls are real stopped proving anything'
+        }
+        @{
+            # A canonical event does not have to name the device that saw it.
+            #
+            # The three optional columns are nullable in the schema and were
+            # scanned into plain strings, so a NULL in any of them was a scan
+            # error and a scan error is a 500 on the search route. The search
+            # answered 500 for a whole page of events, and it stayed invisible
+            # for as long as the route was refused with a 401 before it was
+            # reached: the boot gate was reading a broken route and calling the
+            # refusal a proof that the route was fine.
+            name = 'an event that names no device is still found by the search'
+            file = 'internal/eventsearch/eventsearch.go'
+            from = '&deviceID,'
+            to   = '&h.DeviceID, // REDCHECK RC-37: the optional column is scanned as if it were not nullable'
+            test = 'TestAnEventWithNoDeviceOrZoneIsStillFound'
+            pkg  = './internal/eventsearch'
+            why  = 'a search that answers 500 for half the events it is asked about answers nothing at all, and the console''s moments are the events a site saw'
+        }
+        @{
+            # One path, one owner.
+            #
+            # The route table is the whole fix for a demo that 404ed on every
+            # page: the SPA's catch-all was registered last, and it caught the
+            # paths the showcase owned. The table below is what makes that
+            # impossible to say twice - and the mutation is the duplication
+            # itself, because the defect was two owners for one path.
+            name = 'a path cannot be claimed twice'
+            file = 'web/routes.go'
+            from = '{Path: "/live", File: "live.html"},'
+            to   = '{Path: "/live", File: "live.html"}, {Path: "/live", File: "hub.html"}, // REDCHECK RC-38: one path, two owners'
+            test = 'TestNoPathHasTwoOwners'
+            pkg  = './web'
+            why  = 'the console server used to answer the root with the SPA''s catch-all, registered last, so every page of the five-minute judge track returned 404 with an empty body while the pages themselves sat complete in the tree. A path with two owners is how that happened, and it happened silently'
+        }
+        @{
+            # A number in the markup is a measurement nobody took.
+            #
+            # The front door used to read CPU 34% and Memory 67%, and to list
+            # twelve cameras. The page whose whole claim is that it invents
+            # nothing was inventing the most, and inventing it in the shape of
+            # the real thing. The mutation puts one back.
+            name = 'a showcase page carries no number of its own'
+            file = 'web/static/hub.html'
+            from = 'class="facts" id="facts"'
+            to   = 'class="facts" id="facts" style="width: 34%" // REDCHECK RC-39: a measurement nobody took'
+            test = 'TestTheShowcaseInventsNoNumbers'
+            pkg  = './web'
+            why  = 'a number written into the page is a measurement that was typed in by a person, and a reader cannot check it against the file it claims to come from. The honest rendering of a fact this machine does not have is NOT RUN, in those words'
+        }
+        @{
+            # The contract and the server must name the same security schemes.
+            #
+            # The published document used to name a session cookie and a CSRF
+            # token that the server enforced on nothing, and three login paths
+            # the server did not serve. A published scheme that nothing
+            # provides is a protection an auditor will believe in, and a
+            # protection the document hides is a protection nobody can check.
+            name = 'the contract and the server name the same security schemes'
+            file = 'internal/api/server.go'
+            from = 'EnforcedSecuritySchemes = []string{"serviceBearer"}'
+            to   = 'EnforcedSecuritySchemes = []string{"serviceBearer", "sessionCookie"} // REDCHECK RC-40: the server claims a scheme the document does not declare'
+            test = 'TestTheDocumentAndTheServerNameTheSameSecuritySchemes'
+            pkg  = './internal/api'
+            why  = 'the published contract is what a reader checks the product against, and a contract that names a protection the product does not have is worse than one that names none: the reader stops looking'
+        }
+        @{
+            # A disposition that escalates or dismisses is somebody else's
+            # problem now, and it takes a fresh second factor to say so.
+            #
+            # The check lives in the SERVICE rather than in a route, so every
+            # caller is covered: the console, the JSON API and the CLI all
+            # reach `Record`, and a check in one of them would leave the other
+            # two with a way round it. The route now obtains the step-up; this
+            # is the half that refuses when nobody did.
+            #
+            # Hand-run before it was entered, on Windows: the check replaced
+            # with `false &&`, watched TestSensitiveDispositionsRequireStepUp
+            # fail with ""escalated" was accepted without a step-up
+            # verification" and the same for "dismissed"; restored; watched it
+            # go green. Both transcripts are in docs/status.md.
+            name = 'a sensitive disposition without a second factor is refused'
+            file = 'internal/incidents/incidents.go'
+            from = '	if stepUpRequired[d.Outcome] && !d.StepUpVerified {'
+            to   = '	if false && stepUpRequired[d.Outcome] && !d.StepUpVerified { // REDCHECK RC-41: the step-up check is gone'
+            test = 'TestSensitiveDispositionsRequireStepUp'
+            pkg  = './internal/incidents'
+            why  = 'escalating an incident wakes a duty manager and dismissing one closes a live question, and both are decisions about somebody else''s work. Without a fresh factor either is one stolen session away from being made by whoever holds the session, and the record names the operator who made it'
+        }
+        @{
+            # The per-source login rate limit.
+            #
+            # The threat model records credential stuffing as mitigated by a
+            # per-source limit (docs/threat-model.md A3.5) and the site
+            # configuration publishes the number it uses
+            # (`console.loginRateLimitPerMinute`). Before this the limit was in
+            # neither: there was an ACCOUNT lockout and nothing at all about a
+            # SOURCE, so one address could try every account in the tenant,
+            # each of them once, and never touch a lockout.
+            #
+            # The mutation removes the comparison and keeps the bookkeeping, so
+            # the limiter still counts and still records, and only the refusal
+            # goes. A control that is off by one comparison is off by exactly
+            # the thing it exists for.
+            #
+            # Hand-run before it was entered, on Windows: the check replaced
+            # with `false &&`, watched
+            # TestALoginBurstFromOneSourceIsRefusedAfterTheLimit fail with
+            # "attempt 6 from one source returned <nil>, want ErrRateLimited";
+            # restored; watched it go green. Both transcripts are in
+            # docs/status.md.
+            name = 'a login burst from one source is refused after the limit'
+            file = 'internal/identity/ratelimit.go'
+            from = '	if len(live) >= l.limit {'
+            to   = '	if false && len(live) >= l.limit { // REDCHECK RC-42: the per-source limit is gone'
+            test = 'TestALoginBurstFromOneSourceIsRefusedAfterTheLimit'
+            pkg  = './internal/identity'
+            why  = 'the account lockout bounds one account and the per-source limit bounds one address, and only the second of them is what credential stuffing is: a spray across many accounts from one address never touches a lockout at all'
+        }
+        @{
+            # The attention queue is ordered by the PRODUCT'S score.
+            #
+            # The API used to re-sort the queue by severity after the product
+            # had ordered it by the threat score, so the queue an operator
+            # read was a severity list with the product's judgement thrown
+            # away -- and the product's judgement is the only number in the
+            # product anybody has ever measured. The severity is the rule's
+            # CLAIM: how bad the incident would be if it were real. A claim
+            # is not an answer.
+            #
+            # The mutation restores the severity sort and drops the score, so
+            # the defect is reproduced exactly rather than approximated.
+            #
+            # Hand-run before it was entered, on Windows, against the
+            # database: the comparator replaced with the severity-only one,
+            # watched TestTheAttentionQueueIsOrderedByTheProductsJudgement
+            # fail with "the queue's first item is inc_s-... and the incident
+            # that scored 90 is inc_s-..."; restored; watched it go green.
+            # Both transcripts are in docs/status.md.
+            name = 'the attention queue is ordered by the product''s score'
+            file = 'internal/api/handlers.go'
+            from = '	sort.SliceStable(queue, func(i, j int) bool {
+		si, _ := queue[i]["queueScore"].(int)
+		sj, _ := queue[j]["queueScore"].(int)
+		if si != sj {
+			return si > sj
+		}
+		return severityRank(queue[i]["severity"]) > severityRank(queue[j]["severity"])
+	})
+'
+            to   = '	sort.SliceStable(queue, func(i, j int) bool {
+		return severityRank(queue[i]["severity"]) > severityRank(queue[j]["severity"])
+	}) // REDCHECK RC-43: the severity sort is back and the product''s score is out of it
+'
+            test = 'TestTheAttentionQueueIsOrderedByTheProductsJudgement'
+            pkg  = './internal/api'
+            why  = 'the score is the autonomy layer''s answer to "which of these needs a person", and the severity is the rule''s claim about how bad the incident would be. A queue that reads as a severity list throws the answer away and shows the claims, and the operator cannot tell the difference between an incident the product was sure about and one it was not'
+        }
+        @{
+            # The calibrated engine is MORE PRECISE than the legacy one.
+            #
+            # The base rate is what makes it so, and this is the row that
+            # holds it: the mutation removes the cap that keeps a rule which
+            # is noise AT THIS SITE at the bottom of the likelihood scale, and
+            # the engine then reads the evidence and ignores the site's own
+            # record of the rule. The case it escalates is a case the site's
+            # labelled history says is one in seven real.
+            #
+            # Hand-run before it was entered, on Windows: the comparison
+            # replaced with `false &&`, watched
+            # TestTheCalibratedEngineBeatsTheLegacyOneOnTheCorpus fail with
+            # "the case B02 is at a site whose history says the rule is right
+            # 14% of the time, and the calibrated engine ESCALATED it"; and
+            # the score's own prior factor disabled as well, which is the
+            # whole factor; restored; watched it go green. Both transcripts
+            # are in docs/status.md.
+            name = 'the calibrated engine is more precise than the legacy one'
+            file = 'internal/threat/calibrated.go'
+            from = '	if priorKnown && priorRate < s.cfg.NoisePrior && level > LikelihoodLow {'
+            to   = '	if false && priorKnown && priorRate < s.cfg.NoisePrior && level > LikelihoodLow { // REDCHECK RC-44: the base rate no longer caps the likelihood'
+            test = 'TestTheCalibratedEngineBeatsTheLegacyOneOnTheCorpus'
+            pkg  = './internal/calibration'
+            why  = 'a rule that fires two hundred times a day at a site and is one in fifty real is noise AT THAT SITE, and the engine is supposed to say so. Without the base rate the evidence is read as if it were about the incident, and the operator is sent to a hundred incidents a day to be right about one of them'
+        }
+        @{
+            # Every colour class in the console's source resolves.
+            #
+            # The camera status badges and the detection boxes used to carry
+            # `bg-apple-red` and friends, and the `apple-*` names had been
+            # removed from the token file: the classes compiled, they did
+            # nothing, and nothing failed. Then `border-line` turned out to
+            # name a colour the Tailwind configuration did not declare
+            # either, so every hairline in the console was invisible on every
+            # panel.
+            #
+            # The mutation puts the removed colour back.
+            #
+            # Hand-run before it was entered, on Windows: the class replaced
+            # with `bg-apple-red`, watched
+            # TestEveryColourClassInTheConsoleResolves fail with "spa\src\
+            # pages\Operations.tsx uses the class "bg-apple-red" and the
+            # Tailwind configuration declares no colour called "apple-red"";
+            # restored; watched it go green. Both transcripts are in
+            # docs/status.md.
+            name = 'every colour class in the console resolves to a declared colour'
+            file = 'web/spa/src/pages/Operations.tsx'
+            from = '      return { bg: ''bg-ok-ink'', dot: ''bg-ok-ink'', text: ''text-text'', label: ''Online'' }
+'
+            to   = '      return { bg: ''bg-apple-red'', dot: ''bg-apple-red'', text: ''text-text'', label: ''Online'' } // REDCHECK RC-45: the removed colour is back
+'
+            test = 'TestEveryColourClassInTheConsoleResolves'
+            pkg  = './web'
+            why  = 'a class that compiles and does nothing is the worst kind of defect, because the screen renders and the screen is wrong, and nothing anywhere says so. The camera badges and the detection boxes were colourless for exactly that reason, and so was every hairline in the console'
+        }
+        @{
+            # A document may not claim a control this product does not have.
+            #
+            # The API''s package doc said that every state-changing method
+            # required a CSRF token, that every session cookie was HttpOnly,
+            # Secure and SameSite, and that a `X-Tenant-Id` header was honoured
+            # only when it matched the session tenant. The console has no
+            # login, no session, no cookie and no token, and the header is not
+            # read at all. A security product whose own documentation claims
+            # controls it does not have is worse than one that claims nothing,
+            # because the documentation is what a security director reads.
+            #
+            # The mutation breaks ONE pattern, so the gate stops refusing the
+            # false claim it was written for. The rest of the tree is clean,
+            # which is the point: the mutation is the only way to make the
+            # suite go red.
+            name = 'a document may not claim a control this product does not have'
+            file = 'internal/truthcheck/truthcheck.go'
+            from = '		Re:  regexp.MustCompile(`(?i)every\s+state-changing\s+method\s+requires\s+a\s+CSRF\s+token`),'
+            to   = '		Re:   regexp.MustCompile(`(?i)every\s+state-changing\s+method\s+never\s+requires\s+a\s+CSRF\s+token`), // REDCHECK RC-46: the gate no longer recognises the false claim'
+            test = 'TestTheGateFailsOnAClaim'
+            pkg  = './internal/truthcheck'
+            why  = 'the claim list is short and closed, and it matches ASSERTIONS rather than names, so a document that explains why the header used to be read is not punished for explaining it. The one document that says the control is absent is the only one allowed to name it, and the allow-list is per file AND per claim, so it cannot grow silently in either direction'
+        }
+        @{
+            # The tenant is configuration, and the log says so.
+            #
+            # The access log carried the VALIDATED tenant next to the raw
+            # `X-Site-Id` header a caller sent, and the server read
+            # `X-Tenant-Id` out of the request on an install with no
+            # configured tenant. A header with no session to match it against
+            # is an instruction rather than an authorisation, and a log line
+            # with a trusted field beside an untrusted one is a line that can
+            # be made to say anything.
+            #
+            # The mutation puts the header back in the log line. The test is
+            # the SOURCE scan, not the behavioural one, because the source scan
+            # does not need a database and therefore cannot pass by skipping.
+            name = 'the access log names the configured tenant, not a header the caller sent'
+            file = 'internal/api/server.go'
+            from = '			"tenant_id", s.requestTenant(r),'
+            to   = '			"tenant_id", r.Header.Get("X-Tenant-Id"), // REDCHECK RC-47: the caller names the tenant'
+            test = 'TestTheProductNeverReadsATenantFromARequest'
+            pkg  = './internal/api'
+            why  = 'the tenant and the site are CONFIGURED. A header from a caller with no session to match it against is not an authorisation, and a log line whose tenant a caller chose is a log line that answers no question about whose request it was'
+        }
+        @{
+            # The proxy's identity header is only believed from the proxy.
+            #
+            # D-16 is the appliance's auth posture: a trusted reverse proxy
+            # terminates TLS, authenticates the operator and injects an identity
+            # header, and the console believes the header only when the request
+            # arrived from a trusted peer. A header is forgeable by anybody who
+            # can reach the port, so a proxy that does not STRIP the header from
+            # client requests turns it into a way IN, and the console's refusal
+            # of an untrusted peer is the only thing that would notice.
+            #
+            # The mutation removes the peer check. The suite goes red on the
+            # untrusted-peer case, which is the whole control.
+            name = 'the identity header is only believed from the trusted proxy'
+            file = 'internal/api/server.go'
+            from = '		if !s.fromTrustedProxy(r) {'
+            to   = '		if false && !s.fromTrustedProxy(r) { // REDCHECK RC-49: the peer check is gone'
+            test = 'TestInProxyModeARequestFromAnUntrustedPeerIsRefused'
+            pkg  = './internal/api'
+            why  = 'the header says WHO and the configuration says WHAT. A proxy that could also grant capabilities would be a second authorisation system, and the product would have two, and the stricter one would be the one nobody reads'
+        }
+        @{
+            # The gate count is the number of gates the script RUNS.
+            #
+            # `scripts/verify.ps1` keeps two retired gates in the file as
+            # comments: `contract-sync` and `recovery-drill`. They are a record
+            # of what the script used to run, and the script's own gate list
+            # says so. The derivation used to read the RAW text, so both notes
+            # were counted and the number came out at thirty-eight while the
+            # document said thirty-six -- and the two halves of one tool
+            # disagreed with each other, because the other half counted by LINE
+            # PREFIX and found thirty-six.
+            #
+            # A number two readers derive differently is a number nobody can
+            # rely on, so the rule is now stated in the test: a line whose first
+            # non-space character is `#` is a note about a gate, not a gate.
+            #
+            # The mutation puts the comment back into the count. The named test
+            # is the SYNTHETIC one, because it needs no database and cannot
+            # pass by skipping.
+            #
+            # Hand-run before it was entered, on Windows: the comment-skip
+            # replaced with `false &&`, watched
+            # TestACommentedOutGateIsNotAGate fail with "a script with one live
+            # gate and two commented-out gates counted 3, want 1"; restored;
+            # watched it go green. Both transcripts are in docs/status.md.
+            name = 'a retired gate left as a comment is not a gate'
+            file = 'internal/statuscheck/statuscheck.go'
+            from = '		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") {
+			continue
+		}'
+            to   = '		trimmed := strings.TrimSpace(line)
+		if false && strings.HasPrefix(trimmed, "#") { // REDCHECK RC-48: a retired gate is a gate again
+			continue
+		}'
+            test = 'TestACommentedOutGateIsNotAGate'
+            pkg  = './internal/statuscheck'
+            why  = 'the document states the gate count twice, and a reader who compares it with a run record has no way to tell a difference of KIND from a drift. If a comment is counted as a gate then the count is a fact about the file''s history rather than about the gates that run, and the number a reader checks their own run against is the wrong one'
+        }
+        @{
+            # A named test that does not exist is a finding.
+            #
+            # The QA matrix is a list of claims: "this category is covered, by
+            # THIS test". A claim nobody can find is a claim rather than a
+            # control, and this repository has been bitten by that shape before:
+            # the `red-check` table once held thirty plausible mutations nobody
+            # had run, and the gate reported thirty guarded controls while
+            # proving none of them.
+            #
+            # So the matrix's own gate greps the package's `*_test.go` files
+            # for the name, and a name it cannot find is a finding. The
+            # mutation puts the check back to "never fires", and the named test
+            # is the one that drives the rule against a fixture -- so the
+            # fixture's "a named test that does not exist" case is the thing
+            # that goes red.
+            #
+            # Hand-run before it was entered, on Windows: the check replaced
+            # with `false &&`, watched TestTheGateCanFail fail with "the gate
+            # said nothing about: a named test that does not exist"; restored;
+            # watched it go green. Both transcripts are in docs/status.md.
+            name = 'a named test that does not exist is a finding'
+            file = 'internal/qamatrix/qamatrix.go'
+            from = '				if !t.hasTest(p.Package, tst) {'
+            to   = '				if false && !t.hasTest(p.Package, tst) { // REDCHECK RC-50: the claim is never checked'
+            test = 'TestTheGateCanFail'
+            pkg  = './internal/qamatrix'
+            why  = 'a matrix row that names a test nobody can find is a claim of coverage rather than coverage, and it is read as coverage by everyone who opens the document'
+        }
+        @{
+            # The console''s coverage floor is a floor.
+            #
+            # The console had ONE unit assertion and ONE browser test when the
+            # coverage gate was added, and every number in it was somebody''s
+            # guess. The thresholds are in `web/spa/vite.config.ts` and they
+            # are floors in both directions: a file under its floor fails, and
+            # a file over its floor asks for the floor to be raised.
+            #
+            # The mutation puts the floor above the measured coverage, which is
+            # the way a floor is proved to be a floor: the gate goes red on a
+            # tree nobody touched.
+            #
+            # The runner is npm, because the console''s own gates are npm
+            # scripts and a red-check that cannot reach them would leave the
+            # console''s controls un-falsifiable.
+            #
+            # Hand-run before it was entered, on Windows: the global
+            # thresholds replaced with 999, watched `npm run test:coverage`
+            # fail with "ERROR: Coverage for lines (X%) does not meet global
+            # threshold (999%)"; restored; watched it go green. Both transcripts
+            # are in docs/status.md.
+            name = 'the console''s coverage floor is a floor'
+            file = 'web/spa/vite.config.ts'
+            from = '        statements: 85,
+        lines: 85,
+        functions: 80,
+        branches: 75,'
+            to   = '        statements: 999,
+        lines: 999,
+        functions: 999,
+        branches: 999, // REDCHECK RC-51: the floor is above every measurement'
+            runner = 'npm'
+            test = 'test:coverage'
+            pkg  = 'web/spa'
+            why  = 'a coverage number that is never compared to a floor is a number nobody is reading, and the console is the surface an operator looks at. A floor that only ever goes down is a number that has stopped meaning anything'
+        }
+        @{
+            # The console shows no row the product did not produce.
+            #
+            # The console's camera hook used to answer with eight INVENTED
+            # cameras at three invented sites when the endpoint was
+            # unreachable, and an invented camera list is the worst kind of
+            # answer: it looks exactly like a real one, and the operator
+            # cannot tell.
+            #
+            # The mutation puts the invented list back on the UNREACHABLE
+            # path, which is where it used to live. A fallback on the SUCCESS
+            # path would not do: the endpoint answers with a list, so a
+            # fallback there is never reached, and a control that removes a
+            # line nobody takes proves nothing.
+            #
+            # The named run is the browser layer, because that is where the
+            # invented row would be READ by a person rather than merely held
+            # in memory.
+            #
+            # The npm runner for the e2e builds the bundle first, because the
+            # browser runs the BUILT console and a mutation in the source that
+            # never reaches the bundle proves nothing.
+            #
+            # Hand-run before it was entered, on Windows: the hook's failure
+            # path replaced with an invented camera named "Loading bay",
+            # watched the e2e fail with the console's body containing the
+            # invented camera; restored; watched it go green. Both transcripts
+            # are in docs/status.md.
+            name = 'the console shows no row the product did not produce'
+            file = 'web/spa/src/hooks/api.ts'
+            from = '      const res = await get(''/api/cameras'')
+      const data = (await res.json()) as { cameras: Camera[] }
+      return data.cameras ?? []'
+            to   = '      const res = await get(''/api/cameras'').catch(() => null) // REDCHECK RC-52: the invented camera list is back
+      const data = res
+        ? ((await res.json()) as { cameras: Camera[] })
+        : { cameras: [{ id: ''cam-loading-bay'', siteId: ''site-demo'', name: ''Loading bay'', status: ''online'' as const }] }
+      return data.cameras ?? []'
+            runner = 'npm'
+            test = 'e2e'
+            pkg  = 'web/spa'
+            why  = 'an invented camera list is indistinguishable from a real one to the person reading it, which is the whole danger. The product''s answer is the only source of a camera, and a fallback is a claim about a camera the product never said anything about'
+        }
+        @{
+            # The covered-code mutation floor is the floor that was measured.
+            #
+            # The mutation gate asks whether the assertions BITE: of the code
+            # the critical path''s tests execute, what share of the changes to
+            # it do the assertions catch? The answer was measured at 100, and
+            # the floor is 100.
+            #
+            # A floor that somebody can lower by hand is a floor that is not a
+            # floor. The mutation lowers it, and the test that pins the
+            # measured value goes red -- which is what makes lowering it a
+            # decision with a receipt rather than an edit.
+            #
+            # Hand-run before it was entered, on Windows: the floor replaced
+            # with 99.0, watched TestTheCoveredMSIFloorIsTheOneThatWasMeasured
+            # fail; and the gate itself driven with the floor at 101, watched
+            # go-mutesting exit 4 with "Covered MSI 100.00% is below minimum
+            # required 101.00%"; restored; watched it go green. Both transcripts
+            # are in docs/status.md.
+            name = 'the covered-code mutation floor is the floor that was measured'
+            file = 'internal/mutation/mutation.json'
+            from = '  "minCoveredMSI": 100.0,'
+            to   = '  "minCoveredMSI": 99.0,'
+            test = 'TestTheCoveredMSIFloorIsTheOneThatWasMeasured'
+            pkg  = './internal/mutation'
+            why  = 'a mutation score that is only ever compared to a floor somebody can edit is a score nobody has to answer for. The floor is the claim, and a claim that can be lowered without a red test is a preference'
+        }
+        @{
+            # The Chief refuses a narration that cites something the product
+            # did not record.
+            #
+            # This is the control that makes the Chief safe to put in front
+            # of an operator. A narration is a SENTENCE about the record, and
+            # a sentence about something the record does not contain is a
+            # fabrication -- which is the one failure this whole product
+            # exists to make impossible. The Chief does not ask the model to
+            # be careful: it checks the answer, after the fact, and refuses
+            # it.
+            #
+            # The refusal is not a silent drop. A dropped narration would
+            # read as "the model had nothing to say", which is a different
+            # fact and a worse one; so the deterministic form speaks instead
+            # and the refusal is NAMED.
+            #
+            # Hand-run before it was entered, on Windows: the citation check
+            # replaced with a loop that ignores the citations, watched
+            # TestANarrationCitingAnUnknownFactIsRefused fail with "a
+            # narration citing an unrecorded fact was accepted. The product
+            # would have shown an operator a sentence about something that
+            # never happened"; restored; watched it go green. The transcript
+            # is in docs/status.md.
+            name = 'the Chief refuses a narration that cites something the product did not record'
+            file = 'internal/chief/chief.go'
+            from = "	for _, c := range n.Citations {`n		if !known[c] {`n			return nil`n		}`n	}"
+            to   = "	for range n.Citations {`n		// REDCHECK RC-53: a narration may now cite anything`n	}"
+            test = 'TestANarrationCitingAnUnknownFactIsRefused'
+            pkg  = './internal/chief'
+            why  = 'a narration is a sentence about the record, and a sentence about something the record does not contain is a fabrication. The model is never asked to be trusted opaquely -- it is asked to be replayable, and a replay of a narration that cites a thing that was never there fails'
+        }
+        @{
+            # The Chief may not act on its own at a site with no labelled
+            # history.
+            #
+            # A2 means the Chief disposes of incidents against the site's OWN
+            # base rate: the rate its operators' own dispositions say the
+            # rules are right at. A site with no labelled history has NO
+            # prior -- `internal/calibration` says so in as many words -- so
+            # there is nothing to dispose against, and a Chief disposing of
+            # incidents against a rate it cannot know is the black box this
+            # product exists to avoid.
+            #
+            # The CONFIGURED level stays published beside the EFFECTIVE one,
+            # so an operator told the Chief may act and finds that it may not
+            # learns that the number is not trustworthy. A silent downgrade
+            # would be a quiet lie in the other direction.
+            #
+            # Hand-run before it was entered, on Windows: the base-rate gate
+            # replaced with `false &&`, watched
+            # TestA2IsRefusedAtASiteWithNoLabelledHistory fail with "the
+            # effective autonomy is "A2" at a site with no labelled history,
+            # want "A1""; restored; watched it go green. The transcript is in
+            # docs/status.md.
+            name = 'the Chief may not act on its own at a site with no labelled history'
+            file = 'internal/chief/chief.go'
+            from = '	if c.EffectiveAutonomy == AutonomyAct && !f.HasBaseRate {'
+            to   = '	if false && c.EffectiveAutonomy == AutonomyAct && !f.HasBaseRate { // REDCHECK RC-54: the base-rate gate on A2 is gone'
+            test = 'TestA2IsRefusedAtASiteWithNoLabelledHistory'
+            pkg  = './internal/chief'
+            why  = 'the site''s own history is the only ground truth the product has. A site whose operators have never recorded whether an incident was real has no rate, and a Chief that disposes of incidents anyway is making the decision the product promised it would never make'
+        }
+        @{
+            # Two incidents raised in the same clock tick are two incidents.
+            #
+            # The wall clock does not tick between every pair of calls. Its
+            # resolution is about a millisecond on Windows and about a
+            # microsecond on Linux, so an id derived only from it REPEATS when
+            # two incidents of the same rule at the same site are raised
+            # inside one tick. The second INSERT then failed on the primary
+            # key, and the incident was LOST -- which is invariant 1, "zero
+            # accepted event loss", broken by a clock's resolution.
+            #
+            # It is invisible on a fast machine with a fine clock, and it is
+            # invisible in a test that raises one incident.
+            #
+            # Hand-run before it was entered, on Windows: the counter
+            # removed from the id, watched
+            # TestTwoIncidentsRaisedInTheSameTickAreDistinct fail with "raise
+            # incident 8 of 25: incidents: insert: ERROR: duplicate key
+            # value violates unique constraint "incidents_pkey""; restored;
+            # watched it go green. The transcript is in docs/status.md.
+            name = 'two incidents raised in the same clock tick are two incidents'
+            file = 'internal/incidents/incidents.go'
+            from = '	return fmt.Sprintf("inc_%s_%d_%d", site, at.UnixNano(), s.seq.Add(1))'
+            to   = '	return fmt.Sprintf("inc_%s_%d", site, at.UnixNano()) // REDCHECK RC-55: the counter that keeps two incidents in one tick apart is gone'
+            test = 'TestTwoIncidentsRaisedInTheSameTickAreDistinct'
+            pkg  = './internal/incidents'
+            why  = 'an incident that cannot be inserted is an incident nobody saw, and the product''s first invariant is that nothing is lost. A clock coarse enough to repeat a timestamp is coarse enough to lose an incident'
+        }
+        @{
+            # A partition boundary is in UTC, never in the host's timezone.
+            #
+            # The bounds were rendered as bare `YYYY-MM-DD` dates, and
+            # PostgreSQL casts a bare date to `timestamptz` with the
+            # SESSION''s timezone. A host that is not on UTC therefore
+            # created a partition whose boundary was offset by the host''s
+            # offset -- and that boundary OVERLAPPED the partition the
+            # migrations created, which is written with an explicit `Z`.
+            #
+            # The site's timezone is the site's timezone and never the host's,
+            # and a partition boundary is a storage boundary: it belongs to
+            # the same law. The failure reads as "would overlap partition
+            # inbox_events_2030_12" and only happens on a machine whose clock
+            # is not on UTC.
+            #
+            # Hand-run before it was entered, on Windows: the bounds rendered
+            # as bare dates again, watched
+            # TestEnsurePartitionsClampsTheYearsAheadArgument fail with
+            # "create partition inbox_events_2031_01: ERROR: partition
+            # "inbox_events_2031_01" would overlap partition
+            # "inbox_events_2030_12""; restored; watched it go green. The
+            # transcript is in docs/status.md.
+            name = 'a partition boundary is in UTC, never in the host''s timezone'
+            file = 'internal/migrate/migrate.go'
+            from = "				from.UTC().Format(`"2006-01-02T15:04:05Z`"),`n				to.UTC().Format(`"2006-01-02T15:04:05Z`"))"
+            to   = "				from.Format(`"2006-01-02`"), to.Format(`"2006-01-02`")) // REDCHECK RC-56: the boundary is in the host's timezone again"
+            test = 'TestEnsurePartitionsClampsTheYearsAheadArgument'
+            pkg  = './internal/migrate'
+            why  = 'a storage boundary that moves with the machine that created it is a boundary that two machines disagree about. The partition the migrations created says one thing and the partition the runner created says another, and Postgres refuses the pair'
+        }
+        @{
+            # The coverage panel does not panic on a server with no clock.
+            #
+            # The panel reached past the server's accessor and read the clock
+            # FIELD. The field is nil unless `SetClock` was called, and the
+            # injectable clock is a TEST affordance -- the daemon never calls
+            # it. So the live product answered 500 for every request the panel
+            # had something to report.
+            #
+            # The panel crashed exactly when it found something, which is the
+            # one moment it exists for. And it was invisible to the tests,
+            # because every test built the server with a clock, and a panel
+            # with no finding never reaches the line that reads it.
+            #
+            # The fix is structural rather than local: the clock is a METHOD
+            # that cannot be nil, and the field is `clockFn`, so a call site
+            # that reaches for the field does not compile.
+            #
+            # Hand-run before it was entered, on Windows: the field read put
+            # back, watched
+            # TestTheCoveragePanelDoesNotPanicWithoutAnInjectedClock fail with
+            # "panic: runtime error: invalid memory address or nil pointer
+            # dereference"; restored; watched it go green. The transcript is in
+            # docs/status.md.
+            name = 'the coverage panel does not panic on a server with no clock'
+            file = 'internal/api/absence.go'
+            from = '			v.SinceAge = s.now().Sub(v.Since)'
+            to   = '			v.SinceAge = s.clockFn().Sub(v.Since) // REDCHECK RC-57: the clock is read as a field again'
+            test = 'TestTheCoveragePanelDoesNotPanicWithoutAnInjectedClock'
+            pkg  = './internal/api'
+            why  = 'a panel that crashes when it finds something is a panel that is only ever wrong in the way that matters. The operator who needs it most is the one whose screen goes blank'
+        }
+        @{
+            # The dead-letter reader with an empty kind does not recurse.
+            #
+            # `ReadWithCursor` has cases for "inbox", "job" and "outbox",
+            # and a `default` branch that means "both" — the empty kind.
+            # That branch called itself with the kind "jobs", which is not one
+            # of the cases, so it fell through to `default` again and called
+            # itself for ever. The live daemon died with a stack overflow.
+            #
+            # It was hidden behind the nil-clock panic on the SAME route: the
+            # coverage panel crashed in its first row and never reached the
+            # dead-letter read that comes later. Fixing one uncovered the
+            # other, and both were only reachable when the panel had
+            # something to report.
+            #
+            # Hand-run before it was entered, on Windows: the kind put back
+            # to "jobs", watched
+            # TestTheDeadLetterReaderWithAnEmptyKindDoesNotRecurse take 24
+            # seconds instead of 3 and fail; restored; watched it go green.
+            # The transcript is in docs/status.md.
+            name = 'the dead-letter reader with an empty kind does not recurse'
+            file = 'internal/api/readmodels.go'
+            from = '			items, _, err := d.ReadWithCursor(ctx, tenant, site, "job", "", limit)'
+            to   = '			items, _, err := d.ReadWithCursor(ctx, tenant, site, "jobs", "", limit) // REDCHECK RC-58: the kind is one the switch does not know, so the branch calls itself'
+            test = 'TestTheDeadLetterReaderWithAnEmptyKindDoesNotRecurse'
+            pkg  = './internal/api'
+            why  = 'a reader that recurses on the kind that means "everything" is a reader that kills the process on the route that asks it for everything, which is the one the coverage panel asks for'
+        }
+        @{
+            # The coverage panel's statements name columns that exist.
+            #
+            # The clock-drift statement read `min(sampled_at)` from
+            # `device_clocks`, and that column has never existed on the table —
+            # it is `measured_at`. The statement failed on every read.
+            #
+            # It was the THIRD defect on this one route, behind a nil-clock
+            # panic and behind a stack overflow. Each hid the next, and the
+            # route is only reachable when the panel has something to report.
+            #
+            # The control is a route-level test over the REAL schema. A panel
+            # test with a stubbed reader proves the SHAPE; only a test over
+            # the real tables proves the STATEMENTS.
+            #
+            # Hand-run before it was entered, on Windows: the column put back
+            # to "sampled_at", watched
+            # TestTheCoverageRouteReadsOverTheRealSchema fail with "column
+            # \"sampled_at\" does not exist"; restored; watched it go green.
+            # The transcript is in docs/status.md.
+            name = 'the coverage panel''s statements name columns that exist'
+            file = 'internal/api/absence_sql.go'
+            from = "		       coalesce(min(measured_at), 'epoch'::timestamptz)"
+            to   = "		       coalesce(min(sampled_at), 'epoch'::timestamptz) // REDCHECK RC-59: the column has never existed on this table"
+            test = 'TestTheCoverageRouteReadsOverTheRealSchema'
+            pkg  = './internal/api'
+            why  = 'a statement that names a column the schema does not have fails on every read, and a panel whose rows are all failures is a panel that reports the same broken thing four times instead of what it found'
+        }
+        @{
+            # Every recorded segment starts on a KEYFRAME.
+            #
+            # A segment that starts on anything else cannot be decoded on its
+            # own: the first picture references frames that are not in the
+            # file. So the segmenter cuts at a keyframe, and the keyframe that
+            # ends one segment is the first picture of the next -- which is
+            # also why the recorded timeline has no hole in it.
+            #
+            # The mutation drops the keyframe that starts the new segment. The
+            # segment then begins on an inter frame, and the segment that
+            # follows the next keyframe carries no keyframe at all.
+            #
+            # Hand-run before it was entered, on Windows: the keyframe dropped,
+            # watched TestTheSegmenterProducesIndependentlyPlayableSegments fail
+            # with "segment N carries no keyframe"; restored; watched it go
+            # green. The transcript is in docs/status.md.
+            name = 'every recorded segment starts on a keyframe'
+            file = 'internal/mp4/segmenter.go'
+            from = "	s.segKeyFrames = 0`n	s.held = p"
+            to   = "	s.segKeyFrames = 0`n	s.held = nil // REDCHECK RC-60: the segment no longer starts on a keyframe"
+            test = 'TestTheSegmenterProducesIndependentlyPlayableSegments'
+            pkg  = './internal/mp4'
+            why  = 'a segment that cannot be decoded on its own is not evidence, and a recording made of such segments plays as a grey rectangle and a gap at the same time'
+        }
+        @{
+            # The chain is computed over the segment's OWN BYTES.
+            #
+            # `chain[n] = SHA256(chain[n-1] ‖ segment_digest ‖ started_at)`. The
+            # digest is the segment's own content hash, and it is the reason
+            # the chain is a PROOF: a segment that is edited, moved or replaced
+            # changes the chain from that point on.
+            #
+            # The mutation drops the digest from the link, so two different
+            # segments at the same instant chain the same and an edit is
+            # invisible.
+            #
+            # Hand-run before it was entered, on Windows: the digest dropped,
+            # watched TestTheChainBreaksWhenASegmentIsModified fail with "the
+            # chain verifies after a segment was modified"; restored; watched
+            # it go green. The transcript is in docs/status.md.
+            name = 'the chain is computed over the segment digest'
+            file = 'internal/recording/recording.go'
+            from = '	h.Write([]byte(digest))'
+            to   = '	// REDCHECK RC-61: the digest is no longer part of the link'
+            test = 'TestTheChainBreaksWhenASegmentIsModified'
+            pkg  = './internal/recorder'
+            why  = 'a chain that does not cover the bytes is a chain over a claim, and the whole product claim is that the recording can be proved months later'
+        }
+        @{
+            # The link is computed over the timestamp at the precision the
+            # STORAGE keeps.
+            #
+            # Postgres stores a TIMESTAMPTZ in MICROSECONDS, and it ROUNDS:
+            # `12:00:00.123456789` comes back as `12:00:00.123457`. A link
+            # over the writer's nanosecond value is a different link from
+            # the one recomputed from the stored row -- for HALF of all
+            # timestamps, and for the rest only when the clock's last digits
+            # happened to land differently.
+            #
+            # This is not a cosmetic rule. The chain was computed over the
+            # nanosecond timestamp, and a recording that was never touched
+            # reported itself as BROKEN at random. The defect was found by
+            # the test that records a segment and then verifies the chain it
+            # wrote, and it failed intermittently.
+            #
+            # The mutation removes the truncation from the one function that
+            # computes a link. The writer then stores a nanosecond value,
+            # the storage ROUNDS it, and the two sides of the proof
+            # disagree -- for half of all timestamps.
+            #
+            # Hand-run before it was entered, on Windows: the truncation
+            # removed, watched TestTheChainHashSurvivesTheStorageRoundTrip
+            # fail with "the link computed from a nanosecond timestamp
+            # differs from the link computed from the timestamp the storage
+            # keeps"; restored; watched it go green. The transcript is in
+            # docs/status.md.
+            name = 'the link is computed over the timestamp the storage keeps'
+            file = 'internal/recording/recording.go'
+            from = '	return t.UTC().Truncate(time.Microsecond)'
+            to   = '	return t.UTC() // REDCHECK RC-63: the link is over a timestamp the storage does not keep'
+            test = 'TestTheChainHashSurvivesTheStorageRoundTrip'
+            pkg  = './internal/recording'
+            why  = 'a proof that fails at random is worse than no proof at all, because it looks like tampering and it is really a rounding rule'
+        }
+        @{
+            # The segment is written ATOMICALLY.
+            #
+            # A temporary file, an fsync, and a RENAME. A reader either sees
+            # the whole segment or no segment at all, and there is no third
+            # state in which half a segment is on the disk under its own
+            # name.
+            #
+            # The mutation writes the final file IN PLACE instead of renaming
+            # the temporary one into it. The temporary file is then left
+            # behind on every cut, and the recording root fills with the
+            # pieces of segments nobody can play.
+            #
+            # Hand-run before it was entered, on Windows: the rename replaced
+            # with a direct write, watched TestASegmentIsWrittenAtomically fail
+            # with "temporary file(s) are left in the recording root";
+            # restored; watched it go green. The transcript is in
+            # docs/status.md.
+            name = 'the segment is written atomically'
+            file = 'internal/recorder/recorder.go'
+            from = '	if err := os.Rename(tmp, final); err != nil {'
+            to   = '	if err := os.WriteFile(final, out.Data, 0o640); err != nil { // REDCHECK RC-62: the write is no longer atomic'
+            test = 'TestASegmentIsWrittenAtomically'
+            pkg  = './internal/recorder'
+            why  = 'half a segment under a final name is a recording that looks complete and is not, and nobody finds out until the day they need it'
         }
     )
 
@@ -1533,7 +2661,18 @@ $proved = 0
             continue
         }
         $mutated = $original.Replace($c.from, $c.to)
-        if ($mutated -eq $original) {
+        # The comparison is on the BYTES, not on the strings alone.
+        #
+        # PowerShell's `-eq` on strings is a CULTURE comparison, and Unicode
+        # collation ignores the format characters -- a zero-width no-break space
+        # among them -- so a mutation that inserts one compares EQUAL to the file
+        # it changed. That is not a corner case: it is the mutation of RC-36, the
+        # control this gate is about, and the check that was supposed to notice
+        # it reported "the mutation produced no change" and skipped the control.
+        # A gate that cannot see a one-byte change cannot be trusted to see a
+        # one-line one either, so the length is compared in BYTES as well.
+        if ($mutated -eq $original -and
+            [System.Text.Encoding]::UTF8.GetByteCount($mutated) -eq [System.Text.Encoding]::UTF8.GetByteCount($original)) {
             Write-Host "    SKIPPED: $($c.name) - the mutation produced no change. Not a pass."
             $script:skips.Add([ordered]@{ name = 'red-check'; reason = "$($c.name): mutation produced no change" })
             continue
@@ -1541,6 +2680,7 @@ $proved = 0
         try {
             Write-GateFile -LiteralPath $full -Text $mutated
             $isPy = ($c.runner -eq 'py')
+            $isNpm = ($c.runner -eq 'npm')
             if ($isPy -and -not $py) {
                 # A py control with no Python cannot be exercised. Recorded as a
                 # named skip and the mutation is restored by the finally below.
@@ -1564,11 +2704,28 @@ $proved = 0
                 # that directory and `$c.test` the dotted test id.
                 Push-Location (Join-Path $repo $c.pkg)
                 try { $output = & $py -m unittest -v $c.test 2>&1 } finally { Pop-Location }
+            } elseif ($isNpm) {
+                # An npm control: the SPA's own gates.
+                #
+                # The console's unit tests, its coverage floor and its browser
+                # layer are npm scripts, not Go packages, and a red-check that
+                # cannot reach them would leave the console's controls
+                # un-falsifiable. So the runner is named per entry
+                # (`runner = 'npm'`), the same way the Python one is, and
+                # `$c.pkg` names the directory and `$c.test` the npm script.
+                #
+                # The Go tool is put on PATH for the child, because the
+                # Playwright web server starts the console server with `go run`
+                # and the Go tool is not on PATH on a default Windows shell --
+                # the same reason this script resolves `go` itself.
+                $goDir = Split-Path -Parent $go
+                $env:Path = "$goDir;$env:Path"
+                Push-Location (Join-Path $repo $c.pkg)
+                try { $output = & npm run $c.test 2>&1 } finally { Pop-Location }
             } else {
                 $output = & $go test -p 1 -count=1 -v -run $c.test $c.pkg 2>&1
             }
             $exit = $LASTEXITCODE
-            $ErrorActionPreference = 'Stop'
 
             # "Green" and "did not run" are different failures and the reader needs
             # to be told which.
@@ -1583,16 +2740,32 @@ $proved = 0
             # so nowhere. A Python run is read with its own vocabulary -- unittest
             # prints "Ran N tests ... FAILED (...)", not Go's "--- FAIL" -- so a py
             # control is asked the same two questions in the words its runner uses.
+            #
+            # The text is read with the error preference STILL at 'Continue', and
+            # that is not a detail. A native command's stderr arrives as ERROR
+            # RECORDS, and reading them under 'Stop' THROWS: the first npm
+            # control died here with vitest's own warning text, and the table
+            # stopped half-way with a control removed.
             if ($isPy) {
                 $pyText = ($output | Out-String)
                 $ranAsSkip = $pyText -match '(?m)^.*\.\.\.\s+skipped' -or $pyText -match '(?m)^OK\s+\(skipped'
                 $ranAny = $pyText -match 'Ran [1-9][0-9]* test'
+            } elseif ($isNpm) {
+                # An npm run reports its own vocabulary: Vitest prints
+                # "Test Files N passed" and Playwright prints "N passed" or
+                # "N failed". A run that printed neither did not run, and a run
+                # that skipped everything has proved nothing.
+                $npmText = ($output | Out-String)
+                $ranAsSkip = $npmText -match '(?m)^\s*[0-9]+\s+skipped' -or $npmText -match '(?m)^\s*[0-9]+\s+todo'
+                $ranAny = ($npmText -match 'Test Files\s+[0-9]+') -or ($npmText -match '(?m)^\s*[0-9]+\s+(passed|failed)') -or ($npmText -match 'Tests\s+[0-9]+')
             } else {
                 $ranAsSkip = @($output | ForEach-Object { "$_" } |
                     Where-Object { $_ -match '^(--- )?SKIP' -or $_ -match '\s+--- SKIP:' }).Count -gt 0
                 $ranAny = @($output | ForEach-Object { "$_" } |
                     Where-Object { $_ -match '^(=== RUN|--- (PASS|FAIL|SKIP))' }).Count -gt 0
             }
+            # The preference is raised again now that the output has been read.
+            $ErrorActionPreference = 'Stop'
 
             if ($exit -eq 0 -and -not $ranAny) {
                 Write-Host "    NOT PROVED: $($c.name) - the named test did not RUN, so nothing about the"
@@ -1633,6 +2806,37 @@ $proved = 0
                 Write-Host "      The control is still removed from that file. Every later gate runs against a" -ForegroundColor Red
                 Write-Host "      mutated tree until it is restored by hand; `git checkout -- $($c.file)` does it." -ForegroundColor Red
             }
+
+            # The BUNDLE has to be rebuilt when the mutation was in the
+            # console's source, because the console server embeds the built
+            # bundle and the browser runs THAT.
+            #
+            # A red-check that restored the source and left the bundle holding
+            # the mutation would hand every later gate a console that shows an
+            # invented camera, and the reader would have no way to tell that
+            # from a product defect. The bundle is build output and is not in
+            # the tree, so nothing else notices it.
+            if ($c.file -like 'web/spa/src/*' -and (Test-Path -LiteralPath (Join-Path $repo 'web/spa\node_modules'))) {
+                Push-Location (Join-Path $repo 'web/spa')
+                # The build prints its warnings on STDERR, and a native command's
+                # stderr arrives as error records. Read under 'Stop' those THROW,
+                # and the table died here with vite's own font warning rather
+                # than with a red result. The preference is lowered for the
+                # build and the build's EXIT CODE is what is judged.
+                $previousPreference = $ErrorActionPreference
+                $ErrorActionPreference = 'Continue'
+                try {
+                    & npm run build *> $null
+                    $buildExit = $LASTEXITCODE
+                } finally {
+                    $ErrorActionPreference = $previousPreference
+                    Pop-Location
+                }
+                if ($buildExit -ne 0) {
+                    $script:redCheckFailures.Add("rebuild after $($c.file)")
+                    Write-Host "    FAILED: could not rebuild the console bundle after restoring $($c.file)" -ForegroundColor Red
+                }
+            }
         }
     }
 
@@ -1644,7 +2848,7 @@ $proved = 0
     # stops covering one the moment a control is added somewhere new - and the gate
     # that is supposed to prove the table left the tree alone would then be the one
     # gate not checking the table's own footprint.
-    $mutatedPkgs = @($controls | ForEach-Object { "$($_.pkg)|$(if ($_.runner -eq 'py') { 'py' } else { 'go' })" } | Sort-Object -Unique)
+    $mutatedPkgs = @($controls | ForEach-Object { "$($_.pkg)|$(if ($_.runner -eq 'py') { 'py' } elseif ($_.runner -eq 'npm') { 'npm' } else { 'go' })" } | Sort-Object -Unique)
     $ErrorActionPreference = 'Continue'
     $restoreFailed = $false
     foreach ($entry in $mutatedPkgs) {
@@ -1652,6 +2856,12 @@ $proved = 0
         if ($pkgRunner -eq 'py') {
             if (-not $py) { continue }  # nothing Python-based was mutated that this run could verify
             & $py -m unittest discover -s $p *> $null
+        } elseif ($pkgRunner -eq 'npm') {
+            # The console's own suite. A control that mutated a TypeScript file
+            # and was restored has to leave the console's tests green, and the
+            # console's tests are npm's.
+            Push-Location (Join-Path $repo $p)
+            try { & npm run test *> $null } finally { Pop-Location }
         } else {
             & $go test -p 1 -count=1 $p *> $null
         }
@@ -2198,8 +3408,8 @@ function Write-VerificationRecord {
             'poc/ - a second Go module (github.com/Sergey-Bar/vision-poc). No gate in this script reaches it; run poc/active-monitoring/scripts/verify.ps1 separately.',
             'SonarQube duplication, complexity and coverage analysis - scripts/sonar.ps1, run by hand.',
             'GitHub Actions - it does not exist here.',
-            "SkillSpector's verdict on the installed skills is advisory and does not set outcome for the skills-audit gate. A finding is a question for a human, recorded in docs/threat-model.md; the gate fails only when the scanner itself errors or writes no report. A record read as 'the skills are clean' would be a misreading of it - a clean gate means the scan ran, not that nothing was found."
-        )
+               "SkillSpector's verdict on the installed skills is advisory and does not set outcome for the skills-audit gate. A finding is a question for a human, recorded in docs/threat-model.md; the gate fails only when the scanner itself errors or writes no report. A record read as 'the skills are clean' would be a misreading of it - a clean gate means the scan ran, not that nothing was found."
+    )
 
         gates     = @($results)
         skipped   = @($skips)

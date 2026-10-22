@@ -43,9 +43,14 @@ var capUse = regexp.MustCompile(`\bCap[A-Z][A-Za-z0-9_]*`)
 // than an opinion: the console's identity surface -- `GET /v1/principal`, which
 // names the configured principal the API runs as -- gates on it. A capability
 // that is enforced is not debt.
+//
+// CapSiteConfigure is NOT on this list any more either, and for the same
+// reason: the device registry's two write routes -- `POST /v1/devices`, which
+// records a device, and `POST /v1/devices/{id}/probe`, which MEASURES one --
+// gate on it. Registering a device and measuring one are both acts of site
+// configuration, and that is what the capability was declared for.
 var capabilitiesDeclaredButNotYetEnforced = map[string]string{
 	"CapIncidentEscalate": "no route gates an escalation; it was never wired up",
-	"CapSiteConfigure":    "no route gates site configuration",
 }
 
 // The control. A capability in this vocabulary is a promise that some route or

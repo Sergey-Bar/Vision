@@ -328,7 +328,7 @@ func chdir(t *testing.T, dir string) func() {
 
 // TestTheSearchFreeRouteIsPostOnly guards the method on /api/search/free.
 func TestTheSearchFreeRouteIsPostOnly(t *testing.T) {
-	h := handleSearchFree(nil)
+	h := handleSearchFree(nil, testScope())
 	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete, http.MethodPatch} {
 		req := httptest.NewRequest(method, "/api/search/free", nil)
 		rec := httptest.NewRecorder()
@@ -339,20 +339,24 @@ func TestTheSearchFreeRouteIsPostOnly(t *testing.T) {
 	}
 }
 
-// TestTheSearchFreeRouteRequiresATenant rejects a request with no tenant.
-func TestTheSearchFreeRouteRequiresATenant(t *testing.T) {
-	h := handleSearchFree(nil)
+// TestTheSearchFreeRouteRefusesWhenNoTenantIsConfigured
+//
+// The console's tenant is CONFIGURED. A console that has not been told which
+// tenant it serves refuses the request, and it says 503 rather than 400: the
+// request was fine, and the server is not.
+func TestTheSearchFreeRouteRefusesWhenNoTenantIsConfigured(t *testing.T) {
+	h := handleSearchFree(nil, scope{})
 	req := httptest.NewRequest(http.MethodPost, "/api/search/free", strings.NewReader(`{"q":"test"}`))
 	rec := httptest.NewRecorder()
 	h(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("/api/search/free with no tenant -> %d, want 400", rec.Code)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("/api/search/free with no configured tenant -> %d, want 503", rec.Code)
 	}
 }
 
 // TestTheChatRouteIsPostOnly guards the method on /api/chat.
 func TestTheChatRouteIsPostOnly(t *testing.T) {
-	h := handleChat(nil)
+	h := handleChat(nil, testScope())
 	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete, http.MethodPatch} {
 		req := httptest.NewRequest(method, "/api/chat", nil)
 		rec := httptest.NewRecorder()
@@ -365,7 +369,7 @@ func TestTheChatRouteIsPostOnly(t *testing.T) {
 
 // TestTheChatRouteRequiresAQuestion rejects an empty question.
 func TestTheChatRouteRequiresAQuestion(t *testing.T) {
-	h := handleChat(nil)
+	h := handleChat(nil, testScope())
 	req := httptest.NewRequest(http.MethodPost, "/api/chat", strings.NewReader(`{"question":""}`))
 	rec := httptest.NewRecorder()
 	h(rec, req)
@@ -374,20 +378,21 @@ func TestTheChatRouteRequiresAQuestion(t *testing.T) {
 	}
 }
 
-// TestTheChatRouteRequiresATenant rejects a request with no tenant.
-func TestTheChatRouteRequiresATenant(t *testing.T) {
-	h := handleChat(nil)
+// TestTheChatRouteRefusesWhenNoTenantIsConfigured refuses a console that has
+// not been told which tenant it serves.
+func TestTheChatRouteRefusesWhenNoTenantIsConfigured(t *testing.T) {
+	h := handleChat(nil, scope{})
 	req := httptest.NewRequest(http.MethodPost, "/api/chat", strings.NewReader(`{"question":"test"}`))
 	rec := httptest.NewRecorder()
 	h(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("/api/chat with no tenant -> %d, want 400", rec.Code)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("/api/chat with no configured tenant -> %d, want 503", rec.Code)
 	}
 }
 
 // TestTheClipsRouteIsGetOnly guards the method on /api/clips.
 func TestTheClipsRouteIsGetOnly(t *testing.T) {
-	h := handleClips(nil)
+	h := handleClips(nil, testScope())
 	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch} {
 		req := httptest.NewRequest(method, "/api/clips", nil)
 		rec := httptest.NewRecorder()
@@ -399,19 +404,19 @@ func TestTheClipsRouteIsGetOnly(t *testing.T) {
 }
 
 // TestTheClipsRouteRequiresATenant rejects a request with no tenant.
-func TestTheClipsRouteRequiresATenant(t *testing.T) {
-	h := handleClips(nil)
+func TestTheClipsRouteRefusesWhenNoTenantIsConfigured(t *testing.T) {
+	h := handleClips(nil, scope{})
 	req := httptest.NewRequest(http.MethodGet, "/api/clips", nil)
 	rec := httptest.NewRecorder()
 	h(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("/api/clips with no tenant -> %d, want 400", rec.Code)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("/api/clips with no configured tenant -> %d, want 503", rec.Code)
 	}
 }
 
 // TestTheCriticalRouteIsGetOnly guards the method on /api/critical.
 func TestTheCriticalRouteIsGetOnly(t *testing.T) {
-	h := handleCritical(nil)
+	h := handleCritical(nil, testScope())
 	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch} {
 		req := httptest.NewRequest(method, "/api/critical", nil)
 		rec := httptest.NewRecorder()
@@ -423,12 +428,12 @@ func TestTheCriticalRouteIsGetOnly(t *testing.T) {
 }
 
 // TestTheCriticalRouteRequiresATenant rejects a request with no tenant.
-func TestTheCriticalRouteRequiresATenant(t *testing.T) {
-	h := handleCritical(nil)
+func TestTheCriticalRouteRefusesWhenNoTenantIsConfigured(t *testing.T) {
+	h := handleCritical(nil, scope{})
 	req := httptest.NewRequest(http.MethodGet, "/api/critical", nil)
 	rec := httptest.NewRecorder()
 	h(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("/api/critical with no tenant -> %d, want 400", rec.Code)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("/api/critical with no configured tenant -> %d, want 503", rec.Code)
 	}
 }

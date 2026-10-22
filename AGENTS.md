@@ -19,7 +19,7 @@ This is the first thing that will waste your time.
 
 | Tool | Where | On `PATH`? |
 |---|---|---|
-| `go` | `C:\Program Files\Go\bin\go.exe` | **No** |
+| `go` | `C:\Go\bin\go.exe` — **the path below is the one that exists; `C:\Program Files\Go\bin` does not** | **No** |
 | `gcc` (cgo, for `-race`) | `C:\msys64\mingw64\bin\gcc.exe` | **No** |
 | `protoc` | `...\WinGet\Packages\Google.Protobuf_...\bin\protoc.exe` | **No** |
 | `protoc-gen-go` | `$(go env GOPATH)\bin`, installed by `make bootstrap` | **No** |
@@ -31,21 +31,33 @@ describing the absence rather than by fixing it. `scripts/verify.ps1` now
 locates each one itself and, where a tool is genuinely absent, prints a visible
 **SKIPPED** with the install command — never a quiet pass.
 
+**The Go path in this file was wrong and cost an hour.** It named
+`C:\Program Files\Go\bin\go.exe`, which does not exist on this machine; the
+toolchain is at `C:\Go\bin`. The gate says it locates each tool itself, and it
+does — but the line above is what a person reads first, and it sent them to a
+directory that was not there.
+
 ```powershell
 # PowerShell, for this session
-$env:Path += ";C:\Program Files\Go\bin;C:\msys64\mingw64\bin;$env:USERPROFILE\go\bin"
+$env:Path += ";C:\Go\bin;C:\msys64\mingw64\bin;$env:USERPROFILE\go\bin"
 ```
 
 Verify before you trust anything:
 
 ```powershell
-& "C:\Program Files\Go\bin\go.exe" build ./...   # must exit 0
-& "C:\Program Files\Go\bin\go.exe" version        # 1.26.x; go.mod says 1.26.0
+& "C:\Go\bin\go.exe" build ./...   # must exit 0
+& "C:\Go\bin\go.exe" version        # 1.26.x; go.mod says 1.26.0
 ```
 
 The module declares `go 1.26.0` and CI pins `GO_VERSION: "1.26"` with
 `GOTOOLCHAIN: local`. A pin below the `go` directive is a hard build failure, so
 if you change one you must change the other in the same commit.
+
+**`CGO_ENABLED=0` must also build.** `internal/ortdetect` is cgo-gated on
+purpose — a detector that builds and refuses by name takes nothing down — and
+the whole module has to compile for anyone on a machine with no C toolchain.
+`CGO_ENABLED=0 go vet ./...` is the check that finds a test file that forgot
+the tag, and it found one.
 
 ### The database
 
@@ -53,9 +65,17 @@ The database-backed tests **skip** rather than fail when the environment
 variable is absent, which means a green run can be a run that tested nothing.
 Always confirm they actually ran.
 
+**The image must be `pgvector/pgvector:pg16`, not `postgres:16`.** Migration
+0027 creates the event-embeddings table on the `vector` type, and the plain
+`postgres:16` image does not carry the extension. The `CREATE EXTENSION`
+fails, the migration fails, and every database-backed suite that follows it
+fails with a schema-version error that reads like a broken build rather than
+like a missing extension. `scripts/demo.ps1` already used the right image;
+this line did not.
+
 ```powershell
 docker run -d --name sp-pg -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres `
-  -e POSTGRES_DB=security_test -p 55432:5432 postgres:16 -c max_connections=300
+  -e POSTGRES_DB=security_test -p 55432:5432 pgvector/pgvector:pg16 -c max_connections=300
 $env:SP_TEST_DATABASE_URL='postgres://postgres@127.0.0.1:55432/security_test?sslmode=disable'
 $env:SP_TEST_DATABASE_PASSWORD='postgres'
 go run ./cmd/security-migrate up
@@ -162,19 +182,42 @@ goes in `docs/status.md` with both transcripts. "Not red-checked, and here is wh
 would ship" is an acceptable answer; an unlabelled control is not. Where a control
 is red-checkable by removing one line, it belongs in the `red-check` table in
 `scripts/verify.ps1`, which is the part that keeps running. That table holds
-thirty-three entries — three observations, two evidence, three rules, four
+sixty-four entries — three observations, two evidence, three rules, four
 connection-string, one ingest-scope, one evaluation, one rendering, one
 attention-producer, two tenant-scope, the priority function's forbidden
 anomaly input, one keystore permission bound, one roadmap package count, one console product name, the ingest
 privacy bound on `analyticData`, the M3 binding digest, the investigate
-engine's prompt-injection whitelist, and the two NL controls that any hit
+engine's prompt-injection whitelist, and the four new ones — the two Chief
+controls, that a narration citing something the product did not record is
+refused and that the Chief may not act on its own at a site with no labelled
+history, plus that two incidents raised in the same clock tick are two
+incidents, that a partition boundary is in UTC and never in the host's
+timezone, and the three coverage-panel controls — that the panel does not
+panic on a server with no clock, that the dead-letter reader with an empty
+kind does not recurse, and that the panel's statements name columns that
+exist — and the two NL controls that any hit
 resolves and the answer is the answer without the model, and the served-document
 name that comes from its key, and the count that reads this table, and the scan
 that keeps a rendered node out of a text slot, and the clip a replay serves
 comes from its stored row rather than from the request, and a draft a page produces
 is born disabled so nobody activates it by accident, and a first sighting
 is not a baseline because a baseline needs five minutes of the same
-scene — against
+scene, and the five that hold the demo, its contract and its two silent
+controls — a path cannot be claimed twice, a showcase page carries no number
+of its own, the contract and the server name the same security schemes, a
+sensitive disposition without a second factor is refused, and a login burst
+from one source is refused after the limit, and the three that hold the
+console and the engine — the attention queue is ordered by the product's
+score, the calibrated engine is more precise than the legacy one, and every
+colour class in the console resolves to a declared colour — and the one that
+holds the gate count to the gates that run rather than the ones somebody
+retired, and the four that hold the QA pyramid — a named test that does not
+exist is a finding, the console's coverage floor is a floor, the console shows
+no row the product did not produce, and the covered-code mutation floor is the
+floor that was measured — and the four that hold the media plane — that every
+recorded segment starts on a keyframe, that the chain is computed over the
+segment's own bytes, that the segment is written atomically, and that the link
+is computed over the timestamp the storage keeps — against
 ninety-four in the POC
 module. Entries are added only after being run by hand
 and watched go red, because a table seeded with plausible mutations nobody has run

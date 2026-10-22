@@ -3,8 +3,13 @@ package api_test
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base32"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -20,12 +25,42 @@ import (
 	"github.com/Sergey-Bar/vision/internal/dbx"
 	"github.com/Sergey-Bar/vision/internal/eventsearch"
 	"github.com/Sergey-Bar/vision/internal/evidence"
+	"github.com/Sergey-Bar/vision/internal/identity"
+	"github.com/Sergey-Bar/vision/internal/inbox"
 	"github.com/Sergey-Bar/vision/internal/incidents"
+	"github.com/Sergey-Bar/vision/internal/jobs"
 	"github.com/Sergey-Bar/vision/internal/migrate"
 	"github.com/Sergey-Bar/vision/internal/observability"
+	"github.com/Sergey-Bar/vision/internal/recording"
 	"github.com/Sergey-Bar/vision/internal/rules"
 	"github.com/Sergey-Bar/vision/internal/testutil"
 )
+
+// totpCode computes an RFC 6238 code.
+//
+// Written here rather than reached for in the identity package's tests,
+// because a test that calls the implementation it is testing asserts that the
+// implementation agrees with itself -- which is the property that was broken
+// once already in that package, where the code hashed the base32 text instead
+// of the bytes it encodes.
+func totpCode(t *testing.T, base32Secret string, at time.Time) string {
+	t.Helper()
+	raw, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(base32Secret)
+	if err != nil {
+		t.Fatalf("the enrolled secret is not base32: %v", err)
+	}
+	var counter [8]byte
+	binary.BigEndian.PutUint64(counter[:], uint64(at.Unix()/30))
+	mac := hmac.New(sha256.New, raw)
+	mac.Write(counter[:])
+	sum := mac.Sum(nil)
+	off := sum[len(sum)-1] & 0x0f
+	value := (uint32(sum[off])&0x7f)<<24 |
+		(uint32(sum[off+1])&0xff)<<16 |
+		(uint32(sum[off+2])&0xff)<<8 |
+		(uint32(sum[off+3]) & 0xff)
+	return fmt.Sprintf("%06d", value%1000000)
+}
 
 // theEvidenceStore is the store the most recently built test server was given.
 //
@@ -33,14 +68,39 @@ import (
 // exercise that route has to put real bytes behind a real evidence row.
 var theEvidenceStore *evidence.Store
 
+// theOperatorSecret is the TOTP secret of the principal the most recently
+// built test server was given.
+//
+// The secret is returned exactly once, by the enrolment, and the test needs it
+// to produce the code the disposition route verifies. It is a secret for a
+// throwaway tenant in a test database and it never leaves the process.
+var theOperatorSecret string
+
 var clock = time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC)
 
-// There is no secret store double here.
+// apiSecretStore is the reversible wrapper the API tests use.
 //
-// There used to be one, and it was never called: the API has no login, so
-// nothing in this tree wraps or unwraps a factor. The shared double is in
-// `internal/testutil` for the trees that DO have a login, and a copy of it
-// here is a copy nobody calls.
+// It used to be absent from this file, with the reason written down: the API
+// has no login, so nothing in this tree wrapped or unwrapped a factor, and a
+// copy of the double would be a copy nobody calls.
+//
+// That reason expired when the disposition route started verifying a second
+// factor. The route calls the identity service, and the identity service
+// unwraps the secret the enrolment sealed, so a test that drives the route
+// needs a store that can open what the enrolment wrote.
+type apiSecretStore struct{}
+
+func (apiSecretStore) WrapFor(tenant, userID, factorID string, b []byte) ([]byte, error) {
+	return append([]byte("B:"+tenant+"\x00"+userID+"\x00"+factorID+":"), b...), nil
+}
+
+func (apiSecretStore) UnwrapFor(tenant, userID, factorID string, b []byte) ([]byte, error) {
+	tag := "B:" + tenant + "\x00" + userID + "\x00" + factorID + ":"
+	if len(b) < len(tag) || string(b[:len(tag)]) != tag {
+		return nil, errors.New("not wrapped by this store, or bound to a different row")
+	}
+	return b[len(tag):], nil
+}
 
 func server(t *testing.T) (*api.Server, string, string) {
 	t.Helper()
@@ -51,7 +111,13 @@ func server(t *testing.T) (*api.Server, string, string) {
 // serverWithRegistry is `server` plus the observability registry, so a test can
 // drive the metrics route against the same wiring the daemon uses rather than
 // against a route registered by a different call site.
-func serverWithRegistry(t *testing.T, registry *observability.Registry) (*api.Server, string, string, *observability.Registry) {
+//
+// The opts are mutators over the dependency set. They exist because some
+// routes are only reachable with a dependency the default wiring leaves nil —
+// the Chief's narrator and its prior reader are two of them — and a test that
+// could not install one would be asserting against a route the product never
+// runs.
+func serverWithRegistry(t *testing.T, registry *observability.Registry, opts ...func(*api.Deps)) (*api.Server, string, string, *observability.Registry) {
 	t.Helper()
 	raw := testutil.Pool(t)
 	if _, err := (&migrate.Runner{Pool: raw}).Up(context.Background()); err != nil {
@@ -75,6 +141,62 @@ func serverWithRegistry(t *testing.T, registry *observability.Registry) (*api.Se
 	s.Tenant = tenant
 	s.Secure = true
 	s.SetStartTime(clock)
+
+	// The CONFIGURED principal, which is what every request now runs as.
+	//
+	// The site scope is the tenant's own site, because that is what an install
+	// configured for one site has: a principal with an empty scope sees no
+	// site at all, and a test that seeded a site and then read an incident at
+	// it would be testing a refusal rather than a read.
+	//
+	// The actor and the session are named rather than left empty, because the
+	// ledger's actor column cannot be empty and the attention metric
+	// deduplicates on the session. An empty session id would make every read a
+	// new bout of attention, which is the refresh counter the metric exists not
+	// to be.
+	s.PrincipalSites = []string{site}
+	s.PrincipalName = "operator"
+	s.PrincipalSession = "test-session"
+
+	// The identity service, real, over the same pool.
+	//
+	// The two sensitive disposition outcomes need a second factor, and the
+	// route verifies it by calling this service. A nil service behind that
+	// route is exactly the shape the comment further down refuses: the route
+	// would refuse every escalation and say the install has no identity
+	// service, which is a sentence about the INSTALL when the truth is about
+	// the test.
+	//
+	// The clock is the frozen one, so a TOTP code is a fixed value rather
+	// than a race against a wall clock.
+	identities := &identity.Service{
+		Pool: pool, Audit: writer, SecretStore: apiSecretStore{},
+		Now: func() time.Time { return clock },
+	}
+
+	// The configured principal is a USER, because a second factor belongs to a
+	// user and the sensitive dispositions are recorded against one.
+	operatorID, err := identities.BootstrapAdmin(context.Background(), tenant, "operator",
+		"a-long-bootstrap-passphrase", site)
+	if err != nil {
+		t.Fatalf("bootstrap the operator: %v", err)
+	}
+	s.PrincipalUserID = operatorID
+
+	// The operator's second factor, enrolled and confirmed.
+	//
+	// The confirmation does not spend the TOTP step -- enrolment is not an
+	// authentication -- so the code the test produces for the frozen clock is
+	// still the code the route will accept.
+	secret, _, err := identities.EnrollTOTP(context.Background(), tenant, operatorID, "operator")
+	if err != nil {
+		t.Fatalf("enrol the operator's factor: %v", err)
+	}
+	if err := identities.VerifyTOTPEnrollment(context.Background(), tenant, operatorID,
+		totpCode(t, secret, clock)); err != nil {
+		t.Fatalf("confirm the operator's factor: %v", err)
+	}
+	theOperatorSecret = secret
 
 	// A template failure is a silent 500 without this. An operator seeing one has
 	// no way to tell which page broke, and a console that renders nothing looks
@@ -107,6 +229,47 @@ func serverWithRegistry(t *testing.T, registry *observability.Registry) (*api.Se
 		// The structured search, real, over the same pool. A nil service behind
 		// the search route is exactly the shape the comment above refuses.
 		EventSearch: &eventsearch.Service{Pool: pool},
+		// The absence panel's reader, over the same pool.
+		//
+		// It used NOT to be wired here, and that is why three defects on the
+		// coverage route survived a green suite: with no reader the panel
+		// reads nothing, so it never reaches the statement that names a
+		// column that does not exist, the dead-letter read that recursed, or
+		// the clock it read as a nil field.
+		//
+		// A dependency the tests leave nil is a dependency the tests cannot
+		// speak about, and the route that uses it is a route that is only
+		// right when it has nothing to say.
+		Absence: api.NewAbsenceReader(pool, tenant, "coverage-panel"),
+		// The dead-letter reader, over the same pool.
+		//
+		// It was not wired here either, and the coverage panel reads the dead
+		// letters through it. With no reader the panel never reached the
+		// branch that recursed for ever — so the test harness could not
+		// speak about the one reader that kills the process.
+		DeadLetters: api.DeadLetters{
+			Inbox: &inbox.Writer{Pool: pool},
+			Jobs:  &jobs.Worker{Enqueuer: jobs.Enqueuer{Pool: pool}, Name: jobs.QueueVLM},
+		},
+		// The identity service, for the same reason: the sensitive dispositions
+		// verify a factor through it.
+		Identities: identities,
+		// The durable analytics read the rollup through this pool, and the
+		// rollup is site-scoped, so the reader binds the principal's scope onto
+		// the connection.
+		AnalyticsPool: pool,
+		// The recording index, over the same pool, for the same reason.
+		//
+		// It is wired HERE rather than through an option because a recording
+		// is the first thing an operator looks at and the last thing a test
+		// harness leaves nil: a route with no index behind it answers "not
+		// configured" for every camera, and a test suite that never sees the
+		// route with an index behind it cannot tell a working route from a
+		// route that is only right when it has nothing to say.
+		Recordings: recording.NewService(pool),
+	}
+	for _, opt := range opts {
+		opt(&deps)
 	}
 	// The routes closure captures s, so it is assigned after construction rather
 	// than inside the literal.
@@ -480,14 +643,14 @@ func TestRequestLogCarriesTenantAndRequestID(t *testing.T) {
 	}
 }
 
-// mustSignIn is login for a test that only needs a session. The error path is
-// fatal: a test that continued without a session would be testing the
-// unauthenticated behaviour and calling it the authenticated one.
-func mustSignIn(t *testing.T, s *api.Server) (*http.Cookie, string) {
-	t.Helper()
-	cookie, csrf, err := signIn(t, s)
-	if err != nil {
-		t.Fatalf("sign in: %v", err)
-	}
-	return cookie, csrf
-}
+// mustSignIn is gone.
+//
+// Login is removed, so there is no session to mint. It used to drive the login
+// route and hand back the session cookie and the CSRF value, and every test
+// that called it had been failing since the route was removed -- a suite that
+// is red for a reason nobody wrote down is a suite that stops being read.
+//
+// The tests that needed a second operator now vary the CONFIGURED principal's
+// session instead, which is the same fact expressed in the model the product
+// actually has: two operators are two sessions, and the attention metric
+// counts one bout per session.

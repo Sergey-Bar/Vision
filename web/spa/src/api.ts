@@ -116,3 +116,28 @@ export interface AIRuntimeStatus {
   reason: string | null
   model: string | null
 }
+
+// The configured principal.
+//
+// The console has no login, so there is no user to show: this is the role
+// and the site scope the API is configured with. `timezone` is the site's
+// own, and the console renders every time in it.
+export interface Principal {
+  tenantId: string
+  roles: string[]
+  // The site scope is a LIST, and it was declared as a `string` here while
+  // the product, the published OpenAPI contract, `src/hooks/product.ts`,
+  // `src/pages/Users.tsx` and `src/pages/Upload.tsx` all treat it as one.
+  // The contract says `type: array, items: { type: string }`, and
+  // `internal/api/handlers.go` writes `p.SiteScope`, which is a `[]string`.
+  //
+  // So the type was the odd one out, and it was wrong in a way that is
+  // invisible until the value arrives: `Users.tsx` maps over it, and a string
+  // has no `.map`, so the page threw and the screen went blank. The screen
+  // going blank is the console's most honest-looking failure mode, which is
+  // exactly why it needed a test rather than a careful reader.
+  siteScope: string[]
+  capabilities: string[]
+  serviceAccount: boolean
+  timezone?: string
+}

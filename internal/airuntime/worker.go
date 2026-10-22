@@ -44,6 +44,13 @@ type VLMWorker struct {
 	Log     *slog.Logger
 	// DefaultProfile is the profile used when the job names none.
 	DefaultProfile string
+	// Chain is the site's provider CHAIN, when the install has one.
+	//
+	// It is nil for an install that talks to the local runtime directly,
+	// and that is a supported configuration. When it is set, the worker
+	// asks the chain for the SITE's provider, and the chain records what
+	// left the site.
+	Chain ChainProvider
 }
 
 // NewVLMWorker builds the worker and its queue binding.
@@ -132,7 +139,7 @@ func (w *VLMWorker) Handle(ctx context.Context, j jobs.Job) error {
 	// No runtime configured. This is a supported configuration - a site with no
 	// model is a real deployment - and the honest record is a degraded
 	// observation saying so, not a connection error and not a fabricated answer.
-	if w.Client == nil {
+	if w.Client == nil && w.Chain == nil {
 		return w.record(ctx, base, nil, nil,
 			observations.DegradationNoRuntime,
 			"no AI endpoint is configured on this core")
@@ -152,9 +159,27 @@ func (w *VLMWorker) Handle(ctx context.Context, j jobs.Job) error {
 	// happen.
 	obsID := "obs_pending_" + j.ID
 
-	result, callErr := w.Client.Do(ctx, Request{
+	// The provider: the site's CHAIN when the install has one, and the local
+	// runtime otherwise.
+	//
+	// The chain is asked for PER SITE, because the chain IS the site's
+	// policy: which models may answer, in what order, and whether anything
+	// may leave the machine at all.
+	provider, perr := w.provider(ctx, j)
+	if perr != nil {
+		// The chain could not be built. That is a REFUSAL and not an
+		// absence, and it is recorded as a degraded observation: "the
+		// site's brain is misconfigured" is a fact a pilot needs six weeks
+		// later.
+		return w.record(ctx, base, evidenceList, nil,
+			observations.DegradationNoRuntime, perr.Error())
+	}
+
+	result, callErr := provider.Do(ctx, Request{
 		ObservationID: obsID,
 		ProfileID:     profileID,
+		TenantID:      j.TenantID,
+		SiteID:        j.SiteID,
 		Evidence:      evidenceList,
 		// The schema the shipped investigate engine answers in. Sending it is
 		// what stops validate_output refusing a grounded answer for having no
@@ -186,6 +211,42 @@ func (w *VLMWorker) Handle(ctx context.Context, j jobs.Job) error {
 
 	_, err = w.recordResult(ctx, applied, evidenceList, result)
 	return err
+}
+
+// provider returns the provider for this job's site.
+//
+// The chain is asked FIRST, because the chain is the site's policy: it names
+// the models that may answer, in what order, and whether anything may leave
+// the machine. The local runtime is the fallback for an install with no
+// chain, and it is the fallback rather than the default because a chain that
+// names nothing has said something.
+func (w *VLMWorker) provider(ctx context.Context, j jobs.Job) (Provider, error) {
+	if w.Chain != nil {
+		p, err := w.Chain.ProviderFor(ctx, j.TenantID, j.SiteID)
+		if err == nil {
+			return p, nil
+		}
+		if errors.Is(err, ErrNoPolicy) {
+			// A site with NO CHAIN has the local runtime as its
+			// brain, and that is the ordinary configuration. The
+			// chain is a POLICY, and a site with no policy is a
+			// site that has not made one.
+			if w.Client == nil {
+				return nil, err
+			}
+			return w.Client, nil
+		}
+		// The site HAS a chain and the chain refused. The refusal is
+		// honoured and the local runtime is NOT tried: a chain that
+		// says "this site may not send anything off the machine" is a
+		// decision about the SITE, and the local runtime is on the
+		// machine.
+		return nil, err
+	}
+	if w.Client == nil {
+		return nil, errors.New("airuntime: no AI endpoint is configured on this core")
+	}
+	return w.Client, nil
 }
 
 // gatherEvidence reads the bytes the observation will cite.

@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.aicaptain.dev/security/v1/capability-manifest.schema.json",
+  "title": "Device capability manifest",
+  "description": "What was MEASURED about one device. A camera names the profiles it claims; a camera is routinely wrong about that. A capability that is not `verified` is not a capability, and a `verified` capability with no probe behind it is refused rather than published.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "tenantId",
+    "siteId",
+    "deviceId",
+    "probeId",
+    "probedAt",
+    "capabilities"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "tenantId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The tenant the device belongs to. It is never read from a request body; it is a property of the device's registration."
+    },
+    "siteId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The site the device is installed at. NOT NULL on a physically site-bound record."
+    },
+    "deviceId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The tenant-scoped key of the device this manifest describes."
+    },
+    "probeId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The probe run that produced this manifest. It is what a reader checks a capability against, and it is what makes the manifest falsifiable."
+    },
+    "probedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the probe ran. A manifest with no probe time is a claim."
+    },
+    "make": { "type": "string" },
+    "model": { "type": "string" },
+    "firmware": { "type": "string" },
+    "onvifDeviceId": {
+      "type": "string",
+      "description": "The device's own identifier as it reports it. Not a tenant-scoped key."
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "state"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The capability's name in `namespace.verb` form: `onvif.profile_m`, `rtsp.tcp_interleaved`, `ptz.absolute`."
+          },
+          "state": {
+            "enum": ["unverified", "verified", "contradicted", "unsupported"],
+            "description": "`verified` is the only state that counts as a capability. `unverified` is what the device claimed. `contradicted` is what a probe found when the device said otherwise."
+          },
+          "probe": {
+            "type": "string",
+            "description": "What established the state. A verified capability with no probe is a claim, and the manifest refuses to publish it."
+          },
+          "observedAt": { "type": "string", "format": "date-time" },
+          "detail": {
+            "type": "string",
+            "description": "The probe's own words: the token, the status, the reason."
+          }
+        }
+      }
+    }
+  }
+}

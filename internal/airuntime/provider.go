@@ -1,6 +1,9 @@
 package airuntime
 
-import "context"
+import (
+	"context"
+	"errors"
+)
 
 // Provider is anything that can answer a request for an inference.
 //
@@ -41,4 +44,33 @@ func ProviderFor(p Provider) (Provider, error) {
 		return nil, ErrNoEndpoint
 	}
 	return p, nil
+}
+
+// ErrNoPolicy is a site with no provider policy.
+//
+// It lives HERE rather than in the chain's package because the AI plane has
+// to recognise it: a site with no chain is a site whose brain is the local
+// runtime, and the plane falls back to it. A site WITH a chain that refuses
+// is a refusal, and the two are different facts.
+//
+// The chain's package aliases it, so a caller of either package names the
+// same value.
+var ErrNoPolicy = errors.New("airuntime: the site has no provider policy")
+
+// ChainProvider builds the provider for a SITE.
+//
+// It is the seam between the AI plane and the site's provider CHAIN, and it
+// is declared HERE rather than in the chain's own package so that the plane
+// does not import the chain and the chain does not import the plane.
+//
+// The interface is one method because that is all the plane needs: the chain
+// is the thing that knows the order, and the plane is the thing that knows
+// how to ask.
+type ChainProvider interface {
+	// ProviderFor returns the provider for a site.
+	//
+	// An error is a refusal and not an absence: a site with no policy is
+	// a site with no brain, and that is a fact the caller records rather
+	// than a nil provider it has to guess about.
+	ProviderFor(ctx context.Context, tenant, site string) (Provider, error)
 }
