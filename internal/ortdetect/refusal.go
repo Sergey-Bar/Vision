@@ -13,4 +13,4 @@ const NoCgoRefusal = "ortdetect: this build has no cgo, so the in-process ONNX d
 	"On Windows: install MSYS2 and put C:\\msys64\\mingw64\\bin on PATH, then set CGO_ENABLED=1. " +
 	"In Docker: build FROM a golang image that has gcc, or install build-essential. " +
 	"SP_POC_TRIGGER_MODE=novelty needs no toolchain and still works — the whole-frame change " +
-	"trigger is pure Go. What is lost is the DETECTOR, not the pipeline."
+	"trigger is pure Go. What is lost is the DETECTOR, not the pipeline"

@@ -86,21 +86,26 @@ export default defineConfig({
       // below are the groups' measured values with a margin rather than the
       // lowest file's.
       thresholds: {
-        statements: 85,
-        lines: 85,
+        // Re-baselined on the vitest 2 -> 5 upgrade (2026-10-28): the v8
+        // provider reports branches and statements differently in 5.x, so the
+        // previously-committed floors no longer describe the same measurement.
+        // These floors are set just below the measured values so the ratchet
+        // still fails a real regression while not failing an instrument change.
+        statements: 82,
+        lines: 84,
         functions: 80,
-        branches: 75,
+        branches: 67,
         'src/lib/**': {
-          statements: 95,
-          lines: 95,
+          statements: 92,
+          lines: 96,
           functions: 90,
-          branches: 90,
+          branches: 87,
         },
         'src/hooks/**': {
-          statements: 95,
-          lines: 95,
+          statements: 98,
+          lines: 98,
           functions: 95,
-          branches: 80,
+          branches: 66,
         },
         'src/components/ui/**': {
           statements: 95,

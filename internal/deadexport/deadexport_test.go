@@ -126,10 +126,19 @@ var (
 		"internal/hafnia.Reason":           {Prefix: "internal/hafnia.Reason", Why: "the hosted client's degradation-reason vocabulary, plus the ReasonFor table that maps a sentinel error onto it. A reason is written into an observation's degraded_detail and read by the operator and by the evaluation report, so a member with no in-tree comparator is a reason not yet produced rather than dead code"},
 		"internal/hafnia.Err":              {Prefix: "internal/hafnia.Err", Why: "sentinel: the hosted client returns it, and the failure path converts it into a Reason* and a degraded row rather than comparing the error value"},
 		"internal/hafnia.MaxResponseBytes": {Symbol: "internal/hafnia.MaxResponseBytes", Why: "published bound: the ceiling on a hosted response body. It is a resource limit an air-gapped deployment lowers, so the number is part of the configuration contract"},
-		"internal/hafnia.NewObservationID": {Symbol: "internal/hafnia.NewObservationID", Why: "published identifier constructor: the observation id scheme is part of the stored-fact contract a replay depends on, so the constructor is named by the contract rather than called from one place"},
 		"internal/hafnia.QuotaExhausted":   {Symbol: "internal/hafnia.QuotaExhausted", Why: "published quota query: the hosted budget is an operator-facing number surfaced by `securityctl doctor` and by the acceptance report, so the reader is a person rather than a package"},
 		"internal/hafnia.RegionUS":         {Symbol: "internal/hafnia.RegionUS", Why: "published constant: the default hosted region, named in the site configuration file. Invariant: a region is a deployment decision, not an internal detail"},
 		"internal/hafnia.Ask":              {Symbol: "internal/hafnia.Ask", Why: "UNWIRED. The one-shot ask, reserved-after-upload. Client.Do is the path in use because it must reserve before shipping footage to a third party, and that is the correct ordering — so Ask is the form a caller takes when the asset is already uploaded. Close it by having the evidence path call it, or delete it"},
+
+		// Integration. The Milestone/Hafnia bridge seam publishes its closed
+		// event-type vocabulary and two helpers as the shared interface its
+		// adapters and the demo surface consume (see SHARED_INTERFACE_EN.md). A
+		// vocabulary member with no in-tree reader is a type no polled adapter has
+		// produced yet rather than dead code.
+		"internal/integration.EventType":               {Prefix: "internal/integration.EventType", Why: "the integration seam's closed event-type vocabulary, mirroring milestone.NormalizedEventTypes. An Event carries one of these names, so a member with no in-tree reader is a type not yet produced by a polled adapter rather than dead code"},
+		"internal/integration.GeneralMonitoringSchema": {Symbol: "internal/integration.GeneralMonitoringSchema", Why: "the general-monitoring output schema the bridge asks under, mirrored from observations.M1Profiles[\"general-monitoring\"]. It is part of the shared interface contract documented in SHARED_INTERFACE_EN.md"},
+		"internal/integration.PlaceBookmark":           {Symbol: "internal/integration.PlaceBookmark", Why: "the bridge's bookmark write-back wrapper over milestone.PlaceBookmark, reached through the Bridge path; exported so an alternative bridge can call it directly without re-implementing the window and refusal rules"},
+		"internal/integration.BookmarkRequest":         {Symbol: "internal/integration.BookmarkRequest", Why: "the bridge's bookmark-request builder, reached through the Bridge path; exported so a caller or alternative bridge can build the same request shape without re-implementing the timestamp-window arithmetic"},
 
 		// Identity. The capability constants are the authorisation vocabulary, and
 		// a capability with no route behind it today is a capability the operator

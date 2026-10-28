@@ -43,6 +43,10 @@ type InputSpec struct {
 	Dynamic bool
 }
 
+// Channels is the channel count implied by the model's own layout. It mirrors
+// the cgo build's, so every caller compiles either way.
+func (i InputSpec) Channels() int { return 3 }
+
 // OutputSpec mirrors the cgo build's.
 type OutputSpec struct {
 	Name string
@@ -66,19 +70,30 @@ type Identity struct {
 type Session struct{}
 
 // Open refuses, always, and says what is missing.
-func Open(cfg SessionConfig) (*Session, error) { return nil, errors.New(NoCgoRefusal) }
+func Open(_ SessionConfig) (*Session, error) { return nil, errors.New(NoCgoRefusal) }
 
 // The methods exist so that a caller compiles against either build. Each refuses
 // with the same text, because reaching one of them means something constructed a
 // Session without a successful Open, and that is worth saying loudly rather than
 // allowing a nil dereference to explain it.
 
-func (s *Session) Input() InputSpec                { return InputSpec{} }
-func (s *Session) Outputs() []OutputSpec           { return nil }
-func (s *Session) Identity() Identity              { return Identity{} }
-func (s *Session) CheckInputSize(int) error        { return errors.New(NoCgoRefusal) }
+// Input is the model's declared input; without cgo there is no model.
+func (s *Session) Input() InputSpec { return InputSpec{} }
+
+// Outputs is the model's declared outputs; without cgo there is no model.
+func (s *Session) Outputs() []OutputSpec { return nil }
+
+// Identity is the model's identity; without cgo there is no model.
+func (s *Session) Identity() Identity { return Identity{} }
+
+// CheckInputSize refuses, naming the missing dependency.
+func (s *Session) CheckInputSize(int) error { return errors.New(NoCgoRefusal) }
+
+// CheckDecoderFamily refuses, naming the missing dependency.
 func (s *Session) CheckDecoderFamily(string) error { return errors.New(NoCgoRefusal) }
-func (s *Session) Close() error                    { return nil }
+
+// Close is a no-op: there is no session to close.
+func (s *Session) Close() error { return nil }
 
 // Vocabulary is the built-in one, because a build with no cgo has no model and
 // therefore no class list of its own.

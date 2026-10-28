@@ -81,11 +81,11 @@ func decodeJSONBody(w http.ResponseWriter, r *http.Request, v any) error {
 
 // methodIs is the method guard every handler here shares, named so the guard and
 // its reason are one thing.
-func methodIs(w http.ResponseWriter, r *http.Request, want string) bool {
-	if r.Method == want {
+func methodIs(w http.ResponseWriter, r *http.Request) bool {
+	if r.Method == http.MethodPost {
 		return true
 	}
-	http.Error(w, want+" only", http.StatusMethodNotAllowed)
+	http.Error(w, "POST only", http.StatusMethodNotAllowed)
 	return false
 }
 
@@ -104,7 +104,7 @@ func panicking(w http.ResponseWriter, what string) {
 func handleEfficiency(securityctlPath, repoRoot string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer panicking(w, "handleEfficiency")
-		if !methodIs(w, r, http.MethodPost) {
+		if !methodIs(w, r) {
 			return
 		}
 		var req efficiencyRequest
@@ -137,7 +137,7 @@ func handleEfficiency(securityctlPath, repoRoot string) http.HandlerFunc {
 func handleIncident(securityctlPath, repoRoot string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer panicking(w, "handleIncident")
-		if !methodIs(w, r, http.MethodPost) {
+		if !methodIs(w, r) {
 			return
 		}
 		var req struct {
@@ -165,7 +165,7 @@ func handleIncident(securityctlPath, repoRoot string) http.HandlerFunc {
 func handleExplain(securityctlPath, repoRoot string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer panicking(w, "handleExplain")
-		if !methodIs(w, r, http.MethodPost) {
+		if !methodIs(w, r) {
 			return
 		}
 		var req struct {

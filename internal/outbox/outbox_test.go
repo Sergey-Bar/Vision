@@ -407,7 +407,9 @@ func TestASlowRelayCannotOverwriteADeliveredRowOnFailure(t *testing.T) {
 	}
 
 	close(release)
-	<-slowDone
+	if err := <-slowDone; err != nil {
+		t.Fatalf("slow relay failed: %v", err)
+	}
 
 	after, _, afterErr := statusOf(t, pool, tenant)
 	if after != "delivered" {
