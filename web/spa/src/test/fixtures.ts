@@ -2,6 +2,7 @@ import type {
   Camera,
   ChatResponse,
   Clip,
+  DemoHafniaResponse,
   EventHit,
   Principal,
   SearchResponse,
@@ -651,4 +652,37 @@ export const siteModel = {
       allowedDirection: 'both',
     },
   ],
+}
+
+// The demo bridge answer the local Hafnia test server returns.
+//
+// Every field is synthetic/demo data; the response carries `simulated: true`.
+export const demoHafnia: DemoHafniaResponse = {
+  event: {
+    id: 'evt-motion-001',
+    type: 'motion',
+    camera: 'cameras/e028f597-c64b-4f27-bb8d-08f5cd768e1c',
+    occurredAt: '2026-07-01T12:00:00Z',
+  },
+  hafnia: {
+    degraded: false,
+    reason: 'none',
+    detail: '',
+    structured: {
+      summary: 'a person crossed the restricted zone',
+      sceneDescription: 'A person is crossing the restricted zone at the entrance camera.',
+      confidence: 0.9,
+      abnormalEvent: true,
+      hazardVisible: false,
+      entities: ['person'],
+      recommendedAction: 'Review the restricted-zone footage.',
+    },
+    model: 'hafnia-8b',
+  },
+  bookmark: {
+    placed: true,
+    ref: 'bmk-demo-00000000',
+    refusal: null,
+  },
+  simulated: true,
 }

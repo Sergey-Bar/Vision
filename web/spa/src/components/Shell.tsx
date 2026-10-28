@@ -24,6 +24,7 @@ import { UsersPage } from '../pages/Users'
 import { AuditPage } from '../pages/Audit'
 import { SettingsPage } from '../pages/Settings'
 import { NotFound } from '../pages/NotFound'
+import { DemoHafniaPage } from '../pages/DemoHafnia'
 
 // The shell.
 //
@@ -84,6 +85,7 @@ export function Shell() {
             <Route path="users" element={<UsersPage />} />
             <Route path="audit" element={<AuditPage />} />
             <Route path="settings" element={<SettingsPage />} />
+            <Route path="demo-hafnia" element={<DemoHafniaPage />} />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>

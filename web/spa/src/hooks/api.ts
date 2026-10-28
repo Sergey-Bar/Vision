@@ -16,6 +16,7 @@ import type {
   VideoYouTubeResponse,
   RulesFromTextRequest,
   RulesFromTextResponse,
+  DemoHafniaResponse,
 } from '../api'
 
 export const queryClient = new QueryClient({
@@ -161,5 +162,20 @@ export function useAIRuntime() {
       }
     },
     refetchInterval: 10_000,
+  })
+}
+
+// ---------- Hafnia demo ----------
+
+export function useDemoHafnia() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async () => {
+      const res = await post('/api/demo-hafnia', {})
+      return (await res.json()) as DemoHafniaResponse
+    },
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ['demo-hafnia'] })
+    },
   })
 }

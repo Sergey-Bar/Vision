@@ -79,6 +79,8 @@ const notOnTheWire: Record<string, string> = {
     'the critical-stream list is the console server\'s own shape; the contract describes the incident, not this projection of it',
   Detection:
     'the VMS\'s detection box is the device\'s own shape, read through the console server\'s `/vms` proxy',
+  DemoHafniaResponse:
+    'the demo bridge response is a local demo shape served by `/api/demo-hafnia`; the contract has no schema for it',
   EventHit: 'one hit of the evidence search; the contract types the search response as a `hits` array',
   HandoverBrief: 'the brief artifact in its published `brief/v1` shape, which the contract carries as an opaque object',
   HealthState: 'the health shape the console reads; the contract\'s `Health` is the product\'s own health route',

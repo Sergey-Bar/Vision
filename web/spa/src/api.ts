@@ -141,3 +141,30 @@ export interface Principal {
   serviceAccount: boolean
   timezone?: string
 }
+
+// The demo bridge result, one shape the page renders.
+//
+// `simulated` is true for every byte this surface touches: synthetic Milestone
+// fixtures, a synthetic test-pattern clip, and a local Hafnia test server.
+// It is never presented as automatic detection.
+export interface DemoHafniaResponse {
+  event: {
+    id: string
+    type: string
+    camera: string
+    occurredAt: string
+  }
+  hafnia: {
+    degraded: boolean
+    reason: string
+    detail: string
+    structured: Record<string, unknown> | null
+    model: string
+  }
+  bookmark: {
+    placed: boolean
+    ref: string | null
+    refusal: string | null
+  }
+  simulated: boolean
+}

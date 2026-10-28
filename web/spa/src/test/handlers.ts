@@ -8,6 +8,7 @@ import {
   chief,
   clip,
   coverage,
+  demoHafnia,
   deviceRegistry,
   evidenceHit,
   evidenceMetadata,
@@ -116,6 +117,7 @@ export const handlers = [
   http.post('/api/chat', () => HttpResponse.json(chatResponse)),
   http.get('/api/clips', () => HttpResponse.json({ clips: [clip] })),
   http.get('/api/cameras', () => HttpResponse.json({ cameras: [camera] })),
+  http.post('/api/demo-hafnia', () => HttpResponse.json(demoHafnia)),
 
   // ---------- the VMS, through the server's proxy ----------
   http.get('/vms/cameras', () => HttpResponse.json({ array: [vmsCamera] })),

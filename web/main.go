@@ -47,6 +47,12 @@ func registerAPIRoutes(mux *http.ServeMux, securityctlPath, repoRoot string, dev
 			"and the three operator surfaces that run the CLI")
 		return
 	}
+	// The demo surface runs the integration bridge in-process against
+	// synthetic fixtures and a local Hafnia test server: no securityctl, no
+	// live Milestone, no network egress. It is dev-only like every other
+	// development surface, so a production build does not expose an ungated
+	// endpoint that starts an in-process test server per request.
+	mux.HandleFunc("/api/demo-hafnia", handleDemoHafnia())
 	mux.HandleFunc("/api/poc", handlePOC(securityctlPath, repoRoot))
 	mux.HandleFunc("/api/acceptance", handleAcceptance(securityctlPath, repoRoot))
 	mux.HandleFunc("/api/rules/lint", handleRulesLint(securityctlPath, repoRoot))

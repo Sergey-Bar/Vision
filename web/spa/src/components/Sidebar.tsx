@@ -15,6 +15,7 @@ import {
   Upload,
   Wrench,
   X,
+  Zap,
   type LucideIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -130,6 +131,7 @@ const GROUPS: NavGroup[] = [
       // the site. The order is the policy, and it is what an auditor asks
       // about.
       { href: '/chain', label: 'Chain', icon: Network },
+      { href: '/demo-hafnia', label: 'Hafnia demo', icon: Zap },
       { href: '/audit', label: 'Audit', icon: ScrollText },
       { href: '/users', label: 'Users', icon: ShieldCheck },
       // The operations page: the dead letters and the clock drift. It is the
