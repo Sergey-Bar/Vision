@@ -41,9 +41,18 @@ const settled = async (page: import('@playwright/test').Page) => {
   ).toContainText(/could not read the answer/i, { timeout: 30_000 })
 }
 
+async function openOperations(page: import('@playwright/test').Page) {
+  // The console is one screen; the operations panel opens from the rail's
+  // "more" menu.
+  await page.click('[aria-label="More"]')
+  await page.click('button:has-text("Operations")')
+  await expect(page.locator('main h1').first()).toHaveText('Operations')
+}
+
 test.describe('a refusal reaches the screen', () => {
   test('the console says the answer could not be read', async ({ page }) => {
     await page.goto('/console')
+    await openOperations(page)
     await settled(page)
     const body = await page.locator('body').innerText()
     // The console's own words, from `src/pages/Operations.tsx`: it says what
@@ -53,6 +62,7 @@ test.describe('a refusal reaches the screen', () => {
 
   test('a refusal is not rendered as an empty measurement', async ({ page }) => {
     await page.goto('/console')
+    await openOperations(page)
     await settled(page)
     // The strip's camera counters are a DASH when the answer did not arrive,
     // and a dash is not a zero. The Cockpit used to render `0 / 0` and
@@ -67,6 +77,7 @@ test.describe('a refusal reaches the screen', () => {
 
   test('the refusal names the product, not a stack', async ({ page }) => {
     await page.goto('/console')
+    await openOperations(page)
     await settled(page)
     const body = await page.locator('body').innerText()
     expect(body).not.toMatch(/\bat\s+\w+\s+\(/)

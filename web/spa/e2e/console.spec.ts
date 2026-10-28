@@ -42,27 +42,25 @@ test.describe('the console loads', () => {
     await page.goto('/console')
     const nav = rail(page)
     await expect(nav).toBeVisible()
-    for (const item of ['Operations', 'Incidents', 'Clips', 'Recording', 'Devices', 'Chain']) {
+    for (const item of ['Workstation', 'Incidents', 'Clips', 'Recording', 'Devices', 'Chain']) {
       await expect(nav.getByLabel(item)).toBeVisible()
     }
     await expect(nav.getByLabel('More')).toBeVisible()
   })
 
-  test('the operations entry is lit for all three of its paths', async ({ page }) => {
+  test('exactly one rail entry is lit on the one screen', async ({ page }) => {
+    // The console is one screen; every path lands on it, and the rail says
+    // where you are with exactly one `aria-current` entry.
     for (const route of CONSOLE_ROUTES) {
       await page.goto(route)
-      const operations = page.getByRole('link', { name: 'Operations' })
-      await expect(operations).toBeVisible()
-      // `aria-current="page"` is how the rail says where you are. Exactly one
-      // entry may carry it: two lit entries is a navigation that cannot say
-      // where you are.
-      await expect(operations).toHaveAttribute('aria-current', 'page')
-      const current = page.locator('a[aria-current="page"]')
-      await expect(current).toHaveCount(1)
+      await expect(page.locator('main h1').first()).toBeVisible()
+      await expect(
+        page.locator('[aria-label="Console navigation"] [aria-current="page"]'),
+      ).toHaveCount(1)
     }
   })
 
-  test('the live and events paths land on the operations screen', async ({ page }) => {
+  test('every path lands on the same single screen', async ({ page }) => {
     await page.goto('/console')
     const heading = await page.locator('main h1').first().textContent()
     for (const route of ['/console/live', '/console/events']) {

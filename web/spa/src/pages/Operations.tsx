@@ -23,7 +23,7 @@ import { cn } from '@/lib/utils'
 import { describeError } from '@/lib/errors'
 import { useFlip } from '@/lib/motion'
 import { useDensity } from '@/lib/density'
-import { useChord, useHotkey, isPaletteShortcut, isSearchShortcut } from '@/lib/keys'
+import { useChord, useHotkey } from '@/lib/keys'
 import {
   useAttention,
   useCoverage,
@@ -1196,7 +1196,6 @@ function SitePanel() {
  */
 export function OperationsPage({ focus }: { focus?: 'wall' | 'record' }) {
   const [density, setDensity] = useDensity()
-  const palette = usePalette()
   const navigate = useNavigate()
   const main = useRef<HTMLDivElement | null>(null)
 
@@ -1214,8 +1213,6 @@ export function OperationsPage({ focus }: { focus?: 'wall' | 'record' }) {
 
   // ⌘K opens the palette; `/` opens it too, because the operator's hands are
   // on the keyboard and the palette IS the search.
-  useHotkey(isPaletteShortcut, palette.open)
-  useHotkey(isSearchShortcut, palette.open)
 
   // `g` then a letter goes to a section: o for the top, i for the queue, c
   // for the wall.

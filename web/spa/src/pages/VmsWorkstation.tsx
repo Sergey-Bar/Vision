@@ -132,7 +132,7 @@ export function VmsWorkstation() {
       </aside>
 
       {/* The wall. */}
-      <main className="min-w-0 flex-1 overflow-y-auto p-5">
+      <div className="min-w-0 flex-1 overflow-y-auto p-5">
         <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
           <div>
             <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-text-dim">
@@ -165,7 +165,7 @@ export function VmsWorkstation() {
             Analysing the scene…
           </p>
         )}
-      </main>
+      </div>
 
       {loadFor !== null && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">

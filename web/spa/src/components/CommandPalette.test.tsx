@@ -57,7 +57,7 @@ describe('the command palette', () => {
     // hotkey belongs to the screen, so the screen has to be mounted.
     const user = userEvent.setup()
     renderWithProviders(<Shell />, { route: '/' })
-    await screen.findByRole('heading', { level: 1, name: 'Operations' })
+    await screen.findByRole('heading', { level: 1, name: 'VMS Workstation' })
 
     await user.keyboard('{Meta>}k{/Meta}')
     expect(await screen.findByRole('dialog', { name: 'Search the record' })).toBeInTheDocument()
@@ -67,7 +67,7 @@ describe('the command palette', () => {
     // The palette IS the search, so the search's key opens it too.
     const user = userEvent.setup()
     renderWithProviders(<Shell />, { route: '/' })
-    await screen.findByRole('heading', { level: 1, name: 'Operations' })
+    await screen.findByRole('heading', { level: 1, name: 'VMS Workstation' })
 
     await user.keyboard('/')
     expect(await screen.findByRole('dialog', { name: 'Search the record' })).toBeInTheDocument()

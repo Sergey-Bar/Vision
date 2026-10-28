@@ -953,23 +953,20 @@ func TestTheShowcaseAndTheConsoleNameTheSameTokens(t *testing.T) {
 	}
 }
 
-// The number the document states must be the number the tree holds. The
-// console's screens are counted here so that a page added without a screen
-// in the route table is caught.
+// The one screen hosts every page. The console is a single screen whose rail
+// switches panels by state, so a page is reachable when the workspace imports
+// it. A page added to the screen without a source file is caught here.
 func TestTheConsoleScreensAreAllRouted(t *testing.T) {
-	shell, err := os.ReadFile(filepath.Join("spa", "src", "components", "Shell.tsx"))
+	ws, err := os.ReadFile(filepath.Join("spa", "src", "components", "workspace.tsx"))
 	if err != nil {
-		t.Fatalf("read the shell: %v", err)
+		t.Fatalf("read the workspace: %v", err)
 	}
-	entries := consolePageFiles(t)
-	for _, path := range entries {
-		name := strings.TrimSuffix(filepath.Base(path), ".tsx")
-		if name == "NotFound" {
-			continue
-		}
-		if !strings.Contains(string(shell), name) {
-			t.Errorf("the page %s is not in the shell's route table. A page nobody can "+
-				"reach is a file rather than a page", name)
+	pattern := regexp.MustCompile(`import\s+\{[^}]+\}\s+from\s+'@/pages/([A-Za-z]+)'`)
+	for _, m := range pattern.FindAllStringSubmatch(string(ws), -1) {
+		file := filepath.Join("spa", "src", "pages", m[1]+".tsx")
+		if _, err := os.Stat(file); err != nil {
+			t.Errorf("the workspace imports %s but the file is missing. A panel nobody can "+
+				"render is a file rather than a panel", m[1])
 		}
 	}
 }

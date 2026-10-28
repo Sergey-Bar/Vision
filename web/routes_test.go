@@ -191,28 +191,32 @@ func spaRoutes(t *testing.T) []string {
 
 // TestEveryConsoleRouteIsServed
 //
-// Every route the SPA declares is under the console's prefix, and the server
-// answers it with the shell.
-//
-// The answer is either the built bundle (200) or the committed placeholder
-// (503), and the test says which. What it refuses to accept is a 404: the
-// console server must never answer a console route with nothing.
+// The console is one screen: every path under the console's prefix is served
+// with the same shell, and the server answers it with the SPA. The answer is
+// either the built bundle (200) or the committed placeholder (503), and the
+// test says which. What it refuses to accept is a 404: the console server must
+// never answer a console path with nothing.
 func TestEveryConsoleRouteIsServed(t *testing.T) {
 	mux := pageMux(t)
-	routes := spaRoutes(t)
-	seen := map[string]bool{}
-	for _, r := range routes {
-		if seen[r] {
-			t.Errorf("the SPA declares the route %q twice", r)
-		}
-		seen[r] = true
-		if r == "" {
-			continue
-		}
-		path := consolePrefix + "/" + r
-		if !strings.HasPrefix(path, consolePrefix+"/") {
-			t.Errorf("the console route %q is not under the prefix %q", r, consolePrefix)
-		}
+	paths := []string{
+		consolePrefix,
+		consolePrefix + "/workstation",
+		consolePrefix + "/incidents",
+		consolePrefix + "/clips",
+		consolePrefix + "/devices",
+		consolePrefix + "/recordings",
+		consolePrefix + "/site",
+		consolePrefix + "/chain",
+		consolePrefix + "/audit",
+		consolePrefix + "/users",
+		consolePrefix + "/ops",
+		consolePrefix + "/rules",
+		consolePrefix + "/setup",
+		consolePrefix + "/upload",
+		consolePrefix + "/settings",
+		consolePrefix + "/demo-hafnia",
+	}
+	for _, path := range paths {
 		rec := get(t, mux, path)
 		switch rec.Code {
 		case http.StatusOK:

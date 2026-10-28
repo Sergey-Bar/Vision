@@ -13,6 +13,7 @@ import { Activity, CornerDownLeft, Search } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { describeError } from '@/lib/errors'
 import { useEvidenceSearch } from '@/hooks/product'
+import { isPaletteShortcut, isSearchShortcut, useHotkey } from '@/lib/keys'
 
 // The command palette.
 //
@@ -79,6 +80,11 @@ export function CommandPaletteProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate()
 
   const open = useCallback(() => setIsOpen(true), [])
+
+  // The palette is the console's search, and it opens from anywhere on the
+  // one screen — not only from the page that used to own the shortcuts.
+  useHotkey(isPaletteShortcut, open)
+  useHotkey(isSearchShortcut, open)
   const close = useCallback(() => setIsOpen(false), [])
 
   const value = useMemo<PaletteContextValue>(
