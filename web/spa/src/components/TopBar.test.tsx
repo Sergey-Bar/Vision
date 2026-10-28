@@ -87,7 +87,7 @@ describe('the top bar', () => {
         <TopBar onMenu={noMenu} />
       </CommandPaletteProvider>,
     )
-    const trigger = screen.getByRole('button', { name: 'Search the record' })
+    const trigger = screen.getByRole('button', { name: /Search/ })
     expect(trigger.tagName).toBe('BUTTON')
   })
 
@@ -101,7 +101,7 @@ describe('the top bar', () => {
         <TopBar onMenu={noMenu} />
       </CommandPaletteProvider>,
     )
-    const trigger = screen.getByRole('button', { name: 'Search the record' })
+    const trigger = screen.getByRole('button', { name: /Search/ })
     await user.click(trigger)
     expect(await screen.findByRole('dialog', { name: 'Search the record' })).toBeInTheDocument()
   })

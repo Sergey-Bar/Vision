@@ -15,6 +15,47 @@
 
 @import "../../static/tokens.css";
 
+/* Tailwind v4 does not read a JavaScript config on its own; this directive
+   loads the design system's translation table so every token-named class
+   (bg-bg-panel, h-bar, text-accent, …) actually generates. Without it the
+   console renders unstyled while every static gate passes. */
+@config "../tailwind.config.js";
+
+/* Tailwind v4 generates colour utilities only for colours declared in
+   `@theme`. The tokens themselves live in `web/static/tokens.css` (the one
+   palette); this block simply declares the SAME tailwind-side names as theme
+   colours so `bg-bg-panel`, `text-accent`, `border-line` and friends actually
+   generate. The values are the canonical tokens, so the single source of
+   truth is unchanged. */
+@theme {
+  --color-bg: var(--bg);
+  --color-bg-panel: var(--bg-panel);
+  --color-bg-elevated: var(--bg-elevated);
+  --color-bg-hover: var(--bg-hover);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-text: var(--ink-1);
+  --color-text-muted: var(--ink-2);
+  --color-text-dim: var(--ink-3);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-ink: var(--accent-ink);
+  --color-success: var(--ok);
+  --color-ok-ink: var(--ok-ink);
+  --color-warning: var(--warn);
+  --color-warn-ink: var(--warn-ink);
+  --color-danger: var(--bad);
+  --color-bad-ink: var(--bad-ink);
+  --color-unknown: var(--unknown);
+  --color-unknown-ink: var(--unknown-ink);
+  --breakpoint-sm: 640px;
+  --breakpoint-md: 768px;
+  --breakpoint-lg: 1024px;
+  --breakpoint-xl: 1280px;
+  --breakpoint-2xl: 1536px;
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -139,5 +180,32 @@
 
   .scrollbar-hide::-webkit-scrollbar {
     display: none;
+  }
+}
+
+/* ---------- the screen's settle --------------------------------------------------
+   A route change mounts the new screen with a quiet settle: an opacity and a
+   short rise. It is the only animation a whole screen gets, and it collapses
+   under reduced motion below. The settle is a transform and an opacity, which
+   is the pair the motion tokens allow.
+   ---------------------------------------------------------------------------- */
+@keyframes screen-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.screen-enter {
+  animation: screen-in var(--dur-3) var(--ease-out) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .screen-enter {
+    animation: none;
   }
 }

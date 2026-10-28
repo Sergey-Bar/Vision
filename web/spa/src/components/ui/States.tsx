@@ -43,7 +43,8 @@ export function EmptyState({
 }) {
   return (
     <div className="rounded-lg border border-dashed border-line px-6 py-10 text-center">
-      <p className="text-[15px] font-semibold text-text">{title}</p>
+      <div className="text-[18px] leading-none text-text-dim" aria-hidden="true">◇</div>
+      <p className="mt-2 text-[15px] font-semibold text-text">{title}</p>
       {detail && <p className="mx-auto mt-2 max-w-[60ch] text-[13px] leading-[20px] text-text-muted">{detail}</p>}
       {action && <div className="mt-5 flex justify-center">{action}</div>}
     </div>

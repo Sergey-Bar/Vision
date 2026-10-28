@@ -126,7 +126,9 @@ function Layout({
       <main ref={main} className="flex-1 overflow-y-auto bg-bg relative">
         <ErrorBoundary>
           <Suspense fallback={<LoadingState label="Loading the screen" />}>
-            <Outlet />
+            <div key={currentPath} className="screen-enter">
+              <Outlet />
+            </div>
           </Suspense>
         </ErrorBoundary>
       </main>

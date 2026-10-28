@@ -179,6 +179,7 @@ export function UploadPage() {
               type="file"
               accept="video/*"
               multiple
+              aria-label="Choose video files"
               onChange={(e) => handleFiles(e.target.files)}
               className="sr-only"
             />

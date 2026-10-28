@@ -25,7 +25,7 @@ export function Panel({
       className={cn('rounded-lg border border-line bg-bg-panel', className)}
     >
       {(title ?? action) && (
-        <header className="flex items-baseline justify-between gap-4 px-5 pt-4 pb-3">
+        <header className="flex items-baseline justify-between gap-4 border-b border-line px-5 pt-4 pb-3">
           {title ? (
             <h2 className="text-[15px] font-semibold tracking-tight text-text">{title}</h2>
           ) : (
@@ -34,7 +34,7 @@ export function Panel({
           {action}
         </header>
       )}
-      <div className={cn('px-5 pb-5', !title && !action && 'pt-5', bodyClassName)}>{children}</div>
+      <div className={cn('px-5 pb-5', title || action ? 'pt-4' : 'pt-5', bodyClassName)}>{children}</div>
     </section>
   )
 }

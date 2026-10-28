@@ -37,7 +37,7 @@ export function UsersPage() {
                 Configured principal
               </div>
               <div className="mt-3 flex items-center gap-4">
-              <div className="w-14 h-14 rounded-lg bg-accent flex items-center justify-center text-text font-semibold">
+              <div className="w-14 h-14 rounded-lg bg-accent flex items-center justify-center text-accent-fg font-semibold">
                   SP
                 </div>
                 <div>

@@ -21,11 +21,11 @@ type Size = 'sm' | 'md'
 
 const VARIANTS: Record<Variant, string> = {
   primary:
-    'bg-accent text-accent-fg border border-accent hover:bg-accent-strong hover:border-accent-strong',
+    'bg-accent text-accent-fg border border-accent hover:bg-accent-strong hover:border-accent-strong active:bg-accent-strong/90 active:border-accent-strong',
   secondary:
-    'bg-transparent text-text border border-line hover:border-line-strong hover:bg-bg-elevated hover:text-text',
+    'bg-transparent text-text border border-line hover:border-line-strong hover:bg-bg-elevated hover:text-text active:bg-bg-hover active:border-line-strong',
   ghost:
-    'bg-transparent text-text-muted border border-transparent hover:bg-bg-elevated hover:text-text',
+    'bg-transparent text-text-muted border border-transparent hover:bg-bg-elevated hover:text-text active:bg-bg-hover',
 }
 
 const SIZES: Record<Size, string> = {

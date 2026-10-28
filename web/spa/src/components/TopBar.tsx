@@ -51,7 +51,7 @@ export function TopBar({ onMenu }: { onMenu: () => void }) {
       <div className="flex items-center gap-5 sm:gap-6">
         <div className="hidden sm:flex items-center gap-2 text-[12px] text-text-dim tabular-nums">
           <span>{clock}</span>
-          <span className="text-text-dim/70">{known ? zone : 'UTC (site zone unknown)'}</span>
+          <span className="text-text-muted">{known ? zone : 'UTC (site zone unknown)'}</span>
         </div>
 
         {/* The AI runtime. It does not pulse: a pulsing dot beside a number
@@ -77,18 +77,21 @@ export function TopBar({ onMenu }: { onMenu: () => void }) {
         <button
           onClick={palette.open}
           className="flex items-center gap-2 rounded border border-line px-3 py-1.5 text-[12px] text-text-dim hover:text-text hover:bg-bg-elevated transition-colors duration-1 ease-out"
-          aria-label="Search the record"
+          aria-label="Search ⌘K"
         >
           <Search size={14} aria-hidden="true" />
           <span className="hidden sm:inline">Search</span>
-          <kbd className="hidden sm:inline rounded border border-line px-1.5 py-0.5 font-mono text-[10px]">
+          <kbd
+            aria-hidden="true"
+            className="hidden sm:inline rounded border border-line px-1.5 py-0.5 font-mono text-[10px]"
+          >
             ⌘K
           </kbd>
         </button>
 
         <DropdownMenu>
           <DropdownMenuTrigger className="flex items-center gap-2 text-[12px] text-text-muted hover:text-text transition-colors duration-1 ease-out group">
-            <span className="h-7 w-7 rounded border border-line bg-bg-elevated flex items-center justify-center text-[10px] font-medium text-text-dim">
+            <span className="h-7 w-7 rounded border border-line bg-bg-elevated flex items-center justify-center text-[11px] font-medium text-text">
               SP
             </span>
             <span className="hidden sm:inline">Service principal</span>

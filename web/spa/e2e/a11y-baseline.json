@@ -29,32 +29,15 @@
     "minority -- roughly a third of WCAG issues. Meaningful reading order, alt-text",
     "quality, error announcement and keyboard flow need a human with a screen reader, and",
     "that human has not been in this repository yet. This file is a machine scan against",
-    "a known set, and `docs/status.md` says so in the same words."
+    "a known set, and `docs/status.md` says so in the same words.",
+    "",
+    "2026-10-28: the four recorded violations were closed in one commit -- the top bar's",
+    "dimmed clock and service-principal text were lifted off the opacity token and onto",
+    "`--ink-2/--ink-3` which hold 4.5:1 on the panel ground, the search button's",
+    "accessible name was matched to its visible label by hiding the `Cmd-K` hint from",
+    "the accessibility tree, and the upload page's file input gained a real label. The",
+    "violations list is empty because the scan finds exactly the recorded violations and",
+    "no others."
   ],
-  "violations": [
-    {
-      "id": "color-contrast",
-      "target": "text:UTC (site zone unknown)",
-      "routes": ["/console", "/console/live", "/console/events"],
-      "why": "the dimmed text is drawn at seventy per cent opacity over the panel's ground, and the result is 3.08:1 where the rule asks for 4.5:1. Closing it means changing the design system's dimmed token, and the plan says the design system is not changed without a human saying so"
-    },
-    {
-      "id": "color-contrast",
-      "target": "text:SP",
-      "routes": ["/console", "/console/live", "/console/events"],
-      "why": "the service principal's badge in the top bar is drawn in the same dimmed token at the same seventy per cent, and fails for the same reason. It is a two-letter badge, so it is also the smallest text in the console"
-    },
-    {
-      "id": "label-content-name-mismatch",
-      "target": "aria-label:Search the record",
-      "routes": ["/console", "/console/incidents", "/console/clips", "/console/upload"],
-      "why": "the search button's accessible name is `Search the record` and the text it shows is `Search` with a `Cmd-K` hint beside it, so the name does not contain everything the button displays. Closing it means deciding what the button is called -- `Search` or `Search the record` -- and then making the two agree, which is a wording decision and not a code one"
-    },
-    {
-      "id": "label",
-      "target": "id:file-input",
-      "routes": ["/console/upload"],
-      "why": "the upload page's file input has no label and no placeholder, so a screen reader announces an unnamed field. Closing it is one `<label htmlFor>` and the repository's own rule in `Field.tsx` says every control has a real label"
-    }
-  ]
+  "violations": []
 }

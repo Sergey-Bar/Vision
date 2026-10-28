@@ -219,7 +219,7 @@ export function Sidebar({
         <nav className="flex h-full flex-col overflow-y-auto py-4">
           {GROUPS.map((group) => (
             <div key={group.label} className="mb-5">
-              <p className="px-5 pb-2 font-mono text-[10px] font-medium uppercase tracking-[0.1em] text-text-dim">
+              <p className="px-4 pb-1.5 font-mono text-[10px] font-medium uppercase tracking-[0.1em] text-text-dim">
                 {group.label}
               </p>
               <ul>
@@ -253,14 +253,20 @@ export function Sidebar({
                         }}
                         aria-current={active ? 'page' : undefined}
                         className={cn(
-                          'flex items-center gap-3 px-5 py-2 text-[13px] transition-colors duration-1 ease-out',
-                          'border-l-2',
+                          'group flex items-center gap-3 mx-3 my-0.5 px-3 py-2 rounded-md text-[13px] transition-colors duration-1 ease-out',
                           active
-                            ? 'border-accent text-text bg-bg-elevated'
-                            : 'border-transparent text-text-muted hover:text-text hover:bg-bg-elevated/60',
+                            ? 'bg-bg-elevated text-text'
+                            : 'text-text-muted hover:text-text hover:bg-bg-elevated/70',
                         )}
                       >
-                        <Icon size={16} className="shrink-0" aria-hidden="true" />
+                        <Icon
+                          size={16}
+                          className={cn(
+                            'shrink-0',
+                            active ? 'text-accent-ink' : 'text-text-dim group-hover:text-text-muted',
+                          )}
+                          aria-hidden="true"
+                        />
                         <span className="font-medium">{item.label}</span>
                       </Link>
                     </li>

@@ -343,12 +343,11 @@ describe('the upload page', () => {
     expect(callsTo(spy, '/v1/video/upload')).toHaveLength(0)
   })
 
-  it.fails('gives the file input a label, so it is announced by more than its type', async () => {
-    // The chooser is a button, and the input behind it is a real control with
-    // no label and no placeholder: it is announced as "file" and nothing
-    // else. The repository's own rule is that every control has a real
-    // `<label for>`, and the console's own accessibility gate covers this
-    // route -- so the scan is the one that says it.
+  it('gives the file input a label, so it is announced by more than its type', async () => {
+    // The chooser is a button, and the input behind it is a real control that
+    // used to have no label: it was announced as "file" and nothing else. The
+    // repository's own rule is that every control has a real accessible name,
+    // and the input now carries an `aria-label` that says what it is for.
     const view = await renderUpload()
 
     const results = await axe(view.container)
