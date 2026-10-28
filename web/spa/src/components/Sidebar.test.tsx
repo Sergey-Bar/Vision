@@ -28,13 +28,14 @@ function renderRail(currentPath: string) {
 }
 
 describe('the rail', () => {
-  it('is grouped by the operator\'s questions', () => {
-    // Four groups, and a flat list of twelve entries sorted alphabetically
-    // asks the reader to know the product's vocabulary first.
+  it('renders the unified primary rail and the more menu', () => {
+    // Six primary destinations, and the long tail behind a single "more"
+    // menu, rather than a long flat list of groups.
     renderRail('/')
-    for (const group of ['Watch', 'Decide', 'Review', 'Configure']) {
-      expect(screen.getByText(group)).toBeInTheDocument()
+    for (const item of ['Operations', 'Incidents', 'Clips', 'Recording', 'Devices', 'Chain']) {
+      expect(screen.getByLabelText(item)).toBeInTheDocument()
     }
+    expect(screen.getByLabelText('More')).toBeInTheDocument()
   })
 
   it('marks the item that is showing', () => {
@@ -43,7 +44,7 @@ describe('the rail', () => {
     renderRail('/incidents')
     const current = document.querySelectorAll('[aria-current="page"]')
     expect(current).toHaveLength(1)
-    expect(current[0]).toHaveTextContent('Incidents')
+    expect(current[0]).toHaveAttribute('aria-label', 'Incidents')
   })
 
   it('lights the operations item for all three of its paths', () => {
@@ -54,7 +55,7 @@ describe('the rail', () => {
       const { unmount } = renderRail(path)
       const current = document.querySelectorAll('[aria-current="page"]')
       expect(current).toHaveLength(1)
-      expect(current[0]).toHaveTextContent('Operations')
+      expect(current[0]).toHaveAttribute('aria-label', 'Operations')
       unmount()
     }
   })

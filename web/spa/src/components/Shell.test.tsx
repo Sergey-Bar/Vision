@@ -172,7 +172,9 @@ describe('the shell', () => {
     for (const [route, label] of [
       ['/', 'Operations'],
       ['/incidents', 'Incidents'],
-      ['/settings', 'Settings'],
+      ['/recordings', 'Recording'],
+      ['/devices', 'Devices'],
+      ['/chain', 'Chain'],
     ] as const) {
       const { unmount } = renderWithProviders(<Shell />, { route })
       await waitFor(() => expect(screen.getByRole('complementary', { name: 'Console navigation' })).toBeInTheDocument())
@@ -182,7 +184,7 @@ describe('the shell', () => {
         ),
       )
       expect(current, `nothing was lit at ${route}`).toHaveLength(1)
-      expect(current[0]).toHaveTextContent(label)
+      expect(current[0]).toHaveAttribute('aria-label', label)
       unmount()
     }
   })

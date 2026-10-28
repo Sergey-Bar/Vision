@@ -38,13 +38,14 @@ const rail = (page: import('@playwright/test').Page) =>
   page.locator('[aria-label="Console navigation"]')
 
 test.describe('the console loads', () => {
-  test('the rail renders with its four groups', async ({ page }) => {
+  test('the rail renders its unified workspaces and the more menu', async ({ page }) => {
     await page.goto('/console')
     const nav = rail(page)
     await expect(nav).toBeVisible()
-    for (const group of ['Watch', 'Decide', 'Review', 'Configure']) {
-      await expect(nav.getByText(group, { exact: true })).toBeVisible()
+    for (const item of ['Operations', 'Incidents', 'Clips', 'Recording', 'Devices', 'Chain']) {
+      await expect(nav.getByLabel(item)).toBeVisible()
     }
+    await expect(nav.getByLabel('More')).toBeVisible()
   })
 
   test('the operations entry is lit for all three of its paths', async ({ page }) => {
