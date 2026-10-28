@@ -37,7 +37,7 @@ describe('the VMS workstation', () => {
     renderWithProviders(<VmsWorkstation />, { route: '/workstation' })
     expect(screen.getByRole('heading', { level: 1, name: 'VMS Workstation' })).toBeInTheDocument()
     expect(screen.getAllByText('Load video').length).toBeGreaterThan(0)
-    expect(screen.getByRole('button', { name: 'Help' })).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'Help' }).length).toBeGreaterThan(0)
   })
 
   it('loads a local file into a tile and analyses it as simulated', async () => {
@@ -48,14 +48,14 @@ describe('the VMS workstation', () => {
     const file = new File(['x'], 'entrance.mp4', { type: 'video/mp4' })
     await user.upload(input, file)
     await waitFor(() => expect(screen.getByText('Replace')).toBeInTheDocument())
-    await user.click(screen.getByText('Analyse'))
+    await user.click(screen.getAllByRole('button', { name: /Analyse/ })[0])
     expect(await screen.findByText(/SIMULATED/)).toBeInTheDocument()
   })
 
   it('opens and closes the help popup', async () => {
     const user = userEvent.setup({ delay: null })
     renderWithProviders(<VmsWorkstation />, { route: '/workstation' })
-    await user.click(screen.getByRole('button', { name: 'Help' }))
+    await user.click(screen.getAllByRole('button', { name: 'Help' })[0])
     expect(screen.getByText('The wall')).toBeInTheDocument()
     await user.click(screen.getAllByRole('button', { name: 'Close' })[0])
     expect(screen.queryByText('The wall')).not.toBeInTheDocument()
@@ -64,7 +64,7 @@ describe('the VMS workstation', () => {
   it('opens the settings popup', async () => {
     const user = userEvent.setup({ delay: null })
     renderWithProviders(<VmsWorkstation />, { route: '/workstation' })
-    await user.click(screen.getByRole('button', { name: 'Settings' }))
+    await user.click(screen.getAllByRole('button', { name: 'Settings' })[0])
     expect(screen.getAllByText('2×2 wall').length).toBeGreaterThan(0)
   })
 })

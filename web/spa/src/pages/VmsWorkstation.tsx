@@ -104,18 +104,20 @@ export function VmsWorkstation() {
     })
   }
 
+  const openLoad = () => {
+    const i = st.cells.findIndex((c) => c.kind === 'empty')
+    setLoadFor(i === -1 ? 0 : i)
+  }
+
   return (
-    <div className="flex h-full min-h-0">
-      {/* The side rail: the operator's tools. */}
+    <div className="flex h-full min-h-0 flex-col md:flex-row">
+      {/* The side rail: the operator's tools (md and up). */}
       <aside className="hidden md:flex w-56 flex-shrink-0 flex-col gap-2 border-r border-line bg-bg-panel p-3">
         <div className="flex items-center gap-2 px-2 py-1">
           <MonitorPlay size={16} className="text-accent-ink" aria-hidden="true" />
           <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-text-dim">Workstation</span>
         </div>
-        <Button variant="secondary" size="sm" className="w-full justify-start" onClick={() => {
-          const i = st.cells.findIndex((c) => c.kind === 'empty')
-          setLoadFor(i === -1 ? 0 : i)
-        }}>
+        <Button variant="secondary" size="sm" className="w-full justify-start" onClick={openLoad}>
           <Upload size={14} aria-hidden="true" /> Load video
         </Button>
         <Button variant="secondary" size="sm" className="w-full justify-start" disabled={loadedCount === 0} onClick={analyzeAll}>
@@ -131,8 +133,24 @@ export function VmsWorkstation() {
         </div>
       </aside>
 
+      {/* The mobile action strip: the same tools, laid flat above the wall. */}
+      <div className="flex md:hidden items-center gap-2 overflow-x-auto border-b border-line px-4 pt-3 pb-2">
+        <Button variant="secondary" size="sm" onClick={openLoad}>
+          <Upload size={14} aria-hidden="true" /> Load
+        </Button>
+        <Button variant="secondary" size="sm" disabled={loadedCount === 0} onClick={analyzeAll}>
+          <ScanLine size={14} aria-hidden="true" /> Analyse
+        </Button>
+        <Button variant="ghost" size="sm" onClick={() => setHelpOpen(true)}>
+          <HelpCircle size={14} aria-hidden="true" /> Help
+        </Button>
+        <Button variant="ghost" size="sm" onClick={() => setSettingsOpen(true)}>
+          <Settings size={14} aria-hidden="true" /> Settings
+        </Button>
+      </div>
+
       {/* The wall. */}
-      <div className="min-w-0 flex-1 overflow-y-auto p-5">
+      <div className="min-w-0 flex-1 overflow-y-auto p-4 sm:p-5">
         <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
           <div>
             <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-text-dim">
@@ -146,7 +164,7 @@ export function VmsWorkstation() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
           {st.cells.map((cell, i) => (
             <Tile
               key={i}
@@ -270,11 +288,11 @@ function Tile({
   onReplace: () => void
 }) {
   return (
-    <div className="group relative aspect-video overflow-hidden rounded-lg border border-line bg-bg-panel">
+    <div className="group relative aspect-video overflow-hidden rounded-md bg-bg-panel">
       {cell.kind === 'empty' ? (
         <button
           onClick={onLoad}
-          className="flex h-full w-full flex-col items-center justify-center gap-2 text-text-dim hover:text-text transition-colors duration-1 ease-out"
+          className="flex h-full w-full flex-col items-center justify-center gap-2 border border-dashed border-line text-text-dim hover:text-text transition-colors duration-1 ease-out"
         >
           <Camera size={26} aria-hidden="true" />
           <span className="text-[13px] font-medium">Load video</span>
@@ -294,7 +312,7 @@ function Tile({
       )}
 
       {cell.kind !== 'empty' && (
-        <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 bg-bg/80 px-3 py-2 backdrop-blur-sm">
+        <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 border-t border-line bg-bg px-3 py-2">
           <span className="truncate font-mono text-[11px] text-text-muted">{cell.title}</span>
           <div className="flex items-center gap-2">
             <Button variant="secondary" size="sm" onClick={onReplace}>
