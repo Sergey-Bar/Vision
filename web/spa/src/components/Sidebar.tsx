@@ -8,6 +8,7 @@ import {
   Gauge,
   ListChecks,
   MapPin,
+  MonitorPlay,
   MoreHorizontal,
   Network,
   ScrollText,
@@ -40,6 +41,7 @@ interface NavItem {
 // destinations and folds everything else behind a single "more" menu, rather
 // than a long list of groups. Six primaries, then a menu for the long tail.
 const PRIMARY: NavItem[] = [
+  { href: '/workstation', label: 'Workstation', icon: MonitorPlay },
   { href: '/', paths: ['/', '/live', '/events'], label: 'Operations', icon: Gauge },
   { href: '/incidents', label: 'Incidents', icon: ClipboardList },
   { href: '/clips', label: 'Clips', icon: Eye },

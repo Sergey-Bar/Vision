@@ -25,6 +25,7 @@ import { AuditPage } from '../pages/Audit'
 import { SettingsPage } from '../pages/Settings'
 import { NotFound } from '../pages/NotFound'
 import { DemoHafniaPage } from '../pages/DemoHafnia'
+import { VmsWorkstation } from '../pages/VmsWorkstation'
 
 // The shell.
 //
@@ -68,6 +69,7 @@ export function Shell() {
                 and neither lands the operator on a second version of the
                 truth. */}
             <Route index element={<OperationsPage />} />
+            <Route path="workstation" element={<VmsWorkstation />} />
             <Route path="live" element={<LivePage />} />
             <Route path="events" element={<EventsPage />} />
             <Route path="incidents" element={<IncidentsPage />} />
