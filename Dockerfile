@@ -75,6 +75,16 @@ WORKDIR /src
 COPY . .
 RUN go mod download
 
+# The console bundle is embedded into the security-core binary by
+# `//go:embed consoleui` in web/routes.go, so the SPA has to be built
+# before `go build`. Node is not part of the runtime image; it only needs
+# to live in this build stage long enough to produce web/consoleui/dist.
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends nodejs npm ca-certificates; \
+    rm -rf /var/lib/apt/lists/*; \
+    cd web/spa && npm ci && npm run build
+
 # -buildvcs=false because the build context may or may not carry a .git
 # directory, and a build whose binary stamp depends on which context someone sent
 # is a build nobody can reproduce. -trimpath for the same reason in a different

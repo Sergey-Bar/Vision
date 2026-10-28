@@ -1,4 +1,5 @@
 import { cn } from '@/lib/utils'
+import { Slot } from '@radix-ui/react-slot'
 
 // The button.
 //
@@ -35,11 +36,13 @@ const SIZES: Record<Size, string> = {
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: Variant
   size?: Size
+  asChild?: boolean
 }
 
-export function Button({ variant = 'secondary', size = 'md', className, ...rest }: ButtonProps) {
+export function Button({ variant = 'secondary', size = 'md', className, asChild = false, ...rest }: ButtonProps) {
+  const Comp = asChild ? Slot : 'button'
   return (
-    <button
+    <Comp
       className={cn(
         'inline-flex items-center justify-center gap-2 font-medium tracking-tight',
         'transition-[background-color,border-color,color] duration-1 ease-out',

@@ -252,26 +252,30 @@ function AddDevice({
     <Panel title="Add a device">
       <form onSubmit={submit} className="space-y-4">
         <div className="grid gap-4 sm:grid-cols-2">
-          <label className="block" htmlFor="device-id">
-            <span className="mb-1 block text-[13px] font-medium text-text">Device id</span>
-            <Input
-              id="device-id"
-              value={deviceId}
-              onChange={(e) => setDeviceId(e.target.value)}
-              placeholder="cam-entrance"
-              aria-label="Device id"
-            />
-          </label>
-          <label className="block" htmlFor="device-address">
-            <span className="mb-1 block text-[13px] font-medium text-text">Address</span>
-            <Input
-              id="device-address"
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              placeholder="192.0.2.10"
-              aria-label="Address"
-            />
-          </label>
+                      <label className="block" htmlFor="device-id">
+                        <span className="mb-1.5 block text-[12px] font-medium text-text-muted">
+                          Device id
+                        </span>
+                        <Input
+                          id="device-id"
+                          value={deviceId}
+                          onChange={(e) => setDeviceId(e.target.value)}
+                          placeholder="cam-entrance"
+                          aria-label="Device id"
+                        />
+                      </label>
+                      <label className="block" htmlFor="device-address">
+                        <span className="mb-1.5 block text-[12px] font-medium text-text-muted">
+                          Address
+                        </span>
+                        <Input
+                          id="device-address"
+                          value={address}
+                          onChange={(e) => setAddress(e.target.value)}
+                          placeholder="192.0.2.10"
+                          aria-label="Address"
+                        />
+                      </label>
         </div>
         <p className="text-[13px] leading-[20px] text-text-dim">
           The address is a host and a port. It carries no credential: the camera's secret lives

@@ -2,6 +2,8 @@ package recorder_test
 
 import (
 	"context"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,7 +18,7 @@ import (
 // microseconds while chainTime truncates.
 func TestTheChainVerifiesRepeatedly(t *testing.T) {
 	pool := indexPool(t)
-	tenant, site, _ := testutil.NewTenant(t, pool.Pool())
+	tenant, site, _ := testutil.NewTenant(t, pool.Pool)
 	index := recording.NewService(pool)
 	ctx := context.Background()
 
@@ -39,5 +41,49 @@ func TestTheChainVerifiesRepeatedly(t *testing.T) {
 			t.Fatalf("chain does not verify for day %d: head=%s expected=%s brokenAt=%d",
 				i, v.Recorded, v.Expected, v.BrokenAt)
 		}
+	}
+}
+
+// indexPool opens a migrated database pool for the chain-repeat test.
+//
+// It skips when there is no test database, the same way every other
+// database-backed test in this package does.
+func indexPool(t *testing.T) *dbx.Pool {
+	t.Helper()
+	raw := testutil.Pool(t)
+	if _, err := (&migrate.Runner{Pool: raw}).Up(context.Background()); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	cfg := dbx.DefaultConfig()
+	if err := cfg.ApplyDSN(os.Getenv(testutil.DatabaseURLEnv)); err != nil {
+		t.Fatalf("apply the DSN: %v", err)
+	}
+	pool, err := dbx.Open(context.Background(), cfg, os.Getenv("SP_TEST_DATABASE_PASSWORD"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	return pool
+}
+
+// writeSegment appends one synthetic segment to the index.
+func writeSegment(t *testing.T, index *recording.Service, tenant, site, deviceID string, seq int64, segID string, start time.Time) {
+	t.Helper()
+	seg := recording.Segment{
+		TenantID:   tenant,
+		SiteID:     site,
+		DeviceID:   deviceID,
+		Seq:        seq,
+		SegmentID:  segID,
+		StartedAt:  start,
+		EndedAt:    start.Add(time.Second),
+		Bytes:      1024,
+		Digest:     segID + strings.Repeat("0", 64-len(segID)),
+		Codec:      "h264",
+		StorageRef: segID + ".mp4",
+		State:      recording.StateComplete,
+	}
+	if err := index.Append(context.Background(), seg); err != nil {
+		t.Fatalf("append segment %s: %v", segID, err)
 	}
 }
