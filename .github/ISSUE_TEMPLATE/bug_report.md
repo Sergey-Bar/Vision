@@ -49,8 +49,7 @@ polite, and do not overstate it to be heard.
 <!-- Logs are fine, but redact customer names, site names, badge or credential
      numbers, and anything that identifies a person. If a real incident is
      involved, say so in the issue and describe it in the abstract: we do not
-     want customer footage in a public tracker, and this tracker is private but
-     not access-controlled in the way your incident record is. -->
+     want customer footage in a public tracker, and this tracker is public. -->
 
 ## 5. Was the AI plane involved
 

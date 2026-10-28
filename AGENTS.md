@@ -331,26 +331,17 @@ gate list is a defect even when it is currently correct.
 Not covered here, and still required before a release: `golangci-lint`, and
 regenerating the contracts with `protoc` and committing the result.
 
-**GitHub Actions does not exist in this repository.** The pipeline was removed.
-The reason is not that it was unhelpful: Actions cannot start a job for this
-account, because the repository is private, it is on the free plan, and the
-account's billing state blocks it. A pipeline that never runs is worse than no
-pipeline, because a red X trains you to ignore red.
+**GitHub Actions is not yet wired.** There is no workflow file under
+`.github/workflows/`, so nothing automated gates a pull request today; the gate
+is the local `scripts/verify.ps1` run by a person before committing. (An earlier
+revision of this file claimed CI ran `make verify`; that claim was ahead of the
+tree and is corrected here. A claim that CI exists is only true when a workflow
+file exists and has run.)
 
-Consequences to be honest about:
-
-- **No check runs on a pull request.** A green branch here is a human claim, not
-  an automated one. Do not write "CI passed" anywhere; write which command ran.
-- **No push protection.** Nothing stops a force-push to `main`, and nothing
-  blocks a merge. `scripts/enable-branch-protection.sh` applies both the day the
-  plan is upgraded — with the check list emptied, because there are no checks to
-  require.
-- **`docs/status.md`'s verification block describes a local run.** That is what
-  it is; it is not pipeline evidence.
-
-If CI is ever wanted back, it should be rebuilt deliberately with the
-`permissions`, `concurrency` and SHA-pinning that the deleted pipeline had, plus
-a Windows test job. Do not restore it by copying an old file back.
+When CI is added, it should be rebuilt deliberately with the `permissions`,
+`concurrency` and SHA-pinning that the deleted pipeline had, plus a Windows test
+job, and this section must be updated in the same change. Do not restore it by
+copying an old file back.
 
 The suite must pass with **no Milestone server reachable**. If a test needs one,
 the test is wrong. That rule is unaffected by any of the above.

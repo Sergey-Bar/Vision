@@ -3213,16 +3213,11 @@ file. A control with no such run is not a control; it is a comment.
 > MinGW-w64 is what supplies the compiler on Windows, and the toolchain section
 > below lists it.
 
-> **Verification is local. There is no pipeline.** This repository is private and
-> on GitHub's free plan, and the account's billing state prevents any Actions job
-> from starting. The workflow was removed rather than left as decoration that
-> would never run; `scripts/verify.ps1` is the gate.
->
-> The consequence to be honest about: every verification claim in this document
-> is a **local** run on the machine that produced it, not pipeline evidence.
-> There is no check on a pull request, and nothing stops a force-push to `main`.
-> `scripts/enable-branch-protection.sh` fixes the second the day the plan is
-> upgraded.
+> **Verification is local.** There is no CI workflow committed under
+> `.github/workflows/`, so every verification claim in this document describes a
+> **local** run on the machine that produced it, not pipeline evidence. When CI
+> is added, it must run the same `scripts/verify.ps1`, and this block must be
+> updated in the same change.
 
 The linter configuration in `.golangci.yml` excludes four categories, each
 with a written reason rather than a blanket suppression: writes to stdout from a

@@ -6,18 +6,16 @@ gated by what, sold to whom, and what happens when it slips.
 Start at **[`strategy-and-north-star.md`](strategy-and-north-star.md)**. It
 overrides everything else in this directory on conflict.
 
-> **A note on continuous integration, because these documents predate its
-> removal.** GitHub Actions does not exist in this repository. It could not run:
-> the repository is private, it is on the free plan, and the account's billing
-> state prevents any job from starting. The pipeline was removed on 2026-09-28
-> rather than left as decoration that would never run.
+> **A note on continuous integration.** There is no CI workflow committed under
+> `.github/workflows/` yet, so the gate that runs is `scripts/verify.ps1`,
+> locally, run by a person. When CI is added, `make verify` should delegate to
+> the same script from a workflow, and this note must be updated in the same
+> change.
 >
-> **Any reference to `ci.yml`, to a CI job, or to a pipeline in this directory is
-> historical.** It records what was true when the document was written. The gate
-> that actually runs is `scripts/verify.ps1`, locally, and
-> `scripts/enable-branch-protection.sh` applies branch protection the day the
-> plan is upgraded. Where a document below claims CI is *currently* enforcing
-> something, that claim is wrong and the correction is in the document itself.
+> **Any reference to `ci.yml`, to a CI job, or to a pipeline claiming it does not
+> exist is historical.** It records what was true when the document was written
+> while the repository was private, and it stays true until a workflow file is
+> committed.
 
 ## Read this much and stop
 

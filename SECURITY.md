@@ -8,16 +8,9 @@ valuable thing anyone can send us, and the handling of one is a promise.
 
 **Do not open a public issue for a security problem.**
 
-> **TODO(owner): this repository is private and on GitHub Free, which means
-> neither the Security Advisory flow nor private vulnerability reporting is
-> available — both need a paid plan. Until that is sorted, report by email to
-> `SECURITY-CONTACT@EXAMPLE` — replace this with a real monitored address before
-> this product ships to anyone.** An address nobody reads is worse than no
-> policy, because it looks like a promise.
+This repository is public, so GitHub's **Security Advisory flow and private vulnerability reporting are available**. Use them: go to the repository's **Security → Advisories** tab and draft a report; GitHub will handle disclosure privately and give you a CVE when one is warranted. You do not need to wait for a monitored email address.
 
-If you would rather not wait for that, open a normal issue and mark it
-`security-sensitive`; the maintainers will convert it to a private channel and
-delete the public copy. Say that in the issue body so it is obvious.
+If you would rather not use the Advisory flow, open a normal issue and mark it `security-sensitive`; the maintainers will convert it to a private channel and delete the public copy. Say that in the issue body so it is obvious.
 
 ## What to include
 
@@ -78,11 +71,8 @@ Not a promise, a description of the current state, verifiable in the code:
 - The deterministic core runs with the AI plane entirely absent. A missing AI
   observation is never treated as a negative observation.
 - **`scripts/verify.ps1` is the gate and it runs locally**, before a commit is
-  made. There is no pipeline: GitHub Actions cannot start a job for this
-  account — the repository is private, on the free plan, and the account's
-  billing state blocks it — so the workflow was removed rather than left in
-  place. Nothing automated gates a pull request here, which is a real gap and is
-  why the gate is run by a person before committing.
+  made. GitHub Actions is not yet wired (no workflow file is committed), so
+  nothing automated blocks a merge; the gate is run by a person before committing.
 
 ### Outstanding: third-party apps still have read access
 
